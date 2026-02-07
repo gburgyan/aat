@@ -1,0 +1,136 @@
+package engine
+
+import (
+	"testing"
+
+	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/plan"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func loadTravelportGraph(t *testing.T) *graph.Graph {
+	t.Helper()
+	g, err := graph.ParseFile("../graph/testdata/valid/travelport_booking.yaml")
+	require.NoError(t, err)
+	return g
+}
+
+func TestTopologicalSort_TravelportBooking(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	steps := []plan.Step{
+		{Node: "searchFlights"},
+		{Node: "priceOffer", DependsOn: []string{"searchFlights"}},
+		{Node: "createWorkbench"},
+		{Node: "addOffer", DependsOn: []string{"priceOffer", "createWorkbench"}},
+		{Node: "addTraveler", DependsOn: []string{"createWorkbench"}},
+		{Node: "commitBooking", DependsOn: []string{"addOffer", "addTraveler"}},
+	}
+
+	sorted, err := TopologicalSort(steps, g)
+	require.NoError(t, err)
+	require.Len(t, sorted, 6)
+
+	// Build position map for ordering assertions
+	pos := make(map[string]int)
+	for i, step := range sorted {
+		pos[step.Node] = i
+	}
+
+	// searchFlights must come before priceOffer
+	assert.Less(t, pos["searchFlights"], pos["priceOffer"])
+	// priceOffer must come before addOffer
+	assert.Less(t, pos["priceOffer"], pos["addOffer"])
+	// createWorkbench must come before addOffer and addTraveler
+	assert.Less(t, pos["createWorkbench"], pos["addOffer"])
+	assert.Less(t, pos["createWorkbench"], pos["addTraveler"])
+	// addOffer and addTraveler must come before commitBooking
+	assert.Less(t, pos["addOffer"], pos["commitBooking"])
+	assert.Less(t, pos["addTraveler"], pos["commitBooking"])
+}
+
+func TestTopologicalSort_SingleStep(t *testing.T) {
+	g := loadTravelportGraph(t)
+	steps := []plan.Step{{Node: "searchFlights"}}
+
+	sorted, err := TopologicalSort(steps, g)
+	require.NoError(t, err)
+	require.Len(t, sorted, 1)
+	assert.Equal(t, "searchFlights", sorted[0].Node)
+}
+
+func TestTopologicalSort_GraphEdgesOnly(t *testing.T) {
+	// Even without explicit dependsOn, graph edges create dependencies
+	g := loadTravelportGraph(t)
+	steps := []plan.Step{
+		{Node: "searchFlights"},
+		{Node: "priceOffer"}, // no explicit dependsOn, but graph edge creates dependency
+	}
+
+	sorted, err := TopologicalSort(steps, g)
+	require.NoError(t, err)
+	require.Len(t, sorted, 2)
+	assert.Equal(t, "searchFlights", sorted[0].Node)
+	assert.Equal(t, "priceOffer", sorted[1].Node)
+}
+
+func TestTopologicalSort_IndependentSteps(t *testing.T) {
+	g := loadTravelportGraph(t)
+	// searchFlights and createWorkbench have no dependencies between them
+	steps := []plan.Step{
+		{Node: "searchFlights"},
+		{Node: "createWorkbench"},
+	}
+
+	sorted, err := TopologicalSort(steps, g)
+	require.NoError(t, err)
+	require.Len(t, sorted, 2)
+	// Both should be present (order between them is valid either way)
+	nodes := []string{sorted[0].Node, sorted[1].Node}
+	assert.Contains(t, nodes, "searchFlights")
+	assert.Contains(t, nodes, "createWorkbench")
+}
+
+func TestTopologicalSort_CycleDetection(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"a": {Name: "a"},
+			"b": {Name: "b"},
+		},
+	}
+
+	steps := []plan.Step{
+		{Node: "a", DependsOn: []string{"b"}},
+		{Node: "b", DependsOn: []string{"a"}},
+	}
+
+	_, err := TopologicalSort(steps, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "cycle")
+}
+
+func TestTopologicalSort_ExplicitDependsOn(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"a": {Name: "a"},
+			"b": {Name: "b"},
+			"c": {Name: "c"},
+		},
+	}
+
+	steps := []plan.Step{
+		{Node: "c", DependsOn: []string{"b"}},
+		{Node: "b", DependsOn: []string{"a"}},
+		{Node: "a"},
+	}
+
+	sorted, err := TopologicalSort(steps, g)
+	require.NoError(t, err)
+	require.Len(t, sorted, 3)
+	assert.Equal(t, "a", sorted[0].Node)
+	assert.Equal(t, "b", sorted[1].Node)
+	assert.Equal(t, "c", sorted[2].Node)
+}

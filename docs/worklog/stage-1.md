@@ -106,3 +106,25 @@
 **Open questions:**
 
 - None — ready for Task 6 (sequential plan runner with dependency-aware scheduler).
+
+## 2026-02-07 — Sequential Plan Runner (Task 6)
+
+**What:** Implemented the plan model, YAML parsing, sequential execution engine, value resolution, topological sort, auth/config loading, and cleanup stack. Four sub-tasks (6.1-6.4): plan package (24 tests), engine package (28 tests), config package (11 tests). Total: 63 new tests, all passing.
+
+**Decisions:**
+
+- **Task decomposed into 4 sub-tasks:** 6.1 (plan model), 6.2 (engine runner), 6.3 (auth/config), 6.4 (cleanup stack). 6.1 and 6.3 were independent and built in parallel; 6.2 depended on 6.1; 6.4 depended on 6.2.
+- **StepValue custom UnmarshalYAML:** Bare YAML scalars (e.g., `origin: "DEN"`) set only the `Default` field. Mapping nodes unmarshal into the full StepValue struct. Uses `yaml.Node.Kind == yaml.ScalarNode` check with a type alias to avoid infinite recursion.
+- **TopologicalSort via Kahn's algorithm:** Dependencies from two sources: explicit `dependsOn` and graph edges between plan steps. BFS produces valid ordering and detects cycles. Extensible to parallel execution later (dequeue all zero-in-degree nodes at once).
+- **ResolveInputs priority chain:** graph edge → SELECT edge → plan StepValue.Default → graph node Input.Default → optional skip → error. This ensures edges always win over plan values, which in turn win over graph defaults.
+- **SELECT edge: first-only for Task 6:** Extracts first array element, optionally using gjson field path. Full selection strategies (min, max, match, etc.) deferred to Task 7.
+- **Constructor injection for Engine:** `NewEngine(graph, registry, executor, config)`. No go-ctxdep yet — introduced at CLI wiring (Task 12).
+- **Config package stays leaf:** `LoadSettings` and `Authenticate` are standalone. EnvironmentConfig assembly happens at the call site (engine setup or cmd).
+- **OAuth2 ROPC flow:** `Authenticate(ctx, settings)` posts form-encoded credentials to `settings.AuthURL`. Returns `OAuthToken` with `access_token`.
+- **Cleanup stack FILO:** Last pushed, first executed. Cleanup errors are recorded in StepResult but don't stop subsequent cleanup or propagate to the run outcome.
+- **Fail on non-2xx:** Simplistic for Task 6 — any status >= 400 stops forward execution and triggers cleanup. Error taxonomy (transient vs client vs server) deferred to Task 8.
+
+**Open questions:**
+
+- The gjson field path for SELECT edge extraction (`Identifier.value`) may need adjustment after observing real Travelport API responses. The test fixture uses this path but it hasn't been validated against the actual API yet.
+- None blocking — ready for Task 6a (predicate expression parser).

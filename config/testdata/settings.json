@@ -1,0 +1,9 @@
+{
+	"username": "testuser",
+	"password": "testpass",
+	"client_id": "test-client-id",
+	"client_secret": "test-client-secret",
+	"access_group": "TEST-GROUP-ID",
+	"auth_url": "https://auth.example.com/oauth/token",
+	"api_base": "api.example.com"
+}

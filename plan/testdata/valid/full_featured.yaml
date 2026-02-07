@@ -1,0 +1,77 @@
+metadata:
+  created: 2026-02-07T12:00:00Z
+  prompt: "Book cheapest direct flight"
+  graphVersion: "1.0.0"
+
+intent:
+  goal: commitBooking
+  description: "Book the cheapest direct flight"
+  constraints:
+    hard:
+      - type: value
+        name: directOnly
+        description: "Only non-stop flights"
+        applies_to: [searchFlights]
+    soft:
+      - type: preference
+        name: cheapest
+        description: "Prefer lowest price"
+    free:
+      - "Any departure time is acceptable"
+
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for flights"
+      values:
+        origin: "DEN"
+        destination: "SFO"
+        departureDate: "2026-03-15"
+      retry:
+        max: 3
+        on: [timeout, 503]
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.CatalogProductOfferingsResponse"
+        semantic:
+          - "Response should contain at least one flight offering"
+
+    - node: priceOffer
+      dependsOn: [searchFlights]
+      values:
+        offeringId:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: "Identifier.value"
+      fallback:
+        action: nextValue
+        maxAttempts: 3
+
+    - node: createWorkbench
+
+    - node: addOffer
+      dependsOn: [priceOffer, createWorkbench]
+
+    - node: addTraveler
+      dependsOn: [createWorkbench]
+      values:
+        surname: "Smith"
+        givenName: "Jane"
+
+    - node: commitBooking
+      dependsOn: [addOffer, addTraveler]
+      isGoal: true
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.ReservationResponse.Reservation.Locator"
+
+  cleanup:
+    - node: ignoreWorkbench
+      runOn: always

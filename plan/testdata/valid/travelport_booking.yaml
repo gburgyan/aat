@@ -1,0 +1,41 @@
+metadata:
+  created: 2026-02-07T12:00:00Z
+  prompt: "Book a flight from DEN to SFO"
+  graphVersion: "1.0.0"
+
+intent:
+  goal: commitBooking
+  description: "Complete a flight booking from Denver to San Francisco"
+
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for flights DEN to SFO"
+      values:
+        origin: "DEN"
+        destination: "SFO"
+        departureDate: "2026-03-15"
+
+    - node: priceOffer
+      dependsOn: [searchFlights]
+      values:
+        offeringId:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: "Identifier.value"
+
+    - node: createWorkbench
+
+    - node: addOffer
+      dependsOn: [priceOffer, createWorkbench]
+
+    - node: addTraveler
+      dependsOn: [createWorkbench]
+      values:
+        surname: "Smith"
+        givenName: "Jane"
+
+    - node: commitBooking
+      dependsOn: [addOffer, addTraveler]
+      isGoal: true

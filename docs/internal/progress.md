@@ -10,7 +10,11 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 - [x] 3. Implement adapter interface and HTTPExecutor
 - [x] 4. Implement Tier 1 template adapter loader
 - [x] 5. Write template adapters for Travelport booking flow (7 templates)
-- [ ] 6. Implement sequential plan runner with dependency-aware scheduler
+- [x] 6. Implement sequential plan runner with dependency-aware scheduler
+  - [x] 6.1 Plan model + YAML parsing (`plan` package)
+  - [x] 6.2 Sequential runner + value resolution (`engine` package)
+  - [x] 6.3 Auth + config loading (`config` package)
+  - [x] 6.4 Cleanup stack (`engine` package)
 - [ ] 6a. Implement predicate expression parser and evaluator
 - [ ] 7. Implement array selection in engine
 - [ ] 8. Implement error taxonomy and failure handling

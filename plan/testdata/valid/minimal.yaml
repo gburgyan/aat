@@ -1,0 +1,7 @@
+execution:
+  steps:
+    - node: searchFlights
+      values:
+        origin: "DEN"
+        destination: "SFO"
+        departureDate: "2026-03-15"

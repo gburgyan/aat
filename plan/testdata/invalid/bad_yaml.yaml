@@ -1,0 +1,3 @@
+execution:
+  steps:
+    - node: [this is not valid
