@@ -1,0 +1,12 @@
+version: "abc"
+
+nodes:
+  getUser:
+    description: "Get user"
+    adapter: getUser
+    inputs:
+      - name: userId
+        type: string
+    outputs:
+      - name: name
+        type: string

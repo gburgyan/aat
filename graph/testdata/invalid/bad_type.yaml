@@ -1,0 +1,12 @@
+version: "1.0.0"
+
+nodes:
+  getUser:
+    description: "Get user"
+    adapter: getUser
+    inputs:
+      - name: userId
+        type: "enum["
+    outputs:
+      - name: name
+        type: string

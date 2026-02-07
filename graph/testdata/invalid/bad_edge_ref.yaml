@@ -1,0 +1,16 @@
+version: "1.0.0"
+
+nodes:
+  getUser:
+    description: "Get user"
+    adapter: getUser
+    inputs:
+      - name: userId
+        type: string
+    outputs:
+      - name: name
+        type: string
+
+edges:
+  - from: getUser.name
+    to: nonExistent.input1

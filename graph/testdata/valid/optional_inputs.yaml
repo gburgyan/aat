@@ -1,0 +1,25 @@
+version: "1.0.0"
+
+nodes:
+  createOrder:
+    description: "Create a new order"
+    adapter: createOrder
+    inputs:
+      - name: customerId
+        type: string
+      - name: currency
+        type: string
+        optional: true
+        default: USD
+      - name: priority
+        type: enum[low, normal, high]
+        optional: true
+        default: normal
+      - name: notes
+        type: string
+        optional: true
+    outputs:
+      - name: orderId
+        type: string
+      - name: status
+        type: enum[pending, confirmed]

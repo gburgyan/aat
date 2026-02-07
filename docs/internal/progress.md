@@ -5,7 +5,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 ## Stage 1: Foundation
 
 - [x] 0. Project scaffolding (module, packages, CLAUDE.md, progress tracking)
-- [ ] 1. Define YAML graph schema with semver versioning
+- [x] 1. Define YAML graph schema with semver versioning
 - [ ] 2. Author graph for one real flow (search → select → book → add traveler)
 - [ ] 3. Implement adapter interface and HTTPExecutor
 - [ ] 4. Implement Tier 1 template adapter loader

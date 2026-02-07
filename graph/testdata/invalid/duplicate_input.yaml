@@ -1,0 +1,14 @@
+version: "1.0.0"
+
+nodes:
+  getUser:
+    description: "Get user"
+    adapter: getUser
+    inputs:
+      - name: userId
+        type: string
+      - name: userId
+        type: integer
+    outputs:
+      - name: name
+        type: string

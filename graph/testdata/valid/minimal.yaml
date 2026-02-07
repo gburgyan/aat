@@ -1,0 +1,14 @@
+version: "1.0.0"
+
+nodes:
+  getUser:
+    description: "Retrieve user details"
+    adapter: getUser
+    inputs:
+      - name: userId
+        type: string
+    outputs:
+      - name: name
+        type: string
+      - name: email
+        type: string

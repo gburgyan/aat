@@ -1,0 +1,94 @@
+version: "1.0.0"
+
+nodes:
+  searchFlights:
+    description: "Search for available flights"
+    adapter: searchFlights
+    inputs:
+      - name: origin
+        type: airportCode
+        description: "Departure airport IATA code"
+      - name: destination
+        type: airportCode
+        description: "Arrival airport IATA code"
+      - name: departureDate
+        type: date
+      - name: returnDate
+        type: date
+        optional: true
+      - name: cabinClass
+        type: enum[economy, business, first]
+        default: economy
+    outputs:
+      - name: flights
+        type: flight[]
+        description: "List of available flight options"
+        elementFields:
+          - name: flightId
+            type: string
+          - name: carrier
+            type: string
+          - name: departureTime
+            type: datetime
+          - name: arrivalTime
+            type: datetime
+          - name: price
+            type: money
+          - name: cabinClass
+            type: enum[economy, business, first]
+          - name: stops
+            type: integer
+      - name: searchId
+        type: string
+        description: "Search session identifier"
+    cleanup: cancelSearch
+
+  selectFare:
+    description: "Select a specific fare from search results"
+    adapter: selectFare
+    inputs:
+      - name: searchId
+        type: string
+        source: searchFlights.searchId
+      - name: flightId
+        type: string
+        source: searchFlights.flights[].flightId
+    outputs:
+      - name: fareId
+        type: string
+      - name: price
+        type: money
+
+  addPassportInfo:
+    description: "Add passport information for international travel"
+    adapter: addPassportInfo
+    inputs:
+      - name: passportNumber
+        type: string
+      - name: nationality
+        type: string
+    outputs:
+      - name: verified
+        type: boolean
+
+  cancelSearch:
+    description: "Cancel an active search session"
+    adapter: cancelSearch
+    inputs:
+      - name: searchId
+        type: string
+    outputs:
+      - name: cancelled
+        type: boolean
+
+edges:
+  - from: searchFlights.searchId
+    to: selectFare.searchId
+  - from: searchFlights.flights
+    to: selectFare.flightId
+    select: true
+
+conditions:
+  - when: "route.type == international"
+    require: [addPassportInfo]
+    before: [selectFare]
