@@ -7,7 +7,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 - [x] 0. Project scaffolding (module, packages, CLAUDE.md, progress tracking)
 - [x] 1. Define YAML graph schema with semver versioning
 - [x] 2. Author graph for one real flow (Travelport air booking, 7 nodes)
-- [ ] 3. Implement adapter interface and HTTPExecutor
+- [x] 3. Implement adapter interface and HTTPExecutor
 - [ ] 4. Implement Tier 1 template adapter loader
 - [ ] 5. Write template adapters for 3-4 APIs
 - [ ] 6. Implement sequential plan runner with dependency-aware scheduler

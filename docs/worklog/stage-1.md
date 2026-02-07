@@ -52,3 +52,21 @@
 **Open questions:**
 
 - None — the graph exercises all current schema features (arrays with elementFields, select edges, optional inputs with defaults, enum types, cleanup). Ready for Task 3 (adapter interface).
+
+## 2026-02-07 — Adapter Interface and HTTPExecutor (Task 3)
+
+**What:** Implemented the `adapter` package — Adapter interface, Registry, HTTPExecutor, Request/Response types, EnvironmentConfig, and ValidationResult. 8 source files, 2 test files, 23 tests all passing.
+
+**Decisions:**
+
+- **Request.Body / Response.Body as `[]byte`:** Idiomatic Go; `json.Unmarshal` works directly on `[]byte`, supports binary payloads for Tier 3 adapters.
+- **Request.Headers as `map[string]string`, Response.Headers as `http.Header`:** Simpler single-value map for adapter authors building requests; multi-value `http.Header` for responses to preserve Set-Cookie and similar headers.
+- **BaseURL owned by HTTPExecutor, not adapters:** Adapters produce relative paths. `url.ResolveReference` handles path joining correctly including query params and edge cases.
+- **Minimal EnvironmentConfig in adapter package:** Just BaseURL, Headers, Values — enough for BuildRequest. Full config expansion is Task 10.
+- **ValidationResult semantics:** `nil` means "no validation performed" (opt-out), `Valid: true` means "checked and passed", `Valid: false` with Errors means "checked and failed". This three-state design lets adapters opt out of validation entirely.
+- **Registry with error returns:** `Register` returns error on duplicate (fail-fast), `Get` returns error on not-found. No silent overwrites.
+- **No body reader pooling in HTTPExecutor:** Uses `strings.NewReader` for simplicity. The body is already in memory as `[]byte`; no benefit from pooling at this stage.
+
+**Open questions:**
+
+- None — ready for Task 4 (Tier 1 template adapter loader).

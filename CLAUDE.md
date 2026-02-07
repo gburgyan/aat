@@ -101,6 +101,10 @@ When making design decisions or completing stage milestones, add entries to `doc
 **Open questions:** Anything deferred
 ```
 
+## Task planning
+
+If a task seems too aggressive to do in one operation, push back and offer to break it down into sub-tasks. When doing this, update the implementation plan with the new information so we can have clearly defined work items.
+
 ## Current Stage
 
 **Stage 1: Foundation** — Project scaffolded. Starting Task 1 (YAML graph schema).
