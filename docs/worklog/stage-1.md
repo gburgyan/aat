@@ -35,3 +35,20 @@
 **Open questions:**
 
 - None — Task 1 is self-contained. Task 2 (author a real graph) can proceed immediately.
+
+## 2026-02-07 — Travelport Booking Graph (Task 2)
+
+**What:** Authored a real API graph for the Travelport+ JSON API air booking workflow. 7 nodes, 10 edges, comprehensive parse and validation tests. File: `graph/testdata/valid/travelport_booking.yaml`.
+
+**Decisions:**
+
+- **7 nodes, not 4:** The implementation plan summary says "search → select → book → add traveler" but the real Travelport API requires 6 API calls plus a cleanup operation. Modeled all 7 faithfully: searchFlights, priceOffer, createWorkbench, addOffer, addTraveler, commitBooking, ignoreWorkbench.
+- **Ordering via data edges:** `commitBooking` logically requires both `addOffer` and `addTraveler` to complete first. Since the graph schema has no explicit `dependsOn` mechanism, we express ordering through data edges — `commitBooking` accepts `offerStatus` (from addOffer) and `travelerId` (from addTraveler) as inputs. The adapter may ignore these values in the actual API call, but the edges encode the ordering constraint. This keeps the schema simple while being expressive enough.
+- **Single selection point:** The user selects one offering from search results via a `select: true` edge from `searchFlights.catalogOfferings` to `priceOffer.offeringId`. The confirmed offering ID then flows forward to `addOffer` as a scalar — no second selection needed.
+- **Parallel-capable topology:** `searchFlights` and `createWorkbench` have no dependencies between them and can execute in parallel. `addTraveler` only depends on `createWorkbench`, so it can run in parallel with `priceOffer`/`addOffer`.
+- **Cleanup on createWorkbench:** `createWorkbench` declares `cleanup: ignoreWorkbench` to ensure workbench teardown on failure. The cleanup node receives `workbenchId` via a regular edge.
+- **Adapter naming convention:** Used dotted names (`travelport.searchFlights`) to namespace adapters by provider. This will map naturally to adapter loader paths in Task 3+.
+
+**Open questions:**
+
+- None — the graph exercises all current schema features (arrays with elementFields, select edges, optional inputs with defaults, enum types, cleanup). Ready for Task 3 (adapter interface).

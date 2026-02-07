@@ -1,0 +1,207 @@
+version: "1.0.0"
+
+nodes:
+  searchFlights:
+    description: "Search for available flights via Travelport catalog"
+    adapter: travelport.searchFlights
+    inputs:
+      - name: origin
+        type: string
+        description: "Departure airport IATA code"
+      - name: destination
+        type: string
+        description: "Arrival airport IATA code"
+      - name: departureDate
+        type: date
+        description: "Outbound departure date"
+      - name: returnDate
+        type: date
+        description: "Return date for round-trip"
+        optional: true
+      - name: passengers
+        type: integer
+        description: "Number of passengers"
+        optional: true
+        default: 1
+      - name: cabinPreference
+        type: enum[economy, premiumEconomy, business, first]
+        description: "Preferred cabin class"
+        optional: true
+        default: economy
+    outputs:
+      - name: catalogOfferings
+        type: offering[]
+        description: "List of available flight offerings"
+        elementFields:
+          - name: offeringId
+            type: string
+          - name: departure
+            type: string
+          - name: arrival
+            type: string
+          - name: departureTime
+            type: datetime
+          - name: arrivalTime
+            type: datetime
+          - name: carrier
+            type: string
+          - name: stops
+            type: integer
+          - name: cabin
+            type: string
+      - name: catalogOfferingsId
+        type: string
+        description: "Catalog offerings session identifier"
+
+  priceOffer:
+    description: "Confirm pricing on a selected catalog offering"
+    adapter: travelport.priceOffer
+    inputs:
+      - name: catalogOfferingsId
+        type: string
+        description: "Catalog offerings session identifier"
+      - name: offeringId
+        type: string
+        description: "Selected offering identifier"
+    outputs:
+      - name: totalPrice
+        type: money
+        description: "Confirmed total price"
+      - name: currencyCode
+        type: string
+        description: "Currency of the price"
+      - name: confirmedOfferingId
+        type: string
+        description: "Confirmed offering identifier for booking"
+
+  createWorkbench:
+    description: "Create a reservation workbench (booking session)"
+    adapter: travelport.createWorkbench
+    inputs: []
+    outputs:
+      - name: workbenchId
+        type: string
+        description: "Reservation workbench identifier"
+    cleanup: ignoreWorkbench
+
+  addOffer:
+    description: "Add a priced offer to the reservation workbench"
+    adapter: travelport.addOffer
+    inputs:
+      - name: workbenchId
+        type: string
+        description: "Reservation workbench identifier"
+      - name: catalogOfferingsId
+        type: string
+        description: "Catalog offerings session identifier"
+      - name: offeringId
+        type: string
+        description: "Confirmed offering identifier"
+    outputs:
+      - name: offerStatus
+        type: string
+        description: "Status of the added offer"
+      - name: totalPrice
+        type: money
+        description: "Total price after adding offer"
+
+  addTraveler:
+    description: "Add passenger details to the reservation workbench"
+    adapter: travelport.addTraveler
+    inputs:
+      - name: workbenchId
+        type: string
+        description: "Reservation workbench identifier"
+      - name: surname
+        type: string
+        description: "Traveler last name"
+      - name: givenName
+        type: string
+        description: "Traveler first name"
+      - name: birthDate
+        type: date
+        description: "Traveler date of birth"
+        optional: true
+      - name: gender
+        type: enum[Male, Female, Undisclosed]
+        description: "Traveler gender"
+        optional: true
+      - name: passengerTypeCode
+        type: string
+        description: "Passenger type code (e.g. ADT, CHD, INF)"
+        optional: true
+        default: ADT
+    outputs:
+      - name: travelerId
+        type: string
+        description: "Assigned traveler identifier"
+
+  commitBooking:
+    description: "Finalize the reservation to create a PNR"
+    adapter: travelport.commitBooking
+    inputs:
+      - name: workbenchId
+        type: string
+        description: "Reservation workbench identifier"
+      - name: offerStatus
+        type: string
+        description: "Status confirming offer was added"
+      - name: travelerId
+        type: string
+        description: "Traveler identifier confirming traveler was added"
+    outputs:
+      - name: locator
+        type: string
+        description: "PNR record locator"
+      - name: reservationId
+        type: string
+        description: "Reservation identifier"
+      - name: reservationStatus
+        type: string
+        description: "Status of the finalized reservation"
+
+  ignoreWorkbench:
+    description: "Discard the reservation workbench (cleanup)"
+    adapter: travelport.ignoreWorkbench
+    inputs:
+      - name: workbenchId
+        type: string
+        description: "Reservation workbench identifier"
+    outputs:
+      - name: acknowledged
+        type: boolean
+        description: "Whether the workbench was successfully discarded"
+
+edges:
+  # searchFlights → priceOffer
+  - from: searchFlights.catalogOfferingsId
+    to: priceOffer.catalogOfferingsId
+  - from: searchFlights.catalogOfferings
+    to: priceOffer.offeringId
+    select: true
+
+  # searchFlights → addOffer
+  - from: searchFlights.catalogOfferingsId
+    to: addOffer.catalogOfferingsId
+
+  # priceOffer → addOffer
+  - from: priceOffer.confirmedOfferingId
+    to: addOffer.offeringId
+
+  # createWorkbench → addOffer, addTraveler, commitBooking, ignoreWorkbench
+  - from: createWorkbench.workbenchId
+    to: addOffer.workbenchId
+  - from: createWorkbench.workbenchId
+    to: addTraveler.workbenchId
+  - from: createWorkbench.workbenchId
+    to: commitBooking.workbenchId
+
+  # addOffer, addTraveler → commitBooking (ordering via data edges)
+  - from: addOffer.offerStatus
+    to: commitBooking.offerStatus
+  - from: addTraveler.travelerId
+    to: commitBooking.travelerId
+
+  # createWorkbench → ignoreWorkbench (cleanup edge)
+  - from: createWorkbench.workbenchId
+    to: ignoreWorkbench.workbenchId

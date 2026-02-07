@@ -14,6 +14,7 @@ func TestValidate_ValidGraphs(t *testing.T) {
 		"testdata/valid/travel_flow.yaml",
 		"testdata/valid/with_conditions.yaml",
 		"testdata/valid/optional_inputs.yaml",
+		"testdata/valid/travelport_booking.yaml",
 	}
 	for _, f := range files {
 		t.Run(f, func(t *testing.T) {
