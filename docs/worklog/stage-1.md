@@ -128,3 +128,23 @@
 
 - The gjson field path for SELECT edge extraction (`Identifier.value`) may need adjustment after observing real Travelport API responses. The test fixture uses this path but it hasn't been validated against the actual API yet.
 - None blocking — ready for Task 6a (predicate expression parser).
+
+## 2026-02-07 — Predicate Expression Parser (Task 6a)
+
+**What:** Implemented a self-contained predicate expression parser and evaluator in `plan/predicate.go`. Recursive descent parser with tokenizer, AST, and evaluator. Exposed as `EvalPredicate(expr, context)` and `ValidatePredicate(expr)`. Integrated syntax validation into `Validate()` for filter, constraint, and predicate assertion expressions. 2 new files, 1 modified file, ~55 new tests, all passing.
+
+**Decisions:**
+
+- **12 token types:** `tokenNumber`, `tokenString`, `tokenBool`, `tokenIdent`, `tokenOperator`, `tokenLParen`, `tokenRParen`, `tokenLBracket`, `tokenRBracket`, `tokenComma`, `tokenIn`, `tokenEOF`. Identifiers include dots (e.g., `price.amount` is one token). `true`/`false` emit `tokenBool`, `in` emits `tokenIn`.
+- **5 AST node types:** `literalNode` (float64/string/bool), `identNode` (field reference), `arrayLiteralNode`, `unaryNode` (!), `binaryNode` (==, !=, <, >, <=, >=, &&, ||, in). All implement a `node` interface with a marker method.
+- **Precedence via grammar structure (low→high):** logicalOr → logicalAnd → comparison → inExpr → unary → primary. Comparison is non-associative (single operator only). Boolean ops are left-associative.
+- **Short-circuit evaluation for && and ||:** `false && missing` returns false without evaluating the right side. `true || missing` returns true. This is essential for practical use where not all fields may be present.
+- **Int → float64 coercion:** YAML unmarshals integers as `int`, JSON as `float64`. The evaluator normalizes int/int32/int64 to float64 before comparisons. This handles the common YAML/JSON interop case.
+- **`in` operator:** LHS is scalar, RHS must evaluate to `[]any`. Incompatible element types in the array are skipped (not errors) — pragmatic for mixed-type arrays.
+- **Field resolution via dot splitting:** `resolveField("a.b.c", ctx)` splits on "." and traverses nested `map[string]any`. Errors on missing keys or non-map intermediates.
+- **ValidatePredicate:** Parse-only (tokenize + parse + check EOF), no evaluation. Used by `Validate()` to catch syntax errors at plan load time.
+- **Validation integration points:** Three places checked — `SelectionConfig.Filter`, `StepValue.Constraint`, and `MechanicalAssertion` with `Type == "predicate"`.
+
+**Open questions:**
+
+- None — ready for Task 7 (array selection strategies).

@@ -15,7 +15,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 6.2 Sequential runner + value resolution (`engine` package)
   - [x] 6.3 Auth + config loading (`config` package)
   - [x] 6.4 Cleanup stack (`engine` package)
-- [ ] 6a. Implement predicate expression parser and evaluator
+- [x] 6a. Implement predicate expression parser and evaluator
 - [ ] 7. Implement array selection in engine
 - [ ] 8. Implement error taxonomy and failure handling
 - [ ] 9. Implement mechanical validation

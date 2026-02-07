@@ -88,6 +88,31 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 	}
 
+	// Validate predicate expressions in step values and assertions
+	for i, step := range p.Execution.Steps {
+		for name, sv := range step.Values {
+			if sv.Select != nil && sv.Select.Filter != "" {
+				if err := ValidatePredicate(sv.Select.Filter); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for %q: %v", i, step.Node, name, err))
+				}
+			}
+			if sv.Constraint != "" {
+				if err := ValidatePredicate(sv.Constraint); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, step.Node, name, err))
+				}
+			}
+		}
+		if step.Assertions != nil {
+			for j, ma := range step.Assertions.Mechanical {
+				if ma.Type == "predicate" && ma.Expr != "" {
+					if err := ValidatePredicate(ma.Expr); err != nil {
+						errs = append(errs, fmt.Sprintf("step %d (%s): invalid predicate assertion %d: %v", i, step.Node, j, err))
+					}
+				}
+			}
+		}
+	}
+
 	// Check for dependsOn cycles
 	if cycleErrs := detectDependsOnCycles(p); len(cycleErrs) > 0 {
 		errs = append(errs, cycleErrs...)

@@ -251,6 +251,208 @@ func TestValidate_InputWiredByEdge_NoValueNeeded(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestValidate_PredicateExpressions(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid filter expression", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						Values: map[string]StepValue{
+							"offeringId": {
+								Select: &SelectionConfig{
+									Strategy: "filter",
+									Filter:   "stops == 0 && carrier == 'AA'",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid filter expression", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						Values: map[string]StepValue{
+							"offeringId": {
+								Select: &SelectionConfig{
+									Strategy: "filter",
+									Filter:   "stops ==",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid filter expression")
+	})
+
+	t.Run("valid constraint expression", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						Values: map[string]StepValue{
+							"offeringId": {
+								Constraint: "value > 0",
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid constraint expression", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						Values: map[string]StepValue{
+							"offeringId": {
+								Constraint: "value @@ 'bad'",
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid constraint expression")
+	})
+
+	t.Run("valid predicate assertion", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						Assertions: &Assertions{
+							Mechanical: []MechanicalAssertion{
+								{
+									Type: "predicate",
+									Expr: "price.amount < 1000",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid predicate assertion", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						Assertions: &Assertions{
+							Mechanical: []MechanicalAssertion{
+								{
+									Type: "predicate",
+									Expr: "price.amount <<< 'invalid'",
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid predicate assertion")
+	})
+
+	t.Run("non-predicate assertion type ignored", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						Assertions: &Assertions{
+							Mechanical: []MechanicalAssertion{
+								{
+									Type:   "status",
+									Expect: 200,
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+}
+
 func TestValidate_InvalidGraphVersion(t *testing.T) {
 	g := loadTravelportGraph(t)
 	p := &Plan{
