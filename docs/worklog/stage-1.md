@@ -148,3 +148,22 @@
 **Open questions:**
 
 - None — ready for Task 7 (array selection strategies).
+
+## 2026-02-07 — Array Selection Strategies (Task 7)
+
+**What:** Replaced the hardcoded `arr[0]` array selection with a full strategy dispatch supporting 7 deterministic strategies (first, last, index, random, min, max, match), optional filter expressions, selection decision logging, and deduplication for multiple fields from the same selected element. 2 new files, 5 modified files, ~30 new tests, all passing.
+
+**Decisions:**
+
+- **7 strategies:** `first` (default), `last`, `index`, `random`, `min`, `max`, `match`. All are deterministic except `random` (uses `math/rand/v2`). Empty strategy defaults to `first`.
+- **`match` vs filter:** `match` strategy uses `SelectionConfig.Filter` as its predicate and returns the first matching element — no pre-filtering step. Non-match strategies with a filter apply the filter as a pre-filter (narrowing the array) then apply the strategy on the filtered result.
+- **`SortField` for min/max:** Added to `SelectionConfig`. When both `Field` and `SortField` are set, `SortField` is the comparison key and `Field` is the extraction path. When only `Field` is set for min/max, it serves as both.
+- **`SelectionDecision` struct:** Records `InputName`, `SourceNode`, `SourceField`, `SourceSize`, `FilterExpr`, `FilteredSize`, `Strategy`, `SelectedIndex` — enough for debugging and logging without being heavyweight.
+- **`ResolveInputs` signature change:** Returns `(map[string]any, []SelectionDecision, error)` instead of `(map[string]any, error)`. All callers updated.
+- **Dedup cache in `ResolveInputs`:** Keyed by `from|strategy|filter|index`. When two inputs share the same source and selection config (differing only in `Field`/`SortField`), the selection is performed once and different fields are extracted from the same element. This ensures consistency when e.g. both `itemId` and `itemName` reference the same random selection.
+- **Validation additions:** Unknown strategies, min/max without field, match without filter, negative index — all caught at plan validation time.
+- **Existing test fix:** Pre-existing test used `Strategy: "filter"` which was never a valid strategy name. Updated to `Strategy: "first"` with a filter.
+
+**Open questions:**
+
+- None — ready for Task 8 (error taxonomy and failure handling).

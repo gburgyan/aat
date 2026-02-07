@@ -12,12 +12,14 @@ import (
 // ResolveInputs resolves all input values for a step by checking sources in
 // priority order:
 //  1. Graph edge targeting this input → upstream output from RunState
-//  2. SELECT edge → first element of upstream array, extract field via gjson
-//  3. Plan StepValue.Default
+//  2. SELECT edge → select from upstream array using strategy, extract field via gjson
+//  3. Plan StepValue.Default (via plan values or "from" with select)
 //  4. Graph node Input.Default
 //  5. Optional → skip (not included in result)
 //  6. None → error: required input has no value
-func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunState) (map[string]any, error) {
+//
+// Returns the resolved inputs and any selection decisions made.
+func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunState) (map[string]any, []SelectionDecision, error) {
 	// Build edge lookup for this node: inputName → edge
 	edgeMap := make(map[string]graph.Edge)
 	for _, edge := range g.Edges {
@@ -31,40 +33,59 @@ func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunS
 	}
 
 	inputs := make(map[string]any)
+	var decisions []SelectionDecision
+
+	// Dedup cache: keyed by "from|strategy|filter|index" → cached selectionResult
+	dedupCache := make(map[string]*selectionResult)
 
 	for _, input := range node.Inputs {
-		val, err := resolveInput(input, step, edgeMap, state)
+		val, decision, err := resolveInput(input, step, edgeMap, state, dedupCache)
 		if err != nil {
-			return nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
+			return nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
 		if val != nil {
 			inputs[input.Name] = val
 		}
+		if decision != nil {
+			decisions = append(decisions, *decision)
+		}
 		// val == nil means optional input with no value → skip
 	}
 
-	return inputs, nil
+	return inputs, decisions, nil
 }
 
-func resolveInput(input graph.Input, step plan.Step, edgeMap map[string]graph.Edge, state *RunState) (any, error) {
+// dedupKey builds a cache key for selection deduplication.
+func dedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
+	if sel == nil {
+		return fmt.Sprintf("%s|%s|||", fromNode, fromField)
+	}
+	return fmt.Sprintf("%s|%s|%s|%s|%d", fromNode, fromField, sel.Strategy, sel.Filter, sel.Index)
+}
+
+func resolveInput(input graph.Input, step plan.Step, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult) (any, *SelectionDecision, error) {
 	// 1. Check for graph edge
 	if edge, ok := edgeMap[input.Name]; ok {
 		fromNode, fromField, err := splitRef(edge.From)
 		if err != nil {
-			return nil, fmt.Errorf("invalid edge source %q: %w", edge.From, err)
+			return nil, nil, fmt.Errorf("invalid edge source %q: %w", edge.From, err)
 		}
 
 		if edge.Select {
-			// 2. SELECT edge: extract from first array element
-			return resolveSelectEdge(fromNode, fromField, input.Name, step, state)
+			// 2. SELECT edge: select from upstream array using strategy
+			val, decision, err := resolveSelectEdge(fromNode, fromField, input.Name, step, state, dedupCache)
+			if err != nil {
+				return nil, nil, err
+			}
+			return val, decision, nil
 		}
 
 		// Regular edge: get the output value directly
 		val, err := state.GetOutput(fromNode, fromField)
 		if err != nil {
-			return nil, fmt.Errorf("edge from %q: %w", edge.From, err)
+			return nil, nil, fmt.Errorf("edge from %q: %w", edge.From, err)
 		}
-		return val, nil
+		return val, nil, nil
 	}
 
 	// 3. Plan StepValue.Default (via plan values or "from" with select)
@@ -73,70 +94,139 @@ func resolveInput(input graph.Input, step plan.Step, edgeMap map[string]graph.Ed
 			// Plan-defined selection from upstream output
 			fromNode, fromField, err := splitRef(sv.From)
 			if err != nil {
-				return nil, fmt.Errorf("invalid 'from' reference %q: %w", sv.From, err)
+				return nil, nil, fmt.Errorf("invalid 'from' reference %q: %w", sv.From, err)
 			}
-			return resolveSelectValue(fromNode, fromField, sv.Select, state)
+			val, decision, err := resolveSelectValue(fromNode, fromField, input.Name, sv.Select, state, dedupCache)
+			if err != nil {
+				return nil, nil, err
+			}
+			return val, decision, nil
 		}
 		if sv.Default != nil {
-			return sv.Default, nil
+			return sv.Default, nil, nil
 		}
 	}
 
 	// 4. Graph node Input.Default
 	if input.Default != nil {
-		return input.Default, nil
+		return input.Default, nil, nil
 	}
 
 	// 5. Optional → skip
 	if input.Optional {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// 6. No value → error
-	return nil, fmt.Errorf("required input has no value")
+	return nil, nil, fmt.Errorf("required input has no value")
 }
 
-// resolveSelectEdge handles a SELECT edge: the source is an array, take the
-// first element, and if a plan-level select config exists for this input,
-// extract the specified field.
-func resolveSelectEdge(fromNode, fromField, inputName string, step plan.Step, state *RunState) (any, error) {
+// resolveSelectEdge handles a SELECT edge: the source is an array, select using
+// strategy, and if a plan-level select config exists for this input, extract
+// the specified field.
+func resolveSelectEdge(fromNode, fromField, inputName string, step plan.Step, state *RunState, dedupCache map[string]*selectionResult) (any, *SelectionDecision, error) {
 	arr, err := getArrayFromState(fromNode, fromField, state)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if len(arr) == 0 {
-		return nil, fmt.Errorf("select edge from %s.%s: array is empty", fromNode, fromField)
+	// Get plan-level select config for this input (if any)
+	var sel *plan.SelectionConfig
+	if sv, ok := step.Values[inputName]; ok && sv.Select != nil {
+		sel = sv.Select
 	}
 
-	element := arr[0]
+	// Check dedup cache
+	key := dedupKey(fromNode, fromField, sel)
+	cached, hasCached := dedupCache[key]
 
-	// Check if there's a plan-level select config for this input
-	if sv, ok := step.Values[inputName]; ok && sv.Select != nil && sv.Select.Field != "" {
-		return extractField(element, sv.Select.Field)
+	var result *selectionResult
+	if hasCached {
+		result = cached
+	} else {
+		result, err = applySelection(arr, sel)
+		if err != nil {
+			return nil, nil, fmt.Errorf("select edge from %s.%s: %w", fromNode, fromField, err)
+		}
+		dedupCache[key] = result
 	}
 
-	return element, nil
+	decision := &SelectionDecision{
+		InputName:     inputName,
+		SourceNode:    fromNode,
+		SourceField:   fromField,
+		SourceSize:    len(arr),
+		FilteredSize:  result.filteredSize,
+		Strategy:      strategyName(sel),
+		SelectedIndex: result.index,
+	}
+	if sel != nil && sel.Filter != "" {
+		decision.FilterExpr = sel.Filter
+	}
+
+	// Extract field if specified
+	if sel != nil && sel.Field != "" {
+		val, err := extractField(result.element, sel.Field)
+		if err != nil {
+			return nil, nil, err
+		}
+		return val, decision, nil
+	}
+
+	return result.element, decision, nil
 }
 
 // resolveSelectValue handles plan-defined "from" + "select" value resolution.
-func resolveSelectValue(fromNode, fromField string, sel *plan.SelectionConfig, state *RunState) (any, error) {
+func resolveSelectValue(fromNode, fromField, inputName string, sel *plan.SelectionConfig, state *RunState, dedupCache map[string]*selectionResult) (any, *SelectionDecision, error) {
 	arr, err := getArrayFromState(fromNode, fromField, state)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if len(arr) == 0 {
-		return nil, fmt.Errorf("select from %s.%s: array is empty", fromNode, fromField)
+	// Check dedup cache
+	key := dedupKey(fromNode, fromField, sel)
+	cached, hasCached := dedupCache[key]
+
+	var result *selectionResult
+	if hasCached {
+		result = cached
+	} else {
+		result, err = applySelection(arr, sel)
+		if err != nil {
+			return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, err)
+		}
+		dedupCache[key] = result
 	}
 
-	// Task 6: only "first" strategy supported
-	element := arr[0]
+	decision := &SelectionDecision{
+		InputName:     inputName,
+		SourceNode:    fromNode,
+		SourceField:   fromField,
+		SourceSize:    len(arr),
+		FilteredSize:  result.filteredSize,
+		Strategy:      strategyName(sel),
+		SelectedIndex: result.index,
+	}
+	if sel != nil && sel.Filter != "" {
+		decision.FilterExpr = sel.Filter
+	}
 
 	if sel.Field != "" {
-		return extractField(element, sel.Field)
+		val, err := extractField(result.element, sel.Field)
+		if err != nil {
+			return nil, nil, err
+		}
+		return val, decision, nil
 	}
-	return element, nil
+	return result.element, decision, nil
+}
+
+// strategyName returns the effective strategy name, defaulting to "first".
+func strategyName(sel *plan.SelectionConfig) string {
+	if sel == nil || sel.Strategy == "" {
+		return "first"
+	}
+	return sel.Strategy
 }
 
 // getArrayFromState retrieves an output value and asserts it is a []any.

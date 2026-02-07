@@ -88,12 +88,41 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 	}
 
-	// Validate predicate expressions in step values and assertions
+	// Valid strategy names
+	validStrategies := map[string]bool{
+		"":       true,
+		"first":  true,
+		"last":   true,
+		"index":  true,
+		"random": true,
+		"min":    true,
+		"max":    true,
+		"match":  true,
+	}
+
+	// Validate predicate expressions and selection strategies in step values and assertions
 	for i, step := range p.Execution.Steps {
 		for name, sv := range step.Values {
-			if sv.Select != nil && sv.Select.Filter != "" {
-				if err := ValidatePredicate(sv.Select.Filter); err != nil {
-					errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for %q: %v", i, step.Node, name, err))
+			if sv.Select != nil {
+				sel := sv.Select
+				if !validStrategies[sel.Strategy] {
+					errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for %q", i, step.Node, sel.Strategy, name))
+				}
+				if sel.Filter != "" {
+					if err := ValidatePredicate(sel.Filter); err != nil {
+						errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for %q: %v", i, step.Node, name, err))
+					}
+				}
+				if sel.Strategy == "min" || sel.Strategy == "max" {
+					if sel.Field == "" && sel.SortField == "" {
+						errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires field or sortField for %q", i, step.Node, sel.Strategy, name))
+					}
+				}
+				if sel.Strategy == "match" && sel.Filter == "" {
+					errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for %q", i, step.Node, name))
+				}
+				if sel.Strategy == "index" && sel.Index < 0 {
+					errs = append(errs, fmt.Sprintf("step %d (%s): index strategy requires non-negative index for %q", i, step.Node, name))
 				}
 			}
 			if sv.Constraint != "" {

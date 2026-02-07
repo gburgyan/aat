@@ -75,10 +75,11 @@ type StepValue struct {
 
 // SelectionConfig describes how to select an element from an array output.
 type SelectionConfig struct {
-	Strategy string `yaml:"strategy"`
-	Field    string `yaml:"field,omitempty"`
-	Filter   string `yaml:"filter,omitempty"`
-	Index    int    `yaml:"index,omitempty"`
+	Strategy  string `yaml:"strategy"`
+	Field     string `yaml:"field,omitempty"`
+	Filter    string `yaml:"filter,omitempty"`
+	Index     int    `yaml:"index,omitempty"`
+	SortField string `yaml:"sortField,omitempty"` // For min/max: field to compare by
 }
 
 // RetryConfig controls retry behavior for a step.

@@ -46,7 +46,20 @@ type StepResult struct {
 	Request    *adapter.Request
 	Response   *adapter.Response
 	Outputs    map[string]any
+	Selections []SelectionDecision
 	StatusCode int
 	Error      error
 	Duration   time.Duration
+}
+
+// SelectionDecision records how a particular array selection was resolved.
+type SelectionDecision struct {
+	InputName     string
+	SourceNode    string
+	SourceField   string
+	SourceSize    int
+	FilterExpr    string
+	FilteredSize  int
+	Strategy      string
+	SelectedIndex int
 }

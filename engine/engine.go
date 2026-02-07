@@ -117,7 +117,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	start := time.Now()
 
 	// Resolve inputs
-	inputs, err := ResolveInputs(step, node, e.graph, state)
+	inputs, selections, err := ResolveInputs(step, node, e.graph, state)
 	if err != nil {
 		return StepResult{
 			Node:     step.Node,
@@ -163,6 +163,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	result := StepResult{
 		Node:       step.Node,
 		Inputs:     inputs,
+		Selections: selections,
 		Request:    req,
 		Response:   resp,
 		StatusCode: resp.StatusCode,

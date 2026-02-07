@@ -271,7 +271,7 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 						Values: map[string]StepValue{
 							"offeringId": {
 								Select: &SelectionConfig{
-									Strategy: "filter",
+									Strategy: "first",
 									Filter:   "stops == 0 && carrier == 'AA'",
 								},
 							},
@@ -301,7 +301,7 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 						Values: map[string]StepValue{
 							"offeringId": {
 								Select: &SelectionConfig{
-									Strategy: "filter",
+									Strategy: "first",
 									Filter:   "stops ==",
 								},
 							},
@@ -448,6 +448,116 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 				},
 			},
 		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+}
+
+func TestValidate_SelectionStrategies(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	baseStep := func(sel *SelectionConfig) *Plan {
+		return &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						Values: map[string]StepValue{
+							"offeringId": {Select: sel},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	t.Run("unknown strategy", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "bogus"})
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown selection strategy")
+	})
+
+	t.Run("min requires field", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "min"})
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "min strategy requires field or sortField")
+	})
+
+	t.Run("max requires field", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "max"})
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "max strategy requires field or sortField")
+	})
+
+	t.Run("min with field ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "min", Field: "price"})
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("min with sortField ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "min", SortField: "price"})
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("match requires filter", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "match"})
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "match strategy requires filter")
+	})
+
+	t.Run("match with filter ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "match", Filter: "carrier == 'AA'"})
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("index negative", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "index", Index: -1})
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "non-negative index")
+	})
+
+	t.Run("index zero ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "index", Index: 0})
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("first ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "first"})
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("last ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "last"})
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("random ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "random"})
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("empty strategy ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: ""})
 		err := Validate(p, g)
 		assert.NoError(t, err)
 	})
