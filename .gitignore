@@ -1,0 +1,26 @@
+# Built binaries
+/aat
+/aat-gateway
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Run output
+runs/
+
+# SQLite
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
+.env.*
