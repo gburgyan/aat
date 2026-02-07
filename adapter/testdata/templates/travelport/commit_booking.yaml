@@ -1,0 +1,23 @@
+adapter: travelport.commitBooking
+protocol: http
+
+# Note: offerStatus and travelerId are ordering inputs from graph edges.
+# They ensure addOffer and addTraveler complete before commit but are
+# not used in the request body — the workbench already holds that state.
+
+request:
+  method: POST
+  path: /11/air/book/reservation/reservations/{{workbenchId}}
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "@type": "ReservationQueryCommitReservation",
+      "ReceivedFrom": "AAT"
+    }
+
+response:
+  extract:
+    locator: "$.ReservationResponse.Reservation.LocatorCode"
+    reservationId: "$.ReservationResponse.Identifier.value"
+    reservationStatus: "$.ReservationResponse.reservationStatus"

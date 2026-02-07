@@ -1,0 +1,39 @@
+adapter: travelport.searchFlights
+protocol: http
+
+request:
+  method: POST
+  path: /11/air/catalog/search/catalogproductofferings
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "@type": "CatalogProductOfferingsQueryRequest",
+      "CatalogProductOfferingsRequest": {
+        "@type": "CatalogProductOfferingsRequestAir",
+        "offersPerPage": 10,
+        "PassengerCriteria": [
+          {
+            "@type": "PassengerCriteria",
+            "number": {{passengers}},
+            "passengerTypeCode": "ADT"
+          }
+        ],
+        "SearchCriteriaFlight": [
+          {
+            "departureDate": "{{departureDate}}",
+            "From": {
+              "value": "{{origin}}"
+            },
+            "To": {
+              "value": "{{destination}}"
+            }
+          }
+        ]
+      }
+    }
+
+response:
+  extract:
+    catalogOfferings: "$.CatalogProductOfferingsResponse.CatalogProductOfferings.CatalogProductOffering"
+    catalogOfferingsId: "$.CatalogProductOfferingsResponse.CatalogProductOfferings.Identifier.value"

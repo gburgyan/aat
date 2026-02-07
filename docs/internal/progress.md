@@ -9,7 +9,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 - [x] 2. Author graph for one real flow (Travelport air booking, 7 nodes)
 - [x] 3. Implement adapter interface and HTTPExecutor
 - [x] 4. Implement Tier 1 template adapter loader
-- [ ] 5. Write template adapters for 3-4 APIs
+- [x] 5. Write template adapters for Travelport booking flow (7 templates)
 - [ ] 6. Implement sequential plan runner with dependency-aware scheduler
 - [ ] 6a. Implement predicate expression parser and evaluator
 - [ ] 7. Implement array selection in engine

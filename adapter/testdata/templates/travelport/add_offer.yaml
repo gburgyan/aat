@@ -1,0 +1,41 @@
+adapter: travelport.addOffer
+protocol: http
+
+request:
+  method: POST
+  path: /11/air/book/airoffer/reservationworkbench/{{workbenchId}}/offers/buildfromcatalogproductofferings
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "@type": "OfferQueryBuildFromCatalogProductOfferings",
+      "BuildFromCatalogProductOfferingsRequest": {
+        "@type": "BuildFromCatalogProductOfferingsRequestAir",
+        "CatalogProductOfferingsIdentifier": {
+          "Identifier": {
+            "value": "{{catalogOfferingsId}}"
+          }
+        },
+        "CatalogProductOfferingSelection": [
+          {
+            "CatalogProductOfferingIdentifier": {
+              "Identifier": {
+                "value": "{{offeringId}}"
+              }
+            },
+            "ProductIdentifier": [
+              {
+                "Identifier": {
+                  "value": "{{offeringId}}"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+
+response:
+  extract:
+    offerStatus: "$.OfferListResponse.reservationStatus"
+    totalPrice: "$.OfferListResponse.OfferID.0.Price.TotalPrice"

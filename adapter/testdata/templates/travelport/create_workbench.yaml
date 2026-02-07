@@ -1,0 +1,16 @@
+adapter: travelport.createWorkbench
+protocol: http
+
+request:
+  method: POST
+  path: /11/air/book/session/reservationworkbench
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "@type": "ReservationID"
+    }
+
+response:
+  extract:
+    workbenchId: "$.ReservationResponse.Identifier.value"

@@ -1,0 +1,13 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Adapter Tests" type="GoTestRunConfiguration" factoryName="Go Test">
+    <module name="aat" />
+    <working_directory value="$PROJECT_DIR$/adapter" />
+    <root_directory value="$PROJECT_DIR$" />
+    <kind value="PACKAGE" />
+    <package value="github.com/gburgyan/aat/adapter" />
+    <directory value="$PROJECT_DIR$" />
+    <filePath value="$PROJECT_DIR$" />
+    <framework value="gotest" />
+    <method v="2" />
+  </configuration>
+</component>
