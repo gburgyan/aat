@@ -1,0 +1,5 @@
+protocol: http
+
+request:
+  method: POST
+  path: /v2/test

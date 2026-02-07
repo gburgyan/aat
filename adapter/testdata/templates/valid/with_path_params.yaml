@@ -1,0 +1,19 @@
+adapter: travelport.priceOffer
+protocol: http
+
+request:
+  method: POST
+  path: /v2/offers/{{offeringId}}/price
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "count": {{passengerCount}}
+    }
+
+response:
+  extract:
+    offerId: "$.data.offerId"
+    totalPrice: "$.data.totalPrice"
+  validate:
+    schema: schemas/price_response.json

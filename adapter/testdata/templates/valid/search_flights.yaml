@@ -1,0 +1,20 @@
+adapter: travelport.searchFlights
+protocol: http
+
+request:
+  method: POST
+  path: /v2/catalog/search
+  headers:
+    Content-Type: application/json
+    Authorization: "Bearer {{auth.token}}"
+  body: |
+    {
+      "origin": "{{origin}}",
+      "destination": "{{destination}}",
+      "departureDate": "{{departureDate}}"
+    }
+
+response:
+  extract:
+    searchId: "$.data.searchId"
+    catalogOfferings: "$.data.catalogOfferings"

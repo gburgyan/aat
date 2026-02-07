@@ -70,3 +70,20 @@
 **Open questions:**
 
 - None — ready for Task 4 (Tier 1 template adapter loader).
+
+## 2026-02-07 — Tier 1 Template Adapter Loader (Task 4)
+
+**What:** Implemented the template adapter system that turns YAML files into live `Adapter` implementations via placeholder substitution and GJSON extraction. 1 source file (`template.go`), 1 test file (`template_test.go`), 6 YAML fixture files, 50 total adapter tests all passing.
+
+**Decisions:**
+
+- **GJSON for JSON extraction:** Added `github.com/tidwall/gjson` dependency. Template authors write JSONPath-style expressions (`$.data.flights`); `normalizeJSONPath` converts to GJSON syntax by stripping `$.` prefix and converting `[N]` bracket notation to `.N` dot notation.
+- **Placeholder regex `\{\{\s*([^}]+?)\s*\}\}`:** Matches `{{key}}` with optional internal whitespace. Resolution order: inputs first, then `config.Values`. Collects ALL unresolved placeholders into one error rather than fail-fast — better UX for template authors.
+- **Header merging:** Config headers are applied first, then template headers overlay. Template wins on conflicts. This lets environments provide default auth headers while templates can override Content-Type etc.
+- **ValidateInputs/ValidateResponse return nil:** Template adapters defer input validation to graph-level type checking and response validation to Task 9 (mechanical validation). The `validate.schema` path is parsed and stored but not acted on yet.
+- **LoadTemplates fail-fast:** Stops on first error and includes the filename in the error message. This is simpler than collecting all errors and gives clear diagnostics.
+- **Value conversion via `fmt.Sprintf("%v")`:** All Tier 1 inputs are scalar, so this is sufficient. Tier 2/3 adapters that need complex serialization will use Go code or Lua.
+
+**Open questions:**
+
+- None — ready for Task 5 (write real Travelport template adapters).

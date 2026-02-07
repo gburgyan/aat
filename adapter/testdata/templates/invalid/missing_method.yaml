@@ -1,0 +1,5 @@
+adapter: test.missing_method
+protocol: http
+
+request:
+  path: /v2/test

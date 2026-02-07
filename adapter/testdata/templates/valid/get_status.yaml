@@ -1,0 +1,11 @@
+adapter: travelport.getStatus
+protocol: http
+
+request:
+  method: GET
+  path: /v2/status
+
+response:
+  extract:
+    version: "$.version"
+    healthy: "$.healthy"
