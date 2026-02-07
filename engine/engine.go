@@ -62,7 +62,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			}
 		}
 
-		result := e.executeStep(ctx, step, node, state)
+		result := e.executeStepWithRetry(ctx, step, node, state)
 		stepResults = append(stepResults, result)
 
 		if result.Error != nil {

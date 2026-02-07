@@ -50,6 +50,8 @@ type StepResult struct {
 	StatusCode int
 	Error      error
 	Duration   time.Duration
+	ErrorClass *ErrorClassification // nil on success
+	RetryCount int                  // number of retries performed (0 = no retries)
 }
 
 // SelectionDecision records how a particular array selection was resolved.

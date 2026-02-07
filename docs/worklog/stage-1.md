@@ -167,3 +167,21 @@
 **Open questions:**
 
 - None — ready for Task 8 (error taxonomy and failure handling).
+
+## 2026-02-07 — Error Taxonomy and Failure Handling (Task 8)
+
+**What:** Added error classification and retry logic to the engine. Every step failure is now categorized into one of 7 error categories (transient, client, auth, server, adapter, network, timeout). Steps with a `RetryConfig` are retried with exponential backoff and jitter. 4 new files, 2 modified files. ~40 new tests, all passing.
+
+**Decisions:**
+
+- **7 error categories:** `transient` (429, 502-504, connection refused/reset), `client` (400, 404, 405, 409, 422, other 4xx), `auth` (401, 403), `server` (500, 501), `adapter` (template/extraction errors), `network` (DNS, TLS, no route), `timeout` (context deadline, net timeout). Category names are lowercase strings matching `RetryConfig.On`/`FailOn` YAML values.
+- **`errors.Is`/`errors.As` for classification:** Traverses Go error wrapping chains rather than string matching. Handles `context.DeadlineExceeded`, `net.Error.Timeout()`, `*net.DNSError`, `*net.OpError` with connection refused/reset detection.
+- **`shouldRetry` policy:** `nil` config → never retry (backward compatible). `FailOn` overrides everything. Explicit `On` list → only listed categories. Empty `On` → default retryable set (transient, timeout, server).
+- **`executeStepWithRetry` wraps `executeStep`:** Loop handles both `result.Error` and `result.StatusCode >= 400` as failure conditions. Only the final result (after retry exhaustion or success) is returned to `Run()`. `Run()` change is a single-line substitution.
+- **Exponential backoff with jitter:** Base 500ms, 2x per attempt, capped at 10s, ±25% jitter. Respects `ctx.Done()` during backoff wait.
+- **`ErrorClassification` on `StepResult`:** `nil` on success. Contains category, detail string, action ("retried"/"failed"/"failed_fast"), and retry attempt number. `RetryCount` field tracks total retries performed.
+- **No retry without config:** Existing behavior is fully preserved — steps without `RetryConfig` never retry. Classification is still attached for reporting.
+
+**Open questions:**
+
+- None — ready for Task 9 (mechanical validation).
