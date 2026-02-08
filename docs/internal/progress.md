@@ -21,7 +21,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 - [x] 9. Implement mechanical validation
 - [x] 10. Implement config/environment layer
 - [x] 11. Implement archive writer
-- [ ] 12. Wire CLI: `aat run --plan <file> --env <env>`
+- [x] 12. Wire CLI: `aat run --plan <file> --env <env>`
 
 ## Stage 2: Intelligence
 

@@ -54,7 +54,7 @@ execution:
     - node: createWorkbench
 
     - node: addOffer
-      dependsOn: [priceOffer, createWorkbench]
+      dependsOn: [searchFlights, createWorkbench]
 
     - node: addTraveler
       dependsOn: [createWorkbench]

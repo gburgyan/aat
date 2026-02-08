@@ -26,7 +26,7 @@ request:
             "ProductIdentifier": [
               {
                 "Identifier": {
-                  "value": "{{offeringId}}"
+                  "value": "{{productRef}}"
                 }
               }
             ]
@@ -37,6 +37,7 @@ request:
 
 response:
   extract:
+    offerListId: "$.OfferListResponse.Identifier.value"
+    offerId: "$.OfferListResponse.OfferID.0.id"
     totalPrice: "$.OfferListResponse.OfferID.0.Price.TotalPrice"
     currencyCode: "$.OfferListResponse.OfferID.0.Price.CurrencyCode.value"
-    confirmedOfferingId: "$.OfferListResponse.OfferID.0.Identifier.value"

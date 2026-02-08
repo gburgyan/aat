@@ -1,6 +1,9 @@
 adapter: travelport.addOffer
 protocol: http
 
+# Uses BuildFromCatalogProductOfferings on the workbench to add an offer
+# by referencing the catalog offering identifiers from the Search response.
+
 request:
   method: POST
   path: /11/air/book/airoffer/reservationworkbench/{{workbenchId}}/offers/buildfromcatalogproductofferings
@@ -26,7 +29,7 @@ request:
             "ProductIdentifier": [
               {
                 "Identifier": {
-                  "value": "{{offeringId}}"
+                  "value": "{{productRef}}"
                 }
               }
             ]
@@ -37,5 +40,4 @@ request:
 
 response:
   extract:
-    offerStatus: "$.OfferListResponse.reservationStatus"
-    totalPrice: "$.OfferListResponse.OfferID.0.Price.TotalPrice"
+    offerStatus: "$.OfferListResponse.OfferID.0.Identifier.value"

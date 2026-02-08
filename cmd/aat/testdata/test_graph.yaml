@@ -1,0 +1,14 @@
+version: "1.0.0"
+
+nodes:
+  testNode:
+    description: "A simple test node"
+    adapter: test.adapter
+    inputs:
+      - name: input1
+        type: string
+    outputs:
+      - name: output1
+        type: string
+
+edges: []

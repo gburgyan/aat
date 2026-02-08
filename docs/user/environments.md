@@ -36,6 +36,9 @@ auth:                        # required — how to authenticate
   type: <oauth2|apikey|bearer|none>
   # ... type-specific fields (see below)
 
+headers:                     # optional — static headers added to every request
+  X-Custom-Header: value
+
 llm:                         # optional — LLM provider config
   endpoint: <url>
   apiKey:
@@ -121,6 +124,20 @@ No authentication. Useful for public APIs or when auth is handled externally.
 auth:
   type: none
 ```
+
+## Custom Headers
+
+The `headers` section adds static headers to every API request. These are applied before authentication headers, so auth headers take precedence if there's a conflict.
+
+```yaml
+headers:
+  XAUTH_TRAVELPORT_ACCESSGROUP: "36CFECCB-9A27-4A78-8B4D-7272F3830C20"
+  Accept: application/json
+  Accept-Version: "11"
+  Content-Version: "11"
+```
+
+Use this for API gateway headers, version headers, access group identifiers, or any other headers your API requires on every request.
 
 ## Secrets
 
@@ -224,6 +241,10 @@ auth:
     clientSecret:
       source: env
       var: STAGING_CLIENT_SECRET
+
+headers:
+  X-Api-Version: "2"
+  X-Tenant-Id: acme-corp
 
 llm:
   endpoint: https://api.anthropic.com/v1

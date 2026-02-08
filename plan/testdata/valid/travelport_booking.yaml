@@ -23,12 +23,17 @@ execution:
           from: searchFlights.catalogOfferings
           select:
             strategy: first
-            field: "Identifier.value"
+            field: "id"
+        productRef:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
 
     - node: createWorkbench
 
     - node: addOffer
-      dependsOn: [priceOffer, createWorkbench]
+      dependsOn: [searchFlights, createWorkbench]
 
     - node: addTraveler
       dependsOn: [createWorkbench]

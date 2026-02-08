@@ -24,3 +24,6 @@ runs/
 # Secrets
 .env
 .env.*
+
+# Environment configs (may contain credentials)
+environments/

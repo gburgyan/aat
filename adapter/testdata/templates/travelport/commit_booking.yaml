@@ -12,12 +12,10 @@ request:
     Content-Type: application/json
   body: |
     {
-      "@type": "ReservationQueryCommitReservation",
-      "ReceivedFrom": "AAT"
+      "@type": "ReservationQueryCommitReservation"
     }
 
 response:
   extract:
-    locator: "$.ReservationResponse.Reservation.LocatorCode"
-    reservationId: "$.ReservationResponse.Identifier.value"
-    reservationStatus: "$.ReservationResponse.reservationStatus"
+    locator: "$.ReservationResponse.Reservation.Receipt.0.Confirmation.Locator.value"
+    locatorSource: "$.ReservationResponse.Reservation.Receipt.0.Confirmation.Locator.source"

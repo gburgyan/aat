@@ -9,16 +9,29 @@ request:
   body: |
     {
       "@type": "Traveler",
-      "PersonName": {
-        "@type": "PersonName",
-        "Surname": "{{surname}}",
-        "Given": "{{givenName}}"
-      },
-      "birthDate": "{{birthDate}}",
       "gender": "{{gender}}",
-      "passengerTypeCode": "{{passengerTypeCode}}"
+      "birthDate": "{{birthDate}}",
+      "passengerTypeCode": "{{passengerTypeCode}}",
+      "PersonName": {
+        "@type": "PersonNameDetail",
+        "Given": "{{givenName}}",
+        "Surname": "{{surname}}"
+      },
+      "Telephone": [
+        {
+          "@type": "Telephone",
+          "countryAccessCode": "1",
+          "phoneNumber": "2125551234",
+          "role": "Home"
+        }
+      ],
+      "Email": [
+        {
+          "value": "test@example.com"
+        }
+      ]
     }
 
 response:
   extract:
-    travelerId: "$.TravelerResponse.Identifier.value"
+    travelerId: "$.TravelerResponse.Traveler.Identifier.value"

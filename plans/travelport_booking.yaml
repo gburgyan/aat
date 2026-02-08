@@ -1,0 +1,96 @@
+metadata:
+  created: 2026-02-07T12:00:00Z
+  prompt: "Book a flight from DEN to SFO"
+  graphVersion: "1.0.0"
+
+intent:
+  goal: commitBooking
+  description: "Complete a flight booking from Denver to San Francisco"
+
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for flights DEN to SFO"
+      values:
+        origin: "DEN"
+        destination: "SFO"
+        departureDate: "2026-03-15"
+      retry:
+        max: 3
+        on: [timeout, "503"]
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+
+    - node: priceOffer
+      dependsOn: [searchFlights]
+      description: "Price the first available offering"
+      values:
+        offeringId:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: "id"
+        productRef:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
+      retry:
+        max: 2
+        on: [timeout, "503"]
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+
+    - node: createWorkbench
+      description: "Create reservation workbench"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+
+    - node: addOffer
+      dependsOn: [searchFlights, createWorkbench]
+      description: "Add offer to workbench from catalog product offerings"
+      values:
+        offeringId:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: "id"
+        productRef:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+
+    - node: addTraveler
+      dependsOn: [createWorkbench]
+      description: "Add passenger details"
+      values:
+        surname: "Smith"
+        givenName: "Jane"
+        birthDate: "1990-01-15"
+        gender: "Female"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+
+    - node: commitBooking
+      dependsOn: [addOffer, addTraveler]
+      isGoal: true
+      description: "Commit the booking to create PNR"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.ReservationResponse.Reservation.Receipt.0.Confirmation.Locator.value"

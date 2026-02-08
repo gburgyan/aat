@@ -133,7 +133,7 @@ func TestParse_TravelportBooking(t *testing.T) {
 
 	assert.Equal(t, "1.0.0", g.Version)
 	assert.Len(t, g.Nodes, 7)
-	assert.Len(t, g.Edges, 10)
+	assert.Len(t, g.Edges, 11)
 	assert.Empty(t, g.Conditions)
 
 	// --- searchFlights ---
@@ -190,14 +190,17 @@ func TestParse_TravelportBooking(t *testing.T) {
 	price := g.Nodes["priceOffer"]
 	require.NotNil(t, price)
 	assert.Equal(t, "travelport.priceOffer", price.Adapter)
-	assert.Len(t, price.Inputs, 2)
+	assert.Len(t, price.Inputs, 3)
 	assert.Equal(t, "catalogOfferingsId", price.Inputs[0].Name)
 	assert.Equal(t, "offeringId", price.Inputs[1].Name)
-	assert.Len(t, price.Outputs, 3)
-	assert.Equal(t, "totalPrice", price.Outputs[0].Name)
-	assert.Equal(t, "money", price.Outputs[0].Type)
-	assert.Equal(t, "currencyCode", price.Outputs[1].Name)
-	assert.Equal(t, "confirmedOfferingId", price.Outputs[2].Name)
+	assert.Equal(t, "productRef", price.Inputs[2].Name)
+	assert.Len(t, price.Outputs, 4)
+	assert.Equal(t, "offerListId", price.Outputs[0].Name)
+	assert.Equal(t, "string", price.Outputs[0].Type)
+	assert.Equal(t, "offerId", price.Outputs[1].Name)
+	assert.Equal(t, "totalPrice", price.Outputs[2].Name)
+	assert.Equal(t, "money", price.Outputs[2].Type)
+	assert.Equal(t, "currencyCode", price.Outputs[3].Name)
 
 	// --- createWorkbench ---
 	wb := g.Nodes["createWorkbench"]
@@ -212,14 +215,13 @@ func TestParse_TravelportBooking(t *testing.T) {
 	addOff := g.Nodes["addOffer"]
 	require.NotNil(t, addOff)
 	assert.Equal(t, "travelport.addOffer", addOff.Adapter)
-	assert.Len(t, addOff.Inputs, 3)
+	assert.Len(t, addOff.Inputs, 4)
 	assert.Equal(t, "workbenchId", addOff.Inputs[0].Name)
 	assert.Equal(t, "catalogOfferingsId", addOff.Inputs[1].Name)
 	assert.Equal(t, "offeringId", addOff.Inputs[2].Name)
-	assert.Len(t, addOff.Outputs, 2)
+	assert.Equal(t, "productRef", addOff.Inputs[3].Name)
+	assert.Len(t, addOff.Outputs, 1)
 	assert.Equal(t, "offerStatus", addOff.Outputs[0].Name)
-	assert.Equal(t, "totalPrice", addOff.Outputs[1].Name)
-	assert.Equal(t, "money", addOff.Outputs[1].Type)
 
 	// --- addTraveler ---
 	trav := g.Nodes["addTraveler"]
@@ -248,10 +250,9 @@ func TestParse_TravelportBooking(t *testing.T) {
 	assert.Equal(t, "workbenchId", commit.Inputs[0].Name)
 	assert.Equal(t, "offerStatus", commit.Inputs[1].Name)
 	assert.Equal(t, "travelerId", commit.Inputs[2].Name)
-	assert.Len(t, commit.Outputs, 3)
+	assert.Len(t, commit.Outputs, 2)
 	assert.Equal(t, "locator", commit.Outputs[0].Name)
-	assert.Equal(t, "reservationId", commit.Outputs[1].Name)
-	assert.Equal(t, "reservationStatus", commit.Outputs[2].Name)
+	assert.Equal(t, "locatorSource", commit.Outputs[1].Name)
 
 	// --- ignoreWorkbench ---
 	ignore := g.Nodes["ignoreWorkbench"]
@@ -277,9 +278,12 @@ func TestParse_TravelportBooking(t *testing.T) {
 
 	// searchFlights → addOffer
 	assert.Contains(t, edgeMap, "searchFlights.catalogOfferingsId->addOffer.catalogOfferingsId")
-
-	// priceOffer → addOffer
-	assert.Contains(t, edgeMap, "priceOffer.confirmedOfferingId->addOffer.offeringId")
+	addOfferOfferingEdge, ok := edgeMap["searchFlights.catalogOfferings->addOffer.offeringId"]
+	assert.True(t, ok)
+	assert.True(t, addOfferOfferingEdge.Select)
+	addOfferProductEdge, ok := edgeMap["searchFlights.catalogOfferings->addOffer.productRef"]
+	assert.True(t, ok)
+	assert.True(t, addOfferProductEdge.Select)
 
 	// createWorkbench fan-out
 	assert.Contains(t, edgeMap, "createWorkbench.workbenchId->addOffer.workbenchId")
@@ -291,14 +295,14 @@ func TestParse_TravelportBooking(t *testing.T) {
 	assert.Contains(t, edgeMap, "addOffer.offerStatus->commitBooking.offerStatus")
 	assert.Contains(t, edgeMap, "addTraveler.travelerId->commitBooking.travelerId")
 
-	// Only the one select edge
+	// Three select edges (priceOffer.offeringId + addOffer.offeringId + addOffer.productRef)
 	selectCount := 0
 	for _, e := range g.Edges {
 		if e.Select {
 			selectCount++
 		}
 	}
-	assert.Equal(t, 1, selectCount)
+	assert.Equal(t, 3, selectCount)
 }
 
 func TestSplitRef(t *testing.T) {

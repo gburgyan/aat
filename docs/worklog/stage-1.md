@@ -244,3 +244,40 @@
 **Open questions:**
 
 - None — ready for Task 12 (CLI wiring).
+
+## 2026-02-07 — CLI Wiring + Test Artifacts (Task 12)
+
+**What:** Wired `cmd/aat/main.go` so that `aat run --plan <file> --env <env> --graph <file> --templates <dir>` executes a real API workflow end-to-end. Created Travelport pre-prod environment config, booking plan YAML, and CLI unit tests. Added `Headers` field to `Environment` for static request headers (needed for `XAUTH_TRAVELPORT_ACCESSGROUP`).
+
+**Decisions:**
+
+- **`Headers` field on Environment:** Added `map[string]string` field for static headers included on every request. Custom headers are applied first; auth headers override. This avoids needing an adapter-level workaround for the Travelport access group header.
+- **`runCommand` extracted for testability:** Core logic in `runCommand(ctx, args)` returns error. `runMain` handles flag parsing and exit codes. Tests call `runCommand` directly with mock HTTP servers.
+- **Subcommand-based CLI:** `aat run` as first subcommand. Future subcommands (e.g., `aat validate`, `aat diff`) follow naturally. Uses `flag.FlagSet` — no third-party CLI library.
+- **All four paths required:** `--plan`, `--env`, `--graph`, `--templates` are mandatory. No convention-based discovery (e.g., auto-finding `graph.yaml`). Explicit is better.
+- **Console output format:** Step-by-step summary with status code, duration, retry count. Cleanup steps shown separately. Final line: PASSED/FAILED/ERROR with total duration.
+- **Archive written on every run:** Even failed runs get an archive for diagnostics. `GenerateRunID()` creates the output subdirectory.
+- **Exit code:** 0 for pass, 1 for fail/error. The distinction between "failed" (assertion/status) and "error" (infrastructure) is in the output text, not the exit code.
+- **`environments/` gitignored:** Contains credentials (literal values for dev). Not committed to the repo.
+- **11 CLI tests:** 4 missing-flag tests, 3 invalid-path tests, 1 successful run with mock server, 1 failed step (500 response), 1 custom headers verification, 1 auth error test.
+
+**Open questions:**
+
+- Stage 1 is now complete. Stage 2 (Intelligence) begins with Task 13 (domain knowledge layer).
+
+## 2026-02-07 — Travelport Template Fixes (Post-Task 12)
+
+**What:** Debugged and fixed all 7 Travelport templates to work against the real PP API. The initial templates were based on API docs and schema definitions but had several mismatches with actual API behavior. After iterative testing, achieved a full end-to-end booking flow: search → price → createWorkbench → addOffer → addTraveler → commitBooking.
+
+**Decisions:**
+
+- **addOffer uses `buildfromcatalogproductofferings` on workbench:** The original approach used `buildfromofferlist` (referencing a price response), but this endpoint returns 404 in the PP environment. Switched to `WorkbenchBuildFromCatalogProductOfferings` which references the search response's catalog offering IDs directly on the workbench. This also means addOffer depends on searchFlights (not priceOffer) for its inputs.
+- **priceOffer is informational only:** The separate pricing step is useful for getting price details but not required for the booking flow. addOffer handles pricing implicitly.
+- **PersonNameDetail @type:** The addTraveler template must use `"@type": "PersonNameDetail"` (not `"PersonName"`). Also requires Telephone and Email arrays (hardcoded defaults in template).
+- **commitBooking response structure:** PNR locator is at `Receipt[0].Confirmation.Locator.value`, not `LocatorCode` or `Identifier.value`. Removed `ReceivedFrom` field from request body to match working implementation.
+- **createWorkbench extract path:** Nested under `ReservationResponse.Reservation.Identifier.value` (not `ReservationResponse.Identifier.value`).
+- **addTraveler extract path:** Nested under `TravelerResponse.Traveler.Identifier.value` (not `TravelerResponse.Identifier.value`).
+- **Environment headers:** Added `Accept`, `Accept-Version: 11`, `Content-Version: 11` to environment config alongside `XAUTH_TRAVELPORT_ACCESSGROUP`.
+- **Graph simplification:** addOffer now has 4 inputs (workbenchId, catalogOfferingsId, offeringId, productRef) and 1 output (offerStatus). Edges route from searchFlights→addOffer (3 edges, 2 select) replacing former priceOffer→addOffer edges.
+
+**Key lesson:** API docs and schema definitions are necessary but not sufficient — real API behavior often differs in response shapes, required fields, and endpoint availability. This validates the need for AAT's iterative testing approach.

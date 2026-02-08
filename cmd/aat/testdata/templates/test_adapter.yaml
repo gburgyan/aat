@@ -1,0 +1,10 @@
+adapter: test.adapter
+protocol: http
+
+request:
+  method: GET
+  path: /test/{{input1}}
+
+response:
+  extract:
+    output1: "$.result"

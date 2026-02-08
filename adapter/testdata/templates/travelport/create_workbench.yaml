@@ -13,4 +13,4 @@ request:
 
 response:
   extract:
-    workbenchId: "$.ReservationResponse.Identifier.value"
+    workbenchId: "$.ReservationResponse.Reservation.Identifier.value"

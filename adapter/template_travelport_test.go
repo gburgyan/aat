@@ -82,7 +82,8 @@ func TestTravelportTemplates_BuildRequest(t *testing.T) {
 			adapterName: "travelport.priceOffer",
 			inputs: map[string]any{
 				"catalogOfferingsId": "cat-offer-123",
-				"offeringId":         "offer-456",
+				"offeringId":         "o1",
+				"productRef":         "p0",
 			},
 			wantMethod: "POST",
 			wantPath:   "/11/air/price/offers/buildfromcatalogproductofferings",
@@ -90,7 +91,8 @@ func TestTravelportTemplates_BuildRequest(t *testing.T) {
 				`"@type": "OfferQueryBuildFromCatalogProductOfferings"`,
 				`"@type": "BuildFromCatalogProductOfferingsRequestAir"`,
 				`"value": "cat-offer-123"`,
-				`"value": "offer-456"`,
+				`"value": "o1"`,
+				`"value": "p0"`,
 			},
 		},
 		{
@@ -108,15 +110,18 @@ func TestTravelportTemplates_BuildRequest(t *testing.T) {
 			adapterName: "travelport.addOffer",
 			inputs: map[string]any{
 				"workbenchId":        "wb-789",
-				"catalogOfferingsId": "cat-offer-123",
-				"offeringId":         "offer-456",
+				"catalogOfferingsId": "cat-session-123",
+				"offeringId":         "o1",
+				"productRef":         "p0",
 			},
 			wantMethod: "POST",
 			wantPath:   "/11/air/book/airoffer/reservationworkbench/wb-789/offers/buildfromcatalogproductofferings",
 			bodyContains: []string{
 				`"@type": "OfferQueryBuildFromCatalogProductOfferings"`,
-				`"value": "cat-offer-123"`,
-				`"value": "offer-456"`,
+				`"@type": "BuildFromCatalogProductOfferingsRequestAir"`,
+				`"value": "cat-session-123"`,
+				`"value": "o1"`,
+				`"value": "p0"`,
 			},
 		},
 		{
@@ -134,12 +139,13 @@ func TestTravelportTemplates_BuildRequest(t *testing.T) {
 			wantPath:   "/11/air/book/traveler/reservationworkbench/wb-789/travelers",
 			bodyContains: []string{
 				`"@type": "Traveler"`,
-				`"@type": "PersonName"`,
+				`"@type": "PersonNameDetail"`,
 				`"Surname": "Smith"`,
 				`"Given": "John"`,
 				`"birthDate": "1990-01-15"`,
 				`"gender": "Male"`,
 				`"passengerTypeCode": "ADT"`,
+				`"@type": "Telephone"`,
 			},
 		},
 		{
@@ -152,7 +158,6 @@ func TestTravelportTemplates_BuildRequest(t *testing.T) {
 			wantPath:   "/11/air/book/reservation/reservations/wb-789",
 			bodyContains: []string{
 				`"@type": "ReservationQueryCommitReservation"`,
-				`"ReceivedFrom": "AAT"`,
 			},
 		},
 		{
@@ -228,13 +233,14 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 			},
 		},
 		{
-			name:        "priceOffer extracts price and currency",
+			name:        "priceOffer extracts offerListId, offerId, price and currency",
 			adapterName: "travelport.priceOffer",
 			responseJSON: `{
 				"OfferListResponse": {
+					"Identifier": {"value": "e491538a-0c64-4804-ba44-bf9a8e1d8604_PC"},
 					"OfferID": [
 						{
-							"Identifier": {"value": "confirmed-offer-123"},
+							"id": "o0",
 							"Price": {
 								"TotalPrice": 542.50,
 								"CurrencyCode": {"value": "USD"}
@@ -244,9 +250,10 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 				}
 			}`,
 			wantOutputs: map[string]any{
-				"totalPrice":         542.50,
-				"currencyCode":       "USD",
-				"confirmedOfferingId": "confirmed-offer-123",
+				"offerListId":  "e491538a-0c64-4804-ba44-bf9a8e1d8604_PC",
+				"offerId":      "o0",
+				"totalPrice":   542.50,
+				"currencyCode": "USD",
 			},
 		},
 		{
@@ -254,7 +261,9 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 			adapterName: "travelport.createWorkbench",
 			responseJSON: `{
 				"ReservationResponse": {
-					"Identifier": {"value": "wb-new-456"}
+					"Reservation": {
+						"Identifier": {"value": "wb-new-456"}
+					}
 				}
 			}`,
 			wantOutputs: map[string]any{
@@ -262,23 +271,22 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 			},
 		},
 		{
-			name:        "addOffer extracts status and price",
+			name:        "addOffer extracts offer identifier",
 			adapterName: "travelport.addOffer",
 			responseJSON: `{
 				"OfferListResponse": {
-					"reservationStatus": "Confirmed",
 					"OfferID": [
 						{
-							"Price": {
-								"TotalPrice": 542.50
+							"Identifier": {
+								"authority": "Travelport",
+								"value": "223ca57d-2744-467b-b3a8-22ab0f120e0f"
 							}
 						}
 					]
 				}
 			}`,
 			wantOutputs: map[string]any{
-				"offerStatus": "Confirmed",
-				"totalPrice":  542.50,
+				"offerStatus": "223ca57d-2744-467b-b3a8-22ab0f120e0f",
 			},
 		},
 		{
@@ -286,7 +294,9 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 			adapterName: "travelport.addTraveler",
 			responseJSON: `{
 				"TravelerResponse": {
-					"Identifier": {"value": "tvl-789"}
+					"Traveler": {
+						"Identifier": {"value": "tvl-789"}
+					}
 				}
 			}`,
 			wantOutputs: map[string]any{
@@ -294,21 +304,24 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 			},
 		},
 		{
-			name:        "commitBooking extracts locator and status",
+			name:        "commitBooking extracts locator",
 			adapterName: "travelport.commitBooking",
 			responseJSON: `{
 				"ReservationResponse": {
-					"Identifier": {"value": "res-001"},
-					"reservationStatus": "Confirmed",
 					"Reservation": {
-						"LocatorCode": "ABC123"
+						"Receipt": [
+							{
+								"Confirmation": {
+									"Locator": {"source": "1G", "value": "ABC123"}
+								}
+							}
+						]
 					}
 				}
 			}`,
 			wantOutputs: map[string]any{
-				"locator":           "ABC123",
-				"reservationId":     "res-001",
-				"reservationStatus": "Confirmed",
+				"locator":       "ABC123",
+				"locatorSource": "1G",
 			},
 		},
 		{

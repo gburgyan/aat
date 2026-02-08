@@ -458,6 +458,59 @@ func TestBuildAPIConfig_APIKey(t *testing.T) {
 	assert.False(t, hasAuth)
 }
 
+func TestBuildAPIConfig_CustomHeaders(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(OAuthToken{
+			AccessToken: "test-token",
+			TokenType:   "Bearer",
+			ExpiresIn:   3600,
+		})
+	}))
+	defer server.Close()
+
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type:     "oauth2",
+			TokenURL: server.URL,
+			Credentials: map[string]SecretRef{
+				"username":     {Source: "literal", Value: "u"},
+				"password":     {Source: "literal", Value: "p"},
+				"clientId":     {Source: "literal", Value: "c"},
+				"clientSecret": {Source: "literal", Value: "s"},
+			},
+		},
+		Headers: map[string]string{
+			"X-Custom-Header": "custom-value",
+			"X-Access-Group":  "group-123",
+		},
+	}
+
+	cfg, err := env.BuildAPIConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "custom-value", cfg.Headers["X-Custom-Header"])
+	assert.Equal(t, "group-123", cfg.Headers["X-Access-Group"])
+	assert.Equal(t, "Bearer test-token", cfg.Headers["Authorization"])
+}
+
+func TestBuildAPIConfig_CustomHeadersNoAuth(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Headers: map[string]string{
+			"X-Custom": "value",
+		},
+	}
+
+	cfg, err := env.BuildAPIConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "value", cfg.Headers["X-Custom"])
+	assert.Len(t, cfg.Headers, 1)
+}
+
 func TestBuildAPIConfig_None(t *testing.T) {
 	env := &Environment{
 		Name:       "test",

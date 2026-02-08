@@ -62,17 +62,23 @@ nodes:
         description: "Catalog offerings session identifier"
       - name: offeringId
         type: string
-        description: "Selected offering identifier"
+        description: "Selected catalog product offering reference (e.g. o1)"
+      - name: productRef
+        type: string
+        description: "Selected product reference within the offering (e.g. p0)"
     outputs:
+      - name: offerListId
+        type: string
+        description: "OfferList identifier from price response (GUID for BuildFromOfferList)"
+      - name: offerId
+        type: string
+        description: "Offer identifier from price response"
       - name: totalPrice
         type: money
         description: "Confirmed total price"
       - name: currencyCode
         type: string
         description: "Currency of the price"
-      - name: confirmedOfferingId
-        type: string
-        description: "Confirmed offering identifier for booking"
 
   createWorkbench:
     description: "Create a reservation workbench (booking session)"
@@ -85,7 +91,7 @@ nodes:
     cleanup: ignoreWorkbench
 
   addOffer:
-    description: "Add a priced offer to the reservation workbench"
+    description: "Add an offer to the reservation workbench via BuildFromCatalogProductOfferings"
     adapter: travelport.addOffer
     inputs:
       - name: workbenchId
@@ -93,17 +99,17 @@ nodes:
         description: "Reservation workbench identifier"
       - name: catalogOfferingsId
         type: string
-        description: "Catalog offerings session identifier"
+        description: "Catalog offerings session identifier from search"
       - name: offeringId
         type: string
-        description: "Confirmed offering identifier"
+        description: "Selected catalog product offering reference (e.g. o1)"
+      - name: productRef
+        type: string
+        description: "Selected product reference within the offering (e.g. p0)"
     outputs:
       - name: offerStatus
         type: string
-        description: "Status of the added offer"
-      - name: totalPrice
-        type: money
-        description: "Total price after adding offer"
+        description: "Offer identifier confirming offer was added"
 
   addTraveler:
     description: "Add passenger details to the reservation workbench"
@@ -145,7 +151,7 @@ nodes:
         description: "Reservation workbench identifier"
       - name: offerStatus
         type: string
-        description: "Status confirming offer was added"
+        description: "Offer identifier confirming offer was added"
       - name: travelerId
         type: string
         description: "Traveler identifier confirming traveler was added"
@@ -153,12 +159,9 @@ nodes:
       - name: locator
         type: string
         description: "PNR record locator"
-      - name: reservationId
+      - name: locatorSource
         type: string
-        description: "Reservation identifier"
-      - name: reservationStatus
-        type: string
-        description: "Status of the finalized reservation"
+        description: "Source system of the PNR locator (e.g. 1G, UA)"
 
   ignoreWorkbench:
     description: "Discard the reservation workbench (cleanup)"
@@ -180,13 +183,15 @@ edges:
     to: priceOffer.offeringId
     select: true
 
-  # searchFlights → addOffer
+  # searchFlights → addOffer (catalog offering references from search)
   - from: searchFlights.catalogOfferingsId
     to: addOffer.catalogOfferingsId
-
-  # priceOffer → addOffer
-  - from: priceOffer.confirmedOfferingId
+  - from: searchFlights.catalogOfferings
     to: addOffer.offeringId
+    select: true
+  - from: searchFlights.catalogOfferings
+    to: addOffer.productRef
+    select: true
 
   # createWorkbench → addOffer, addTraveler, commitBooking, ignoreWorkbench
   - from: createWorkbench.workbenchId

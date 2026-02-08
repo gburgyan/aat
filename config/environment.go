@@ -99,12 +99,13 @@ type RuntimeSettings struct {
 
 // Environment is the top-level configuration loaded from a YAML file.
 type Environment struct {
-	Name       string          `yaml:"environment"`
-	APIBaseURL string          `yaml:"apiBaseUrl"`
-	Auth       AuthConfig      `yaml:"auth"`
-	LLM        LLMConfig       `yaml:"llm"`
-	Settings   RuntimeSettings `yaml:"settings"`
-	Notes      string          `yaml:"notes,omitempty"`
+	Name       string            `yaml:"environment"`
+	APIBaseURL string            `yaml:"apiBaseUrl"`
+	Auth       AuthConfig        `yaml:"auth"`
+	Headers    map[string]string `yaml:"headers,omitempty"` // static headers added to every request
+	LLM        LLMConfig         `yaml:"llm"`
+	Settings   RuntimeSettings   `yaml:"settings"`
+	Notes      string            `yaml:"notes,omitempty"`
 }
 
 // APIConfig is a flat output structure for bridging to adapter.EnvironmentConfig.
@@ -115,6 +116,7 @@ type APIConfig struct {
 }
 
 // BuildAPIConfig authenticates and returns a flat APIConfig ready for use.
+// Custom headers from the environment are included first; auth headers override.
 func (env *Environment) BuildAPIConfig(ctx context.Context) (*APIConfig, error) {
 	token, err := Authenticate(ctx, env.Auth)
 	if err != nil {
@@ -123,6 +125,12 @@ func (env *Environment) BuildAPIConfig(ctx context.Context) (*APIConfig, error) 
 
 	headers := make(map[string]string)
 
+	// Custom static headers first
+	for k, v := range env.Headers {
+		headers[k] = v
+	}
+
+	// Auth headers override custom headers
 	if token != nil {
 		switch env.Auth.Type {
 		case "apikey":

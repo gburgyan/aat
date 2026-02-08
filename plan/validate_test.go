@@ -228,7 +228,8 @@ func TestValidate_DependsOnCycle(t *testing.T) {
 
 func TestValidate_InputWiredByEdge_NoValueNeeded(t *testing.T) {
 	g := loadTravelportGraph(t)
-	// addOffer requires workbenchId, catalogOfferingsId, offeringId — all wired by edges
+	// addOffer requires workbenchId, catalogOfferingsId, offeringId, productRef — all wired by edges
+	// priceOffer requires productRef which has no edge, so provide it
 	p := &Plan{
 		Execution: Execution{
 			Steps: []Step{
@@ -240,7 +241,9 @@ func TestValidate_InputWiredByEdge_NoValueNeeded(t *testing.T) {
 						"departureDate": {Default: "2026-03-15"},
 					},
 				},
-				{Node: "priceOffer"},
+				{Node: "priceOffer", Values: map[string]StepValue{
+					"productRef": {Default: "p0"},
+				}},
 				{Node: "createWorkbench"},
 				{Node: "addOffer"}, // all inputs come from edges
 			},
@@ -275,6 +278,7 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 									Filter:   "stops == 0 && carrier == 'AA'",
 								},
 							},
+							"productRef": {Default: "p0"},
 						},
 					},
 				},
@@ -305,6 +309,7 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 									Filter:   "stops ==",
 								},
 							},
+							"productRef": {Default: "p0"},
 						},
 					},
 				},
@@ -333,6 +338,7 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 							"offeringId": {
 								Constraint: "value > 0",
 							},
+							"productRef": {Default: "p0"},
 						},
 					},
 				},
@@ -360,6 +366,7 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 							"offeringId": {
 								Constraint: "value @@ 'bad'",
 							},
+							"productRef": {Default: "p0"},
 						},
 					},
 				},
@@ -471,7 +478,8 @@ func TestValidate_SelectionStrategies(t *testing.T) {
 					{
 						Node: "priceOffer",
 						Values: map[string]StepValue{
-							"offeringId": {Select: sel},
+							"offeringId":  {Select: sel},
+							"productRef":  {Default: "p0"},
 						},
 					},
 				},
