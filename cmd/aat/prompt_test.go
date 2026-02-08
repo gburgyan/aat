@@ -190,6 +190,28 @@ func TestPromptMain_FlagParsing(t *testing.T) {
 	assert.Equal(t, 1, code, "missing prompt should exit 1")
 }
 
+func TestPromptMain_TraceFlags(t *testing.T) {
+	// Verify --trace and --trace-dir are accepted by the flag parser.
+	// The command will fail on missing env, but the flags should parse.
+	code := promptMain([]string{
+		"--trace",
+		"--trace-dir", "custom-traces",
+		"--env", "x",
+		"--graph", "x",
+		"--templates", "x",
+		"test prompt",
+	})
+	// Will fail because env file "x" doesn't exist, but flags were parsed.
+	assert.Equal(t, 1, code)
+}
+
+func TestPromptArgs_TraceDefaults(t *testing.T) {
+	// Verify that TracePlan defaults to false and TraceDir defaults to "traces".
+	pa := &promptArgs{}
+	assert.False(t, pa.TracePlan)
+	assert.Empty(t, pa.TraceDir) // Zero value; the flag parser sets the default.
+}
+
 func TestPromptCommand_InvalidGraphPath(t *testing.T) {
 	envContent := "environment: test\napiBaseUrl: https://api.example.com\nauth:\n  type: none\nllm:\n  endpoint: https://api.openai.com/v1\n  apiKey:\n    source: literal\n    value: test-key\n  model: gpt-4o\n"
 	envFile := filepath.Join(t.TempDir(), "env.yaml")

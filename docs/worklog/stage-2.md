@@ -114,3 +114,26 @@
 - `graph/parse_test.go`, `intent/postprocess_test.go`, `intent/format_test.go` — updated assertions, 6 new unit tests
 
 **Open questions:** None.
+
+## 2026-02-08 — Task 17a-obs: Planning Pipeline Observability (Plan Trace)
+
+**What:** Added opt-in tracing to the intent.Interpret() pipeline. When enabled, captures both LLM calls (prompts, responses, tokens, timing), backward chaining results, skeleton construction, merge results, and validation outcomes as a JSON file for debugging.
+
+**Decisions:**
+- Types live in `intent` package (PlanTrace, LLMCallTrace, ChainTrace, SkeletonTrace, etc.) — avoids dependency cycles with archive
+- Opt-in via `InterpretRequest.EnableTrace` bool — zero overhead when false
+- Refactored `analyzeGoal` to return `goalResult` struct carrying response metadata and prompts (internal, no API breakage)
+- Own trace ID format `trace-YYYYMMDD-HHMMSS-XXXXXXXX` (same pattern as archive.GenerateRunID but avoids intent→archive import)
+- Partial trace on error: when tracing is enabled and an error occurs mid-pipeline, `InterpretResult{Trace: trace}` is returned alongside the error so the CLI can still write the trace
+- `WritePlanTrace` mirrors `archive.Write` pattern (MkdirAll + MarshalIndent)
+- CLI: `--trace` flag enables tracing, `--trace-dir` sets output directory (default "traces")
+
+**Files:**
+- `intent/trace.go` — new: PlanTrace types, WritePlanTrace, generateTraceID, helper converters (~140 lines)
+- `intent/trace_test.go` — new: 9 tests (write, parent dirs, ID format, uniqueness, trace on/off, error, fallback, LLM error)
+- `intent/interpret.go` — refactored analyzeGoal return type, added trace capture throughout Interpret(), partial trace on error
+- `cmd/aat/prompt.go` — added TracePlan/TraceDir to promptArgs, --trace/--trace-dir flags, trace writing after Interpret
+- `cmd/aat/prompt_test.go` — 2 new tests (trace flag parsing, defaults)
+- `docs/internal/progress.md` — marked complete
+
+**Open questions:** None.

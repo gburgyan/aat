@@ -33,6 +33,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 15c. Interpret pipeline + post-processing (`intent/`)
 - [x] 16. Implement plan validation enhancements
 - [x] 17. Implement confirmation UX (print plan, y/n/adjust)
+- [x] 17a-obs. Planning pipeline observability (plan trace)
 - [ ] 18. Implement value resolution hierarchy (defaults → pools → LLM)
 - [ ] 19. Add LLM-assisted value selection for arrays
 - [ ] 20. Add constraint-aware fallback with relaxation guard

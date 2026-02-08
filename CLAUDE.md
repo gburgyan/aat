@@ -101,11 +101,46 @@ When making design decisions or completing stage milestones, add entries to `doc
 **Open questions:** Anything deferred
 ```
 
+## Observability & Debugging
+
+AAT has two layers of observability: **run archives** capture execution, **plan traces** capture planning.
+
+### Run Archives (`archive/`)
+
+Every execution writes a JSON archive to the output directory (default `runs/`). Archives contain per-step request/response pairs, timing, status codes, and overall outcome. Sensitive headers are redacted.
+
+```bash
+aat run --plan plan.yaml --env env.yaml --output runs/
+# produces: runs/run-YYYYMMDD-HHMMSS-XXXXXXXX/archive.json
+```
+
+Key types: `archive.Archive`, `archive.Write`, `archive.Read`, `archive.GenerateRunID`.
+
+### Plan Traces (`intent/`)
+
+When `--trace` is passed to `aat prompt`, the `intent.Interpret()` pipeline captures every intermediate step as a JSON trace file. This is the primary tool for debugging LLM prompt engineering and plan generation issues.
+
+```bash
+aat prompt --trace --trace-dir traces/ --env env.yaml --graph graph.yaml --templates tpl/ "book a flight"
+# produces: traces/trace-YYYYMMDD-HHMMSS-XXXXXXXX/plan-trace.json
+```
+
+The trace captures:
+- **Goal call**: full system/user prompts, raw LLM response, token counts, timing, whether heuristic fallback was used
+- **Backward chaining**: nodes, edges, decisions, timing
+- **Skeleton**: the deterministic plan scaffold + YAML sent to the LLM, unfed inputs list
+- **Plan call**: full prompts, raw LLM response, token counts, timing
+- **Merge/post-process**: snapshots of the plan after merge and after post-processing
+- **Validation**: any validation errors
+- **Partial traces on error**: if the pipeline fails mid-way, whatever was captured so far is still written
+
+Opt-in via `InterpretRequest.EnableTrace = true`. Zero overhead when disabled. Key types: `intent.PlanTrace`, `intent.WritePlanTrace`.
+
 ## Task planning
 
 If a task seems too aggressive to do in one operation, push back and offer to break it down into sub-tasks. When doing this, update the implementation plan with the new information so we can have clearly defined work items.
 
 ## Current Stage
 
-**Stage 1: Foundation** — Project scaffolded. Starting Task 1 (YAML graph schema).
+**Stage 2: Intelligence** — Foundation complete. Working through LLM-assisted planning and execution.
 See `docs/internal/progress.md` for detailed status.

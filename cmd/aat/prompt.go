@@ -32,6 +32,8 @@ type promptArgs struct {
 	OutputDir     string
 	SavePlan      string
 	AutoConfirm   bool
+	TracePlan     bool
+	TraceDir      string
 }
 
 // promptMain parses flags and delegates to promptCommand.
@@ -45,6 +47,8 @@ func promptMain(args []string) int {
 	fs.StringVar(&pa.OutputDir, "output", "runs", "directory for archive output")
 	fs.StringVar(&pa.SavePlan, "save", "", "save generated plan to this file path")
 	fs.BoolVar(&pa.AutoConfirm, "yes", false, "skip confirmation prompt")
+	fs.BoolVar(&pa.TracePlan, "trace", false, "capture planning pipeline trace for debugging")
+	fs.StringVar(&pa.TraceDir, "trace-dir", "traces", "directory for plan trace output")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
@@ -124,11 +128,23 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 	// 7. Interpret prompt
 	fmt.Printf("aat: analyzing prompt with LLM...\n")
 	result, err := intent.Interpret(ctx, intent.InterpretRequest{
-		Prompt: args.Prompt,
-		Graph:  g,
-		KB:     kb,
-		Client: llmClient,
+		Prompt:      args.Prompt,
+		Graph:       g,
+		KB:          kb,
+		Client:      llmClient,
+		EnableTrace: args.TracePlan,
 	})
+
+	// Write trace if present (even on error — partial traces aid debugging).
+	if result != nil && result.Trace != nil {
+		tracePath := filepath.Join(args.TraceDir, result.Trace.TraceID, "plan-trace.json")
+		if writeErr := intent.WritePlanTrace(result.Trace, tracePath); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "aat: warning: failed to write plan trace: %s\n", writeErr)
+		} else {
+			fmt.Printf("aat: plan trace: %s\n", tracePath)
+		}
+	}
+
 	if err != nil {
 		return fmt.Errorf("interpreting prompt: %w", err)
 	}

@@ -15,17 +15,22 @@ import (
 
 // InterpretRequest holds the inputs for prompt-to-plan transformation.
 type InterpretRequest struct {
-	Prompt string
-	Graph  *graph.Graph
-	KB     *domain.KnowledgeBase // may be nil
-	Client llm.Client
+	Prompt      string
+	Graph       *graph.Graph
+	KB          *domain.KnowledgeBase // may be nil
+	Client      llm.Client
+	EnableTrace bool // when true, pipeline observability data is captured in the result
 }
 
 // InterpretResult holds the outputs of prompt-to-plan transformation.
+// When EnableTrace is set and an error occurs mid-pipeline, the result may be
+// non-nil with only Trace populated — callers can inspect the partial trace for
+// debugging even when the returned error is non-nil.
 type InterpretResult struct {
 	Plan         *plan.Plan
 	GoalAnalysis *GoalAnalysis
 	ChainResult  *graph.ChainResult
+	Trace        *PlanTrace // non-nil only when EnableTrace was true
 }
 
 // GoalAnalysis captures the output of the first LLM call.
@@ -51,6 +56,17 @@ type ConstraintInfo struct {
 	AppliesTo   []string `json:"appliesTo"`
 }
 
+// goalResult is the internal return type from analyzeGoal, carrying the response
+// metadata and prompts alongside the parsed analysis.
+type goalResult struct {
+	Analysis *GoalAnalysis
+	GoalJSON string
+	Response *llm.Response
+	Fallback bool
+	System   string // system prompt sent
+	User     string // user prompt sent
+}
+
 // Interpret transforms a natural language prompt into a validated execution plan.
 // It uses a two-call LLM architecture:
 //  1. Goal analysis: identify goal node and classify constraints
@@ -60,6 +76,10 @@ type ConstraintInfo struct {
 // creates a structurally complete plan. The LLM only provides creative content
 // (literal values, selection strategy overrides, assertions). MergeLLMValues
 // combines the LLM output into the authoritative skeleton.
+//
+// When EnableTrace is set, pipeline observability data is captured. If an error
+// occurs mid-pipeline, a partial trace is returned alongside the error so the
+// CLI can still write the trace for debugging.
 func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, error) {
 	if req.Prompt == "" {
 		return nil, fmt.Errorf("intent: prompt is required")
@@ -71,36 +91,86 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		return nil, fmt.Errorf("intent: LLM client is required")
 	}
 
-	now := time.Now()
+	pipelineStart := time.Now()
+	now := pipelineStart
+
+	// Initialize trace if enabled.
+	var trace *PlanTrace
+	if req.EnableTrace {
+		trace = &PlanTrace{
+			TraceID:   generateTraceID(),
+			Timestamp: now,
+			Prompt:    req.Prompt,
+		}
+	}
+
+	// traceErr is a helper that sets the error on the trace and returns a
+	// partial result with the trace attached.
+	traceErr := func(err error) (*InterpretResult, error) {
+		if trace != nil {
+			trace.Error = err.Error()
+			trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
+			return &InterpretResult{Trace: trace}, err
+		}
+		return nil, err
+	}
 
 	// --- Call 1: Goal Analysis ---
 	graphContext := FormatGraph(req.Graph)
-	goalAnalysis, goalJSON, err := analyzeGoal(ctx, req.Client, graphContext, req.Prompt, req.Graph, now)
+	goalStart := time.Now()
+	gr, err := analyzeGoal(ctx, req.Client, graphContext, req.Prompt, req.Graph, now)
 	if err != nil {
-		return nil, fmt.Errorf("intent: goal analysis: %w", err)
+		if trace != nil && gr != nil {
+			trace.GoalCall = toLLMCallTrace(gr.System, gr.User, 0.1, gr.Response, time.Since(goalStart), err)
+		}
+		return traceErr(fmt.Errorf("intent: goal analysis: %w", err))
+	}
+
+	goalAnalysis := gr.Analysis
+	goalJSON := gr.GoalJSON
+
+	if trace != nil {
+		trace.GoalCall = toLLMCallTrace(gr.System, gr.User, 0.1, gr.Response, time.Since(goalStart), nil)
+		trace.GoalAnalysis = goalAnalysis
+		trace.GoalFallback = gr.Fallback
 	}
 
 	// --- Backward Chaining ---
+	chainStart := time.Now()
 	chainResult, err := graph.BackwardChain(req.Graph, graph.ChainOptions{
 		Goals:            []string{goalAnalysis.Goal},
 		ConditionContext: goalAnalysis.ConditionContext,
 		EvalPredicate:    plan.EvalPredicate,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("intent: backward chaining: %w", err)
+		return traceErr(fmt.Errorf("intent: backward chaining: %w", err))
+	}
+
+	if trace != nil {
+		trace.ChainResult = toChainTrace(chainResult, time.Since(chainStart))
 	}
 
 	// --- Build Skeleton ---
+	skelStart := time.Now()
 	skeleton := BuildSkeleton(req.Graph, chainResult, goalAnalysis, req.Prompt, now)
 
 	// Marshal skeleton to YAML for the LLM prompt.
 	skeletonBytes, err := plan.Marshal(skeleton)
 	if err != nil {
-		return nil, fmt.Errorf("intent: marshalling skeleton: %w", err)
+		return traceErr(fmt.Errorf("intent: marshalling skeleton: %w", err))
 	}
 
 	// Compute unfed inputs that need LLM values.
 	unfedInputs := UnfedInputs(req.Graph, chainResult)
+
+	if trace != nil {
+		trace.Skeleton = &SkeletonTrace{
+			Plan:        skeleton,
+			YAML:        string(skeletonBytes),
+			UnfedInputs: unfedInputs,
+			DurationMs:  time.Since(skelStart).Milliseconds(),
+		}
+	}
 
 	// --- Call 2: Fill Skeleton ---
 	chainContext := FormatChainResult(chainResult, req.Graph)
@@ -112,6 +182,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 
 	system, user := buildPlanPrompt(string(skeletonBytes), unfedInputs, chainContext, domainContext, goalJSON, req.Prompt, now)
 
+	planCallStart := time.Now()
 	planResp, err := req.Client.Complete(ctx, &llm.Request{
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: system},
@@ -120,38 +191,74 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		Temperature: 0.2,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("intent: plan generation LLM call: %w", err)
+		if trace != nil {
+			trace.PlanCall = toLLMCallTrace(system, user, 0.2, nil, time.Since(planCallStart), err)
+		}
+		return traceErr(fmt.Errorf("intent: plan generation LLM call: %w", err))
+	}
+
+	if trace != nil {
+		trace.PlanCall = toLLMCallTrace(system, user, 0.2, planResp, time.Since(planCallStart), nil)
 	}
 
 	// --- Parse and Merge ---
 	yamlBytes, err := ExtractYAML(planResp.Content)
 	if err != nil {
-		return nil, fmt.Errorf("intent: extracting YAML from LLM response: %w", err)
+		return traceErr(fmt.Errorf("intent: extracting YAML from LLM response: %w", err))
+	}
+
+	if trace != nil {
+		trace.LLMPlanYAML = string(yamlBytes)
 	}
 
 	llmPlan, err := plan.Parse(yamlBytes)
 	if err != nil {
-		return nil, fmt.Errorf("intent: parsing generated plan: %w", err)
+		return traceErr(fmt.Errorf("intent: parsing generated plan: %w", err))
 	}
 
 	MergeLLMValues(skeleton, llmPlan)
+
+	if trace != nil {
+		// Snapshot the plan after merge but before post-processing.
+		merged := copyPlanShallow(skeleton)
+		trace.MergedPlan = merged
+	}
+
 	PostProcess(skeleton, req.Graph, chainResult, goalAnalysis, req.Prompt)
 
 	if err := plan.Validate(skeleton, req.Graph); err != nil {
-		return nil, fmt.Errorf("intent: validating generated plan: %w", err)
+		if trace != nil {
+			trace.ValidationErr = err.Error()
+			trace.FinalPlan = skeleton
+		}
+		return traceErr(fmt.Errorf("intent: validating generated plan: %w", err))
+	}
+
+	if trace != nil {
+		trace.FinalPlan = skeleton
+		trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
 	}
 
 	return &InterpretResult{
 		Plan:         skeleton,
 		GoalAnalysis: goalAnalysis,
 		ChainResult:  chainResult,
+		Trace:        trace,
 	}, nil
 }
 
+// copyPlanShallow creates a shallow copy of a Plan for trace snapshots.
+// It copies the top-level struct so later mutations to the original don't
+// affect the snapshot.
+func copyPlanShallow(p *plan.Plan) *plan.Plan {
+	cp := *p
+	return &cp
+}
+
 // analyzeGoal performs the first LLM call to identify the goal node and
-// classify constraints. Returns the parsed GoalAnalysis, the raw JSON string
-// (for forwarding to the second call), and any error.
-func analyzeGoal(ctx context.Context, client llm.Client, graphContext, prompt string, g *graph.Graph, now time.Time) (*GoalAnalysis, string, error) {
+// classify constraints. Returns a goalResult with the parsed analysis,
+// raw JSON, LLM response metadata, and prompt text.
+func analyzeGoal(ctx context.Context, client llm.Client, graphContext, prompt string, g *graph.Graph, now time.Time) (*goalResult, error) {
 	system, user := buildGoalPrompt(graphContext, prompt, now)
 
 	resp, err := client.Complete(ctx, &llm.Request{
@@ -162,7 +269,7 @@ func analyzeGoal(ctx context.Context, client llm.Client, graphContext, prompt st
 		Temperature: 0.1,
 	})
 	if err != nil {
-		return nil, "", fmt.Errorf("LLM call failed: %w", err)
+		return &goalResult{System: system, User: user}, fmt.Errorf("LLM call failed: %w", err)
 	}
 
 	content := strings.TrimSpace(resp.Content)
@@ -176,17 +283,38 @@ func analyzeGoal(ctx context.Context, client llm.Client, graphContext, prompt st
 		ga = heuristicGoalAnalysis(prompt, g)
 		// Marshal for forwarding
 		fallbackJSON, _ := json.Marshal(ga)
-		return &ga, string(fallbackJSON), nil
+		return &goalResult{
+			Analysis: &ga,
+			GoalJSON: string(fallbackJSON),
+			Response: resp,
+			Fallback: true,
+			System:   system,
+			User:     user,
+		}, nil
 	}
 
 	// Validate goal exists in graph
 	if g.Nodes[ga.Goal] == nil {
 		ga = heuristicGoalAnalysis(prompt, g)
 		fallbackJSON, _ := json.Marshal(ga)
-		return &ga, string(fallbackJSON), nil
+		return &goalResult{
+			Analysis: &ga,
+			GoalJSON: string(fallbackJSON),
+			Response: resp,
+			Fallback: true,
+			System:   system,
+			User:     user,
+		}, nil
 	}
 
-	return &ga, content, nil
+	return &goalResult{
+		Analysis: &ga,
+		GoalJSON: content,
+		Response: resp,
+		Fallback: false,
+		System:   system,
+		User:     user,
+	}, nil
 }
 
 // stripJSONFencing removes ```json ... ``` fencing if present.
