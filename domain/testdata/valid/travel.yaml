@@ -1,0 +1,229 @@
+concepts:
+  domestic:
+    description: "A flight where origin and destination are within the same country"
+    applies_to: [origin, destination]
+    constraint: "origin and destination must be in the same country"
+    examples:
+      US: ["JFK-LAX", "ORD-SFO", "ATL-DFW"]
+      UK: ["LHR-MAN", "EDI-LGW"]
+
+  international:
+    description: "A flight where origin and destination are in different countries"
+    applies_to: [origin, destination]
+    constraint: "origin and destination must be in different countries"
+    examples:
+      transatlantic: ["JFK-LHR", "ORD-CDG"]
+      transpacific: ["LAX-NRT", "SFO-HKG"]
+
+  roundTrip:
+    description: "A journey with outbound and return segments"
+    applies_to: [tripType]
+    constraint: "requires both departure and return dates"
+
+  oneWay:
+    description: "A journey with only an outbound segment"
+    applies_to: [tripType]
+    constraint: "requires only a departure date"
+
+  directFlight:
+    description: "A flight with no intermediate stops or connections"
+    applies_to: [connectionType]
+    constraint: "maxConnections must be 0"
+
+  economy:
+    description: "Standard cabin class with basic service"
+    applies_to: [cabin]
+    constraint: "cabin must be Economy or PremiumEconomy"
+
+  business:
+    description: "Premium cabin class with enhanced service"
+    applies_to: [cabin]
+    constraint: "cabin must be Business or First"
+
+  adultTraveler:
+    description: "A passenger aged 12 or older"
+    applies_to: [passengerType, age]
+    constraint: "passengerTypeCode must be ADT"
+
+  childTraveler:
+    description: "A passenger aged 2-11"
+    applies_to: [passengerType, age]
+    constraint: "passengerTypeCode must be CNN"
+
+  futureDeparture:
+    description: "Departure date must be in the future relative to search time"
+    applies_to: [departureDate, returnDate]
+    constraint: "date must be after current date"
+
+  shortHaul:
+    description: "A flight under 3 hours duration"
+    applies_to: [origin, destination, duration]
+    constraint: "total flight time under 180 minutes"
+
+  longHaul:
+    description: "A flight over 6 hours duration"
+    applies_to: [origin, destination, duration]
+    constraint: "total flight time over 360 minutes"
+
+  multiPassenger:
+    description: "A booking with more than one traveler"
+    applies_to: [passengerCount, travelers]
+    constraint: "at least 2 passengers in the booking"
+
+types:
+  airportCode:
+    description: "IATA 3-letter airport code"
+    format: "3 uppercase letters"
+    validation: "^[A-Z]{3}$"
+    pool: usAirports
+
+  passengerTypeCode:
+    description: "ATPCO passenger type code"
+    format: "3 uppercase letters"
+    validation: "^[A-Z]{3}$"
+
+  traveler:
+    description: "A person traveling on the booking"
+    format: "composite"
+    fields:
+      given:
+        type: string
+        description: "First/given name"
+        strategy: "generate realistic name"
+      surname:
+        type: string
+        description: "Last/family name"
+        strategy: "generate realistic name"
+      passengerTypeCode:
+        type: passengerTypeCode
+        description: "ATPCO passenger type (ADT, CNN, INF)"
+        constraint: "must match traveler age"
+      gender:
+        type: string
+        description: "Gender (Male, Female)"
+        constraint: "must be Male or Female"
+
+  cabinClass:
+    description: "Aircraft cabin class"
+    format: "one of Economy, PremiumEconomy, Business, First"
+    pool: cabinClasses
+
+  pnrLocator:
+    description: "Passenger Name Record locator code"
+    format: "6 alphanumeric characters"
+    validation: "^[A-Z0-9]{6}$"
+
+  currencyCode:
+    description: "ISO 4217 currency code"
+    format: "3 uppercase letters"
+    validation: "^[A-Z]{3}$"
+    pool: currencies
+
+valuePools:
+  usAirports:
+    description: "Major US airport IATA codes"
+    type: string
+    values:
+      - ATL
+      - BOS
+      - CLT
+      - DEN
+      - DFW
+      - DTW
+      - EWR
+      - IAH
+      - JFK
+      - LAX
+      - LAS
+      - MCO
+      - MIA
+      - MSP
+      - ORD
+      - PHL
+      - PHX
+      - SEA
+      - SFO
+      - SLC
+
+  internationalAirports:
+    description: "Major international airport IATA codes grouped by region"
+    type: string
+    groups:
+      europe: [LHR, CDG, FRA, AMS, MAD, FCO, MUC, ZRH]
+      asia: [NRT, HND, HKG, SIN, ICN, BKK, PVG, DEL]
+      americas: [YYZ, MEX, GRU, EZE, SCL, BOG, LIM]
+      middleEast: [DXB, DOH, AUH, IST]
+      oceania: [SYD, MEL, AKL]
+
+  firstNames:
+    description: "Common first names for test travelers"
+    type: string
+    values:
+      - James
+      - Mary
+      - Robert
+      - Patricia
+      - John
+      - Jennifer
+      - Michael
+      - Linda
+      - David
+      - Elizabeth
+      - William
+      - Barbara
+      - Richard
+      - Susan
+      - Joseph
+      - Sarah
+      - Thomas
+      - Karen
+      - Daniel
+      - Nancy
+
+  lastNames:
+    description: "Common last names for test travelers"
+    type: string
+    values:
+      - Smith
+      - Johnson
+      - Williams
+      - Brown
+      - Jones
+      - Garcia
+      - Miller
+      - Davis
+      - Rodriguez
+      - Martinez
+      - Hernandez
+      - Lopez
+      - Gonzalez
+      - Wilson
+      - Anderson
+      - Thomas
+      - Taylor
+      - Moore
+      - Jackson
+      - Martin
+
+  cabinClasses:
+    description: "Valid cabin class values"
+    type: string
+    values:
+      - Economy
+      - PremiumEconomy
+      - Business
+      - First
+
+  currencies:
+    description: "Common ISO 4217 currency codes"
+    type: string
+    values:
+      - USD
+      - EUR
+      - GBP
+      - JPY
+      - CAD
+      - AUD
+      - CHF
+      - CNY
+      - MXN

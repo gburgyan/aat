@@ -25,7 +25,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 
 ## Stage 2: Intelligence
 
-- [ ] 13. Curate domain knowledge layer (10-15 concepts)
+- [x] 13. Curate domain knowledge layer (13 concepts, 6 types, 6 pools)
 - [ ] 14. Implement deterministic backward chaining
 - [ ] 15. Build prompt-to-plan transformer
 - [ ] 16. Implement plan validation

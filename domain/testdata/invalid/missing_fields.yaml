@@ -1,0 +1,19 @@
+concepts:
+  noDescription:
+    applies_to: [field1]
+  noAppliesTo:
+    description: "Has description but no applies_to"
+
+types:
+  noDesc:
+    format: "something"
+  noFormat:
+    description: "Has description but no format"
+
+valuePools:
+  emptyPool:
+    description: "A pool with no values or groups"
+    type: string
+  noType:
+    description: "A pool missing its type"
+    values: [a, b]

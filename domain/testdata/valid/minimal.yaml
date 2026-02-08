@@ -1,0 +1,4 @@
+concepts:
+  testConcept:
+    description: "A minimal test concept"
+    applies_to: [fieldA]

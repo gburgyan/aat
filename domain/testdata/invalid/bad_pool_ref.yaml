@@ -1,0 +1,5 @@
+types:
+  refType:
+    description: "A type referencing a nonexistent pool"
+    format: "some format"
+    pool: nonexistentPool

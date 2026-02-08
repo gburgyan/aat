@@ -1,0 +1,5 @@
+types:
+  badType:
+    description: "A type with invalid regex"
+    format: "some format"
+    validation: "[invalid(regex"
