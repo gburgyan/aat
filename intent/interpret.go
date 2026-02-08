@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
@@ -53,11 +54,12 @@ type ConstraintInfo struct {
 // Interpret transforms a natural language prompt into a validated execution plan.
 // It uses a two-call LLM architecture:
 //  1. Goal analysis: identify goal node and classify constraints
-//  2. Plan generation: fill in values for the backward-chained subgraph
+//  2. Value fill: given a deterministic skeleton, fill literal values and assertions
 //
-// Between calls, deterministic backward chaining computes the minimal subgraph.
-// After the second call, deterministic post-processing fixes dependsOn, cleanup,
-// and selection defaults.
+// Between calls, backward chaining computes the minimal subgraph and BuildSkeleton
+// creates a structurally complete plan. The LLM only provides creative content
+// (literal values, selection strategy overrides, assertions). MergeLLMValues
+// combines the LLM output into the authoritative skeleton.
 func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, error) {
 	if req.Prompt == "" {
 		return nil, fmt.Errorf("intent: prompt is required")
@@ -69,9 +71,11 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		return nil, fmt.Errorf("intent: LLM client is required")
 	}
 
+	now := time.Now()
+
 	// --- Call 1: Goal Analysis ---
 	graphContext := FormatGraph(req.Graph)
-	goalAnalysis, goalJSON, err := analyzeGoal(ctx, req.Client, graphContext, req.Prompt, req.Graph)
+	goalAnalysis, goalJSON, err := analyzeGoal(ctx, req.Client, graphContext, req.Prompt, req.Graph, now)
 	if err != nil {
 		return nil, fmt.Errorf("intent: goal analysis: %w", err)
 	}
@@ -86,16 +90,27 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		return nil, fmt.Errorf("intent: backward chaining: %w", err)
 	}
 
-	// --- Call 2: Plan Generation ---
+	// --- Build Skeleton ---
+	skeleton := BuildSkeleton(req.Graph, chainResult, goalAnalysis, req.Prompt, now)
+
+	// Marshal skeleton to YAML for the LLM prompt.
+	skeletonBytes, err := plan.Marshal(skeleton)
+	if err != nil {
+		return nil, fmt.Errorf("intent: marshalling skeleton: %w", err)
+	}
+
+	// Compute unfed inputs that need LLM values.
+	unfedInputs := UnfedInputs(req.Graph, chainResult)
+
+	// --- Call 2: Fill Skeleton ---
 	chainContext := FormatChainResult(chainResult, req.Graph)
-	planSchema := FormatPlanSchema()
 
 	var domainContext string
 	if req.KB != nil {
 		domainContext = req.KB.FormatForPrompt()
 	}
 
-	system, user := buildPlanPrompt(planSchema, chainContext, domainContext, goalJSON, req.Prompt)
+	system, user := buildPlanPrompt(string(skeletonBytes), unfedInputs, chainContext, domainContext, goalJSON, req.Prompt, now)
 
 	planResp, err := req.Client.Complete(ctx, &llm.Request{
 		Messages: []llm.Message{
@@ -108,25 +123,26 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		return nil, fmt.Errorf("intent: plan generation LLM call: %w", err)
 	}
 
-	// --- Parse and Post-Process ---
+	// --- Parse and Merge ---
 	yamlBytes, err := ExtractYAML(planResp.Content)
 	if err != nil {
 		return nil, fmt.Errorf("intent: extracting YAML from LLM response: %w", err)
 	}
 
-	p, err := plan.Parse(yamlBytes)
+	llmPlan, err := plan.Parse(yamlBytes)
 	if err != nil {
 		return nil, fmt.Errorf("intent: parsing generated plan: %w", err)
 	}
 
-	PostProcess(p, req.Graph, chainResult, goalAnalysis, req.Prompt)
+	MergeLLMValues(skeleton, llmPlan)
+	PostProcess(skeleton, req.Graph, chainResult, goalAnalysis, req.Prompt)
 
-	if err := plan.Validate(p, req.Graph); err != nil {
+	if err := plan.Validate(skeleton, req.Graph); err != nil {
 		return nil, fmt.Errorf("intent: validating generated plan: %w", err)
 	}
 
 	return &InterpretResult{
-		Plan:         p,
+		Plan:         skeleton,
 		GoalAnalysis: goalAnalysis,
 		ChainResult:  chainResult,
 	}, nil
@@ -135,8 +151,8 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 // analyzeGoal performs the first LLM call to identify the goal node and
 // classify constraints. Returns the parsed GoalAnalysis, the raw JSON string
 // (for forwarding to the second call), and any error.
-func analyzeGoal(ctx context.Context, client llm.Client, graphContext, prompt string, g *graph.Graph) (*GoalAnalysis, string, error) {
-	system, user := buildGoalPrompt(graphContext, prompt)
+func analyzeGoal(ctx context.Context, client llm.Client, graphContext, prompt string, g *graph.Graph, now time.Time) (*GoalAnalysis, string, error) {
+	system, user := buildGoalPrompt(graphContext, prompt, now)
 
 	resp, err := client.Complete(ctx, &llm.Request{
 		Messages: []llm.Message{

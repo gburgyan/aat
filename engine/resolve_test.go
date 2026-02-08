@@ -2,6 +2,7 @@ package engine
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
@@ -657,4 +658,68 @@ func TestResolveInputs_Dedup_SameSource_SameStrategy(t *testing.T) {
 	selectedItem := items[idx].(map[string]any)
 	assert.Equal(t, selectedItem["id"], inputs["itemId"])
 	assert.Equal(t, selectedItem["name"], inputs["itemName"])
+}
+
+// --- coerceValue tests ---
+
+func TestCoerceValue_DateFromDatetime(t *testing.T) {
+	result := coerceValue("2026-02-16T00:00:00Z", "date")
+	assert.Equal(t, "2026-02-16", result)
+}
+
+func TestCoerceValue_DatePassthrough(t *testing.T) {
+	result := coerceValue("2026-02-16", "date")
+	assert.Equal(t, "2026-02-16", result)
+}
+
+func TestCoerceValue_DateFromTimeValue(t *testing.T) {
+	tv := time.Date(2026, 2, 16, 14, 30, 0, 0, time.UTC)
+	result := coerceValue(tv, "date")
+	assert.Equal(t, "2026-02-16", result)
+}
+
+func TestCoerceValue_DatetimeFromTimeValue(t *testing.T) {
+	tv := time.Date(2026, 2, 16, 14, 30, 0, 0, time.UTC)
+	result := coerceValue(tv, "datetime")
+	assert.Equal(t, "2026-02-16T14:30:00Z", result)
+}
+
+func TestCoerceValue_IntegerFromString(t *testing.T) {
+	result := coerceValue("42", "integer")
+	assert.Equal(t, 42, result)
+}
+
+func TestCoerceValue_IntegerFromFloat(t *testing.T) {
+	result := coerceValue(42.0, "integer")
+	assert.Equal(t, 42, result)
+}
+
+func TestCoerceValue_BoolFromString(t *testing.T) {
+	result := coerceValue("true", "boolean")
+	assert.Equal(t, true, result)
+}
+
+func TestCoerceValue_FloatFromString(t *testing.T) {
+	result := coerceValue("3.14", "float")
+	assert.Equal(t, 3.14, result)
+}
+
+func TestCoerceValue_StringPassthrough(t *testing.T) {
+	result := coerceValue("hello", "string")
+	assert.Equal(t, "hello", result)
+}
+
+func TestCoerceValue_UnknownType(t *testing.T) {
+	result := coerceValue("foo", "custom")
+	assert.Equal(t, "foo", result)
+}
+
+func TestCoerceValue_ParseError(t *testing.T) {
+	result := coerceValue("not-a-number", "integer")
+	assert.Equal(t, "not-a-number", result)
+}
+
+func TestCoerceValue_CaseInsensitive(t *testing.T) {
+	result := coerceValue("2026-02-16T00:00:00Z", "Date")
+	assert.Equal(t, "2026-02-16", result)
 }

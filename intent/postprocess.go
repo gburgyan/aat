@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ func PostProcess(p *plan.Plan, g *graph.Graph, cr *graph.ChainResult, ga *GoalAn
 
 	fixDependsOn(p, g, stepIndex)
 	fixSelectionConfigs(p, g, stepIndex)
+	fixAssertions(p)
 	addCleanupSteps(p, g, stepIndex)
 	setMetadata(p, g, ga, prompt)
 	populateIntent(p, ga)
@@ -123,7 +125,7 @@ func fixSelectionConfigs(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool
 			if sv.Select == nil {
 				sv.Select = &plan.SelectionConfig{
 					Strategy: "first",
-					Field:    inp.Name,
+					Field:    lookupElementFieldPath(g, source, inp.Name),
 				}
 			} else if sv.Select.Strategy == "" {
 				sv.Select.Strategy = "first"
@@ -131,6 +133,50 @@ func fixSelectionConfigs(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool
 
 			p.Execution.Steps[i].Values[inp.Name] = sv
 		}
+	}
+}
+
+// validAssertionTypes is the set of recognized mechanical assertion types.
+var validAssertionTypes = map[string]bool{
+	"status":      true,
+	"schema":      true,
+	"fieldExists": true,
+	"fieldEquals": true,
+	"predicate":   true,
+}
+
+// fixAssertions removes mechanical assertions with empty or unknown types and
+// ensures every step has at least a status assertion. LLMs sometimes produce
+// assertions with missing type fields; this cleans them up.
+func fixAssertions(p *plan.Plan) {
+	for i := range p.Execution.Steps {
+		step := &p.Execution.Steps[i]
+		if step.Assertions == nil {
+			step.Assertions = &plan.Assertions{}
+		}
+
+		// Filter to valid assertions only.
+		var valid []plan.MechanicalAssertion
+		hasStatus := false
+		for _, a := range step.Assertions.Mechanical {
+			if !validAssertionTypes[a.Type] {
+				continue
+			}
+			if a.Type == "status" {
+				hasStatus = true
+			}
+			valid = append(valid, a)
+		}
+
+		// Ensure at least a status 200 assertion.
+		if !hasStatus {
+			valid = append([]plan.MechanicalAssertion{{
+				Type:   "status",
+				Expect: 200,
+			}}, valid...)
+		}
+
+		step.Assertions.Mechanical = valid
 	}
 }
 
@@ -160,11 +206,7 @@ func addCleanupSteps(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 
 // setMetadata populates plan metadata fields.
 func setMetadata(p *plan.Plan, g *graph.Graph, ga *GoalAnalysis, prompt string) {
-	p.Metadata.Prompt = prompt
-	p.Metadata.GraphVersion = g.Version
-	if p.Metadata.Created.IsZero() {
-		p.Metadata.Created = time.Now()
-	}
+	setMetadataWithTime(p, g, ga, prompt, time.Now())
 }
 
 // populateIntent transfers constraint classification from GoalAnalysis into the plan.
@@ -178,26 +220,292 @@ func populateIntent(p *plan.Plan, ga *GoalAnalysis) {
 		p.Intent.Description = ga.Description
 	}
 
-	if len(ga.Constraints.Hard) > 0 || len(ga.Constraints.Soft) > 0 || len(ga.Constraints.Free) > 0 {
-		if p.Intent.Constraints == nil {
+	// Only backfill constraints from GoalAnalysis if the LLM didn't already
+	// populate them in the YAML. This prevents duplication when the LLM
+	// includes constraints (it has full visibility of GoalAnalysis in the prompt).
+	if p.Intent.Constraints == nil {
+		if len(ga.Constraints.Hard) > 0 || len(ga.Constraints.Soft) > 0 || len(ga.Constraints.Free) > 0 {
 			p.Intent.Constraints = &plan.Constraints{}
+			for _, h := range ga.Constraints.Hard {
+				p.Intent.Constraints.Hard = append(p.Intent.Constraints.Hard, plan.Constraint{
+					Name:        h.Name,
+					Description: h.Description,
+					AppliesTo:   h.AppliesTo,
+				})
+			}
+			for _, s := range ga.Constraints.Soft {
+				p.Intent.Constraints.Soft = append(p.Intent.Constraints.Soft, plan.Constraint{
+					Name:        s.Name,
+					Description: s.Description,
+					AppliesTo:   s.AppliesTo,
+				})
+			}
+			p.Intent.Constraints.Free = append(p.Intent.Constraints.Free, ga.Constraints.Free...)
 		}
-		for _, h := range ga.Constraints.Hard {
-			p.Intent.Constraints.Hard = append(p.Intent.Constraints.Hard, plan.Constraint{
-				Name:        h.Name,
-				Description: h.Description,
-				AppliesTo:   h.AppliesTo,
-			})
-		}
-		for _, s := range ga.Constraints.Soft {
-			p.Intent.Constraints.Soft = append(p.Intent.Constraints.Soft, plan.Constraint{
-				Name:        s.Name,
-				Description: s.Description,
-				AppliesTo:   s.AppliesTo,
-			})
-		}
-		p.Intent.Constraints.Free = append(p.Intent.Constraints.Free, ga.Constraints.Free...)
 	}
+}
+
+// BuildSkeleton constructs a deterministic plan scaffold from the graph,
+// backward chain result, and goal analysis. All structural elements (steps,
+// dependsOn, from refs, select configs, cleanup, metadata, intent) are
+// computed from the graph. Only literal values for unfed inputs are left
+// empty for the LLM to fill.
+func BuildSkeleton(g *graph.Graph, cr *graph.ChainResult, ga *GoalAnalysis, prompt string, now time.Time) *plan.Plan {
+	p := &plan.Plan{}
+
+	// Build edge indexes from the chain's edges (not the full graph).
+	// allEdges: "toNode.toInput" → "fromNode.fromOutput"
+	allEdges := map[string]string{}
+	// selectEdges: same but only for select:true edges
+	selectEdges := map[string]string{}
+	for _, edge := range cr.Edges {
+		allEdges[edge.To] = edge.From
+		if edge.Select {
+			selectEdges[edge.To] = edge.From
+		}
+	}
+
+	// Build step index from chain nodes.
+	stepIndex := map[string]bool{}
+	for _, name := range cr.Nodes {
+		stepIndex[name] = true
+	}
+
+	// Build edge-based dependency map: targetNode → set of sourceNodes
+	edgeDeps := map[string]map[string]bool{}
+	for _, edge := range cr.Edges {
+		fromNode := splitNodeName(edge.From)
+		toNode := splitNodeName(edge.To)
+		if fromNode == "" || toNode == "" {
+			continue
+		}
+		if edgeDeps[toNode] == nil {
+			edgeDeps[toNode] = map[string]bool{}
+		}
+		edgeDeps[toNode][fromNode] = true
+	}
+
+	// Create steps in chain order.
+	for _, nodeName := range cr.Nodes {
+		node := g.Nodes[nodeName]
+		if node == nil {
+			continue
+		}
+
+		step := plan.Step{
+			Node:   nodeName,
+			IsGoal: ga != nil && nodeName == ga.Goal,
+			Values: map[string]plan.StepValue{},
+		}
+
+		// Compute dependsOn from chain edges.
+		deps := map[string]bool{}
+		for dep := range edgeDeps[nodeName] {
+			if stepIndex[dep] && dep != nodeName {
+				deps[dep] = true
+			}
+		}
+		depList := make([]string, 0, len(deps))
+		for dep := range deps {
+			depList = append(depList, dep)
+		}
+		sortStrings(depList)
+		step.DependsOn = depList
+
+		// For each input, wire up from/select or leave empty for LLM.
+		for _, inp := range node.Inputs {
+			edgeKey := nodeName + "." + inp.Name
+
+			if source, isSelect := selectEdges[edgeKey]; isSelect {
+				// Select edge: set from + select config.
+				sourceNode := splitNodeName(source)
+				if stepIndex[sourceNode] {
+					step.Values[inp.Name] = plan.StepValue{
+						From: source,
+						Select: &plan.SelectionConfig{
+							Strategy: "first",
+							Field:    lookupElementFieldPath(g, source, inp.Name),
+						},
+					}
+				}
+			} else if source, hasEdge := allEdges[edgeKey]; hasEdge {
+				// Scalar edge: set from only.
+				sourceNode := splitNodeName(source)
+				if stepIndex[sourceNode] {
+					step.Values[inp.Name] = plan.StepValue{
+						From: source,
+					}
+				}
+			} else if inp.Default != nil {
+				// Graph-level default: set as default value.
+				step.Values[inp.Name] = plan.StepValue{
+					Default: inp.Default,
+				}
+			}
+			// else: unfed input → leave absent, LLM will fill it.
+		}
+
+		p.Execution.Steps = append(p.Execution.Steps, step)
+	}
+
+	// Add cleanup steps.
+	addCleanupSteps(p, g, stepIndex)
+
+	// Set metadata and intent.
+	setMetadataWithTime(p, g, ga, prompt, now)
+	populateIntent(p, ga)
+
+	return p
+}
+
+// UnfedInputs returns a list of "node.input" keys that have no edge feeding
+// them and no graph-level default — these need LLM-provided values.
+func UnfedInputs(g *graph.Graph, cr *graph.ChainResult) []string {
+	// Build fed set from chain edges.
+	fed := map[string]bool{}
+	for _, edge := range cr.Edges {
+		fed[edge.To] = true
+	}
+
+	var unfed []string
+	for _, nodeName := range cr.Nodes {
+		node := g.Nodes[nodeName]
+		if node == nil {
+			continue
+		}
+		for _, inp := range node.Inputs {
+			key := nodeName + "." + inp.Name
+			if fed[key] {
+				continue
+			}
+			if inp.Optional {
+				continue
+			}
+			if inp.Default != nil {
+				continue
+			}
+			unfed = append(unfed, fmt.Sprintf("%s.%s (%s)", nodeName, inp.Name, inp.Type))
+		}
+	}
+	return unfed
+}
+
+// MergeLLMValues merges LLM-provided creative content into the skeleton plan.
+// The skeleton's structural fields are authoritative; the LLM only adds/overrides
+// values, descriptions, assertions, selection strategy refinements, and retry config.
+func MergeLLMValues(skeleton, llmPlan *plan.Plan) {
+	// Build index of LLM steps by node name.
+	llmSteps := map[string]*plan.Step{}
+	for i := range llmPlan.Execution.Steps {
+		llmSteps[llmPlan.Execution.Steps[i].Node] = &llmPlan.Execution.Steps[i]
+	}
+
+	for i := range skeleton.Execution.Steps {
+		skelStep := &skeleton.Execution.Steps[i]
+		llmStep, ok := llmSteps[skelStep.Node]
+		if !ok {
+			continue
+		}
+
+		// Accept description from LLM.
+		if llmStep.Description != "" {
+			skelStep.Description = llmStep.Description
+		}
+
+		// Accept assertions from LLM.
+		if llmStep.Assertions != nil {
+			skelStep.Assertions = llmStep.Assertions
+		}
+
+		// Accept retry config from LLM.
+		if llmStep.Retry != nil {
+			skelStep.Retry = llmStep.Retry
+		}
+
+		// Merge values.
+		if llmStep.Values == nil {
+			continue
+		}
+		if skelStep.Values == nil {
+			skelStep.Values = map[string]plan.StepValue{}
+		}
+
+		for inputName, llmVal := range llmStep.Values {
+			skelVal, exists := skelStep.Values[inputName]
+
+			if !exists {
+				// Skeleton has no entry for this input. Accept literal from LLM
+				// but strip any from/select (LLM shouldn't set structural fields).
+				if llmVal.Default != nil {
+					skelStep.Values[inputName] = plan.StepValue{
+						Default: llmVal.Default,
+					}
+				}
+				continue
+			}
+
+			// Skeleton has an entry. Merge based on what skeleton has.
+			if skelVal.From != "" && skelVal.Select != nil {
+				// Select edge: accept strategy/filter/sortField/index overrides.
+				if llmVal.Select != nil {
+					if llmVal.Select.Strategy != "" {
+						skelVal.Select.Strategy = llmVal.Select.Strategy
+					}
+					if llmVal.Select.Filter != "" {
+						skelVal.Select.Filter = llmVal.Select.Filter
+					}
+					if llmVal.Select.SortField != "" {
+						skelVal.Select.SortField = llmVal.Select.SortField
+					}
+					if llmVal.Select.Index != 0 {
+						skelVal.Select.Index = llmVal.Select.Index
+					}
+				}
+				skelStep.Values[inputName] = skelVal
+			} else if skelVal.From != "" {
+				// Scalar from ref: skeleton is authoritative, ignore LLM changes.
+				// But if LLM tries to add Select to a scalar edge, ignore it.
+			} else {
+				// Graph default or empty: accept LLM literal override.
+				if llmVal.Default != nil {
+					skelVal.Default = llmVal.Default
+				}
+				skelStep.Values[inputName] = skelVal
+			}
+		}
+	}
+}
+
+// setMetadataWithTime populates plan metadata with a specific time.
+func setMetadataWithTime(p *plan.Plan, g *graph.Graph, ga *GoalAnalysis, prompt string, now time.Time) {
+	p.Metadata.Prompt = prompt
+	p.Metadata.GraphVersion = g.Version
+	if p.Metadata.Created.IsZero() {
+		p.Metadata.Created = now
+	}
+}
+
+// lookupElementFieldPath resolves the gjson extraction path for an input fed
+// by a select edge. It finds the source output's elementField matching
+// inputName and returns its EffectivePath. Falls back to inputName if not found.
+func lookupElementFieldPath(g *graph.Graph, sourceRef, inputName string) string {
+	srcNode := splitNodeName(sourceRef)
+	srcField := sourceRef[len(srcNode)+1:]
+	node := g.Nodes[srcNode]
+	if node == nil {
+		return inputName
+	}
+	for _, out := range node.Outputs {
+		if out.Name == srcField {
+			for _, ef := range out.ElementFields {
+				if ef.Name == inputName {
+					return ef.EffectivePath()
+				}
+			}
+			break
+		}
+	}
+	return inputName
 }
 
 // splitNodeName extracts the node name from a "node.field" reference.

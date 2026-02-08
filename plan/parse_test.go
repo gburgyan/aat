@@ -192,6 +192,45 @@ execution:
 	assert.Equal(t, "sequential", *sv.FallbackStrategy)
 }
 
+func TestAssertions_FlatList(t *testing.T) {
+	data := []byte(`
+execution:
+  steps:
+    - node: test
+      assertions:
+        - type: status
+          expect: 200
+        - type: fieldExists
+          path: "$.locator"
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, p.Execution.Steps[0].Assertions)
+	assert.Len(t, p.Execution.Steps[0].Assertions.Mechanical, 2)
+	assert.Equal(t, "status", p.Execution.Steps[0].Assertions.Mechanical[0].Type)
+	assert.Equal(t, 200, p.Execution.Steps[0].Assertions.Mechanical[0].Expect)
+	assert.Equal(t, "fieldExists", p.Execution.Steps[0].Assertions.Mechanical[1].Type)
+}
+
+func TestAssertions_MappingForm(t *testing.T) {
+	data := []byte(`
+execution:
+  steps:
+    - node: test
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+        semantic:
+          - "response should contain valid data"
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, p.Execution.Steps[0].Assertions)
+	assert.Len(t, p.Execution.Steps[0].Assertions.Mechanical, 1)
+	assert.Len(t, p.Execution.Steps[0].Assertions.Semantic, 1)
+}
+
 func TestStepValue_SelectWithIndex(t *testing.T) {
 	data := []byte(`
 execution:

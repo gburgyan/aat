@@ -59,7 +59,11 @@ func FormatGraph(g *graph.Graph) string {
 				}
 				fmt.Fprintf(&b, "  - %s: %s%s\n", out.Name, out.Type, desc)
 				for _, ef := range out.ElementFields {
-					fmt.Fprintf(&b, "    - %s: %s\n", ef.Name, ef.Type)
+					if ef.Path != "" && ef.Path != ef.Name {
+						fmt.Fprintf(&b, "    - %s: %s (path: %s)\n", ef.Name, ef.Type, ef.Path)
+					} else {
+						fmt.Fprintf(&b, "    - %s: %s\n", ef.Name, ef.Type)
+					}
 				}
 			}
 		}
@@ -143,7 +147,11 @@ func FormatChainResult(cr *graph.ChainResult, g *graph.Graph) string {
 			for _, out := range node.Outputs {
 				fmt.Fprintf(&b, "  - %s: %s\n", out.Name, out.Type)
 				for _, ef := range out.ElementFields {
-					fmt.Fprintf(&b, "    - %s: %s\n", ef.Name, ef.Type)
+					if ef.Path != "" && ef.Path != ef.Name {
+						fmt.Fprintf(&b, "    - %s: %s (path: %s)\n", ef.Name, ef.Type, ef.Path)
+					} else {
+						fmt.Fprintf(&b, "    - %s: %s\n", ef.Name, ef.Type)
+					}
 				}
 			}
 		}
@@ -178,134 +186,63 @@ func FormatChainResult(cr *graph.ChainResult, g *graph.Graph) string {
 	return b.String()
 }
 
-// FormatPlanSchema returns documentation describing the plan YAML schema,
-// suitable for inclusion in an LLM system prompt.
+// FormatPlanSchema returns concise documentation for the LLM about how to
+// fill in a skeleton plan. The LLM no longer generates structure (that's in
+// the skeleton), it only provides values, strategy overrides, and assertions.
 func FormatPlanSchema() string {
-	return `# Plan YAML Schema
+	return `# How to Fill the Plan Skeleton
 
-A plan describes an ordered sequence of API steps to execute.
+The skeleton already has all structural elements wired: nodes, dependsOn, from refs,
+select configs, cleanup, metadata, and intent. You only need to add:
 
-## Top-level Structure
+## 1. Literal Values
 
+For inputs that need values, set them as bare scalars:
 ` + "```yaml" + `
-metadata:
-  prompt: "original user prompt"
-  graphVersion: "1.0.0"
-intent:
-  goal: "node name that achieves the goal"
-  description: "what the plan does"
-  constraints:
-    hard:
-      - type: "constraint type"
-        name: "constraint name"
-        description: "why this is hard"
-        applies_to: ["node.input"]
-    soft:
-      - type: "constraint type"
-        name: "preference name"
-        description: "why this is preferred"
-        applies_to: ["node.input"]
-    free: ["aspects that can vary freely"]
-execution:
-  steps:
-    - node: nodeName
-      dependsOn: [otherNode]
-      description: "what this step does"
-      isGoal: true  # mark the goal step
-      values:
-        inputName: "literal value"
-        inputName:
-          from: sourceNode.outputName
-          select:
-            strategy: first|last|random|min|max|match|index
-            field: "extraction field path"
-            filter: "predicate expression"
-            sortField: "comparison field for min/max"
-            index: 0
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
-          - type: fieldExists
-            path: "$.response.field"
-          - type: fieldEquals
-            path: "$.response.field"
-            value: "expected"
-          - type: predicate
-            expr: "response.price > 0"
-      retry:
-        max: 2
-        on: [transient, timeout]
-  cleanup:
-    - node: cleanupNodeName
-      runOn: always
+values:
+  origin: "DEN"
+  departureDate: "2026-06-15"
 ` + "```" + `
 
-## Step Value Variants
+## 2. Selection Strategy Overrides
 
-A step value can be:
-1. **Bare scalar**: ` + "`inputName: \"DEN\"`" + ` — sets the default value directly
-2. **Mapping with from/select**: Routes data from a previous step's output
-   - ` + "`from`" + `: ` + "`sourceNode.outputName`" + ` — which output to read
-   - ` + "`select`" + `: selection config for array outputs
+The skeleton defaults select inputs to strategy "first". You may override:
+` + "```yaml" + `
+values:
+  offeringId:
+    from: searchFlights.catalogOfferings   # keep existing from
+    select:
+      strategy: match
+      field: id                             # keep existing field (uses gjson path from graph)
+      filter: "stops == 0"                  # add filter for match
+` + "```" + `
 
-## Selection Strategies
+Valid strategies: first, last, random, index, min, max, match
+- match: requires "filter" (predicate expression)
+- min/max: requires "sortField"
+- index: requires "index" (integer)
 
-- **first**: Take the first element
-- **last**: Take the last element
-- **random**: Pick a random element
-- **index**: Pick element at specific index
-- **min/max**: Pick element with smallest/largest value of ` + "`sortField`" + ` (or ` + "`field`" + `)
-- **match**: Pick first element matching ` + "`filter`" + ` predicate
+## 3. Assertions
 
-## Cleanup Steps
+Add mechanical assertions to verify step results:
+` + "```yaml" + `
+assertions:
+  mechanical:
+    - type: status
+      expect: 200
+    - type: fieldExists
+      path: "$.locator"
+    - type: fieldEquals
+      path: "$.response.field"
+      value: "expected"
+    - type: predicate
+      expr: "response.price > 0"
+` + "```" + `
 
-Cleanup runs after the main flow (success or failure). ` + "`runOn`" + ` can be:
-- **always**: Run regardless of outcome (default)
-- **failure**: Run only on failure
-- **success**: Run only on success
-
-## Example: Book a Flight
+## 4. Step Descriptions (optional)
 
 ` + "```yaml" + `
-execution:
-  steps:
-    - node: searchFlights
-      values:
-        origin: "DEN"
-        destination: "SFO"
-        departureDate: "2025-06-15"
-    - node: createWorkbench
-    - node: addOffer
-      dependsOn: [searchFlights, createWorkbench]
-      values:
-        offeringId:
-          from: searchFlights.catalogOfferings
-          select:
-            strategy: first
-            field: offeringId
-        productRef:
-          from: searchFlights.catalogOfferings
-          select:
-            strategy: first
-            field: offeringId
-    - node: addTraveler
-      dependsOn: [createWorkbench]
-      values:
-        surname: "Smith"
-        givenName: "John"
-    - node: commitBooking
-      dependsOn: [addOffer, addTraveler]
-      isGoal: true
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
-          - type: fieldExists
-            path: "$.locator"
-  cleanup:
-    - node: ignoreWorkbench
-      runOn: always
+description: "Search for flights from DEN to SFO"
 ` + "```" + `
 `
 }

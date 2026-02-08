@@ -3,6 +3,9 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
@@ -44,6 +47,7 @@ func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunS
 			return nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
 		if val != nil {
+			val = coerceValue(val, input.Type)
 			inputs[input.Name] = val
 		}
 		if decision != nil {
@@ -254,4 +258,65 @@ func extractField(element any, field string) (any, error) {
 		return nil, fmt.Errorf("field %q not found in element", field)
 	}
 	return result.Value(), nil
+}
+
+// coerceValue normalizes a resolved value based on the graph input's declared type.
+// For example, a datetime string "2026-02-16T00:00:00Z" is truncated to "2026-02-16"
+// when the input type is "date". On any parse error the original value is returned
+// unchanged so the downstream API can report the mismatch.
+func coerceValue(val any, inputType string) any {
+	switch strings.ToLower(inputType) {
+	case "date":
+		switch v := val.(type) {
+		case string:
+			if strings.Contains(v, "T") {
+				t, err := time.Parse(time.RFC3339, v)
+				if err != nil {
+					return val
+				}
+				return t.Format("2006-01-02")
+			}
+			return val
+		case time.Time:
+			return v.Format("2006-01-02")
+		}
+
+	case "datetime":
+		switch v := val.(type) {
+		case time.Time:
+			return v.Format(time.RFC3339)
+		}
+
+	case "integer":
+		switch v := val.(type) {
+		case string:
+			i, err := strconv.Atoi(v)
+			if err != nil {
+				return val
+			}
+			return i
+		case float64:
+			return int(v)
+		}
+
+	case "boolean":
+		if s, ok := val.(string); ok {
+			b, err := strconv.ParseBool(s)
+			if err != nil {
+				return val
+			}
+			return b
+		}
+
+	case "float":
+		if s, ok := val.(string); ok {
+			f, err := strconv.ParseFloat(s, 64)
+			if err != nil {
+				return val
+			}
+			return f
+		}
+	}
+
+	return val
 }

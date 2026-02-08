@@ -65,3 +65,52 @@
 - 32 new test cases, all existing tests still pass
 
 **Open questions:** None.
+
+## 2026-02-08 — Task 17: Confirmation UX + End-to-End Prompt Command
+
+**What:** Implemented the `aat prompt` command connecting the full pipeline: natural language → LLM-generated plan → narrative display → confirmation → execution → archive.
+
+**Decisions:**
+- Three sub-tasks: 17a (plan narrative formatter), 17b (YAML serializer), 17c (CLI prompt command)
+- `FormatNarrative(p, g)` in `plan/` package — reusable by future web server, not just CLI
+- `Marshal`/`WriteFile` in `plan/` — `MarshalYAML` on StepValue emits bare scalars when only Default is set (mirrors UnmarshalYAML pattern)
+- `io.Reader` injection for confirmation input — entire command pipeline testable without real stdin
+- Adjust flow: save YAML to temp file → user edits externally → press Enter → reload + revalidate + redisplay
+- Shared `writeArchive` helper extracted from `runCommand`, reused by `promptCommand`
+- `--yes` flag for non-interactive/CI usage, `--save` to persist generated plan, `--domain` optional for domain knowledge enrichment
+- Clear error message when environment lacks LLM config (endpoint check)
+
+**Files:**
+- `plan/format.go` — new: FormatNarrative + helpers (~165 lines)
+- `plan/format_test.go` — new: 13 table-driven tests
+- `plan/write.go` — new: Marshal, WriteFile (~35 lines)
+- `plan/write_test.go` — new: 8 tests (round-trip, bare scalars, directory creation)
+- `plan/parse.go` — modified: added MarshalYAML to StepValue
+- `cmd/aat/prompt.go` — new: promptCommand, confirmPlan, adjustPlan, executePlan, writeArchive (~215 lines)
+- `cmd/aat/prompt_test.go` — new: 15 tests (flag validation, LLM config check, confirm parsing, adjust flow)
+- `cmd/aat/main.go` — modified: added prompt case, shared writeArchive helper, cleaned up unused imports
+
+**Open questions:** None.
+
+## 2026-02-08 — Fix: elementField Path annotations for correct selection fields
+
+**What:** LLM-generated plans used wrong field names in selection configs (e.g., `offeringId` instead of `id`). Added `Path` field to graph elementFields so the skeleton builder can resolve the correct gjson extraction paths.
+
+**Decisions:**
+- Added `Path string` to `graph.Field` with `EffectivePath()` method (returns Path if set, else Name)
+- Added `lookupElementFieldPath` helper in intent/postprocess.go — resolves the gjson path from the source output's elementField matching the input name
+- Updated both `BuildSkeleton` and `fixSelectionConfigs` to use the helper instead of bare `inp.Name`
+- Added path annotations to LLM context formatting (`FormatGraph`, `FormatChainResult`) so the LLM sees the mapping
+- Added `productRef` elementField to travelport booking graph with deeply nested path
+- No changes needed to engine (already uses `SelectionConfig.Field` as gjson path), plan schema, or MergeLLMValues (Field is skeleton-authoritative)
+
+**Verification:** End-to-end CLI test produced `field: id` and `field: ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef` — matching the hand-written plan. Full booking flow executed successfully (5/5 steps passed).
+
+**Files:**
+- `graph/types.go` — added Path field, EffectivePath method
+- `graph/testdata/valid/travelport_booking.yaml` — path annotations, productRef field
+- `intent/postprocess.go` — lookupElementFieldPath helper, updated BuildSkeleton + fixSelectionConfigs
+- `intent/format.go` — path annotations in FormatGraph/FormatChainResult, updated FormatPlanSchema example
+- `graph/parse_test.go`, `intent/postprocess_test.go`, `intent/format_test.go` — updated assertions, 6 new unit tests
+
+**Open questions:** None.

@@ -35,6 +35,7 @@ nodes:
         elementFields:
           - name: offeringId
             type: string
+            path: "id"
           - name: departure
             type: string
           - name: arrival
@@ -49,6 +50,9 @@ nodes:
             type: integer
           - name: cabin
             type: string
+          - name: productRef
+            type: string
+            path: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
       - name: catalogOfferingsId
         type: string
         description: "Catalog offerings session identifier"
@@ -127,11 +131,9 @@ nodes:
       - name: birthDate
         type: date
         description: "Traveler date of birth"
-        optional: true
       - name: gender
         type: enum[Male, Female, Undisclosed]
         description: "Traveler gender"
-        optional: true
       - name: passengerTypeCode
         type: string
         description: "Passenger type code (e.g. ADT, CHD, INF)"

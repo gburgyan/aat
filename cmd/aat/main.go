@@ -5,11 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
-	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
@@ -19,7 +17,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: aat <command> [options]")
-		fmt.Fprintln(os.Stderr, "commands: run")
+		fmt.Fprintln(os.Stderr, "commands: run, prompt")
 		os.Exit(1)
 	}
 
@@ -27,9 +25,12 @@ func main() {
 	case "run":
 		code := runMain(os.Args[2:])
 		os.Exit(code)
+	case "prompt":
+		code := promptMain(os.Args[2:])
+		os.Exit(code)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "commands: run")
+		fmt.Fprintln(os.Stderr, "commands: run, prompt")
 		os.Exit(1)
 	}
 }
@@ -134,22 +135,9 @@ func runCommand(ctx context.Context, args *runArgs) error {
 	printSummary(result)
 
 	// 9. Write archive
-	runID := archive.GenerateRunID()
-	meta := archive.ArchiveMetadata{
-		Version:      "1.0.0",
-		RunID:        runID,
-		Timestamp:    time.Now(),
-		Plan:         p,
-		Environment:  env.Name,
-		GraphVersion: g.Version,
-		ToolVersion:  "0.1.0",
+	if err := writeArchive(result, p, env, g, args.OutputDir); err != nil {
+		return err
 	}
-	arc := engine.ToArchive(result, meta, apiConfig.BaseURL)
-	archivePath := filepath.Join(args.OutputDir, runID, "archive.json")
-	if err := archive.Write(arc, archivePath); err != nil {
-		return fmt.Errorf("writing archive: %w", err)
-	}
-	fmt.Printf("Archive: %s\n", archivePath)
 
 	// 10. Exit code
 	if result.Outcome != engine.OutcomePassed {

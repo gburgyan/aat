@@ -988,6 +988,8 @@ func TestValidate_SortField(t *testing.T) {
 						Values: map[string]StepValue{
 							"surname":   {Default: "Smith"},
 							"givenName": {Default: "Jane"},
+							"birthDate": {Default: "1990-01-15"},
+							"gender":    {Default: "Male"},
 							// Use a From to a scalar output; selection won't be valid
 							// but we're testing sortField skip when no elementFields
 						},
@@ -1372,7 +1374,7 @@ func TestValidate_GoalConsistency(t *testing.T) {
 					{Node: "priceOffer", Values: map[string]StepValue{"productRef": {Default: "p0"}}},
 					{Node: "createWorkbench"},
 					{Node: "addOffer"},
-					{Node: "addTraveler", Values: map[string]StepValue{"surname": {Default: "S"}, "givenName": {Default: "J"}}},
+					{Node: "addTraveler", Values: map[string]StepValue{"surname": {Default: "S"}, "givenName": {Default: "J"}, "birthDate": {Default: "1990-01-15"}, "gender": {Default: "Male"}}},
 					{Node: "commitBooking", IsGoal: true},
 				},
 			},
@@ -1419,7 +1421,7 @@ func TestValidate_GoalConsistency(t *testing.T) {
 					{Node: "priceOffer", Values: map[string]StepValue{"productRef": {Default: "p0"}}},
 					{Node: "createWorkbench"},
 					{Node: "addOffer"},
-					{Node: "addTraveler", Values: map[string]StepValue{"surname": {Default: "S"}, "givenName": {Default: "J"}}},
+					{Node: "addTraveler", Values: map[string]StepValue{"surname": {Default: "S"}, "givenName": {Default: "J"}, "birthDate": {Default: "1990-01-15"}, "gender": {Default: "Male"}}},
 					{Node: "commitBooking"},
 				},
 			},

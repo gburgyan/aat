@@ -40,6 +40,8 @@ execution:
       values:
         surname: "Smith"
         givenName: "Jane"
+        birthDate: "1990-01-15"
+        gender: "Male"
 
     - node: commitBooking
       dependsOn: [addOffer, addTraveler]

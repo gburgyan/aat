@@ -28,6 +28,45 @@ func ParseFile(path string) (*Plan, error) {
 	return Parse(data)
 }
 
+// UnmarshalYAML implements custom YAML unmarshalling for Assertions.
+// Handles two formats:
+//   - Mapping with mechanical/semantic keys (correct form)
+//   - Flat list of assertion objects (common LLM mistake → treated as mechanical)
+func (a *Assertions) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.SequenceNode:
+		// Flat list → treat as mechanical assertions.
+		var items []MechanicalAssertion
+		if err := value.Decode(&items); err != nil {
+			return err
+		}
+		a.Mechanical = items
+		return nil
+	case yaml.MappingNode:
+		// Mapping → unmarshal normally.
+		type rawAssertions Assertions
+		var raw rawAssertions
+		if err := value.Decode(&raw); err != nil {
+			return err
+		}
+		*a = Assertions(raw)
+		return nil
+	default:
+		return fmt.Errorf("unexpected YAML node kind %d for Assertions", value.Kind)
+	}
+}
+
+// MarshalYAML implements custom YAML marshalling for StepValue.
+// When only Default is set, marshal as a bare scalar instead of a mapping.
+func (sv StepValue) MarshalYAML() (interface{}, error) {
+	if sv.From == "" && sv.Select == nil && sv.Constraint == "" &&
+		len(sv.FallbackPool) == 0 && sv.FallbackStrategy == nil && sv.Default != nil {
+		return sv.Default, nil
+	}
+	type rawStepValue StepValue
+	return rawStepValue(sv), nil
+}
+
 // UnmarshalYAML implements custom YAML unmarshalling for StepValue.
 // Bare scalars (e.g., origin: "DEN") set Default only.
 // Mappings unmarshal into the full StepValue struct.

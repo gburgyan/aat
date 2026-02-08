@@ -62,9 +62,14 @@ func TestFormatGraph_ElementFields(t *testing.T) {
 	result := FormatGraph(g)
 
 	// Should show element fields for array outputs
-	assert.Contains(t, result, "offeringId: string")
+	assert.Contains(t, result, "offeringId: string (path: id)")
 	assert.Contains(t, result, "carrier: string")
 	assert.Contains(t, result, "stops: integer")
+	assert.Contains(t, result, "productRef: string (path: ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef)")
+
+	// Fields without path annotations should NOT have (path: ...)
+	assert.NotContains(t, result, "carrier: string (path:")
+	assert.NotContains(t, result, "stops: integer (path:")
 }
 
 func TestFormatChainResult_Travelport(t *testing.T) {
@@ -125,14 +130,14 @@ func TestFormatChainResult_WithDecisions(t *testing.T) {
 func TestFormatPlanSchema_NonEmpty(t *testing.T) {
 	schema := FormatPlanSchema()
 
-	assert.Contains(t, schema, "Plan YAML Schema")
-	assert.Contains(t, schema, "metadata")
-	assert.Contains(t, schema, "execution")
+	assert.Contains(t, schema, "Fill the Plan Skeleton")
+	assert.Contains(t, schema, "Literal Values")
 	assert.Contains(t, schema, "strategy")
-	assert.Contains(t, schema, "dependsOn")
-	assert.Contains(t, schema, "cleanup")
-	assert.Contains(t, schema, "isGoal")
 	assert.Contains(t, schema, "assertions")
+	assert.Contains(t, schema, "match")
+	assert.Contains(t, schema, "filter")
+	assert.Contains(t, schema, "field: id")
+	assert.Contains(t, schema, "gjson path from graph")
 }
 
 func TestFormatGraph_EmptyGraph(t *testing.T) {

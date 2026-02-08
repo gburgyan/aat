@@ -48,6 +48,16 @@ type Output struct {
 type Field struct {
 	Name string `yaml:"name"`
 	Type string `yaml:"type"`
+	Path string `yaml:"path,omitempty"` // JSON extraction path (gjson); defaults to Name
+}
+
+// EffectivePath returns the gjson extraction path for this field.
+// If Path is set, it is returned; otherwise Name is used.
+func (f Field) EffectivePath() string {
+	if f.Path != "" {
+		return f.Path
+	}
+	return f.Name
 }
 
 // Edge describes a data flow connection between a node output and a node input.

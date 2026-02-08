@@ -1,8 +1,12 @@
-Here is the execution plan:
+Here is the completed plan:
 
 ```yaml
 metadata:
   prompt: "book a flight from DEN to SFO"
+  graphVersion: "1.0.0"
+intent:
+  goal: commitBooking
+  description: "Book a flight from DEN to SFO"
 execution:
   steps:
     - node: searchFlights
@@ -14,7 +18,7 @@ execution:
     - node: createWorkbench
       description: "Create a reservation workbench"
     - node: addOffer
-      dependsOn: [searchFlights, createWorkbench]
+      dependsOn: [createWorkbench, searchFlights]
       description: "Add the selected flight offer to the workbench"
       values:
         offeringId:
@@ -26,13 +30,15 @@ execution:
           from: searchFlights.catalogOfferings
           select:
             strategy: first
-            field: offeringId
+            field: productRef
     - node: addTraveler
       dependsOn: [createWorkbench]
       description: "Add traveler details"
       values:
         surname: "Smith"
         givenName: "John"
+        birthDate: "1990-01-15"
+        gender: "Male"
     - node: commitBooking
       dependsOn: [addOffer, addTraveler]
       description: "Finalize the booking"

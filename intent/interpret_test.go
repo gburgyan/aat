@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
@@ -95,7 +96,8 @@ func TestInterpret_BookingFlow(t *testing.T) {
 	assert.Contains(t, client.calls[0].Messages[1].Content, "searchFlights")
 	assert.Contains(t, client.calls[0].Messages[1].Content, "book a flight from DEN to SFO")
 
-	// Second call should contain chain context
+	// Second call should contain the skeleton and chain context
+	assert.Contains(t, client.calls[1].Messages[1].Content, "Plan Skeleton")
 	assert.Contains(t, client.calls[1].Messages[1].Content, "Execution Chain")
 }
 
@@ -313,6 +315,37 @@ valuePools:
 	// Second call should contain domain context
 	assert.Contains(t, client.calls[1].Messages[1].Content, "Domain Knowledge")
 	assert.Contains(t, client.calls[1].Messages[1].Content, "airportCode")
+}
+
+func TestInterpret_DateInPrompts(t *testing.T) {
+	g := loadTravelportGraph(t)
+	goalJSON := loadFixture(t, "testdata/responses/goal_analysis.json")
+	planYAML := loadFixture(t, "testdata/responses/booking_plan.yaml")
+
+	client := &stubClient{
+		responses: []string{goalJSON, planYAML},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt: "book a flight from DEN to SFO",
+		Graph:  g,
+		Client: client,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Len(t, client.calls, 2)
+
+	// Today's date should appear in both LLM prompts
+	today := time.Now().Format("2006-01-02")
+
+	// First call (goal analysis): date in system message
+	assert.Contains(t, client.calls[0].Messages[0].Content, today,
+		"goal analysis system prompt should contain today's date")
+
+	// Second call (plan generation): date in system message (the rules section)
+	assert.Contains(t, client.calls[1].Messages[0].Content, today,
+		"plan generation system prompt should contain today's date")
 }
 
 func TestInterpret_LLMError(t *testing.T) {
