@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -722,4 +723,747 @@ func TestCoerceValue_ParseError(t *testing.T) {
 func TestCoerceValue_CaseInsensitive(t *testing.T) {
 	result := coerceValue("2026-02-16T00:00:00Z", "Date")
 	assert.Equal(t, "2026-02-16", result)
+}
+
+// --- ResolveInputsWithContext tests ---
+
+func fixedNow() time.Time {
+	return time.Date(2026, 2, 8, 12, 0, 0, 0, time.UTC)
+}
+
+func TestResolveInputsWithContext_ExpressionInDefault(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "departureDate", Type: "date"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"departureDate": {Default: "{{today + 5 days}}"},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-02-13", inputs["departureDate"])
+}
+
+func TestResolveInputsWithContext_ExpressionTodayBare(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "date", Type: "date"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"date": {Default: "{{today}}"},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-02-08", inputs["date"])
+}
+
+func TestResolveInputsWithContext_ConstraintPasses(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "passengers", Type: "integer"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"passengers": {
+				Default:    2,
+				Constraint: "value >= 1 && value <= 9",
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, 2, inputs["passengers"])
+}
+
+func TestResolveInputsWithContext_ConstraintFails_FallbackPool(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:      "INVALID",
+				Constraint:   "value != 'INVALID'",
+				FallbackPool: []any{"DEN", "LAX", "ORD"},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", inputs["origin"]) // first pool value that passes
+}
+
+func TestResolveInputsWithContext_FallbackPoolSequential(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "code", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"code": {
+				Default:      "BAD",
+				Constraint:   "value != 'BAD' && value != 'ALSO_BAD'",
+				FallbackPool: []any{"ALSO_BAD", "GOOD", "ALSO_GOOD"},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "GOOD", inputs["code"]) // first pool value that passes
+}
+
+func TestResolveInputsWithContext_FallbackPoolRandom(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "code", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	strategy := "random"
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"code": {
+				FallbackPool:     []any{"A", "B", "C", "D", "E"},
+				FallbackStrategy: &strategy,
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+
+	// Run multiple times and verify we get a result from the pool
+	seen := make(map[any]bool)
+	for i := 0; i < 20; i++ {
+		inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+		require.NoError(t, err)
+		seen[inputs["code"]] = true
+	}
+	// With random, we should see multiple values over 20 runs
+	assert.Greater(t, len(seen), 1, "expected multiple different values from random pool")
+}
+
+func TestResolveInputsWithContext_AllPoolFail(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "code", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"code": {
+				Default:      "A",
+				Constraint:   "value == 'Z'", // nothing will match
+				FallbackPool: []any{"B", "C"},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed constraint")
+}
+
+func TestResolveInputsWithContext_ExpressionInFallbackPool(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "date", Type: "date"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"date": {
+				FallbackPool: []any{"{{today + 5 days}}", "{{today + 10 days}}"},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-02-13", inputs["date"]) // first pool value
+}
+
+func TestResolveInputsWithContext_NilContextSameAsBefore(t *testing.T) {
+	// Verify that passing nil rctx gives the same result as ResolveInputs
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {Default: "DEN"},
+		},
+	}
+
+	inputs1, _, err1 := ResolveInputs(step, g.Nodes["target"], g, state)
+	inputs2, _, _, err2 := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, nil)
+	require.NoError(t, err1)
+	require.NoError(t, err2)
+	assert.Equal(t, inputs1, inputs2)
+}
+
+func TestResolveInputsWithContext_MixedInputs(t *testing.T) {
+	// Some inputs use expressions/fallback, others are plain
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{Name: "sessionId", Type: "string"},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "sessionId", Type: "string"},
+					{Name: "departureDate", Type: "date"},
+					{Name: "origin", Type: "string"},
+					{Name: "passengers", Type: "integer"},
+				},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "source.sessionId", To: "target.sessionId"},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{"sessionId": "sess-123"})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"departureDate": {Default: "{{today + 5 days}}"},
+			"origin":        {Default: "DEN"},
+			"passengers": {
+				Default:    10,
+				Constraint: "value <= 9",
+				FallbackPool: []any{1, 2, 3},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "sess-123", inputs["sessionId"])    // from edge
+	assert.Equal(t, "2026-02-13", inputs["departureDate"]) // from expression
+	assert.Equal(t, "DEN", inputs["origin"])                // plain default
+	assert.Equal(t, 1, inputs["passengers"])                // from pool (default failed constraint)
+}
+
+func TestResolveInputsWithContext_ReferenceEarlierInput(t *testing.T) {
+	// Test that later inputs can reference earlier ones via expressions
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "departureDate", Type: "date"},
+					{Name: "returnDate", Type: "date"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"departureDate": {Default: "{{today + 5 days}}"},
+			"returnDate":    {Default: "{{departureDate + 7 days}}"},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-02-13", inputs["departureDate"])
+	assert.Equal(t, "2026-02-20", inputs["returnDate"])
+}
+
+func TestResolveInputsWithContext_ConstraintFailsNoPool(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "code", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"code": {
+				Default:    "BAD",
+				Constraint: "value == 'GOOD'",
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "failed constraint")
+}
+
+func TestResolveInputsWithContext_EnvExpression(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "apiKey", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"apiKey": {Default: "{{env.TEST_KEY}}"},
+		},
+	}
+
+	rctx := &ResolveContext{
+		Now:       fixedNow(),
+		Mode:      "strict",
+		EnvLookup: func(key string) string {
+			if key == "TEST_KEY" {
+				return "secret-123"
+			}
+			return ""
+		},
+	}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "secret-123", inputs["apiKey"])
+}
+
+func TestResolveInputsWithContext_NoDefaultOnlyPool(t *testing.T) {
+	// StepValue with no Default but a FallbackPool
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "code", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"code": {
+				FallbackPool: []any{"DEN", "LAX", "ORD"},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", inputs["code"]) // first pool value
+}
+
+// --- evaluateValue / checkConstraint unit tests ---
+
+func TestEvaluateValue_NonString(t *testing.T) {
+	ectx := plan.ExprContext{Now: fixedNow()}
+	val, err := evaluateValue(42, ectx)
+	require.NoError(t, err)
+	assert.Equal(t, 42, val)
+}
+
+func TestEvaluateValue_NoExpr(t *testing.T) {
+	ectx := plan.ExprContext{Now: fixedNow()}
+	val, err := evaluateValue("DEN", ectx)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", val)
+}
+
+func TestCheckConstraint_Empty(t *testing.T) {
+	ok, err := checkConstraint("", "anything", nil)
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestCheckConstraint_Passes(t *testing.T) {
+	ok, err := checkConstraint("value > 0", 5, map[string]any{})
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+func TestCheckConstraint_Fails(t *testing.T) {
+	ok, err := checkConstraint("value > 10", 5, map[string]any{})
+	require.NoError(t, err)
+	assert.False(t, ok)
+}
+
+func TestCheckConstraint_WithOtherInputs(t *testing.T) {
+	ok, err := checkConstraint("value != origin", "LAX", map[string]any{"origin": "DEN"})
+	require.NoError(t, err)
+	assert.True(t, ok)
+}
+
+// --- ValueResolution record tests ---
+
+func TestResolution_EdgeSource(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name:    "source",
+				Outputs: []graph.Output{{Name: "val", Type: "string"}},
+			},
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "input1", Type: "string"}},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "source.val", To: "target.input1"},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{"val": "hello"})
+	step := plan.Step{Node: "target"}
+
+	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, nil)
+	require.NoError(t, err)
+	require.Len(t, resolutions, 1)
+	assert.Equal(t, "input1", resolutions[0].InputName)
+	assert.Equal(t, "edge", resolutions[0].Source)
+	assert.Equal(t, "source", resolutions[0].FromStep)
+	assert.Equal(t, "val", resolutions[0].FromOutput)
+	assert.Equal(t, "hello", resolutions[0].FinalValue)
+}
+
+func TestResolution_PlanDefault(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "origin", Type: "string"}},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node:   "target",
+		Values: map[string]plan.StepValue{"origin": {Default: "DEN"}},
+	}
+
+	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, nil)
+	require.NoError(t, err)
+	require.Len(t, resolutions, 1)
+	assert.Equal(t, "origin", resolutions[0].InputName)
+	assert.Equal(t, "plan_default", resolutions[0].Source)
+	assert.Equal(t, "DEN", resolutions[0].FinalValue)
+	assert.Equal(t, "DEN", resolutions[0].RawValue)
+}
+
+func TestResolution_ExpressionSource(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "date", Type: "date"}},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node:   "target",
+		Values: map[string]plan.StepValue{"date": {Default: "{{today + 5 days}}"}},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	require.Len(t, resolutions, 1)
+	assert.Equal(t, "expression", resolutions[0].Source)
+	assert.Equal(t, "{{today + 5 days}}", resolutions[0].Expression)
+	assert.Equal(t, "{{today + 5 days}}", resolutions[0].RawValue)
+	assert.Equal(t, "2026-02-13", resolutions[0].FinalValue)
+}
+
+func TestResolution_FallbackPool(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "code", Type: "string"}},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"code": {
+				Default:      "BAD",
+				Constraint:   "value != 'BAD' && value != 'ALSO_BAD'",
+				FallbackPool: []any{"ALSO_BAD", "GOOD", "ALSO_GOOD"},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	require.Len(t, resolutions, 1)
+	r := resolutions[0]
+	assert.Equal(t, "fallback_pool", r.Source)
+	assert.Equal(t, "GOOD", r.FinalValue)
+	assert.Equal(t, 1, r.PoolIndex)
+	assert.Equal(t, 3, r.PoolSize)
+	assert.True(t, r.ConstraintOK)
+	assert.Equal(t, "value != 'BAD' && value != 'ALSO_BAD'", r.Constraint)
+	// "BAD" (default) and "ALSO_BAD" (pool[0]) were tried before "GOOD"
+	assert.Len(t, r.Tried, 2)
+}
+
+func TestResolution_GraphDefault(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "count", Type: "integer", Default: 1}},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{Node: "target"}
+
+	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, nil)
+	require.NoError(t, err)
+	require.Len(t, resolutions, 1)
+	assert.Equal(t, "graph_default", resolutions[0].Source)
+	assert.Equal(t, 1, resolutions[0].FinalValue)
+}
+
+func TestResolution_OptionalSkip(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "opt", Type: "string", Optional: true}},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{Node: "target"}
+
+	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, nil)
+	require.NoError(t, err)
+	require.Len(t, resolutions, 1)
+	assert.Equal(t, "optional_skip", resolutions[0].Source)
+}
+
+func TestResolution_SelectEdge(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name:    "source",
+				Outputs: []graph.Output{{Name: "items", Type: "item[]"}},
+			},
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "itemId", Type: "string"}},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "source.items", To: "target.itemId", Select: true},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "first"},
+			map[string]any{"id": "second"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"itemId": {Select: &plan.SelectionConfig{Strategy: "first", Field: "id"}},
+		},
+	}
+
+	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, nil)
+	require.NoError(t, err)
+	require.Len(t, resolutions, 1)
+	assert.Equal(t, "select_edge", resolutions[0].Source)
+	assert.Equal(t, "source", resolutions[0].FromStep)
+	assert.Equal(t, "items", resolutions[0].FromOutput)
+	assert.Equal(t, "first", resolutions[0].FinalValue)
+}
+
+func TestResolution_LLMFallback(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "origin", Type: "string"}},
+			},
+		},
+	}
+
+	stub := &stubLLMClient{responses: []string{"DEN"}}
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:      "BAD",
+				Constraint:   "value == 'DEN' || value == 'LAX'",
+				FallbackPool: []any{"ALSO_BAD"},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "lean", LLM: stub}
+	inputs, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", inputs["origin"])
+	require.Len(t, resolutions, 1)
+	r := resolutions[0]
+	assert.Equal(t, "llm", r.Source)
+	assert.Equal(t, "DEN", r.FinalValue)
+	require.NotNil(t, r.LLMCall)
+	assert.Equal(t, "DEN", r.LLMCall.Response)
+	assert.Len(t, r.LLMCall.Messages, 2)
+	assert.Len(t, r.Tried, 2) // "BAD" and "ALSO_BAD"
 }

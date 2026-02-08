@@ -36,8 +36,9 @@ type StepRecord struct {
 	Response   *ResponseRecord   `json:"response,omitempty"`
 	Outputs    map[string]any    `json:"outputs,omitempty"`
 	Validation *ValidationRecord `json:"validation,omitempty"`
-	Selections []SelectionRecord `json:"selections,omitempty"`
-	ErrorClass *ErrorClassRecord `json:"errorClassification,omitempty"`
+	Selections  []SelectionRecord        `json:"selections,omitempty"`
+	Resolutions []ValueResolutionRecord `json:"resolutions,omitempty"`
+	ErrorClass  *ErrorClassRecord       `json:"errorClassification,omitempty"`
 	Error      string            `json:"error,omitempty"`
 	RetryCount int               `json:"retryCount,omitempty"`
 }
@@ -90,6 +91,41 @@ type ErrorClassRecord struct {
 	Detail       string `json:"detail"`
 	Action       string `json:"action"`
 	RetryAttempt int    `json:"retryAttempt"`
+}
+
+// ValueResolutionRecord captures how a single input was resolved.
+type ValueResolutionRecord struct {
+	InputName    string          `json:"inputName"`
+	Source       string          `json:"source"`
+	RawValue     any             `json:"rawValue,omitempty"`
+	FinalValue   any             `json:"finalValue,omitempty"`
+	FromStep     string          `json:"fromStep,omitempty"`
+	FromOutput   string          `json:"fromOutput,omitempty"`
+	Expression   string          `json:"expression,omitempty"`
+	Constraint   string          `json:"constraint,omitempty"`
+	ConstraintOK *bool           `json:"constraintOk,omitempty"`
+	PoolIndex    int             `json:"poolIndex,omitempty"`
+	PoolSize     int             `json:"poolSize,omitempty"`
+	Tried        []any           `json:"tried,omitempty"`
+	LLMCall      *LLMCallRecord  `json:"llmCall,omitempty"`
+}
+
+// LLMCallRecord captures details of a single LLM API call.
+type LLMCallRecord struct {
+	Messages     []LLMMessageRecord `json:"messages"`
+	Model        string             `json:"model"`
+	Response     string             `json:"response"`
+	InputTokens  int                `json:"inputTokens"`
+	OutputTokens int                `json:"outputTokens"`
+	DurationMs   int64              `json:"durationMs"`
+	FinishReason string             `json:"finishReason,omitempty"`
+	Error        string             `json:"error,omitempty"`
+}
+
+// LLMMessageRecord captures a single prompt message sent to the LLM.
+type LLMMessageRecord struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // ArchiveResult captures the overall outcome of a run.

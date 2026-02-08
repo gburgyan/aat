@@ -3,10 +3,14 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
+	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 )
@@ -23,6 +27,16 @@ type Engine struct {
 	// failure stops execution and triggers cleanup. When true, the outcome
 	// is set to Failed but subsequent steps still execute.
 	ContinueOnAssertionFailure bool
+
+	// Mode controls LLM involvement: strict (never), lean (after pool exhausted),
+	// adaptive (same as lean for now; Task 20 adds recovery). Empty defaults to strict.
+	Mode config.ExecutionMode
+
+	// KB is the optional domain knowledge base for LLM-assisted value selection.
+	KB *domain.KnowledgeBase
+
+	// LLMClient is the optional LLM client for value selection calls.
+	LLMClient llm.Client
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -33,6 +47,24 @@ func NewEngine(g *graph.Graph, registry *adapter.Registry, executor *adapter.HTT
 		executor: executor,
 		config:   config,
 	}
+}
+
+// WithMode sets the execution mode and returns the engine for chaining.
+func (e *Engine) WithMode(mode config.ExecutionMode) *Engine {
+	e.Mode = mode
+	return e
+}
+
+// WithDomain sets the domain knowledge base and returns the engine for chaining.
+func (e *Engine) WithDomain(kb *domain.KnowledgeBase) *Engine {
+	e.KB = kb
+	return e
+}
+
+// WithLLM sets the LLM client and returns the engine for chaining.
+func (e *Engine) WithLLM(client llm.Client) *Engine {
+	e.LLMClient = client
+	return e
 }
 
 // Run executes a plan: validates, sorts steps topologically, runs each in order,
@@ -138,8 +170,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
 	start := time.Now()
 
+	// Construct ResolveContext from engine fields
+	rctx := e.buildResolveContext(node)
+
 	// Resolve inputs
-	inputs, selections, err := ResolveInputs(step, node, e.graph, state)
+	inputs, selections, resolutions, err := ResolveInputsWithContext(ctx, step, node, e.graph, state, rctx)
 	if err != nil {
 		return StepResult{
 			Node:      step.Node,
@@ -187,14 +222,15 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	}
 
 	result := StepResult{
-		Node:       step.Node,
-		Inputs:     inputs,
-		Selections: selections,
-		Request:    req,
-		Response:   resp,
-		StatusCode: resp.StatusCode,
-		StartTime:  start,
-		Duration:   time.Since(start),
+		Node:        step.Node,
+		Inputs:      inputs,
+		Selections:  selections,
+		Resolutions: resolutions,
+		Request:     req,
+		Response:    resp,
+		StatusCode:  resp.StatusCode,
+		StartTime:   start,
+		Duration:    time.Since(start),
 	}
 
 	// Extract outputs (only on success)
@@ -217,6 +253,28 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	}
 
 	return result
+}
+
+// buildResolveContext creates a ResolveContext from the engine's configuration.
+// Always returns a non-nil context so that expression evaluation and constraint
+// checking are active.
+func (e *Engine) buildResolveContext(node *graph.Node) *ResolveContext {
+	return &ResolveContext{
+		Mode:      e.effectiveMode(),
+		Now:       time.Now(),
+		EnvLookup: os.Getenv,
+		KB:        e.KB,
+		LLM:       e.LLMClient,
+		Node:      node,
+	}
+}
+
+// effectiveMode returns the engine's execution mode, defaulting to strict.
+func (e *Engine) effectiveMode() config.ExecutionMode {
+	if e.Mode == "" {
+		return config.ModeStrict
+	}
+	return e.Mode
 }
 
 // convertAssertions bridges plan.MechanicalAssertion to validate.MechanicalAssertion.

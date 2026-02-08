@@ -477,3 +477,150 @@ func TestToArchive_FullRoundTrip(t *testing.T) {
 	require.Len(t, loaded.Steps, 1)
 	assert.Equal(t, "https://api.example.com/api/test", loaded.Steps[0].Request.URL)
 }
+
+func TestToArchive_ResolutionConversion(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "step1",
+				Resolutions: []ValueResolution{
+					{
+						InputName:    "origin",
+						Source:       "plan_default",
+						RawValue:     "DEN",
+						FinalValue:   "DEN",
+						PoolIndex:    -1,
+					},
+					{
+						InputName:    "date",
+						Source:       "expression",
+						RawValue:     "{{today + 5 days}}",
+						FinalValue:   "2026-02-13",
+						Expression:   "{{today + 5 days}}",
+						PoolIndex:    -1,
+					},
+					{
+						InputName:    "sessionId",
+						Source:       "edge",
+						FinalValue:   "sess-123",
+						FromStep:     "login",
+						FromOutput:   "sessionId",
+						PoolIndex:    -1,
+					},
+					{
+						InputName:    "code",
+						Source:       "fallback_pool",
+						RawValue:     "GOOD",
+						FinalValue:   "GOOD",
+						Constraint:   "value != 'BAD'",
+						ConstraintOK: true,
+						PoolIndex:    1,
+						PoolSize:     3,
+						Tried:        []any{"BAD"},
+					},
+				},
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-res"}
+	a := ToArchive(result, meta, "")
+
+	require.Len(t, a.Steps[0].Resolutions, 4)
+
+	// Plan default
+	r0 := a.Steps[0].Resolutions[0]
+	assert.Equal(t, "origin", r0.InputName)
+	assert.Equal(t, "plan_default", r0.Source)
+	assert.Equal(t, "DEN", r0.FinalValue)
+	assert.Nil(t, r0.ConstraintOK) // no constraint → nil pointer
+
+	// Expression
+	r1 := a.Steps[0].Resolutions[1]
+	assert.Equal(t, "expression", r1.Source)
+	assert.Equal(t, "{{today + 5 days}}", r1.Expression)
+	assert.Equal(t, "2026-02-13", r1.FinalValue)
+
+	// Edge
+	r2 := a.Steps[0].Resolutions[2]
+	assert.Equal(t, "edge", r2.Source)
+	assert.Equal(t, "login", r2.FromStep)
+	assert.Equal(t, "sessionId", r2.FromOutput)
+
+	// Fallback pool
+	r3 := a.Steps[0].Resolutions[3]
+	assert.Equal(t, "fallback_pool", r3.Source)
+	assert.Equal(t, 1, r3.PoolIndex)
+	assert.Equal(t, 3, r3.PoolSize)
+	require.NotNil(t, r3.ConstraintOK)
+	assert.True(t, *r3.ConstraintOK)
+	require.Len(t, r3.Tried, 1)
+}
+
+func TestToArchive_ResolutionWithLLMCall(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "step1",
+				Resolutions: []ValueResolution{
+					{
+						InputName:  "origin",
+						Source:     "llm",
+						FinalValue: "DEN",
+						Constraint: "value != 'BAD'",
+						ConstraintOK: true,
+						PoolIndex:  -1,
+						PoolSize:   2,
+						Tried:      []any{"BAD", "ALSO_BAD"},
+						LLMCall: &LLMCallRecord{
+							Messages: []LLMMessage{
+								{Role: "system", Content: "You are an assistant."},
+								{Role: "user", Content: "Select a value."},
+							},
+							Model:        "gpt-4",
+							Response:     "DEN",
+							InputTokens:  50,
+							OutputTokens: 3,
+							DurationMs:   150,
+							FinishReason: "stop",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-llm"}
+	a := ToArchive(result, meta, "")
+
+	require.Len(t, a.Steps[0].Resolutions, 1)
+	r := a.Steps[0].Resolutions[0]
+	assert.Equal(t, "llm", r.Source)
+	require.NotNil(t, r.LLMCall)
+	assert.Equal(t, "gpt-4", r.LLMCall.Model)
+	assert.Equal(t, "DEN", r.LLMCall.Response)
+	assert.Equal(t, 50, r.LLMCall.InputTokens)
+	assert.Equal(t, 3, r.LLMCall.OutputTokens)
+	assert.Equal(t, int64(150), r.LLMCall.DurationMs)
+	assert.Equal(t, "stop", r.LLMCall.FinishReason)
+	require.Len(t, r.LLMCall.Messages, 2)
+	assert.Equal(t, "system", r.LLMCall.Messages[0].Role)
+	assert.Equal(t, "user", r.LLMCall.Messages[1].Role)
+
+	// Verify round-trip through JSON
+	data, err := json.MarshalIndent(a, "", "  ")
+	require.NoError(t, err)
+
+	var loaded archive.Archive
+	err = json.Unmarshal(data, &loaded)
+	require.NoError(t, err)
+
+	require.Len(t, loaded.Steps[0].Resolutions, 1)
+	lr := loaded.Steps[0].Resolutions[0]
+	assert.Equal(t, "llm", lr.Source)
+	require.NotNil(t, lr.LLMCall)
+	assert.Equal(t, "gpt-4", lr.LLMCall.Model)
+	assert.Equal(t, "DEN", lr.LLMCall.Response)
+}

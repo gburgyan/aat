@@ -137,3 +137,65 @@
 - `docs/internal/progress.md` — marked complete
 
 **Open questions:** None.
+
+## 2026-02-08 — Task 18: Value Resolution Hierarchy
+
+**What:** Added pre-execution value resolution with expression evaluation, constraint checking, fallback pools, LLM-assisted value selection, and execution mode enforcement.
+
+**Decisions:**
+- Three sub-tasks: 18a (expression evaluator), 18b (enhanced resolution), 18c (mode + LLM)
+- Expression evaluator (`plan/expr.go`): `{{...}}` template syntax with `today`, `today +/- N days`, `env.VAR`, `ref +/- N days`. Simple regex-based parser, not a full grammar — sufficient for date arithmetic and env lookups
+- `ContainsExpr` is a fast `strings.Contains("{{")` check — zero overhead for the common case of no expressions
+- `ExprContext` carries `Now`, `Env`, `Values` — injectable for testing, defaults to `time.Now()`/`os.Getenv`
+- `ResolveInputsWithContext` wraps the original chain with expression evaluation, constraint checking, and fallback pool iteration. `ResolveInputs` delegates to it with `nil` context for backward compatibility
+- `resolvedInputs` accumulates as we iterate `node.Inputs`, so later inputs can reference earlier ones in expressions (e.g., `returnDate = departureDate + 7 days`)
+- Edge-resolved values are NOT subject to expression evaluation (they come from real API responses)
+- Constraints evaluated via existing `plan.EvalPredicate` with candidate as `"value"` in context plus all resolved inputs
+- `FallbackStrategy`: `nil`/"sequential" = in-order, "random" = shuffled via `rand.Shuffle`
+- Engine gains `Mode`, `KB`, `LLMClient` fields with builder methods (`WithMode`, `WithDomain`, `WithLLM`)
+- `executeStep` now always constructs a `ResolveContext` (expressions and constraints are always active)
+- Mode enforcement: `strict` → never calls LLM, `lean` → calls LLM only when pool exhausted, `adaptive` → same as lean for now (Task 20 adds recovery)
+- CLI: `--mode` and `--domain` flags added to `run` command. `prompt` command defaults to `lean` mode
+- `buildValueSelectionPrompt` includes input metadata, constraint, tried values, resolved inputs, and domain knowledge (type defs, value pools, applicable concepts)
+
+**Files:**
+- `plan/expr.go` — new: EvalExpr, ContainsExpr, ValidateExpr, ExprContext (~195 lines)
+- `plan/expr_test.go` — new: 30 test cases (today, env, references, mixed, errors, boundaries)
+- `engine/resolve.go` — modified: added ResolveContext, ResolveInputsWithContext, evaluateValue, checkConstraint, resolveWithFallback
+- `engine/resolve_test.go` — modified: 20 new test cases (expressions, constraints, pools, references, mixed inputs)
+- `engine/engine.go` — modified: added Mode/KB/LLMClient fields, WithMode/WithDomain/WithLLM builders, buildResolveContext
+- `engine/llm_values.go` — new: llmSelectValue, buildValueSelectionPrompt (~100 lines)
+- `engine/llm_values_test.go` — new: 12 test cases (strict/lean/adaptive mode, prompt content, error cases)
+- `cmd/aat/main.go` — modified: added --mode/--domain flags, LLM client creation, engine wiring
+- `cmd/aat/prompt.go` — modified: updated executePlan to wire mode/domain/LLM
+
+**Open questions:** None.
+
+## 2026-02-08 — Task 18d: Wire LLM Fallback + Resolution/LLM Call Tracking in Archives
+
+**What:** Connected the LLM value selection into the resolution chain (was defined/tested but never called), and added full audit trail for how every input was resolved — including LLM call details (prompts, response, model, tokens, timing).
+
+**Decisions:**
+- `ResolveInputsWithContext` gains `ctx context.Context` param (needed for LLM calls) and returns `[]ValueResolution` as 3rd return value
+- `ResolveInputs` backward-compat wrapper passes `context.Background()` and drops the resolutions
+- Every path through `resolveInputEnhanced` builds a `ValueResolution` record: `edge`, `select_edge`, `plan_default`, `expression`, `fallback_pool`, `graph_default`, `llm`, `optional_skip`
+- `resolveWithFallback` now calls `llmSelectValue` when all pool values fail constraint and mode allows — this was the main missing wiring
+- `llmSelectValue` returns `(any, *LLMCallRecord, error)` — captures timing, prompts, tokens, model from the LLM response. On LLM error, record is still returned (with Error field) for debugging
+- Engine types: `ValueResolution`, `LLMCallRecord`, `LLMMessage` in `engine/result.go`; `StepResult.Resolutions` field
+- Archive types: `ValueResolutionRecord`, `LLMCallRecord`, `LLMMessageRecord` in `archive/types.go`; `StepRecord.Resolutions` field
+- `convertResolutions` / `convertLLMCall` follow the existing `convertSelections` pattern
+- Archive `ConstraintOK` is `*bool` (pointer) so it omits cleanly when no constraint was checked
+- Types are independent of `intent.LLMCallTrace` to avoid import cycles (engine → intent not allowed)
+
+**Files:**
+- `engine/result.go` — added ValueResolution, LLMCallRecord, LLMMessage types; added Resolutions to StepResult
+- `engine/resolve.go` — added ctx param, returns []ValueResolution, builds resolution records in all paths, wires LLM fallback
+- `engine/llm_values.go` — returns *LLMCallRecord, captures timing/tokens/prompts
+- `engine/engine.go` — passes ctx to resolve, stores resolutions in StepResult
+- `archive/types.go` — added ValueResolutionRecord, LLMCallRecord, LLMMessageRecord; added Resolutions to StepRecord
+- `engine/archive.go` — added convertResolutions, convertLLMCall
+- `engine/resolve_test.go` — 8 new resolution record tests, updated signatures
+- `engine/llm_values_test.go` — updated for 3-value return, verify LLMCallRecord content
+- `engine/archive_test.go` — 2 new tests (resolution conversion, LLM call round-trip)
+
+**Open questions:** None.

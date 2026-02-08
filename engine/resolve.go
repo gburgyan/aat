@@ -1,28 +1,55 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 	"github.com/tidwall/gjson"
 )
 
-// ResolveInputs resolves all input values for a step by checking sources in
-// priority order:
+// ResolveContext provides optional context for enhanced value resolution,
+// including expression evaluation, constraint checking, fallback pools,
+// and LLM-assisted value selection.
+type ResolveContext struct {
+	Mode      config.ExecutionMode
+	Now       time.Time
+	EnvLookup func(string) string
+	KB        *domain.KnowledgeBase // may be nil
+	LLM       llm.Client            // may be nil
+	Node      *graph.Node
+}
+
+// ResolveInputs resolves all input values for a step using the basic resolution
+// chain. This is a backward-compatible wrapper around ResolveInputsWithContext
+// with a nil ResolveContext.
+func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunState) (map[string]any, []SelectionDecision, error) {
+	inputs, decisions, _, err := ResolveInputsWithContext(context.Background(), step, node, g, state, nil)
+	return inputs, decisions, err
+}
+
+// ResolveInputsWithContext resolves all input values for a step by checking
+// sources in priority order:
 //  1. Graph edge targeting this input → upstream output from RunState
 //  2. SELECT edge → select from upstream array using strategy, extract field via gjson
-//  3. Plan StepValue.Default (via plan values or "from" with select)
+//  3. Plan StepValue.Default (with expression evaluation, constraint checking, fallback pools)
 //  4. Graph node Input.Default
 //  5. Optional → skip (not included in result)
 //  6. None → error: required input has no value
 //
-// Returns the resolved inputs and any selection decisions made.
-func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunState) (map[string]any, []SelectionDecision, error) {
+// When rctx is non-nil, expression evaluation ({{...}} templates), constraint
+// checking, and fallback pool iteration are activated at priority 3. When rctx
+// is nil, the behavior is identical to the basic ResolveInputs.
+func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.Node, g *graph.Graph, state *RunState, rctx *ResolveContext) (map[string]any, []SelectionDecision, []ValueResolution, error) {
 	// Build edge lookup for this node: inputName → edge
 	edgeMap := make(map[string]graph.Edge)
 	for _, edge := range g.Edges {
@@ -37,26 +64,46 @@ func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunS
 
 	inputs := make(map[string]any)
 	var decisions []SelectionDecision
+	var resolutions []ValueResolution
 
 	// Dedup cache: keyed by "from|strategy|filter|index" → cached selectionResult
 	dedupCache := make(map[string]*selectionResult)
 
+	// Build expression context if rctx is provided
+	var ectx *plan.ExprContext
+	if rctx != nil {
+		ectx = &plan.ExprContext{
+			Now:    rctx.Now,
+			Env:    rctx.EnvLookup,
+			Values: make(map[string]any),
+		}
+	}
+
 	for _, input := range node.Inputs {
-		val, decision, err := resolveInput(input, step, edgeMap, state, dedupCache)
+		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, edgeMap, state, dedupCache, rctx, ectx, inputs)
 		if err != nil {
-			return nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
+			return nil, nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
 		if val != nil {
 			val = coerceValue(val, input.Type)
 			inputs[input.Name] = val
+			// Update expression context so later inputs can reference this one
+			if ectx != nil {
+				ectx.Values[input.Name] = val
+			}
 		}
 		if decision != nil {
 			decisions = append(decisions, *decision)
 		}
+		if resolution != nil {
+			// Update FinalValue with coerced value
+			resolution.FinalValue = inputs[input.Name]
+			resolutions = append(resolutions, *resolution)
+		}
 		// val == nil means optional input with no value → skip
 	}
 
-	return inputs, decisions, nil
+	return inputs, decisions, resolutions, nil
 }
 
 // dedupKey builds a cache key for selection deduplication.
@@ -67,62 +114,117 @@ func dedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
 	return fmt.Sprintf("%s|%s|%s|%s|%d", fromNode, fromField, sel.Strategy, sel.Filter, sel.Index)
 }
 
-func resolveInput(input graph.Input, step plan.Step, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult) (any, *SelectionDecision, error) {
+// resolveInputEnhanced resolves a single input with optional enhanced features.
+// When rctx/ectx are nil, it behaves identically to the original resolveInput.
+func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
 	// 1. Check for graph edge
 	if edge, ok := edgeMap[input.Name]; ok {
 		fromNode, fromField, err := splitRef(edge.From)
 		if err != nil {
-			return nil, nil, fmt.Errorf("invalid edge source %q: %w", edge.From, err)
+			return nil, nil, nil, fmt.Errorf("invalid edge source %q: %w", edge.From, err)
 		}
 
 		if edge.Select {
 			// 2. SELECT edge: select from upstream array using strategy
 			val, decision, err := resolveSelectEdge(fromNode, fromField, input.Name, step, state, dedupCache)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
-			return val, decision, nil
+			res := &ValueResolution{
+				InputName:  input.Name,
+				Source:     "select_edge",
+				FinalValue: val,
+				FromStep:   fromNode,
+				FromOutput: fromField,
+				PoolIndex:  -1,
+			}
+			return val, decision, res, nil
 		}
 
 		// Regular edge: get the output value directly
+		// Edge-resolved values are NOT subject to expression evaluation.
 		val, err := state.GetOutput(fromNode, fromField)
 		if err != nil {
-			return nil, nil, fmt.Errorf("edge from %q: %w", edge.From, err)
+			return nil, nil, nil, fmt.Errorf("edge from %q: %w", edge.From, err)
 		}
-		return val, nil, nil
+		res := &ValueResolution{
+			InputName:  input.Name,
+			Source:     "edge",
+			FinalValue: val,
+			FromStep:   fromNode,
+			FromOutput: fromField,
+			PoolIndex:  -1,
+		}
+		return val, nil, res, nil
 	}
 
-	// 3. Plan StepValue.Default (via plan values or "from" with select)
+	// 3. Plan StepValue (via plan values or "from" with select)
 	if sv, ok := step.Values[input.Name]; ok {
 		if sv.From != "" && sv.Select != nil {
 			// Plan-defined selection from upstream output
 			fromNode, fromField, err := splitRef(sv.From)
 			if err != nil {
-				return nil, nil, fmt.Errorf("invalid 'from' reference %q: %w", sv.From, err)
+				return nil, nil, nil, fmt.Errorf("invalid 'from' reference %q: %w", sv.From, err)
 			}
 			val, decision, err := resolveSelectValue(fromNode, fromField, input.Name, sv.Select, state, dedupCache)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
-			return val, decision, nil
+			res := &ValueResolution{
+				InputName:  input.Name,
+				Source:     "select_edge",
+				FinalValue: val,
+				FromStep:   fromNode,
+				FromOutput: fromField,
+				PoolIndex:  -1,
+			}
+			return val, decision, res, nil
 		}
 		if sv.Default != nil {
-			return sv.Default, nil, nil
+			// Enhanced path: evaluate expressions, check constraints, try fallback pool
+			if rctx != nil && ectx != nil {
+				return resolveWithFallback(ctx, sv, input, *ectx, resolvedInputs, rctx)
+			}
+			// Basic path: return raw default
+			res := &ValueResolution{
+				InputName:  input.Name,
+				Source:     "plan_default",
+				RawValue:   sv.Default,
+				FinalValue: sv.Default,
+				PoolIndex:  -1,
+			}
+			return sv.Default, nil, res, nil
+		}
+		// StepValue exists but no Default and no From+Select:
+		// try fallback pool if enhanced context is available
+		if rctx != nil && ectx != nil && len(sv.FallbackPool) > 0 {
+			return resolveWithFallback(ctx, sv, input, *ectx, resolvedInputs, rctx)
 		}
 	}
 
 	// 4. Graph node Input.Default
 	if input.Default != nil {
-		return input.Default, nil, nil
+		res := &ValueResolution{
+			InputName:  input.Name,
+			Source:     "graph_default",
+			FinalValue: input.Default,
+			PoolIndex:  -1,
+		}
+		return input.Default, nil, res, nil
 	}
 
 	// 5. Optional → skip
 	if input.Optional {
-		return nil, nil, nil
+		res := &ValueResolution{
+			InputName: input.Name,
+			Source:    "optional_skip",
+			PoolIndex: -1,
+		}
+		return nil, nil, res, nil
 	}
 
 	// 6. No value → error
-	return nil, nil, fmt.Errorf("required input has no value")
+	return nil, nil, nil, fmt.Errorf("required input has no value")
 }
 
 // resolveSelectEdge handles a SELECT edge: the source is an array, select using
@@ -258,6 +360,176 @@ func extractField(element any, field string) (any, error) {
 		return nil, fmt.Errorf("field %q not found in element", field)
 	}
 	return result.Value(), nil
+}
+
+// evaluateValue applies expression evaluation if the raw value is a string
+// containing {{...}} templates. Returns the value unchanged if no expressions
+// are found or if raw is not a string.
+func evaluateValue(raw any, ectx plan.ExprContext) (any, error) {
+	return plan.EvalExpr(raw, ectx)
+}
+
+// checkConstraint evaluates a constraint predicate against a candidate value.
+// The candidate is available as "value" in the predicate context, and all
+// previously resolved inputs are also available. Returns true if the constraint
+// passes or if the constraint string is empty.
+func checkConstraint(constraint string, candidate any, resolvedInputs map[string]any) (bool, error) {
+	if constraint == "" {
+		return true, nil
+	}
+	ctx := make(map[string]any, len(resolvedInputs)+1)
+	for k, v := range resolvedInputs {
+		ctx[k] = v
+	}
+	ctx["value"] = candidate
+	return plan.EvalPredicate(constraint, ctx)
+}
+
+// resolveWithFallback tries the StepValue default (with expression evaluation
+// and constraint checking), then iterates the fallback pool. If all deterministic
+// values are exhausted and mode allows, delegates to the LLM. Returns the first
+// value that passes the constraint. FallbackStrategy controls iteration order:
+// nil/"sequential" = in order, "random" = shuffled.
+func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Input, ectx plan.ExprContext, resolvedInputs map[string]any, rctx *ResolveContext) (any, *SelectionDecision, *ValueResolution, error) {
+	inputName := input.Name
+	var tried []any
+
+	// Try the default value first
+	if sv.Default != nil {
+		evaluated, err := evaluateValue(sv.Default, ectx)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("evaluating expression for %q: %w", inputName, err)
+		}
+		passes, err := checkConstraint(sv.Constraint, evaluated, resolvedInputs)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("checking constraint for %q: %w", inputName, err)
+		}
+		if passes {
+			source := "plan_default"
+			if isExpression(sv.Default) {
+				source = "expression"
+			}
+			res := &ValueResolution{
+				InputName:    inputName,
+				Source:       source,
+				RawValue:     sv.Default,
+				FinalValue:   evaluated,
+				Constraint:   sv.Constraint,
+				ConstraintOK: true,
+				PoolIndex:    -1,
+				PoolSize:     len(sv.FallbackPool),
+			}
+			if isExpression(sv.Default) {
+				if s, ok := sv.Default.(string); ok {
+					res.Expression = s
+				}
+			}
+			return evaluated, nil, res, nil
+		}
+		// Default failed constraint — track and fall through to pool
+		tried = append(tried, evaluated)
+	}
+
+	// Try the fallback pool
+	if len(sv.FallbackPool) > 0 {
+		pool := make([]any, len(sv.FallbackPool))
+		copy(pool, sv.FallbackPool)
+
+		// Track original indices for resolution record
+		indices := make([]int, len(pool))
+		for i := range pool {
+			indices[i] = i
+		}
+
+		if sv.FallbackStrategy != nil && *sv.FallbackStrategy == "random" {
+			rand.Shuffle(len(pool), func(i, j int) {
+				pool[i], pool[j] = pool[j], pool[i]
+				indices[i], indices[j] = indices[j], indices[i]
+			})
+		}
+
+		for pi, candidate := range pool {
+			evaluated, err := evaluateValue(candidate, ectx)
+			if err != nil {
+				tried = append(tried, candidate)
+				continue // skip values that fail expression evaluation
+			}
+			passes, err := checkConstraint(sv.Constraint, evaluated, resolvedInputs)
+			if err != nil {
+				tried = append(tried, evaluated)
+				continue // skip values that fail constraint evaluation
+			}
+			if passes {
+				res := &ValueResolution{
+					InputName:    inputName,
+					Source:       "fallback_pool",
+					RawValue:     candidate,
+					FinalValue:   evaluated,
+					Constraint:   sv.Constraint,
+					ConstraintOK: true,
+					PoolIndex:    indices[pi],
+					PoolSize:     len(sv.FallbackPool),
+					Tried:        tried,
+				}
+				if isExpression(candidate) {
+					if s, ok := candidate.(string); ok {
+						res.Expression = s
+					}
+				}
+				return evaluated, nil, res, nil
+			}
+			tried = append(tried, evaluated)
+		}
+
+		// All pool values failed — try LLM if mode allows
+		val, llmRec, err := llmSelectValue(ctx, rctx, input, sv, resolvedInputs)
+		if err == nil {
+			res := &ValueResolution{
+				InputName:    inputName,
+				Source:       "llm",
+				FinalValue:   val,
+				Constraint:   sv.Constraint,
+				ConstraintOK: true,
+				PoolIndex:    -1,
+				PoolSize:     len(sv.FallbackPool),
+				Tried:        tried,
+				LLMCall:      llmRec,
+			}
+			return val, nil, res, nil
+		}
+
+		// LLM also failed (or mode doesn't allow it) — return original pool-exhausted error
+		return nil, nil, nil, fmt.Errorf("all fallback pool values for %q failed constraint %q", inputName, sv.Constraint)
+	}
+
+	// No pool — try LLM if default failed constraint
+	if sv.Default != nil {
+		// Default existed but failed constraint, try LLM
+		val, llmRec, err := llmSelectValue(ctx, rctx, input, sv, resolvedInputs)
+		if err == nil {
+			res := &ValueResolution{
+				InputName:    inputName,
+				Source:       "llm",
+				FinalValue:   val,
+				Constraint:   sv.Constraint,
+				ConstraintOK: true,
+				PoolIndex:    -1,
+				Tried:        tried,
+				LLMCall:      llmRec,
+			}
+			return val, nil, res, nil
+		}
+		return nil, nil, nil, fmt.Errorf("default value for %q failed constraint %q and no fallback pool is configured", inputName, sv.Constraint)
+	}
+
+	// No default and no pool
+	return nil, nil, nil, fmt.Errorf("required input %q has no value", inputName)
+}
+
+// isExpression returns true if the value is a string containing {{...}} templates.
+func isExpression(v any) bool {
+	s, ok := v.(string)
+	return ok && plan.ContainsExpr(s)
 }
 
 // coerceValue normalizes a resolved value based on the graph input's declared type.

@@ -34,7 +34,11 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 - [x] 16. Implement plan validation enhancements
 - [x] 17. Implement confirmation UX (print plan, y/n/adjust)
 - [x] 17a-obs. Planning pipeline observability (plan trace)
-- [ ] 18. Implement value resolution hierarchy (defaults → pools → LLM)
+- [x] 18. Implement value resolution hierarchy (defaults → pools → LLM)
+  - [x] 18a. Value expression evaluator (`plan/expr.go`)
+  - [x] 18b. Enhanced resolution with constraints + fallback pools (`engine/resolve.go`)
+  - [x] 18c. Execution mode + LLM value selection (`engine/llm_values.go`, CLI wiring)
+  - [x] 18d. Wire LLM fallback into resolution chain + resolution/LLM call tracking in archives
 - [ ] 19. Add LLM-assisted value selection for arrays
 - [ ] 20. Add constraint-aware fallback with relaxation guard
 - [ ] 21. Embed GopherLua with sandbox restrictions (Tier 2 adapters)

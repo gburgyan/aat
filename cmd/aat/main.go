@@ -9,8 +9,10 @@ import (
 
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -42,6 +44,8 @@ type runArgs struct {
 	GraphPath     string
 	TemplatesPath string
 	OutputDir     string
+	Mode          string
+	DomainPath    string
 }
 
 // runMain parses flags and delegates to runCommand.
@@ -53,6 +57,8 @@ func runMain(args []string) int {
 	fs.StringVar(&ra.GraphPath, "graph", "", "path to graph YAML file (required)")
 	fs.StringVar(&ra.TemplatesPath, "templates", "", "path to templates directory (required)")
 	fs.StringVar(&ra.OutputDir, "output", "runs", "directory for archive output")
+	fs.StringVar(&ra.Mode, "mode", "", "execution mode: strict, lean, adaptive (overrides env config)")
+	fs.StringVar(&ra.DomainPath, "domain", "", "path to domain knowledge YAML file")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
@@ -109,7 +115,17 @@ func runCommand(ctx context.Context, args *runArgs) error {
 		return fmt.Errorf("loading plan: %w", err)
 	}
 
-	// 5. Load templates
+	// 5. Load domain knowledge (optional)
+	var kb *domain.KnowledgeBase
+	if args.DomainPath != "" {
+		kb, err = domain.ParseFile(args.DomainPath)
+		if err != nil {
+			return fmt.Errorf("loading domain knowledge: %w", err)
+		}
+		fmt.Printf("aat: loaded domain knowledge\n")
+	}
+
+	// 6. Load templates
 	registry := adapter.NewRegistry()
 	count, err := adapter.LoadTemplates(args.TemplatesPath, registry)
 	if err != nil {
@@ -117,7 +133,7 @@ func runCommand(ctx context.Context, args *runArgs) error {
 	}
 	fmt.Printf("aat: loaded %d templates\n", count)
 
-	// 6. Create executor and environment config
+	// 7. Create executor and environment config
 	executor := adapter.NewHTTPExecutor(apiConfig.BaseURL)
 	envConfig := &adapter.EnvironmentConfig{
 		BaseURL: apiConfig.BaseURL,
@@ -125,9 +141,30 @@ func runCommand(ctx context.Context, args *runArgs) error {
 		Values:  apiConfig.Values,
 	}
 
-	// 7. Create engine and run
-	eng := engine.NewEngine(g, registry, executor, envConfig)
-	fmt.Printf("aat: executing plan (%d steps)...\n\n", len(p.Execution.Steps))
+	// 8. Determine execution mode
+	effectiveMode := config.ExecutionMode(args.Mode)
+	if effectiveMode == "" {
+		effectiveMode = env.LLM.Mode
+	}
+	if effectiveMode == "" {
+		effectiveMode = config.ModeStrict
+	}
+
+	// 9. Create LLM client if mode requires it
+	var llmClient llm.Client
+	if effectiveMode != config.ModeStrict && env.LLM.Endpoint != "" {
+		llmClient, err = llm.NewClient(env.LLM)
+		if err != nil {
+			return fmt.Errorf("creating LLM client: %w", err)
+		}
+	}
+
+	// 10. Create engine and run
+	eng := engine.NewEngine(g, registry, executor, envConfig).
+		WithMode(effectiveMode).
+		WithDomain(kb).
+		WithLLM(llmClient)
+	fmt.Printf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), effectiveMode)
 
 	result := eng.Run(ctx, p)
 

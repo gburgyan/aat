@@ -60,6 +60,9 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 	if len(s.Selections) > 0 {
 		rec.Selections = convertSelections(s.Selections)
 	}
+	if len(s.Resolutions) > 0 {
+		rec.Resolutions = convertResolutions(s.Resolutions)
+	}
 	if s.ErrorClass != nil {
 		rec.ErrorClass = convertErrorClass(s.ErrorClass)
 	}
@@ -124,6 +127,53 @@ func convertErrorClass(ec *ErrorClassification) *archive.ErrorClassRecord {
 		Action:       ec.Action,
 		RetryAttempt: ec.RetryAttempt,
 	}
+}
+
+func convertResolutions(resolutions []ValueResolution) []archive.ValueResolutionRecord {
+	records := make([]archive.ValueResolutionRecord, len(resolutions))
+	for i, r := range resolutions {
+		rec := archive.ValueResolutionRecord{
+			InputName:  r.InputName,
+			Source:     r.Source,
+			RawValue:   r.RawValue,
+			FinalValue: r.FinalValue,
+			FromStep:   r.FromStep,
+			FromOutput: r.FromOutput,
+			Expression: r.Expression,
+			Constraint: r.Constraint,
+			PoolIndex:  r.PoolIndex,
+			PoolSize:   r.PoolSize,
+			Tried:      r.Tried,
+		}
+		if r.Constraint != "" {
+			ok := r.ConstraintOK
+			rec.ConstraintOK = &ok
+		}
+		if r.LLMCall != nil {
+			rec.LLMCall = convertLLMCall(r.LLMCall)
+		}
+		records[i] = rec
+	}
+	return records
+}
+
+func convertLLMCall(call *LLMCallRecord) *archive.LLMCallRecord {
+	rec := &archive.LLMCallRecord{
+		Model:        call.Model,
+		Response:     call.Response,
+		InputTokens:  call.InputTokens,
+		OutputTokens: call.OutputTokens,
+		DurationMs:   call.DurationMs,
+		FinishReason: call.FinishReason,
+		Error:        call.Error,
+	}
+	for _, m := range call.Messages {
+		rec.Messages = append(rec.Messages, archive.LLMMessageRecord{
+			Role:    m.Role,
+			Content: m.Content,
+		})
+	}
+	return rec
 }
 
 // errString returns the error message or empty string for nil.

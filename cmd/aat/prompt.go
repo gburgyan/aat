@@ -186,11 +186,11 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 	}
 
 	// 11. Execute
-	return executePlan(ctx, p, g, args, apiConfig, env)
+	return executePlan(ctx, p, g, args, apiConfig, env, kb, llmClient)
 }
 
 // executePlan loads templates, creates the engine, runs the plan, and writes an archive.
-func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, apiConfig *config.APIConfig, env *config.Environment) error {
+func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, apiConfig *config.APIConfig, env *config.Environment, kb *domain.KnowledgeBase, llmClient llm.Client) error {
 	// Load templates
 	registry := adapter.NewRegistry()
 	count, err := adapter.LoadTemplates(args.TemplatesPath, registry)
@@ -207,9 +207,18 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		Values:  apiConfig.Values,
 	}
 
+	// Determine execution mode: prompt command always has LLM, default to lean
+	effectiveMode := env.LLM.Mode
+	if effectiveMode == "" {
+		effectiveMode = config.ModeLean
+	}
+
 	// Create engine and run
-	eng := engine.NewEngine(g, registry, executor, envConfig)
-	fmt.Printf("aat: executing plan (%d steps)...\n\n", len(p.Execution.Steps))
+	eng := engine.NewEngine(g, registry, executor, envConfig).
+		WithMode(effectiveMode).
+		WithDomain(kb).
+		WithLLM(llmClient)
+	fmt.Printf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), effectiveMode)
 
 	result := eng.Run(ctx, p)
 
