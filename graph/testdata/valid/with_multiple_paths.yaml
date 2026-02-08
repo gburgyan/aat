@@ -1,0 +1,66 @@
+version: "1.0.0"
+
+nodes:
+  source:
+    description: "Primary data source"
+    adapter: source
+    inputs: []
+    outputs:
+      - name: data
+        type: string
+
+  transform:
+    description: "Transform data (longer path)"
+    adapter: transform
+    inputs:
+      - name: data
+        type: string
+    outputs:
+      - name: result
+        type: string
+
+  shortcut:
+    description: "Direct shortcut (shorter path)"
+    adapter: shortcut
+    inputs: []
+    outputs:
+      - name: result
+        type: string
+
+  preferredSource:
+    description: "Preferred path source"
+    adapter: preferredSource
+    inputs:
+      - name: data
+        type: string
+    outputs:
+      - name: result
+        type: string
+
+  consumer:
+    description: "Consumes result from one of the paths"
+    adapter: consumer
+    inputs:
+      - name: result
+        type: string
+    outputs:
+      - name: output
+        type: string
+
+edges:
+  # Path 1: source → transform → consumer (longer, depth 2)
+  - from: source.data
+    to: transform.data
+  - from: transform.result
+    to: consumer.result
+
+  # Path 2: shortcut → consumer (shorter, depth 1)
+  - from: shortcut.result
+    to: consumer.result
+
+  # Path 3: source → preferredSource → consumer (preferred edge)
+  - from: source.data
+    to: preferredSource.data
+  - from: preferredSource.result
+    to: consumer.result
+    preferred: true

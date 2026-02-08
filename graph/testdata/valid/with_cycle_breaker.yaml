@@ -1,0 +1,70 @@
+version: "1.0.0"
+
+nodes:
+  authenticate:
+    description: "Authenticate with the API"
+    adapter: auth.authenticate
+    cycleBreaker: true
+    inputs:
+      - name: clientId
+        type: string
+      - name: clientSecret
+        type: string
+    outputs:
+      - name: token
+        type: string
+
+  refreshToken:
+    description: "Refresh an expired token"
+    adapter: auth.refreshToken
+    inputs:
+      - name: token
+        type: string
+    outputs:
+      - name: token
+        type: string
+
+  getUser:
+    description: "Get user details"
+    adapter: api.getUser
+    inputs:
+      - name: token
+        type: string
+      - name: userId
+        type: string
+    outputs:
+      - name: name
+        type: string
+      - name: email
+        type: string
+
+  updateUser:
+    description: "Update user details"
+    adapter: api.updateUser
+    inputs:
+      - name: token
+        type: string
+      - name: userId
+        type: string
+      - name: name
+        type: string
+    outputs:
+      - name: updated
+        type: boolean
+
+edges:
+  # Auth cycle: authenticate → refreshToken → authenticate
+  - from: authenticate.token
+    to: refreshToken.token
+  - from: refreshToken.token
+    to: authenticate.clientId
+
+  # Auth → API nodes
+  - from: authenticate.token
+    to: getUser.token
+  - from: authenticate.token
+    to: updateUser.token
+
+  # getUser → updateUser (data dependency)
+  - from: getUser.name
+    to: updateUser.name

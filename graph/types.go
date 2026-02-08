@@ -17,12 +17,13 @@ type Graph struct {
 
 // Node represents a single logical API operation in the graph.
 type Node struct {
-	Name        string   // populated from map key during parsing, not from YAML
-	Description string   `yaml:"description"`
-	Adapter     string   `yaml:"adapter"`
-	Inputs      []Input  `yaml:"inputs"`
-	Outputs     []Output `yaml:"outputs"`
-	Cleanup     string   `yaml:"cleanup,omitempty"`
+	Name         string   // populated from map key during parsing, not from YAML
+	Description  string   `yaml:"description"`
+	Adapter      string   `yaml:"adapter"`
+	Inputs       []Input  `yaml:"inputs"`
+	Outputs      []Output `yaml:"outputs"`
+	Cleanup      string   `yaml:"cleanup,omitempty"`
+	CycleBreaker bool     `yaml:"cycleBreaker,omitempty"`
 }
 
 // Input describes a single input parameter for a node.
@@ -51,9 +52,10 @@ type Field struct {
 
 // Edge describes a data flow connection between a node output and a node input.
 type Edge struct {
-	From   string `yaml:"from"`
-	To     string `yaml:"to"`
-	Select bool   `yaml:"select,omitempty"`
+	From      string `yaml:"from"`
+	To        string `yaml:"to"`
+	Select    bool   `yaml:"select,omitempty"`
+	Preferred bool   `yaml:"preferred,omitempty"`
 }
 
 // Condition describes a conditional requirement or ordering constraint.

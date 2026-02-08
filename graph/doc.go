@@ -1,2 +1,2 @@
-// Package graph defines the API graph model, parsing, traversal, and diffing.
+// Package graph defines the API graph model, parsing, traversal, backward chaining, and diffing.
 package graph

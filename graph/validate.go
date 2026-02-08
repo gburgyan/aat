@@ -231,7 +231,17 @@ func detectCycles(g *Graph) []string {
 				for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
 					path[i], path[j] = path[j], path[i]
 				}
-				cycles = append(cycles, fmt.Sprintf("cycle detected: %s", strings.Join(path, " → ")))
+				// Suppress cycle if any node in the path is a CycleBreaker
+				hasCycleBreaker := false
+				for _, p := range path {
+					if n := g.Nodes[p]; n != nil && n.CycleBreaker {
+						hasCycleBreaker = true
+						break
+					}
+				}
+				if !hasCycleBreaker {
+					cycles = append(cycles, fmt.Sprintf("cycle detected: %s", strings.Join(path, " → ")))
+				}
 			} else if color[neighbor] == white {
 				parent[neighbor] = node
 				dfs(neighbor)
