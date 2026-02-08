@@ -19,7 +19,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 - [x] 7. Implement array selection strategies in engine
 - [x] 8. Implement error taxonomy and failure handling
 - [x] 9. Implement mechanical validation
-- [ ] 10. Implement config/environment layer
+- [x] 10. Implement config/environment layer
 - [ ] 11. Implement archive writer
 - [ ] 12. Wire CLI: `aat run --plan <file> --env <env>`
 

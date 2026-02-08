@@ -1,0 +1,472 @@
+package config
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// --- Loading tests ---
+
+func TestLoadEnvironment_Full(t *testing.T) {
+	env, err := LoadEnvironment("testdata/environments/test.yaml")
+	require.NoError(t, err)
+
+	assert.Equal(t, "test", env.Name)
+	assert.Equal(t, "https://api.example.com", env.APIBaseURL)
+	assert.Equal(t, "oauth2", env.Auth.Type)
+	assert.Equal(t, "https://auth.example.com/oauth/token", env.Auth.TokenURL)
+	assert.Equal(t, "literal", env.Auth.Credentials["username"].Source)
+	assert.Equal(t, "testuser", env.Auth.Credentials["username"].Value)
+	assert.Equal(t, "https://llm.example.com/v1", env.LLM.Endpoint)
+	assert.Equal(t, "gpt-4", env.LLM.Model)
+	assert.Equal(t, ModeAdaptive, env.LLM.Mode)
+	assert.Equal(t, 5*time.Minute, env.Settings.MaxRunDuration.Duration)
+	assert.Equal(t, 3, env.Settings.DefaultRetries)
+	assert.Equal(t, 5, env.Settings.MaxRelaxationDepth)
+	assert.Equal(t, ArchiveJSONGZ, env.Settings.ArchiveFormat)
+	assert.Equal(t, "Full test environment with all fields populated.", env.Notes)
+}
+
+func TestLoadEnvironment_Minimal(t *testing.T) {
+	env, err := LoadEnvironment("testdata/environments/minimal.yaml")
+	require.NoError(t, err)
+
+	assert.Equal(t, "minimal", env.Name)
+	assert.Equal(t, "https://api.example.com", env.APIBaseURL)
+	assert.Equal(t, "none", env.Auth.Type)
+
+	// Verify defaults applied
+	assert.Equal(t, ModeLean, env.LLM.Mode)
+	assert.Equal(t, 120*time.Second, env.Settings.MaxRunDuration.Duration)
+	assert.Equal(t, 2, env.Settings.DefaultRetries)
+	assert.Equal(t, 3, env.Settings.MaxRelaxationDepth)
+	assert.Equal(t, ArchiveJSON, env.Settings.ArchiveFormat)
+}
+
+func TestLoadEnvironment_MissingFile(t *testing.T) {
+	_, err := LoadEnvironment("testdata/environments/nonexistent.yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading environment file")
+}
+
+func TestLoadEnvironment_MalformedYAML(t *testing.T) {
+	tmpFile := t.TempDir() + "/bad.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte(":\n  :\n    [invalid"), 0644))
+
+	_, err := LoadEnvironment(tmpFile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing environment YAML")
+}
+
+func TestLoadEnvironment_MissingName(t *testing.T) {
+	_, err := LoadEnvironment("testdata/environments/invalid/missing_name.yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "environment name is required")
+}
+
+func TestLoadEnvironment_MissingAPIBaseURL(t *testing.T) {
+	tmpFile := t.TempDir() + "/no_url.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte("environment: test\nauth:\n  type: none\n"), 0644))
+
+	_, err := LoadEnvironment(tmpFile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "apiBaseUrl is required")
+}
+
+func TestLoadEnvironmentFromDir(t *testing.T) {
+	env, err := LoadEnvironmentFromDir("testdata/environments", "test")
+	require.NoError(t, err)
+	assert.Equal(t, "test", env.Name)
+}
+
+func TestLoadEnvironmentFromDir_NotFound(t *testing.T) {
+	_, err := LoadEnvironmentFromDir("testdata/environments", "nonexistent")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "reading environment file")
+}
+
+// --- Validation tests ---
+
+func TestValidateEnvironment_InvalidAuthType(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "magic"},
+		LLM:        LLMConfig{Mode: ModeLean},
+		Settings:   RuntimeSettings{ArchiveFormat: ArchiveJSON},
+	}
+	err := ValidateEnvironment(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown auth type")
+}
+
+func TestValidateEnvironment_OAuth2MissingTokenURL(t *testing.T) {
+	_, err := LoadEnvironment("testdata/environments/invalid/oauth2_no_token_url.yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auth.tokenUrl is required")
+}
+
+func TestValidateEnvironment_OAuth2MissingCredentials(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type:     "oauth2",
+			TokenURL: "https://auth.example.com/token",
+			// no credentials
+		},
+		LLM:      LLMConfig{Mode: ModeLean},
+		Settings: RuntimeSettings{ArchiveFormat: ArchiveJSON},
+	}
+	err := ValidateEnvironment(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auth.credentials.username")
+	assert.Contains(t, err.Error(), "auth.credentials.password")
+	assert.Contains(t, err.Error(), "auth.credentials.clientId")
+	assert.Contains(t, err.Error(), "auth.credentials.clientSecret")
+}
+
+func TestValidateEnvironment_APIKeyMissingKey(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "apikey", HeaderName: "X-Api-Key"},
+		LLM:        LLMConfig{Mode: ModeLean},
+		Settings:   RuntimeSettings{ArchiveFormat: ArchiveJSON},
+	}
+	err := ValidateEnvironment(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auth.credentials.key")
+}
+
+func TestValidateEnvironment_APIKeyMissingHeaderName(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type:        "apikey",
+			Credentials: map[string]SecretRef{"key": {Source: "literal", Value: "abc"}},
+		},
+		LLM:      LLMConfig{Mode: ModeLean},
+		Settings: RuntimeSettings{ArchiveFormat: ArchiveJSON},
+	}
+	err := ValidateEnvironment(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "auth.headerName is required")
+}
+
+func TestValidateEnvironment_InvalidMode(t *testing.T) {
+	_, err := LoadEnvironment("testdata/environments/invalid/bad_mode.yaml")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown llm.mode")
+}
+
+func TestValidateEnvironment_InvalidArchiveFormat(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		LLM:        LLMConfig{Mode: ModeLean},
+		Settings:   RuntimeSettings{ArchiveFormat: "xml"},
+	}
+	err := ValidateEnvironment(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown archiveFormat")
+}
+
+// --- SecretRef tests ---
+
+func TestSecretRef_ResolveEnv(t *testing.T) {
+	t.Setenv("AAT_TEST_SECRET", "my-secret-value")
+	ref := SecretRef{Source: "env", Var: "AAT_TEST_SECRET"}
+	val, err := ref.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "my-secret-value", val)
+}
+
+func TestSecretRef_ResolveEnvNotSet(t *testing.T) {
+	ref := SecretRef{Source: "env", Var: "AAT_DEFINITELY_NOT_SET_12345"}
+	_, err := ref.Resolve()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not set")
+}
+
+func TestSecretRef_ResolveLiteral(t *testing.T) {
+	ref := SecretRef{Source: "literal", Value: "plain-value"}
+	val, err := ref.Resolve()
+	require.NoError(t, err)
+	assert.Equal(t, "plain-value", val)
+}
+
+func TestSecretRef_ResolveUnknownSource(t *testing.T) {
+	ref := SecretRef{Source: "vault"}
+	_, err := ref.Resolve()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown secret source")
+}
+
+func TestSecretRef_IsSet(t *testing.T) {
+	assert.True(t, SecretRef{Source: "env", Var: "X"}.IsSet())
+	assert.True(t, SecretRef{Source: "literal", Value: "x"}.IsSet())
+	assert.False(t, SecretRef{}.IsSet())
+}
+
+// --- Duration tests ---
+
+func TestDuration_Parse(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected time.Duration
+	}{
+		{"120s", 120 * time.Second},
+		{"5m", 5 * time.Minute},
+		{"2h30m", 2*time.Hour + 30*time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			yaml := "environment: test\napiBaseUrl: https://x\nauth:\n  type: none\nsettings:\n  maxRunDuration: " + tt.input + "\n"
+			tmpFile := t.TempDir() + "/dur.yaml"
+			require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
+
+			env, err := LoadEnvironment(tmpFile)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expected, env.Settings.MaxRunDuration.Duration)
+		})
+	}
+}
+
+func TestDuration_RejectBareInteger(t *testing.T) {
+	yaml := "environment: test\napiBaseUrl: https://x\nauth:\n  type: none\nsettings:\n  maxRunDuration: 120\n"
+	tmpFile := t.TempDir() + "/dur.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
+
+	_, err := LoadEnvironment(tmpFile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid duration")
+}
+
+// --- Auth tests ---
+
+func TestAuthenticate_OAuth2Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "application/x-www-form-urlencoded", r.Header.Get("Content-Type"))
+
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "password", r.FormValue("grant_type"))
+		assert.Equal(t, "testuser", r.FormValue("username"))
+		assert.Equal(t, "testpass", r.FormValue("password"))
+		assert.Equal(t, "test-client-id", r.FormValue("client_id"))
+		assert.Equal(t, "test-client-secret", r.FormValue("client_secret"))
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(OAuthToken{
+			AccessToken: "test-token-123",
+			TokenType:   "Bearer",
+			ExpiresIn:   3600,
+		})
+	}))
+	defer server.Close()
+
+	auth := AuthConfig{
+		Type:     "oauth2",
+		TokenURL: server.URL,
+		Credentials: map[string]SecretRef{
+			"username":     {Source: "literal", Value: "testuser"},
+			"password":     {Source: "literal", Value: "testpass"},
+			"clientId":     {Source: "literal", Value: "test-client-id"},
+			"clientSecret": {Source: "literal", Value: "test-client-secret"},
+		},
+	}
+
+	token, err := Authenticate(context.Background(), auth)
+	require.NoError(t, err)
+	assert.Equal(t, "test-token-123", token.AccessToken)
+	assert.Equal(t, "Bearer", token.TokenType)
+	assert.Equal(t, 3600, token.ExpiresIn)
+}
+
+func TestAuthenticate_OAuth2HTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error": "invalid_client"}`))
+	}))
+	defer server.Close()
+
+	auth := AuthConfig{
+		Type:     "oauth2",
+		TokenURL: server.URL,
+		Credentials: map[string]SecretRef{
+			"username":     {Source: "literal", Value: "bad"},
+			"password":     {Source: "literal", Value: "creds"},
+			"clientId":     {Source: "literal", Value: "x"},
+			"clientSecret": {Source: "literal", Value: "x"},
+		},
+	}
+
+	_, err := Authenticate(context.Background(), auth)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "status 401")
+}
+
+func TestAuthenticate_OAuth2MalformedResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("not json"))
+	}))
+	defer server.Close()
+
+	auth := AuthConfig{
+		Type:     "oauth2",
+		TokenURL: server.URL,
+		Credentials: map[string]SecretRef{
+			"username":     {Source: "literal", Value: "u"},
+			"password":     {Source: "literal", Value: "p"},
+			"clientId":     {Source: "literal", Value: "c"},
+			"clientSecret": {Source: "literal", Value: "s"},
+		},
+	}
+
+	_, err := Authenticate(context.Background(), auth)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "parsing auth response")
+}
+
+func TestAuthenticate_OAuth2MissingAccessToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"token_type": "Bearer",
+			"expires_in": 3600,
+		})
+	}))
+	defer server.Close()
+
+	auth := AuthConfig{
+		Type:     "oauth2",
+		TokenURL: server.URL,
+		Credentials: map[string]SecretRef{
+			"username":     {Source: "literal", Value: "u"},
+			"password":     {Source: "literal", Value: "p"},
+			"clientId":     {Source: "literal", Value: "c"},
+			"clientSecret": {Source: "literal", Value: "s"},
+		},
+	}
+
+	_, err := Authenticate(context.Background(), auth)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing access_token")
+}
+
+func TestAuthenticate_BearerPassthrough(t *testing.T) {
+	auth := AuthConfig{
+		Type: "bearer",
+		Credentials: map[string]SecretRef{
+			"token": {Source: "literal", Value: "my-bearer-token"},
+		},
+	}
+
+	token, err := Authenticate(context.Background(), auth)
+	require.NoError(t, err)
+	assert.Equal(t, "my-bearer-token", token.AccessToken)
+	assert.Equal(t, "Bearer", token.TokenType)
+}
+
+func TestAuthenticate_APIKeyPassthrough(t *testing.T) {
+	auth := AuthConfig{
+		Type:       "apikey",
+		HeaderName: "X-Api-Key",
+		Credentials: map[string]SecretRef{
+			"key": {Source: "literal", Value: "my-api-key"},
+		},
+	}
+
+	token, err := Authenticate(context.Background(), auth)
+	require.NoError(t, err)
+	assert.Equal(t, "my-api-key", token.AccessToken)
+	assert.Equal(t, "apikey", token.TokenType)
+}
+
+func TestAuthenticate_NoneReturnsNil(t *testing.T) {
+	auth := AuthConfig{Type: "none"}
+	token, err := Authenticate(context.Background(), auth)
+	require.NoError(t, err)
+	assert.Nil(t, token)
+}
+
+// --- BuildAPIConfig test ---
+
+func TestBuildAPIConfig_OAuth2(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(OAuthToken{
+			AccessToken: "built-token",
+			TokenType:   "Bearer",
+			ExpiresIn:   3600,
+		})
+	}))
+	defer server.Close()
+
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type:     "oauth2",
+			TokenURL: server.URL,
+			Credentials: map[string]SecretRef{
+				"username":     {Source: "literal", Value: "u"},
+				"password":     {Source: "literal", Value: "p"},
+				"clientId":     {Source: "literal", Value: "c"},
+				"clientSecret": {Source: "literal", Value: "s"},
+			},
+		},
+	}
+
+	cfg, err := env.BuildAPIConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.example.com", cfg.BaseURL)
+	assert.Equal(t, "Bearer built-token", cfg.Headers["Authorization"])
+	assert.NotNil(t, cfg.Values)
+}
+
+func TestBuildAPIConfig_APIKey(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type:       "apikey",
+			HeaderName: "X-Api-Key",
+			Credentials: map[string]SecretRef{
+				"key": {Source: "literal", Value: "secret-key"},
+			},
+		},
+	}
+
+	cfg, err := env.BuildAPIConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "secret-key", cfg.Headers["X-Api-Key"])
+	_, hasAuth := cfg.Headers["Authorization"]
+	assert.False(t, hasAuth)
+}
+
+func TestBuildAPIConfig_None(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+	}
+
+	cfg, err := env.BuildAPIConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "https://api.example.com", cfg.BaseURL)
+	assert.Empty(t, cfg.Headers)
+}

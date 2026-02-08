@@ -1,0 +1,35 @@
+environment: test
+apiBaseUrl: https://api.example.com
+
+auth:
+  type: oauth2
+  tokenUrl: https://auth.example.com/oauth/token
+  credentials:
+    username:
+      source: literal
+      value: testuser
+    password:
+      source: literal
+      value: testpass
+    clientId:
+      source: literal
+      value: test-client-id
+    clientSecret:
+      source: literal
+      value: test-client-secret
+
+llm:
+  endpoint: https://llm.example.com/v1
+  apiKey:
+    source: env
+    var: LLM_API_KEY
+  model: gpt-4
+  mode: adaptive
+
+settings:
+  maxRunDuration: 5m
+  defaultRetries: 3
+  maxRelaxationDepth: 5
+  archiveFormat: json.gz
+
+notes: Full test environment with all fields populated.

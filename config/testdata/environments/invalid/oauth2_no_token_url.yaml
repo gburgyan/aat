@@ -1,0 +1,18 @@
+environment: oauth2-no-url
+apiBaseUrl: https://api.example.com
+
+auth:
+  type: oauth2
+  credentials:
+    username:
+      source: literal
+      value: user
+    password:
+      source: literal
+      value: pass
+    clientId:
+      source: literal
+      value: cid
+    clientSecret:
+      source: literal
+      value: csec

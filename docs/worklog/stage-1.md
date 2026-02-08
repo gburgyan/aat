@@ -205,3 +205,22 @@
 
 - JSON Schema validation (`type: schema`) and OAS-based response validation are deferred. These will be important for comprehensive API testing — see implementation plan for future task details.
 - None blocking — ready for Task 10 (config/environment layer).
+
+## 2026-02-07 — Config/Environment Layer (Task 10)
+
+**What:** Replaced the JSON-based `Settings`/`LoadSettings` system with a unified YAML-based `Environment` configuration. New types: `Environment`, `AuthConfig`, `LLMConfig`, `RuntimeSettings`, `SecretRef`, `Duration`, `APIConfig`. `Authenticate` now takes `AuthConfig` and supports oauth2, apikey, bearer, and none auth types. `BuildAPIConfig` bridges environment config to adapter layer. 3 new files, 1 rewritten file, 3 deleted files, 5 test fixtures, 32 tests all passing.
+
+**Decisions:**
+
+- **Unified config — removed JSON settings:** The old `Settings` struct and `LoadSettings(path)` (JSON-based) are deleted. The `Environment` YAML config replaces everything. One config system, not two.
+- **Named credential fields via `map[string]SecretRef`:** Each auth type requires specific keys (oauth2: username/password/clientId/clientSecret; apikey: key; bearer: token). Validation checks for required keys per auth type.
+- **`SecretRef` with env/literal sources:** Secrets reference environment variables (`source: env, var: VAR_NAME`) or inline literals (`source: literal, value: xyz`). Extensible for vault/KMS sources later.
+- **`Duration` custom YAML unmarshaling:** Wraps `time.Duration` with `time.ParseDuration`-based YAML unmarshaling. Rejects bare integers — must be explicit like "120s" or "5m".
+- **Defaults applied before validation:** mode → lean, maxRunDuration → 120s, defaultRetries → 2, maxRelaxationDepth → 3, archiveFormat → json.
+- **`APIConfig` as flat bridge:** `BuildAPIConfig(ctx)` authenticates and produces a flat `APIConfig{BaseURL, Headers, Values}` suitable for bridging to `adapter.EnvironmentConfig` at the call site (Task 12).
+- **Config stays leaf:** No aat imports. The bridge to `adapter.EnvironmentConfig` happens at the call site, not in this package.
+- **SQLite deferred to Task 10b:** Local run history indexing via SQLite is split out as a separate sub-task to keep this change focused on the config model.
+
+**Open questions:**
+
+- None — ready for Task 11 (archive writer).

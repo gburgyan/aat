@@ -17,18 +17,53 @@ type OAuthToken struct {
 	ExpiresIn   int    `json:"expires_in"`
 }
 
-// Authenticate performs an OAuth2 Resource Owner Password Credentials (ROPC)
-// token exchange against the settings' AuthURL.
-func Authenticate(ctx context.Context, s *Settings) (*OAuthToken, error) {
-	form := url.Values{
-		"grant_type":    {"password"},
-		"username":      {s.Username},
-		"password":      {s.Password},
-		"client_id":     {s.ClientID},
-		"client_secret": {s.ClientSecret},
+// Authenticate performs authentication based on the AuthConfig type.
+// For oauth2, it performs an OAuth2 ROPC token exchange.
+// For apikey, it returns the resolved key as the access token.
+// For bearer, it returns the resolved token.
+// For none, it returns nil.
+func Authenticate(ctx context.Context, auth AuthConfig) (*OAuthToken, error) {
+	switch auth.Type {
+	case "oauth2":
+		return authenticateOAuth2(ctx, auth)
+	case "apikey":
+		return authenticateAPIKey(auth)
+	case "bearer":
+		return authenticateBearer(auth)
+	case "none", "":
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("unknown auth type %q", auth.Type)
+	}
+}
+
+func authenticateOAuth2(ctx context.Context, auth AuthConfig) (*OAuthToken, error) {
+	username, err := auth.Credentials["username"].Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolving username: %w", err)
+	}
+	password, err := auth.Credentials["password"].Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolving password: %w", err)
+	}
+	clientID, err := auth.Credentials["clientId"].Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolving clientId: %w", err)
+	}
+	clientSecret, err := auth.Credentials["clientSecret"].Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolving clientSecret: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.AuthURL, strings.NewReader(form.Encode()))
+	form := url.Values{
+		"grant_type":    {"password"},
+		"username":      {username},
+		"password":      {password},
+		"client_id":     {clientID},
+		"client_secret": {clientSecret},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, auth.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("creating auth request: %w", err)
 	}
@@ -59,4 +94,34 @@ func Authenticate(ctx context.Context, s *Settings) (*OAuthToken, error) {
 	}
 
 	return &token, nil
+}
+
+func authenticateAPIKey(auth AuthConfig) (*OAuthToken, error) {
+	ref, ok := auth.Credentials["key"]
+	if !ok {
+		return nil, fmt.Errorf("apikey auth missing credentials.key")
+	}
+	key, err := ref.Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolving api key: %w", err)
+	}
+	return &OAuthToken{
+		AccessToken: key,
+		TokenType:   "apikey",
+	}, nil
+}
+
+func authenticateBearer(auth AuthConfig) (*OAuthToken, error) {
+	ref, ok := auth.Credentials["token"]
+	if !ok {
+		return nil, fmt.Errorf("bearer auth missing credentials.token")
+	}
+	token, err := ref.Resolve()
+	if err != nil {
+		return nil, fmt.Errorf("resolving bearer token: %w", err)
+	}
+	return &OAuthToken{
+		AccessToken: token,
+		TokenType:   "Bearer",
+	}, nil
 }

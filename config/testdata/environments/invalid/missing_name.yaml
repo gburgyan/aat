@@ -1,0 +1,4 @@
+apiBaseUrl: https://api.example.com
+
+auth:
+  type: none

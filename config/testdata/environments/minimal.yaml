@@ -1,0 +1,5 @@
+environment: minimal
+apiBaseUrl: https://api.example.com
+
+auth:
+  type: none
