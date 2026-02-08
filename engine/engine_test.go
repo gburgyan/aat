@@ -363,6 +363,354 @@ func (a *captureAdapter) BuildRequest(inputs map[string]any, config *adapter.Env
 	return a.stubAdapter.BuildRequest(inputs, config)
 }
 
+func TestEngine_Run_StatusAssertionPasses(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{{Name: "id", Type: "string"}},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id": "abc-123"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "GET",
+		path:     "/step1",
+		response: map[string]any{"id": "abc-123"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							{Type: "status", Expect: 200},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	assert.Nil(t, result.Error)
+	require.Len(t, result.Steps, 1)
+	require.NotNil(t, result.Steps[0].Validation)
+	assert.True(t, result.Steps[0].Validation.Passed)
+}
+
+func TestEngine_Run_FailingAssertionTriggersCleanup(t *testing.T) {
+	cleanupCalled := false
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{{Name: "id", Type: "string"}},
+				Cleanup: "cleanup1",
+			},
+			"cleanup1": {
+				Name:    "cleanup1",
+				Adapter: "test.cleanup1",
+				Inputs:  []graph.Input{},
+			},
+			"step2": {
+				Name:    "step2",
+				Adapter: "test.step2",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{{Name: "result", Type: "string"}},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/cleanup" {
+			cleanupCalled = true
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id": "abc"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method: "POST", path: "/step1",
+		response: map[string]any{"id": "abc"},
+	}))
+	require.NoError(t, registry.Register("test.cleanup1", &stubAdapter{
+		method: "DELETE", path: "/cleanup",
+		response: map[string]any{},
+	}))
+	require.NoError(t, registry.Register("test.step2", &stubAdapter{
+		method: "POST", path: "/step2",
+		response: map[string]any{"result": "done"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							{Type: "status", Expect: 201}, // fails: server returns 200
+						},
+					},
+				},
+				{
+					Node:      "step2",
+					DependsOn: []string{"step1"},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	assert.Error(t, result.Error)
+	assert.Contains(t, result.Error.Error(), "failed mechanical validation")
+	// step2 should NOT have executed
+	require.Len(t, result.Steps, 1)
+	// Cleanup should have run
+	assert.True(t, cleanupCalled)
+}
+
+func TestEngine_Run_FieldExistsAssertionOnBody(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{{Name: "name", Type: "string"}},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"name": "Alice", "age": 30}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method: "GET", path: "/step1",
+		response: map[string]any{"name": "Alice"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							{Type: "fieldExists", Path: "name"},
+							{Type: "fieldExists", Path: "age"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.NotNil(t, result.Steps[0].Validation)
+	assert.True(t, result.Steps[0].Validation.Passed)
+	assert.Len(t, result.Steps[0].Validation.Results, 2)
+}
+
+func TestEngine_Run_NoAssertions(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{{Name: "id", Type: "string"}},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method: "GET", path: "/step1",
+		response: map[string]any{"id": "x"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{{Node: "step1"}},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Nil(t, result.Steps[0].Validation)
+}
+
+func TestEngine_Run_PredicateAssertion(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{{Name: "count", Type: "integer"}},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"count": 5, "active": true}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method: "GET", path: "/step1",
+		response: map[string]any{"count": 5},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							{Type: "predicate", Expr: "count > 0"},
+							{Type: "predicate", Expr: "active == true"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.NotNil(t, result.Steps[0].Validation)
+	assert.True(t, result.Steps[0].Validation.Passed)
+	assert.Len(t, result.Steps[0].Validation.Results, 2)
+}
+
+func TestEngine_Run_ContinueOnAssertionFailure(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{{Name: "id", Type: "string"}},
+			},
+			"step2": {
+				Name:    "step2",
+				Adapter: "test.step2",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{{Name: "result", Type: "string"}},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"id": "abc", "result": "done"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method: "POST", path: "/step1",
+		response: map[string]any{"id": "abc"},
+	}))
+	require.NoError(t, registry.Register("test.step2", &stubAdapter{
+		method: "POST", path: "/step2",
+		response: map[string]any{"result": "done"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine.ContinueOnAssertionFailure = true
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							{Type: "status", Expect: 201}, // fails: server returns 200
+						},
+					},
+				},
+				{Node: "step2"},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	// Both steps should have executed
+	require.Len(t, result.Steps, 2)
+	assert.False(t, result.Steps[0].Validation.Passed)
+}
+
 func TestEngine_Run_StepDurations(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",

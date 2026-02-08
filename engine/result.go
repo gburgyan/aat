@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
+	"github.com/gburgyan/aat/validate"
 )
 
 // Outcome describes the overall result of a plan execution.
@@ -50,8 +51,9 @@ type StepResult struct {
 	StatusCode int
 	Error      error
 	Duration   time.Duration
-	ErrorClass *ErrorClassification // nil on success
-	RetryCount int                  // number of retries performed (0 = no retries)
+	ErrorClass *ErrorClassification       // nil on success
+	RetryCount int                        // number of retries performed (0 = no retries)
+	Validation *validate.MechanicalResult // nil if no assertions configured
 }
 
 // SelectionDecision records how a particular array selection was resolved.

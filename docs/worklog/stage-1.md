@@ -185,3 +185,23 @@
 **Open questions:**
 
 - None — ready for Task 9 (mechanical validation).
+
+## 2026-02-07 — Mechanical Validation (Task 9)
+
+**What:** Implemented the `validate` package with mechanical assertion types and integrated validation into the engine execution loop. 4 new files, 2 modified files. ~43 new tests (37 validate, 6 engine integration), all passing.
+
+**Decisions:**
+
+- **5 assertion types:** `status`, `schema` (stub), `fieldExists`, `fieldEquals`, `predicate`. Each has a dedicated checker function. Unknown types produce a failed result with a descriptive message rather than panicking.
+- **Dependency boundary respected:** `validate` cannot import `plan`, `engine`, or `graph`. The predicate evaluator is injected as a `PredicateEvalFunc` function type. `engine` bridges `plan.MechanicalAssertion` → `validate.MechanicalAssertion` via a `convertAssertions` helper doing field-by-field copy.
+- **`NormalizeJSONPath` duplicated from adapter:** Small function (~10 lines). Extracting a shared package would add a dependency and complexity disproportionate to the code savings. Both copies are tested independently.
+- **Schema validation stubbed:** `checkSchema` always returns `passed: true` with "not yet implemented" message. JSON Schema and OAS-based validation deferred to a future task.
+- **Cleanup pushed before assertion check:** When a step's HTTP call succeeds (2xx) but assertions fail, the cleanup node is still pushed. The step executed and may have created resources that need teardown. This differs from the error/4xx case where cleanup was already pushed for prior successful steps.
+- **`ContinueOnAssertionFailure` on Engine:** Boolean field controls whether assertion failure aborts execution. Default is false (abort + cleanup). When true, the outcome is set to Failed but subsequent steps still execute — useful for diagnostic runs.
+- **Numeric coercion for status expects:** YAML unmarshals `expect: 200` as `int`, but `float64(200)` also works. The `toInt` helper handles int, int64, float64 (if whole number), and json.Number.
+- **`valuesEqual` uses gjson.Result:** Direct comparison against the gjson result value rather than re-parsing. Handles string, bool, float64, and int with coercion.
+
+**Open questions:**
+
+- JSON Schema validation (`type: schema`) and OAS-based response validation are deferred. These will be important for comprehensive API testing — see implementation plan for future task details.
+- None blocking — ready for Task 10 (config/environment layer).

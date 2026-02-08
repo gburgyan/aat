@@ -8,6 +8,7 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
+	"github.com/gburgyan/aat/validate"
 )
 
 // Engine orchestrates plan execution against a graph using adapters.
@@ -16,6 +17,12 @@ type Engine struct {
 	registry *adapter.Registry
 	executor *adapter.HTTPExecutor
 	config   *adapter.EnvironmentConfig
+
+	// ContinueOnAssertionFailure controls whether execution continues after
+	// a step's mechanical assertions fail. When false (default), assertion
+	// failure stops execution and triggers cleanup. When true, the outcome
+	// is set to Failed but subsequent steps still execute.
+	ContinueOnAssertionFailure bool
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -94,12 +101,27 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			state.StoreOutputs(step.Node, result.Outputs)
 		}
 
-		// Push cleanup if node has one
+		// Push cleanup if node has one — done before assertion check because
+		// the step executed successfully (HTTP-wise) and may have created resources.
 		if node.Cleanup != "" {
 			cleanupStack.Push(CleanupEntry{
 				NodeName: node.Cleanup,
 				ForNode:  node.Name,
 			})
+		}
+
+		// Run mechanical assertions if configured
+		if result.Validation != nil && !result.Validation.Passed {
+			outcome = OutcomeFailed
+			if !e.ContinueOnAssertionFailure {
+				cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+				return &RunResult{
+					Outcome:        outcome,
+					Steps:          stepResults,
+					CleanupResults: cleanupResults,
+					Error:          fmt.Errorf("step %q failed mechanical validation", step.Node),
+				}
+			}
 		}
 	}
 
@@ -180,5 +202,30 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		result.Outputs = outputs
 	}
 
+	// Run mechanical assertions if configured
+	if step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
+		result.Validation = validate.RunMechanical(
+			resp.StatusCode, resp.Body,
+			convertAssertions(step.Assertions.Mechanical),
+			plan.EvalPredicate,
+		)
+	}
+
+	return result
+}
+
+// convertAssertions bridges plan.MechanicalAssertion to validate.MechanicalAssertion.
+func convertAssertions(planAssertions []plan.MechanicalAssertion) []validate.MechanicalAssertion {
+	result := make([]validate.MechanicalAssertion, len(planAssertions))
+	for i, pa := range planAssertions {
+		result[i] = validate.MechanicalAssertion{
+			Type:   validate.AssertionType(pa.Type),
+			Expect: pa.Expect,
+			Ref:    pa.Ref,
+			Path:   pa.Path,
+			Value:  pa.Value,
+			Expr:   pa.Expr,
+		}
+	}
 	return result
 }
