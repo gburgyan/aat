@@ -1,0 +1,17 @@
+```yaml
+metadata:
+  prompt: "search for flights from DEN to LAX"
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for available flights"
+      isGoal: true
+      values:
+        origin: "DEN"
+        destination: "LAX"
+        departureDate: "2025-07-01"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+```

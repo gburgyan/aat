@@ -1,0 +1,51 @@
+Here is the execution plan:
+
+```yaml
+metadata:
+  prompt: "book a flight from DEN to SFO"
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for flights from DEN to SFO"
+      values:
+        origin: "DEN"
+        destination: "SFO"
+        departureDate: "2025-06-15"
+    - node: createWorkbench
+      description: "Create a reservation workbench"
+    - node: addOffer
+      dependsOn: [searchFlights, createWorkbench]
+      description: "Add the selected flight offer to the workbench"
+      values:
+        offeringId:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: offeringId
+        productRef:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: offeringId
+    - node: addTraveler
+      dependsOn: [createWorkbench]
+      description: "Add traveler details"
+      values:
+        surname: "Smith"
+        givenName: "John"
+    - node: commitBooking
+      dependsOn: [addOffer, addTraveler]
+      description: "Finalize the booking"
+      isGoal: true
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.locator"
+  cleanup:
+    - node: ignoreWorkbench
+      runOn: always
+```
+
+This plan will book a flight from Denver to San Francisco.

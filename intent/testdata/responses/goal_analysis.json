@@ -1,0 +1,14 @@
+{
+  "goal": "commitBooking",
+  "description": "Book a flight from DEN to SFO by searching, creating a workbench, adding the offer and traveler, then committing the booking",
+  "conditionContext": {},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [
+      {"name": "origin", "description": "Departure must be DEN", "appliesTo": ["searchFlights.origin"]},
+      {"name": "destination", "description": "Arrival must be SFO", "appliesTo": ["searchFlights.destination"]}
+    ],
+    "soft": [],
+    "free": ["departureDate", "passengers", "cabinPreference", "traveler details"]
+  }
+}

@@ -1,0 +1,6 @@
+I'm sorry, but I cannot generate a valid API testing plan because the request is ambiguous. Please provide more specific details about what you want to test.
+
+Here are some suggestions:
+1. Specify the origin and destination airports
+2. Indicate whether this is a one-way or round-trip booking
+3. Mention any specific constraints

@@ -87,6 +87,7 @@ type LLMConfig struct {
 	APIKey   SecretRef     `yaml:"apiKey"`
 	Model    string        `yaml:"model"`
 	Mode     ExecutionMode `yaml:"mode"`
+	Provider string        `yaml:"provider,omitempty"` // "openai" or "anthropic"; auto-detected from endpoint if empty
 }
 
 // RuntimeSettings holds execution-time configuration with sensible defaults.
