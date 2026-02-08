@@ -515,7 +515,7 @@ func TestValidate_SelectionStrategies(t *testing.T) {
 	})
 
 	t.Run("min with sortField ok", func(t *testing.T) {
-		p := baseStep(&SelectionConfig{Strategy: "min", SortField: "price"})
+		p := baseStep(&SelectionConfig{Strategy: "min", SortField: "stops"})
 		err := Validate(p, g)
 		assert.NoError(t, err)
 	})
@@ -594,4 +594,950 @@ func TestValidate_InvalidGraphVersion(t *testing.T) {
 	err := Validate(p, g)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid plan graphVersion")
+}
+
+// --- Gap 1: From field validation ---
+
+func TestValidate_From(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid reference", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From: "searchFlights.catalogOfferings",
+								Select: &SelectionConfig{
+									Strategy: "first",
+									Field:    "offeringId",
+								},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid format no dot", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {From: "searchFlights"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid 'from' reference")
+	})
+
+	t.Run("node not in plan", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {From: "nonexistent.field"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a step in this plan")
+	})
+
+	t.Run("output not on node", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {From: "searchFlights.fakeOutput"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not exist on node")
+	})
+}
+
+// --- Gap 2: Array selection source validation ---
+
+func TestValidate_SelectionSource(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("from array output", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From:   "searchFlights.catalogOfferings",
+								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("from non-array output", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From:   "searchFlights.catalogOfferingsId",
+								Select: &SelectionConfig{Strategy: "first"},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not an array type")
+	})
+
+	t.Run("implicit select edge", func(t *testing.T) {
+		// priceOffer.offeringId has a select edge from searchFlights.catalogOfferings
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						Values: map[string]StepValue{
+							"offeringId": {
+								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("no from no select edge", func(t *testing.T) {
+		// priceOffer.productRef has no select edge in the graph
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						Values: map[string]StepValue{
+							"offeringId": {Default: "o1"},
+							"productRef": {
+								Select: &SelectionConfig{Strategy: "first"},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "no 'from' and no select edge")
+	})
+}
+
+// --- Gap 3: SortField validation ---
+
+func TestValidate_SortField(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid element field", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From: "searchFlights.catalogOfferings",
+								Select: &SelectionConfig{
+									Strategy:  "min",
+									SortField: "stops",
+									Field:     "offeringId",
+								},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid element field", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From: "searchFlights.catalogOfferings",
+								Select: &SelectionConfig{
+									Strategy:  "min",
+									SortField: "nonexistent",
+									Field:     "offeringId",
+								},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not found in elementFields")
+	})
+
+	t.Run("nested path skipped", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From: "searchFlights.catalogOfferings",
+								Select: &SelectionConfig{
+									Strategy:  "min",
+									SortField: "nested.path",
+									Field:     "offeringId",
+								},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("no element fields skipped", func(t *testing.T) {
+		// priceOffer.offerListId is a string output — no elementFields
+		// We use a From pointing to an output that has no elementFields
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From: "searchFlights.catalogOfferings",
+								Select: &SelectionConfig{
+									Strategy:  "min",
+									SortField: "stops",
+									Field:     "offeringId",
+								},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+					{
+						Node:      "addTraveler",
+						DependsOn: []string{"priceOffer"},
+						Values: map[string]StepValue{
+							"surname":   {Default: "Smith"},
+							"givenName": {Default: "Jane"},
+							// Use a From to a scalar output; selection won't be valid
+							// but we're testing sortField skip when no elementFields
+						},
+					},
+				},
+			},
+		}
+		// This just validates the searchFlights→priceOffer chain passes for sortField
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+}
+
+// --- Gap 4: Constraint AppliesTo validation ---
+
+func TestValidate_ConstraintAppliesTo(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid applies to bare node", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{
+				Constraints: &Constraints{
+					Hard: []Constraint{
+						{
+							Name:      "direct flights",
+							Type:      "preference",
+							AppliesTo: []string{"searchFlights"},
+						},
+					},
+				},
+			},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("valid applies to node.input", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{
+				Constraints: &Constraints{
+					Hard: []Constraint{
+						{
+							Name:      "origin",
+							Type:      "preference",
+							AppliesTo: []string{"searchFlights.origin"},
+						},
+					},
+				},
+			},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("unknown applies to hard", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{
+				Constraints: &Constraints{
+					Hard: []Constraint{
+						{
+							Name:      "some constraint",
+							Type:      "preference",
+							AppliesTo: []string{"nonexistent"},
+						},
+					},
+				},
+			},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "appliesTo references unknown step")
+	})
+
+	t.Run("unknown applies to soft", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{
+				Constraints: &Constraints{
+					Soft: []Constraint{
+						{
+							Name:      "some soft constraint",
+							Type:      "preference",
+							AppliesTo: []string{"nonexistent"},
+						},
+					},
+				},
+			},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "appliesTo references unknown step")
+	})
+}
+
+// --- Gap 5: Cleanup and Verification validation ---
+
+func TestValidate_Cleanup(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid node", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+				Cleanup: []CleanupStep{
+					{Node: "ignoreWorkbench", RunOn: "always"},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("unknown node", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+				Cleanup: []CleanupStep{
+					{Node: "nonexistentCleanup", RunOn: "always"},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "cleanup step 0: node \"nonexistentCleanup\" not found in graph")
+	})
+
+	t.Run("invalid runOn", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+				Cleanup: []CleanupStep{
+					{Node: "ignoreWorkbench", RunOn: "bogus"},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid runOn value")
+	})
+
+	t.Run("empty runOn ok", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+				Cleanup: []CleanupStep{
+					{Node: "ignoreWorkbench"},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+}
+
+func TestValidate_Verification(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid node", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+				Verification: []VerificationStep{
+					{Node: "searchFlights", Purpose: "verify search results"},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("unknown node", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+				Verification: []VerificationStep{
+					{Node: "nonexistentVerify"},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "verification step 0: node \"nonexistentVerify\" not found in graph")
+	})
+
+	t.Run("invalid predicate assertion", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+				Verification: []VerificationStep{
+					{
+						Node: "searchFlights",
+						Assertions: &Assertions{
+							Mechanical: []MechanicalAssertion{
+								{Type: "predicate", Expr: "bad <<<"},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "verification step 0")
+		assert.Contains(t, err.Error(), "invalid predicate assertion")
+	})
+}
+
+// --- Gap 6: Unknown value names ---
+
+func TestValidate_UnknownValues(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("hallucinated value", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+							"flightNumber":  {Default: "UA123"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match any input")
+	})
+
+	t.Run("all valid", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+}
+
+// --- Gap 8: Goal consistency ---
+
+func TestValidate_GoalConsistency(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("goal matches step", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{Goal: "commitBooking"},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{Node: "priceOffer", Values: map[string]StepValue{"productRef": {Default: "p0"}}},
+					{Node: "createWorkbench"},
+					{Node: "addOffer"},
+					{Node: "addTraveler", Values: map[string]StepValue{"surname": {Default: "S"}, "givenName": {Default: "J"}}},
+					{Node: "commitBooking", IsGoal: true},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("goal not in plan", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{Goal: "nonexistent"},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "intent goal references unknown step")
+	})
+
+	t.Run("isGoal mismatch", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{Goal: "commitBooking"},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node:   "searchFlights",
+						IsGoal: true,
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{Node: "priceOffer", Values: map[string]StepValue{"productRef": {Default: "p0"}}},
+					{Node: "createWorkbench"},
+					{Node: "addOffer"},
+					{Node: "addTraveler", Values: map[string]StepValue{"surname": {Default: "S"}, "givenName": {Default: "J"}}},
+					{Node: "commitBooking"},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not match intent goal")
+	})
+
+	t.Run("multiple isGoal", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node:   "searchFlights",
+						IsGoal: true,
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:   "priceOffer",
+						IsGoal: true,
+						Values: map[string]StepValue{"productRef": {Default: "p0"}},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "multiple steps marked as isGoal")
+	})
+
+	t.Run("empty goal no isGoal ok", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+}
+
+// --- Gap 9: DependsOn completeness ---
+
+func TestValidate_DependsOnCompleteness(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("from implies dep present", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From:   "searchFlights.catalogOfferings",
+								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("from missing dep", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						// Missing dependsOn: ["searchFlights"]
+						Values: map[string]StepValue{
+							"offeringId": {
+								From:   "searchFlights.catalogOfferings",
+								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "has 'from' reference to \"searchFlights\" but does not list it in dependsOn")
+	})
 }

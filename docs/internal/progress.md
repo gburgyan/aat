@@ -27,8 +27,11 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 
 - [x] 13. Curate domain knowledge layer (13 concepts, 6 types, 6 pools)
 - [x] 14. Implement deterministic backward chaining
-- [ ] 15. Build prompt-to-plan transformer
-- [ ] 16. Implement plan validation
+- [x] 15. Build prompt-to-plan transformer
+  - [x] 15a. LLM client package (`llm/`)
+  - [x] 15b. Formatters, extraction, prompt templates (`intent/`)
+  - [x] 15c. Interpret pipeline + post-processing (`intent/`)
+- [x] 16. Implement plan validation enhancements
 - [ ] 17. Implement confirmation UX (print plan, y/n/adjust)
 - [ ] 18. Implement value resolution hierarchy (defaults → pools → LLM)
 - [ ] 19. Add LLM-assisted value selection for arrays
