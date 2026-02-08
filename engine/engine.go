@@ -142,9 +142,10 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	inputs, selections, err := ResolveInputs(step, node, e.graph, state)
 	if err != nil {
 		return StepResult{
-			Node:     step.Node,
-			Error:    fmt.Errorf("resolving inputs: %w", err),
-			Duration: time.Since(start),
+			Node:      step.Node,
+			Error:     fmt.Errorf("resolving inputs: %w", err),
+			StartTime: start,
+			Duration:  time.Since(start),
 		}
 	}
 
@@ -152,10 +153,11 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	adp, err := e.registry.Get(node.Adapter)
 	if err != nil {
 		return StepResult{
-			Node:     step.Node,
-			Inputs:   inputs,
-			Error:    fmt.Errorf("getting adapter: %w", err),
-			Duration: time.Since(start),
+			Node:      step.Node,
+			Inputs:    inputs,
+			Error:     fmt.Errorf("getting adapter: %w", err),
+			StartTime: start,
+			Duration:  time.Since(start),
 		}
 	}
 
@@ -163,10 +165,11 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	req, err := adp.BuildRequest(inputs, e.config)
 	if err != nil {
 		return StepResult{
-			Node:     step.Node,
-			Inputs:   inputs,
-			Error:    fmt.Errorf("building request: %w", err),
-			Duration: time.Since(start),
+			Node:      step.Node,
+			Inputs:    inputs,
+			Error:     fmt.Errorf("building request: %w", err),
+			StartTime: start,
+			Duration:  time.Since(start),
 		}
 	}
 
@@ -174,11 +177,12 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	resp, err := e.executor.Execute(ctx, req)
 	if err != nil {
 		return StepResult{
-			Node:     step.Node,
-			Inputs:   inputs,
-			Request:  req,
-			Error:    fmt.Errorf("executing request: %w", err),
-			Duration: time.Since(start),
+			Node:      step.Node,
+			Inputs:    inputs,
+			Request:   req,
+			Error:     fmt.Errorf("executing request: %w", err),
+			StartTime: start,
+			Duration:  time.Since(start),
 		}
 	}
 
@@ -189,6 +193,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		Request:    req,
 		Response:   resp,
 		StatusCode: resp.StatusCode,
+		StartTime:  start,
 		Duration:   time.Since(start),
 	}
 

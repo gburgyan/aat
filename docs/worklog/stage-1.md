@@ -224,3 +224,23 @@
 **Open questions:**
 
 - None — ready for Task 11 (archive writer).
+
+## 2026-02-07 — Task 11: Archive Writer
+
+**What:** Implemented JSON archive capture for run results. Every engine run can now be serialized to an inspectable JSON file and read back.
+
+**Decisions:**
+
+- **Dependency direction:** `archive → plan` (for Plan snapshot), `engine → archive` (for conversion). archive cannot import engine/adapter/validate — it defines its own JSON-serializable types.
+- **Conversion layer in engine:** `engine/archive.go` contains `ToArchive()` which bridges engine types → archive types. This keeps the archive package clean of engine dependencies.
+- **Header redaction:** Case-insensitive redaction of sensitive headers (Authorization, X-API-Key, X-Auth-Token, Cookie, Set-Cookie, Proxy-Authorization). Applied to both request and response headers during conversion.
+- **Body handling:** `toRawMessage` embeds valid JSON inline; non-JSON bytes are marshalled as a JSON string; nil/empty → nil (omitted from output).
+- **RunID format:** `run-YYYYMMDD-HHMMSS-XXXXXXXX` with 4 bytes (8 hex chars) from crypto/rand. Initially used 2 bytes but that caused flaky uniqueness tests under tight loops.
+- **json tags on plan types:** Added `json` tags alongside existing `yaml` tags so the plan snapshot in archives uses consistent camelCase keys.
+- **StartTime field:** Added `StartTime time.Time` to `StepResult` to capture when each step began, set from the existing `start` variable in `executeStep`.
+- **Duration as milliseconds:** `time.Duration` → `int64` milliseconds in the archive for easy consumption by tooling.
+- **http.Header flattening:** `map[string][]string` → `map[string]string` by joining with ", ".
+
+**Open questions:**
+
+- None — ready for Task 12 (CLI wiring).
