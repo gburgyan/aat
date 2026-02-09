@@ -44,7 +44,7 @@ func TestParseFile_TravelportBooking(t *testing.T) {
 	assert.Equal(t, "searchFlights.catalogOfferings", offeringVal.From)
 	require.NotNil(t, offeringVal.Select)
 	assert.Equal(t, "first", offeringVal.Select.Strategy)
-	assert.Equal(t, "id", offeringVal.Select.Field)
+	assert.Equal(t, "offeringId", offeringVal.Select.Field)
 
 	// Step with isGoal
 	commitStep := p.Execution.Steps[5]

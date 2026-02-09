@@ -80,7 +80,7 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	}
 
 	for _, input := range node.Inputs {
-		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, edgeMap, state, dedupCache, rctx, ectx, inputs)
+		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, g, edgeMap, state, dedupCache, rctx, ectx, inputs)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
@@ -116,7 +116,7 @@ func dedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
 
 // resolveInputEnhanced resolves a single input with optional enhanced features.
 // When rctx/ectx are nil, it behaves identically to the original resolveInput.
-func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
+func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, g *graph.Graph, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
 	// 1. Check for graph edge
 	if edge, ok := edgeMap[input.Name]; ok {
 		fromNode, fromField, err := splitRef(edge.From)
@@ -126,7 +126,7 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 
 		if edge.Select {
 			// 2. SELECT edge: select from upstream array using strategy
-			val, decision, err := resolveSelectEdge(fromNode, fromField, input.Name, step, state, dedupCache)
+			val, decision, err := resolveSelectEdge(ctx, fromNode, fromField, input.Name, step, g, state, dedupCache, rctx)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -166,7 +166,7 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("invalid 'from' reference %q: %w", sv.From, err)
 			}
-			val, decision, err := resolveSelectValue(fromNode, fromField, input.Name, sv.Select, state, dedupCache)
+			val, decision, err := resolveSelectValue(ctx, fromNode, fromField, input.Name, sv.Select, g, state, dedupCache, rctx)
 			if err != nil {
 				return nil, nil, nil, err
 			}
@@ -230,7 +230,7 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 // resolveSelectEdge handles a SELECT edge: the source is an array, select using
 // strategy, and if a plan-level select config exists for this input, extract
 // the specified field.
-func resolveSelectEdge(fromNode, fromField, inputName string, step plan.Step, state *RunState, dedupCache map[string]*selectionResult) (any, *SelectionDecision, error) {
+func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName string, step plan.Step, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext) (any, *SelectionDecision, error) {
 	arr, err := getArrayFromState(fromNode, fromField, state)
 	if err != nil {
 		return nil, nil, err
@@ -242,6 +242,37 @@ func resolveSelectEdge(fromNode, fromField, inputName string, step plan.Step, st
 		sel = sv.Select
 	}
 
+	// LLM selection strategy
+	if sel != nil && sel.Strategy == "llm" {
+		result, llmRec, llmErr := llmSelectElement(ctx, rctx, arr, sel, inputName, g, fromNode, fromField)
+		if llmErr != nil {
+			return nil, nil, fmt.Errorf("select edge from %s.%s: %w", fromNode, fromField, llmErr)
+		}
+		decision := &SelectionDecision{
+			InputName:     inputName,
+			SourceNode:    fromNode,
+			SourceField:   fromField,
+			SourceSize:    len(arr),
+			FilteredSize:  result.filteredSize,
+			Strategy:      "llm",
+			SelectedIndex: result.index,
+			LLMCall:       llmRec,
+		}
+		// Extract field if specified
+		if sel.Field != "" {
+			resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
+			val, exErr := extractField(result.element, resolvedField)
+			if exErr != nil {
+				return nil, nil, exErr
+			}
+			return val, decision, nil
+		}
+		return result.element, decision, nil
+	}
+
+	// Resolve elementField names to gjson paths for applySelection (min/max SortField)
+	resolvedSel := resolveSelectionFields(sel, g, fromNode, fromField)
+
 	// Check dedup cache
 	key := dedupKey(fromNode, fromField, sel)
 	cached, hasCached := dedupCache[key]
@@ -250,7 +281,7 @@ func resolveSelectEdge(fromNode, fromField, inputName string, step plan.Step, st
 	if hasCached {
 		result = cached
 	} else {
-		result, err = applySelection(arr, sel)
+		result, err = applySelection(arr, resolvedSel)
 		if err != nil {
 			return nil, nil, fmt.Errorf("select edge from %s.%s: %w", fromNode, fromField, err)
 		}
@@ -270,9 +301,9 @@ func resolveSelectEdge(fromNode, fromField, inputName string, step plan.Step, st
 		decision.FilterExpr = sel.Filter
 	}
 
-	// Extract field if specified
-	if sel != nil && sel.Field != "" {
-		val, err := extractField(result.element, sel.Field)
+	// Extract field if specified — use resolved gjson path
+	if resolvedSel != nil && resolvedSel.Field != "" {
+		val, err := extractField(result.element, resolvedSel.Field)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -283,11 +314,41 @@ func resolveSelectEdge(fromNode, fromField, inputName string, step plan.Step, st
 }
 
 // resolveSelectValue handles plan-defined "from" + "select" value resolution.
-func resolveSelectValue(fromNode, fromField, inputName string, sel *plan.SelectionConfig, state *RunState, dedupCache map[string]*selectionResult) (any, *SelectionDecision, error) {
+func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName string, sel *plan.SelectionConfig, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext) (any, *SelectionDecision, error) {
 	arr, err := getArrayFromState(fromNode, fromField, state)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// LLM selection strategy
+	if sel != nil && sel.Strategy == "llm" {
+		result, llmRec, llmErr := llmSelectElement(ctx, rctx, arr, sel, inputName, g, fromNode, fromField)
+		if llmErr != nil {
+			return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, llmErr)
+		}
+		decision := &SelectionDecision{
+			InputName:     inputName,
+			SourceNode:    fromNode,
+			SourceField:   fromField,
+			SourceSize:    len(arr),
+			FilteredSize:  result.filteredSize,
+			Strategy:      "llm",
+			SelectedIndex: result.index,
+			LLMCall:       llmRec,
+		}
+		if sel.Field != "" {
+			resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
+			val, exErr := extractField(result.element, resolvedField)
+			if exErr != nil {
+				return nil, nil, exErr
+			}
+			return val, decision, nil
+		}
+		return result.element, decision, nil
+	}
+
+	// Resolve elementField names to gjson paths for applySelection (min/max SortField)
+	resolvedSel := resolveSelectionFields(sel, g, fromNode, fromField)
 
 	// Check dedup cache
 	key := dedupKey(fromNode, fromField, sel)
@@ -297,7 +358,7 @@ func resolveSelectValue(fromNode, fromField, inputName string, sel *plan.Selecti
 	if hasCached {
 		result = cached
 	} else {
-		result, err = applySelection(arr, sel)
+		result, err = applySelection(arr, resolvedSel)
 		if err != nil {
 			return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, err)
 		}
@@ -317,8 +378,9 @@ func resolveSelectValue(fromNode, fromField, inputName string, sel *plan.Selecti
 		decision.FilterExpr = sel.Filter
 	}
 
-	if sel.Field != "" {
-		val, err := extractField(result.element, sel.Field)
+	// Use resolved gjson path for field extraction
+	if resolvedSel != nil && resolvedSel.Field != "" {
+		val, err := extractField(result.element, resolvedSel.Field)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -347,6 +409,48 @@ func getArrayFromState(nodeName, outputName string, state *RunState) ([]any, err
 		return nil, fmt.Errorf("output %s.%s is not an array (got %T)", nodeName, outputName, val)
 	}
 	return arr, nil
+}
+
+// resolveElementFieldPath looks up a field reference against the graph's
+// elementFields for a given source output. If fieldRef matches an elementField
+// name, returns its EffectivePath (the gjson path). Otherwise returns fieldRef
+// unchanged for backward compatibility with raw gjson paths.
+func resolveElementFieldPath(g *graph.Graph, sourceNode, sourceOutput, fieldRef string) string {
+	if g == nil {
+		return fieldRef
+	}
+	node := g.Nodes[sourceNode]
+	if node == nil {
+		return fieldRef
+	}
+	for _, out := range node.Outputs {
+		if out.Name == sourceOutput {
+			for _, ef := range out.ElementFields {
+				if ef.Name == fieldRef {
+					return ef.EffectivePath()
+				}
+			}
+			break
+		}
+	}
+	return fieldRef
+}
+
+// resolveSelectionFields returns a shallow copy of sel with Field and SortField
+// resolved from elementField names to gjson paths using the graph. The original
+// sel is not modified. Returns nil if sel is nil.
+func resolveSelectionFields(sel *plan.SelectionConfig, g *graph.Graph, sourceNode, sourceOutput string) *plan.SelectionConfig {
+	if sel == nil {
+		return nil
+	}
+	resolved := *sel
+	if resolved.Field != "" {
+		resolved.Field = resolveElementFieldPath(g, sourceNode, sourceOutput, resolved.Field)
+	}
+	if resolved.SortField != "" {
+		resolved.SortField = resolveElementFieldPath(g, sourceNode, sourceOutput, resolved.SortField)
+	}
+	return &resolved
 }
 
 // extractField marshals an element to JSON and extracts a field using gjson.

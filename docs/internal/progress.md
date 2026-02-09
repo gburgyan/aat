@@ -39,7 +39,9 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 18b. Enhanced resolution with constraints + fallback pools (`engine/resolve.go`)
   - [x] 18c. Execution mode + LLM value selection (`engine/llm_values.go`, CLI wiring)
   - [x] 18d. Wire LLM fallback into resolution chain + resolution/LLM call tracking in archives
-- [ ] 19. Add LLM-assisted value selection for arrays
+- [x] 19. Add LLM-assisted value selection for arrays
+  - [x] 19a. ElementField name resolution (plans use names, engine resolves to gjson paths)
+  - [x] 19b. LLM-assisted element selection (`strategy: llm` with prompt)
 - [ ] 20. Add constraint-aware fallback with relaxation guard
 - [ ] 21. Embed GopherLua with sandbox restrictions (Tier 2 adapters)
 - [ ] 22. Add semantic validation via LLM

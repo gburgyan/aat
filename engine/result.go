@@ -68,6 +68,7 @@ type SelectionDecision struct {
 	FilteredSize  int
 	Strategy      string
 	SelectedIndex int
+	LLMCall       *LLMCallRecord // non-nil for llm strategy
 }
 
 // ValueResolution records how a single input was resolved.

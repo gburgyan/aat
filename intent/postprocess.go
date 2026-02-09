@@ -446,7 +446,7 @@ func MergeLLMValues(skeleton, llmPlan *plan.Plan) {
 
 			// Skeleton has an entry. Merge based on what skeleton has.
 			if skelVal.From != "" && skelVal.Select != nil {
-				// Select edge: accept strategy/filter/sortField/index overrides.
+				// Select edge: accept strategy/filter/sortField/index/prompt overrides.
 				if llmVal.Select != nil {
 					if llmVal.Select.Strategy != "" {
 						skelVal.Select.Strategy = llmVal.Select.Strategy
@@ -459,6 +459,9 @@ func MergeLLMValues(skeleton, llmPlan *plan.Plan) {
 					}
 					if llmVal.Select.Index != 0 {
 						skelVal.Select.Index = llmVal.Select.Index
+					}
+					if llmVal.Select.Prompt != "" {
+						skelVal.Select.Prompt = llmVal.Select.Prompt
 					}
 				}
 				skelStep.Values[inputName] = skelVal
@@ -485,9 +488,11 @@ func setMetadataWithTime(p *plan.Plan, g *graph.Graph, ga *GoalAnalysis, prompt 
 	}
 }
 
-// lookupElementFieldPath resolves the gjson extraction path for an input fed
-// by a select edge. It finds the source output's elementField matching
-// inputName and returns its EffectivePath. Falls back to inputName if not found.
+// lookupElementFieldPath finds the elementField name for an input fed by a
+// select edge. It returns the elementField Name (not the gjson path) so that
+// plans remain decoupled from response structure. The engine resolves the
+// name to a gjson path at runtime via resolveElementFieldPath.
+// Falls back to inputName if no matching elementField exists.
 func lookupElementFieldPath(g *graph.Graph, sourceRef, inputName string) string {
 	srcNode := splitNodeName(sourceRef)
 	srcField := sourceRef[len(srcNode)+1:]
@@ -499,7 +504,7 @@ func lookupElementFieldPath(g *graph.Graph, sourceRef, inputName string) string 
 		if out.Name == srcField {
 			for _, ef := range out.ElementFields {
 				if ef.Name == inputName {
-					return ef.EffectivePath()
+					return ef.Name
 				}
 			}
 			break

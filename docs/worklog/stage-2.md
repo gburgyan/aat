@@ -199,3 +199,38 @@
 - `engine/archive_test.go` — 2 new tests (resolution conversion, LLM call round-trip)
 
 **Open questions:** None.
+
+## 2026-02-08 — Task 19: ElementField Name Resolution + LLM-Assisted Array Selection
+
+**What:** Two sub-tasks: (19a) Plans now use elementField names (e.g., `offeringId`, `productRef`) instead of raw gjson paths; the engine resolves names to paths at runtime. (19b) Added `strategy: llm` for array element selection, where the LLM examines array elements and picks the best one based on a prompt.
+
+**Decisions:**
+- 19a: `lookupElementFieldPath` in `intent/postprocess.go` now returns `ef.Name` instead of `ef.EffectivePath()` — plans are human-readable
+- 19a: `resolveElementFieldPath(g, sourceNode, sourceOutput, fieldRef)` in engine resolves names → gjson paths via graph elementFields lookup. Falls back to fieldRef unchanged for backward compatibility with raw gjson paths
+- 19a: `resolveSelectionFields` creates a shallow copy of SelectionConfig with resolved Field and SortField — original untouched for dedup cache keys
+- 19a: `resolveSelectEdge` and `resolveSelectValue` gained `ctx`, `g`, `rctx` parameters (same refactor needed for 19b)
+- 19b: `llmSelectElement` follows `llmSelectValue` patterns: mode enforcement (strict → error), LLM call with audit trail, index parsing (plain int or JSON `{"index": N}`)
+- 19b: Array summarization: tabular format using elementFields when available (token-efficient), raw JSON fallback, max 10 elements shown
+- 19b: Filter interaction: if `sel.Filter` is set, filter first, then pass filtered array to LLM
+- 19b: `SelectionConfig` gained `Prompt` field; validation requires non-empty prompt for `llm` strategy
+- 19b: `SelectionDecision` and `SelectionRecord` gained `LLMCall` field for audit trail
+- Both sub-tasks implemented together since they share the same signature refactor, minimizing churn
+
+**Files:**
+- `intent/postprocess.go` — returns name not path; added Prompt to MergeLLMValues override list
+- `engine/resolve.go` — resolveElementFieldPath, resolveSelectionFields, parameter threading, LLM strategy routing
+- `engine/llm_selection.go` — new: llmSelectElement, parseElementIndex, buildElementSelectionPrompt, helpers
+- `engine/result.go` — LLMCall field on SelectionDecision
+- `plan/types.go` — Prompt field on SelectionConfig
+- `plan/validate.go` — llm in validStrategies, prompt required for llm
+- `archive/types.go` — LLMCall on SelectionRecord
+- `engine/archive.go` — copy LLM call in convertSelections
+- `plans/travelport_booking.yaml` — field names instead of gjson paths
+- `plan/testdata/valid/travelport_booking.yaml` — same
+- `intent/postprocess_test.go` — updated for name expectations
+- `plan/parse_test.go` — updated for name expectations
+- `engine/resolve_test.go` — 5 new elementField resolution tests + unit test
+- `engine/llm_selection_test.go` — new: 20+ tests (modes, parsing, filter+llm, elementFields, integration)
+- `plan/validate_test.go` — 2 new tests (llm with/without prompt)
+
+**Open questions:** None.

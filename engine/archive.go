@@ -106,7 +106,7 @@ func convertValidation(v *validate.MechanicalResult) *archive.ValidationRecord {
 func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
 	records := make([]archive.SelectionRecord, len(sels))
 	for i, s := range sels {
-		records[i] = archive.SelectionRecord{
+		rec := archive.SelectionRecord{
 			InputName:     s.InputName,
 			SourceNode:    s.SourceNode,
 			SourceField:   s.SourceField,
@@ -116,6 +116,10 @@ func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
 			Strategy:      s.Strategy,
 			SelectedIndex: s.SelectedIndex,
 		}
+		if s.LLMCall != nil {
+			rec.LLMCall = convertLLMCall(s.LLMCall)
+		}
+		records[i] = rec
 	}
 	return records
 }

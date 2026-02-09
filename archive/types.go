@@ -75,14 +75,15 @@ type AssertionRecord struct {
 
 // SelectionRecord captures how an array selection was resolved.
 type SelectionRecord struct {
-	InputName     string `json:"inputName"`
-	SourceNode    string `json:"sourceNode"`
-	SourceField   string `json:"sourceField"`
-	SourceSize    int    `json:"sourceSize"`
-	FilterExpr    string `json:"filterExpr,omitempty"`
-	FilteredSize  int    `json:"filteredSize"`
-	Strategy      string `json:"strategy"`
-	SelectedIndex int    `json:"selectedIndex"`
+	InputName     string         `json:"inputName"`
+	SourceNode    string         `json:"sourceNode"`
+	SourceField   string         `json:"sourceField"`
+	SourceSize    int            `json:"sourceSize"`
+	FilterExpr    string         `json:"filterExpr,omitempty"`
+	FilteredSize  int            `json:"filteredSize"`
+	Strategy      string         `json:"strategy"`
+	SelectedIndex int            `json:"selectedIndex"`
+	LLMCall       *LLMCallRecord `json:"llmCall,omitempty"`
 }
 
 // ErrorClassRecord captures the error classification for a failed step.

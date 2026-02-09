@@ -80,6 +80,7 @@ type SelectionConfig struct {
 	Filter    string `yaml:"filter,omitempty" json:"filter,omitempty"`
 	Index     int    `yaml:"index,omitempty" json:"index,omitempty"`
 	SortField string `yaml:"sortField,omitempty" json:"sortField,omitempty"` // For min/max: field to compare by
+	Prompt    string `yaml:"prompt,omitempty" json:"prompt,omitempty"`       // For llm strategy: selection criteria
 }
 
 // RetryConfig controls retry behavior for a step.

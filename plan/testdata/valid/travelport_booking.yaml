@@ -23,12 +23,12 @@ execution:
           from: searchFlights.catalogOfferings
           select:
             strategy: first
-            field: "id"
+            field: offeringId
         productRef:
           from: searchFlights.catalogOfferings
           select:
             strategy: first
-            field: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
+            field: productRef
 
     - node: createWorkbench
 

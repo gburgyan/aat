@@ -165,14 +165,14 @@ func TestFixSelectionConfigs_AddsDefault(t *testing.T) {
 	assert.Equal(t, "searchFlights.catalogOfferings", sv.From)
 	require.NotNil(t, sv.Select)
 	assert.Equal(t, "first", sv.Select.Strategy)
-	assert.Equal(t, "id", sv.Select.Field) // uses Path from elementField
+	assert.Equal(t, "offeringId", sv.Select.Field) // elementField name, not gjson path
 
 	// addOffer.productRef is also fed by a select edge
 	svProd, ok := p.Execution.Steps[1].Values["productRef"]
 	require.True(t, ok, "productRef should have been added")
 	assert.Equal(t, "searchFlights.catalogOfferings", svProd.From)
 	require.NotNil(t, svProd.Select)
-	assert.Equal(t, "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef", svProd.Select.Field)
+	assert.Equal(t, "productRef", svProd.Select.Field) // elementField name, not gjson path
 }
 
 func TestFixSelectionConfigs_PreservesExisting(t *testing.T) {
@@ -379,14 +379,14 @@ func TestBuildSkeleton_TravelportBooking(t *testing.T) {
 	// searchFlights: no dependsOn, no from refs.
 	assert.Empty(t, skel.Execution.Steps[0].DependsOn)
 
-	// addOffer: offeringId and productRef should have select configs with paths.
+	// addOffer: offeringId and productRef should have select configs with elementField names.
 	addOfferVals := skel.Execution.Steps[2].Values
 	require.NotNil(t, addOfferVals["offeringId"].Select)
 	assert.Equal(t, "first", addOfferVals["offeringId"].Select.Strategy)
-	assert.Equal(t, "id", addOfferVals["offeringId"].Select.Field) // uses Path from elementField
+	assert.Equal(t, "offeringId", addOfferVals["offeringId"].Select.Field) // elementField name, not gjson path
 	assert.Equal(t, "searchFlights.catalogOfferings", addOfferVals["offeringId"].From)
 	require.NotNil(t, addOfferVals["productRef"].Select)
-	assert.Equal(t, "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef", addOfferVals["productRef"].Select.Field)
+	assert.Equal(t, "productRef", addOfferVals["productRef"].Select.Field) // elementField name, not gjson path
 	assert.Equal(t, "searchFlights.catalogOfferings", addOfferVals["productRef"].From)
 
 	// addOffer: workbenchId should be a scalar from ref (no select).
@@ -893,23 +893,23 @@ func TestFixAssertions_StatusPrependedWhenMissing(t *testing.T) {
 func TestLookupElementFieldPath_WithPath(t *testing.T) {
 	g := loadTravelportGraph(t)
 
-	// offeringId has path: "id"
+	// offeringId has path: "id" but we return the elementField name, not the gjson path
 	path := lookupElementFieldPath(g, "searchFlights.catalogOfferings", "offeringId")
-	assert.Equal(t, "id", path)
+	assert.Equal(t, "offeringId", path)
 }
 
 func TestLookupElementFieldPath_WithLongPath(t *testing.T) {
 	g := loadTravelportGraph(t)
 
-	// productRef has a deeply nested path
+	// productRef has a deeply nested path but we return the elementField name
 	path := lookupElementFieldPath(g, "searchFlights.catalogOfferings", "productRef")
-	assert.Equal(t, "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef", path)
+	assert.Equal(t, "productRef", path)
 }
 
 func TestLookupElementFieldPath_NoPath(t *testing.T) {
 	g := loadTravelportGraph(t)
 
-	// departure has no path annotation — falls back to Name
+	// departure has no path annotation — returns elementField name
 	path := lookupElementFieldPath(g, "searchFlights.catalogOfferings", "departure")
 	assert.Equal(t, "departure", path)
 }

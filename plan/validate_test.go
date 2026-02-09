@@ -569,6 +569,19 @@ func TestValidate_SelectionStrategies(t *testing.T) {
 		err := Validate(p, g)
 		assert.NoError(t, err)
 	})
+
+	t.Run("llm with prompt ok", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "llm", Prompt: "pick the cheapest option"})
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("llm without prompt rejected", func(t *testing.T) {
+		p := baseStep(&SelectionConfig{Strategy: "llm"})
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "llm strategy requires prompt")
+	})
 }
 
 func TestValidate_InvalidGraphVersion(t *testing.T) {

@@ -31,12 +31,12 @@ execution:
           from: searchFlights.catalogOfferings
           select:
             strategy: first
-            field: "id"
+            field: offeringId
         productRef:
           from: searchFlights.catalogOfferings
           select:
             strategy: first
-            field: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
+            field: productRef
       retry:
         max: 2
         on: [timeout, "503"]
@@ -60,12 +60,12 @@ execution:
           from: searchFlights.catalogOfferings
           select:
             strategy: first
-            field: "id"
+            field: offeringId
         productRef:
           from: searchFlights.catalogOfferings
           select:
             strategy: first
-            field: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
+            field: productRef
       assertions:
         mechanical:
           - type: status

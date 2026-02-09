@@ -212,6 +212,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 		"min":    true,
 		"max":    true,
 		"match":  true,
+		"llm":    true,
 	}
 
 	// Validate predicate expressions and selection strategies in step values and assertions
@@ -237,6 +238,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 				}
 				if sel.Strategy == "index" && sel.Index < 0 {
 					errs = append(errs, fmt.Sprintf("step %d (%s): index strategy requires non-negative index for %q", i, step.Node, name))
+				}
+				if sel.Strategy == "llm" && sel.Prompt == "" {
+					errs = append(errs, fmt.Sprintf("step %d (%s): llm strategy requires prompt for %q", i, step.Node, name))
 				}
 			}
 			if sv.Constraint != "" {

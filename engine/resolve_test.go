@@ -1430,6 +1430,269 @@ func TestResolution_SelectEdge(t *testing.T) {
 	assert.Equal(t, "first", resolutions[0].FinalValue)
 }
 
+// --- ElementField name resolution tests ---
+
+func TestResolveInputs_SelectEdge_ElementFieldName(t *testing.T) {
+	// Plan uses elementField name "offeringId" instead of raw gjson path "id".
+	// Engine should resolve "offeringId" → the gjson path via the graph.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []graph.Field{
+							{Name: "offeringId", Type: "string", Path: "id"},
+							{Name: "price", Type: "number", Path: "details.price"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedId", Type: "string"},
+				},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "source.items", To: "target.selectedId", Select: true},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "offer-1", "details": map[string]any{"price": 100}},
+			map[string]any{"id": "offer-2", "details": map[string]any{"price": 200}},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"selectedId": {
+				Select: &plan.SelectionConfig{
+					Strategy: "first",
+					Field:    "offeringId", // elementField name, not raw "id"
+				},
+			},
+		},
+	}
+
+	inputs, decisions, err := ResolveInputs(step, g.Nodes["target"], g, state)
+	require.NoError(t, err)
+	assert.Equal(t, "offer-1", inputs["selectedId"])
+	require.Len(t, decisions, 1)
+	assert.Equal(t, 0, decisions[0].SelectedIndex)
+}
+
+func TestResolveInputs_SelectEdge_ElementFieldName_BackwardCompat(t *testing.T) {
+	// Raw gjson path should still work even when elementFields are defined.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []graph.Field{
+							{Name: "offeringId", Type: "string", Path: "id"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedId", Type: "string"},
+				},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "source.items", To: "target.selectedId", Select: true},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "offer-1"},
+			map[string]any{"id": "offer-2"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"selectedId": {
+				Select: &plan.SelectionConfig{
+					Strategy: "first",
+					Field:    "id", // raw gjson path — not an elementField name
+				},
+			},
+		},
+	}
+
+	inputs, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
+	require.NoError(t, err)
+	assert.Equal(t, "offer-1", inputs["selectedId"])
+}
+
+func TestResolveInputs_PlanFromSelect_ElementFieldName(t *testing.T) {
+	// Plan uses From + Select with elementField name.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{
+						Name: "offerings",
+						Type: "offering[]",
+						ElementFields: []graph.Field{
+							{Name: "offeringId", Type: "string", Path: "Identifier.value"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "offeringId", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"offerings": []any{
+			map[string]any{"Identifier": map[string]any{"value": "offer-123"}},
+			map[string]any{"Identifier": map[string]any{"value": "offer-456"}},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"offeringId": {
+				From: "source.offerings",
+				Select: &plan.SelectionConfig{
+					Strategy: "first",
+					Field:    "offeringId", // elementField name → resolves to "Identifier.value"
+				},
+			},
+		},
+	}
+
+	inputs, decisions, err := ResolveInputs(step, g.Nodes["target"], g, state)
+	require.NoError(t, err)
+	assert.Equal(t, "offer-123", inputs["offeringId"])
+	require.Len(t, decisions, 1)
+}
+
+func TestResolveInputs_MinSortField_ElementFieldName(t *testing.T) {
+	// SortField as elementField name.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []graph.Field{
+							{Name: "itemId", Type: "string", Path: "id"},
+							{Name: "cost", Type: "number", Path: "pricing.amount"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedId", Type: "string"},
+				},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "source.items", To: "target.selectedId", Select: true},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "expensive", "pricing": map[string]any{"amount": 300.0}},
+			map[string]any{"id": "cheapest", "pricing": map[string]any{"amount": 100.0}},
+			map[string]any{"id": "mid", "pricing": map[string]any{"amount": 200.0}},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"selectedId": {
+				Select: &plan.SelectionConfig{
+					Strategy:  "min",
+					Field:     "itemId", // elementField → "id"
+					SortField: "cost",   // elementField → "pricing.amount"
+				},
+			},
+		},
+	}
+
+	inputs, decisions, err := ResolveInputs(step, g.Nodes["target"], g, state)
+	require.NoError(t, err)
+	assert.Equal(t, "cheapest", inputs["selectedId"])
+	require.Len(t, decisions, 1)
+	assert.Equal(t, "min", decisions[0].Strategy)
+}
+
+func TestResolveElementFieldPath_Unit(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []graph.Field{
+							{Name: "offeringId", Type: "string", Path: "id"},
+							{Name: "productRef", Type: "string", Path: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Matches elementField name → returns gjson path
+	assert.Equal(t, "id", resolveElementFieldPath(g, "source", "items", "offeringId"))
+	assert.Equal(t, "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef",
+		resolveElementFieldPath(g, "source", "items", "productRef"))
+
+	// No match → returns the fieldRef unchanged
+	assert.Equal(t, "someOtherField", resolveElementFieldPath(g, "source", "items", "someOtherField"))
+
+	// Nil graph → returns fieldRef unchanged
+	assert.Equal(t, "offeringId", resolveElementFieldPath(nil, "source", "items", "offeringId"))
+
+	// Unknown node → returns fieldRef unchanged
+	assert.Equal(t, "offeringId", resolveElementFieldPath(g, "unknown", "items", "offeringId"))
+
+	// Unknown output → returns fieldRef unchanged
+	assert.Equal(t, "offeringId", resolveElementFieldPath(g, "source", "unknown", "offeringId"))
+}
+
 func TestResolution_LLMFallback(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
