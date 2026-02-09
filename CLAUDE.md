@@ -22,6 +22,7 @@ AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API w
 | `llm/` | Provider-agnostic LLM client |
 | `config/` | Configuration, environments, local storage |
 | `server/` | Local web API server, WebSocket, embedded frontend |
+| `mcp/` | MCP server: API lifecycle platform for IDE-based AI tools |
 | `gateway/` | LLM gateway proxy logic |
 | `internal/testutil/` | Shared test helpers and fixtures |
 | `internal/version/` | Build version info |
@@ -33,8 +34,8 @@ Dependencies flow in one direction. No cycles. No lateral imports within a tier.
 **Leaf packages** (zero aat imports): `config`, `graph`, `domain`, `llm`
 **Mid-tier**: `adapter` → config; `plan` → graph; `archive` → plan; `validate` → llm
 **Orchestrators**: `engine` → graph, adapter, plan, domain, llm, validate, archive, config
-**Entry points**: `intent` → graph, domain, plan, llm; `server` → engine, archive, plan, config
-**Binaries**: `cmd/aat` → engine, server, intent, archive, config
+**Entry points**: `intent` → graph, domain, plan, llm; `mcp` → all packages; `server` → engine, archive, plan, config
+**Binaries**: `cmd/aat` → engine, server, intent, mcp, archive, config
 
 Data flows down, decisions flow up. No business logic in `cmd/`.
 

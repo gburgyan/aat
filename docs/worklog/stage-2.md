@@ -267,6 +267,27 @@
 
 **Open questions:** None.
 
+## 2026-02-09 — Task 60 Expanded: MCP as API Lifecycle Platform
+
+**What:** Expanded Task 60 from "graph authoring tool" to full API integration lifecycle platform.
+
+**Decisions:**
+- MCP server exposes five lifecycle lenses: coding, testing, docs, CI/CD, monitoring
+- A test plan and a synthetic monitor are the same thing — different scheduling
+- Project manifest (`aat-project.yaml`) centralizes config for MCP server and CLI
+- Per-node Markdown documentation enriched by Claude Code via MCP prompts
+- Sub-tasks: 60a (graph knowledge), 60b (docs), 60c (testing), 60d (CI/CD + monitoring)
+- 60a-60c in Stage 2, 60d deferred to Stage 3a+
+- SDK: mark3labs/mcp-go (mature, well-documented)
+- New `mcp/` package at orchestrator tier
+
+**Rationale:** The graph already contains everything needed to assist with coding, testing, documentation, and monitoring. The MCP server is a thin adapter layer that exposes existing package capabilities. No new business logic — just new access patterns. Production monitoring is the natural end-state: if you can test a workflow, you can monitor it.
+
+**Open questions:**
+- Project manifest schema: what other fields beyond graph/templates/domain/envs?
+- Doc file naming convention: by node name or by adapter name?
+- Monitor daemon architecture: embedded scheduler vs systemd/cron integration?
+
 ## 2026-02-09 — Strategic Review: Roadmap Resequencing
 
 **What:** Product Owner + Staff Engineer review of remaining work, technical debt, and feature sequencing.

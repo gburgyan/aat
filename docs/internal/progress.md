@@ -53,13 +53,17 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 - [ ] 24. Build prompt-to-plan regression test suite
 - [ ] 28. CI/CD mode (moved from Stage 3a — table stakes)
 - [ ] 59. `aat docs generate` (moved from Stage 4)
-- [ ] 60. `aat mcp serve` with OAS enrichment (moved from Stage 4)
+- [ ] 60. `aat mcp serve` — API lifecycle platform
+  - [ ] 60a. Core MCP server + API knowledge tools (graph, templates, domain)
+  - [ ] 60b. Documentation integration (per-node Markdown, enrichment)
+  - [ ] 60c. Testing lifecycle tools (plan generation, execution, archives)
 - [ ] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)
 - [ ] H2. Quickstart example (PetStore)
 - [ ] H3. `aat graph validate` (feedback loop for AI-assisted authoring)
 
 ## Stage 3a: CI/CD, Web UI & Polish
 
+- [ ] 60d. MCP CI/CD tools + production monitoring (synthetic monitors)
 - [ ] 10b. Initialize SQLite for local run history indexing
 - [ ] 22. Add semantic validation via LLM (moved from Stage 2 — mechanical validation sufficient for launch)
 - [ ] 25. Build the local API server
