@@ -182,8 +182,8 @@ llm:
 | Mode | Behavior |
 |------|----------|
 | `strict` | No LLM involvement during execution. Plans must be fully specified. |
-| `lean` | LLM assists only when the engine cannot resolve a value deterministically. |
-| `adaptive` | LLM actively participates in value selection, error recovery, and plan adjustment. |
+| `lean` | LLM assists only when the engine cannot resolve a value deterministically (default + fallback pool exhausted). |
+| `adaptive` | Same as `lean`, plus step-level recovery: relaxes soft constraints and retries steps on HTTP 4xx errors. See [value-flow.md](value-flow.md#soft-constraint-relaxation). |
 
 Default: `lean`.
 
