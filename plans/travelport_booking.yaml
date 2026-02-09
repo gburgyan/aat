@@ -26,17 +26,15 @@ execution:
     - node: priceOffer
       dependsOn: [searchFlights]
       description: "Price the first available offering"
+      selections:
+        catalogOffering:
+          from: searchFlights.catalogOfferings
+          strategy: first
       values:
         offeringId:
-          from: searchFlights.catalogOfferings
-          select:
-            strategy: first
-            field: offeringId
+          fromSelection: catalogOffering.offeringId
         productRef:
-          from: searchFlights.catalogOfferings
-          select:
-            strategy: first
-            field: productRef
+          fromSelection: catalogOffering.productRef
       retry:
         max: 2
         on: [timeout, "503"]
@@ -55,17 +53,15 @@ execution:
     - node: addOffer
       dependsOn: [searchFlights, createWorkbench]
       description: "Add offer to workbench from catalog product offerings"
+      selections:
+        catalogOffering:
+          from: searchFlights.catalogOfferings
+          strategy: first
       values:
         offeringId:
-          from: searchFlights.catalogOfferings
-          select:
-            strategy: first
-            field: offeringId
+          fromSelection: catalogOffering.offeringId
         productRef:
-          from: searchFlights.catalogOfferings
-          select:
-            strategy: first
-            field: productRef
+          fromSelection: catalogOffering.productRef
       assertions:
         mechanical:
           - type: status

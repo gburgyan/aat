@@ -94,6 +94,9 @@ func writeSteps(b *strings.Builder, p *Plan, g *graph.Graph) {
 			fmt.Fprintf(b, "     Depends on: %s\n", strings.Join(step.DependsOn, ", "))
 		}
 
+		// Selections
+		writeStepSelections(b, step)
+
 		// Values
 		writeStepValues(b, step)
 
@@ -116,6 +119,35 @@ func writeSteps(b *strings.Builder, p *Plan, g *graph.Graph) {
 	}
 }
 
+func writeStepSelections(b *strings.Builder, step Step) {
+	if len(step.Selections) == 0 {
+		return
+	}
+
+	b.WriteString("     Selections:\n")
+
+	// Sort keys for stable output
+	keys := make([]string, 0, len(step.Selections))
+	for k := range step.Selections {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, k := range keys {
+		sel := step.Selections[k]
+		strategy := sel.Strategy
+		if strategy == "" {
+			strategy = "first"
+		}
+		detail := fmt.Sprintf("from %s (strategy: %s", sel.From, strategy)
+		if sel.Filter != "" {
+			detail += fmt.Sprintf(", filter: %s", sel.Filter)
+		}
+		detail += ")"
+		fmt.Fprintf(b, "       %s: %s\n", k, detail)
+	}
+}
+
 func writeStepValues(b *strings.Builder, step Step) {
 	if len(step.Values) == 0 {
 		return
@@ -132,7 +164,9 @@ func writeStepValues(b *strings.Builder, step Step) {
 
 	for _, k := range keys {
 		v := step.Values[k]
-		if v.From != "" {
+		if v.FromSelection != "" {
+			fmt.Fprintf(b, "       %s: from selection %s\n", k, v.FromSelection)
+		} else if v.From != "" {
 			// From reference
 			detail := fmt.Sprintf("from %s", v.From)
 			if v.Select != nil {

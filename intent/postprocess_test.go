@@ -379,15 +379,22 @@ func TestBuildSkeleton_TravelportBooking(t *testing.T) {
 	// searchFlights: no dependsOn, no from refs.
 	assert.Empty(t, skel.Execution.Steps[0].DependsOn)
 
-	// addOffer: offeringId and productRef should have select configs with elementField names.
-	addOfferVals := skel.Execution.Steps[2].Values
-	require.NotNil(t, addOfferVals["offeringId"].Select)
-	assert.Equal(t, "first", addOfferVals["offeringId"].Select.Strategy)
-	assert.Equal(t, "offeringId", addOfferVals["offeringId"].Select.Field) // elementField name, not gjson path
-	assert.Equal(t, "searchFlights.catalogOfferings", addOfferVals["offeringId"].From)
-	require.NotNil(t, addOfferVals["productRef"].Select)
-	assert.Equal(t, "productRef", addOfferVals["productRef"].Select.Field) // elementField name, not gjson path
-	assert.Equal(t, "searchFlights.catalogOfferings", addOfferVals["productRef"].From)
+	// addOffer: offeringId and productRef share the same source (searchFlights.catalogOfferings)
+	// so they should be grouped into a named selection.
+	addOfferStep := skel.Execution.Steps[2]
+	addOfferVals := addOfferStep.Values
+	require.NotNil(t, addOfferStep.Selections, "addOffer should have named selections")
+	require.Contains(t, addOfferStep.Selections, "catalogOffering")
+	assert.Equal(t, "searchFlights.catalogOfferings", addOfferStep.Selections["catalogOffering"].From)
+	assert.Equal(t, "first", addOfferStep.Selections["catalogOffering"].Strategy)
+
+	// offeringId and productRef should use fromSelection references
+	assert.Equal(t, "catalogOffering.offeringId", addOfferVals["offeringId"].FromSelection)
+	assert.Empty(t, addOfferVals["offeringId"].From)
+	assert.Nil(t, addOfferVals["offeringId"].Select)
+	assert.Equal(t, "catalogOffering.productRef", addOfferVals["productRef"].FromSelection)
+	assert.Empty(t, addOfferVals["productRef"].From)
+	assert.Nil(t, addOfferVals["productRef"].Select)
 
 	// addOffer: workbenchId should be a scalar from ref (no select).
 	assert.Equal(t, "createWorkbench.workbenchId", addOfferVals["workbenchId"].From)
@@ -935,4 +942,367 @@ func TestLookupElementFieldPath_WrongOutput(t *testing.T) {
 	// catalogOfferingsId is a scalar output — no elementFields
 	path := lookupElementFieldPath(g, "searchFlights.catalogOfferingsId", "offeringId")
 	assert.Equal(t, "offeringId", path)
+}
+
+// --- Named Selections: BuildSkeleton grouping tests ---
+
+func TestBuildSkeleton_GroupsMultiFieldSelections(t *testing.T) {
+	// When 2+ inputs share the same select-edge source, BuildSkeleton should
+	// create a named selection instead of old-style from+select per input.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name:        "source",
+				Description: "Source node",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "array",
+						ElementFields: []graph.Field{
+							{Name: "itemId", Type: "string", Path: "id"},
+							{Name: "itemRef", Type: "string", Path: "ref"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name:        "target",
+				Description: "Target node",
+				Inputs: []graph.Input{
+					{Name: "itemId", Type: "string"},
+					{Name: "itemRef", Type: "string"},
+				},
+			},
+		},
+	}
+	cr := &graph.ChainResult{
+		Nodes:      []string{"source", "target"},
+		EntryNodes: []string{"source"},
+		Edges: []graph.Edge{
+			{From: "source.items", To: "target.itemId", Select: true},
+			{From: "source.items", To: "target.itemRef", Select: true},
+		},
+	}
+	ga := &GoalAnalysis{Goal: "target", Description: "test"}
+	now := time.Date(2026, 2, 8, 0, 0, 0, 0, time.UTC)
+
+	skel := BuildSkeleton(g, cr, ga, "test", now)
+
+	require.Len(t, skel.Execution.Steps, 2)
+	targetStep := skel.Execution.Steps[1]
+	assert.Equal(t, "target", targetStep.Node)
+
+	// Should have a named selection named "item" (singular of "items")
+	require.NotNil(t, targetStep.Selections)
+	require.Contains(t, targetStep.Selections, "item")
+	assert.Equal(t, "source.items", targetStep.Selections["item"].From)
+	assert.Equal(t, "first", targetStep.Selections["item"].Strategy)
+
+	// Both inputs should use fromSelection
+	assert.Equal(t, "item.itemId", targetStep.Values["itemId"].FromSelection)
+	assert.Empty(t, targetStep.Values["itemId"].From)
+	assert.Nil(t, targetStep.Values["itemId"].Select)
+
+	assert.Equal(t, "item.itemRef", targetStep.Values["itemRef"].FromSelection)
+	assert.Empty(t, targetStep.Values["itemRef"].From)
+	assert.Nil(t, targetStep.Values["itemRef"].Select)
+}
+
+func TestBuildSkeleton_SingleInputKeepsOldStyle(t *testing.T) {
+	// When only 1 input uses a select-edge source, keep old-style from+select.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name:        "source",
+				Description: "Source node",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "array",
+						ElementFields: []graph.Field{
+							{Name: "itemId", Type: "string"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name:        "target",
+				Description: "Target node",
+				Inputs: []graph.Input{
+					{Name: "itemId", Type: "string"},
+				},
+			},
+		},
+	}
+	cr := &graph.ChainResult{
+		Nodes:      []string{"source", "target"},
+		EntryNodes: []string{"source"},
+		Edges: []graph.Edge{
+			{From: "source.items", To: "target.itemId", Select: true},
+		},
+	}
+	ga := &GoalAnalysis{Goal: "target", Description: "test"}
+	now := time.Date(2026, 2, 8, 0, 0, 0, 0, time.UTC)
+
+	skel := BuildSkeleton(g, cr, ga, "test", now)
+
+	require.Len(t, skel.Execution.Steps, 2)
+	targetStep := skel.Execution.Steps[1]
+
+	// No named selections — single input
+	assert.Nil(t, targetStep.Selections)
+
+	// Old-style from+select
+	assert.Equal(t, "source.items", targetStep.Values["itemId"].From)
+	require.NotNil(t, targetStep.Values["itemId"].Select)
+	assert.Equal(t, "first", targetStep.Values["itemId"].Select.Strategy)
+	assert.Equal(t, "itemId", targetStep.Values["itemId"].Select.Field)
+}
+
+// --- Named Selections: deriveSelectionName tests ---
+
+func TestDeriveSelectionName(t *testing.T) {
+	tests := []struct {
+		source string
+		want   string
+	}{
+		{"searchFlights.catalogOfferings", "catalogOffering"},
+		{"source.items", "item"},
+		{"node.result", "result"}, // no trailing 's'
+		{"noField", "selection"},  // no dot → fallback
+	}
+	for _, tt := range tests {
+		t.Run(tt.source, func(t *testing.T) {
+			assert.Equal(t, tt.want, deriveSelectionName(tt.source))
+		})
+	}
+}
+
+// --- Named Selections: fixSelectionConfigs tests ---
+
+func TestFixSelectionConfigs_DefaultsNamedSelectionStrategy(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "searchFlights"},
+				{Node: "createWorkbench"},
+				{
+					Node:      "addOffer",
+					DependsOn: []string{"searchFlights", "createWorkbench"},
+					Selections: map[string]plan.StepSelection{
+						"offering": {
+							From:     "searchFlights.catalogOfferings",
+							Strategy: "", // empty → should default to "first"
+						},
+					},
+					Values: map[string]plan.StepValue{
+						"offeringId": {FromSelection: "offering.offeringId"},
+						"productRef": {FromSelection: "offering.productRef"},
+					},
+				},
+			},
+		},
+	}
+
+	stepIndex := buildStepIndex(p)
+	fixSelectionConfigs(p, g, stepIndex)
+
+	// Strategy should default to "first"
+	assert.Equal(t, "first", p.Execution.Steps[2].Selections["offering"].Strategy)
+
+	// fromSelection values should be untouched (not processed as regular inputs)
+	assert.Equal(t, "offering.offeringId", p.Execution.Steps[2].Values["offeringId"].FromSelection)
+	assert.Empty(t, p.Execution.Steps[2].Values["offeringId"].From)
+	assert.Nil(t, p.Execution.Steps[2].Values["offeringId"].Select)
+}
+
+func TestFixSelectionConfigs_SkipsFromSelectionValues(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "searchFlights"},
+				{Node: "createWorkbench"},
+				{
+					Node:      "addOffer",
+					DependsOn: []string{"searchFlights", "createWorkbench"},
+					Selections: map[string]plan.StepSelection{
+						"offering": {
+							From:     "searchFlights.catalogOfferings",
+							Strategy: "first",
+						},
+					},
+					Values: map[string]plan.StepValue{
+						"offeringId":         {FromSelection: "offering.offeringId"},
+						"productRef":         {FromSelection: "offering.productRef"},
+						"workbenchId":        {From: "createWorkbench.workbenchId"},
+						"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+					},
+				},
+			},
+		},
+	}
+
+	stepIndex := buildStepIndex(p)
+	fixSelectionConfigs(p, g, stepIndex)
+
+	// fromSelection values should NOT gain from/select
+	assert.Equal(t, "offering.offeringId", p.Execution.Steps[2].Values["offeringId"].FromSelection)
+	assert.Empty(t, p.Execution.Steps[2].Values["offeringId"].From)
+	assert.Nil(t, p.Execution.Steps[2].Values["offeringId"].Select)
+
+	// scalar from refs should still be fine
+	assert.Equal(t, "createWorkbench.workbenchId", p.Execution.Steps[2].Values["workbenchId"].From)
+}
+
+// --- Named Selections: MergeLLMValues tests ---
+
+func TestMergeLLMValues_NamedSelectionStrategyOverride(t *testing.T) {
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"offering": {
+							From:     "searchFlights.catalogOfferings",
+							Strategy: "first",
+						},
+					},
+					Values: map[string]plan.StepValue{
+						"offeringId": {FromSelection: "offering.offeringId"},
+						"productRef": {FromSelection: "offering.productRef"},
+					},
+				},
+			},
+		},
+	}
+
+	llmPlan := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"offering": {
+							From:     "searchFlights.catalogOfferings",
+							Strategy: "match",
+							Filter:   "stops == 0",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	MergeLLMValues(skeleton, llmPlan)
+
+	sel := skeleton.Execution.Steps[0].Selections["offering"]
+	assert.Equal(t, "match", sel.Strategy)
+	assert.Equal(t, "stops == 0", sel.Filter)
+	assert.Equal(t, "searchFlights.catalogOfferings", sel.From) // preserved
+
+	// fromSelection values should be untouched
+	assert.Equal(t, "offering.offeringId", skeleton.Execution.Steps[0].Values["offeringId"].FromSelection)
+	assert.Equal(t, "offering.productRef", skeleton.Execution.Steps[0].Values["productRef"].FromSelection)
+}
+
+func TestMergeLLMValues_IgnoresUnknownNamedSelection(t *testing.T) {
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"offering": {
+							From:     "searchFlights.catalogOfferings",
+							Strategy: "first",
+						},
+					},
+					Values: map[string]plan.StepValue{
+						"offeringId": {FromSelection: "offering.offeringId"},
+					},
+				},
+			},
+		},
+	}
+
+	llmPlan := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"bogus": {
+							From:     "searchFlights.catalogOfferings",
+							Strategy: "random",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	MergeLLMValues(skeleton, llmPlan)
+
+	// "bogus" should NOT be added
+	_, exists := skeleton.Execution.Steps[0].Selections["bogus"]
+	assert.False(t, exists)
+
+	// "offering" should remain unchanged
+	assert.Equal(t, "first", skeleton.Execution.Steps[0].Selections["offering"].Strategy)
+}
+
+func TestMergeLLMValues_SkipsFromSelectionValues(t *testing.T) {
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"offering": {
+							From:     "searchFlights.catalogOfferings",
+							Strategy: "first",
+						},
+					},
+					Values: map[string]plan.StepValue{
+						"offeringId": {FromSelection: "offering.offeringId"},
+						"productRef": {FromSelection: "offering.productRef"},
+					},
+				},
+			},
+		},
+	}
+
+	llmPlan := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Values: map[string]plan.StepValue{
+						// LLM tries to override fromSelection values
+						"offeringId": {Default: "some-id"},
+						"productRef": {
+							From: "otherNode.output",
+							Select: &plan.SelectionConfig{
+								Strategy: "random",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	MergeLLMValues(skeleton, llmPlan)
+
+	// fromSelection refs should be preserved, LLM changes ignored
+	assert.Equal(t, "offering.offeringId", skeleton.Execution.Steps[0].Values["offeringId"].FromSelection)
+	assert.Nil(t, skeleton.Execution.Steps[0].Values["offeringId"].Select)
+	assert.Equal(t, "offering.productRef", skeleton.Execution.Steps[0].Values["productRef"].FromSelection)
 }

@@ -137,7 +137,7 @@ func TestFormatPlanSchema_NonEmpty(t *testing.T) {
 	assert.Contains(t, schema, "match")
 	assert.Contains(t, schema, "filter")
 	assert.Contains(t, schema, "field: id")
-	assert.Contains(t, schema, "gjson path from graph")
+	assert.Contains(t, schema, "named selections")
 }
 
 func TestFormatGraph_EmptyGraph(t *testing.T) {

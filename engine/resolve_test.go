@@ -1730,3 +1730,324 @@ func TestResolution_LLMFallback(t *testing.T) {
 	assert.Len(t, r.LLMCall.Messages, 2)
 	assert.Len(t, r.Tried, 2) // "BAD" and "ALSO_BAD"
 }
+
+// --- Named Selection tests ---
+
+func TestResolveInputs_NamedSelection_FirstStrategy(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []graph.Field{
+							{Name: "itemId", Type: "string", Path: "id"},
+							{Name: "itemName", Type: "string", Path: "name"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedId", Type: "string"},
+					{Name: "selectedName", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "id-1", "name": "first-item"},
+			map[string]any{"id": "id-2", "name": "second-item"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Selections: map[string]plan.StepSelection{
+			"item": {
+				From:     "source.items",
+				Strategy: "first",
+			},
+		},
+		Values: map[string]plan.StepValue{
+			"selectedId":   {FromSelection: "item.itemId"},
+			"selectedName": {FromSelection: "item.itemName"},
+		},
+	}
+
+	inputs, decisions, resolutions, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, nil,
+	)
+	require.NoError(t, err)
+
+	// Both fields from the same element
+	assert.Equal(t, "id-1", inputs["selectedId"])
+	assert.Equal(t, "first-item", inputs["selectedName"])
+
+	// One decision for the named selection + one per value
+	require.GreaterOrEqual(t, len(decisions), 1)
+	// The named selection decision
+	found := false
+	for _, d := range decisions {
+		if d.SelectionName == "item" {
+			found = true
+			assert.Equal(t, "first", d.Strategy)
+			assert.Equal(t, "source", d.SourceNode)
+			break
+		}
+	}
+	assert.True(t, found, "expected named selection decision")
+
+	// Resolutions for both values
+	require.Len(t, resolutions, 2)
+	for _, r := range resolutions {
+		assert.Equal(t, "named_selection", r.Source)
+		assert.Equal(t, "source", r.FromStep)
+		assert.Equal(t, "items", r.FromOutput)
+	}
+}
+
+func TestResolveInputs_NamedSelection_WholeElement(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name:    "source",
+				Outputs: []graph.Output{{Name: "items", Type: "item[]"}},
+			},
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "item", Type: "object"}},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "first"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Selections: map[string]plan.StepSelection{
+			"result": {From: "source.items", Strategy: "first"},
+		},
+		Values: map[string]plan.StepValue{
+			"item": {FromSelection: "result"}, // no dot → whole element
+		},
+	}
+
+	inputs, _, _, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"id": "first"}, inputs["item"])
+}
+
+func TestResolveInputs_NamedSelection_MixedWithOldStyle(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []graph.Field{
+							{Name: "itemId", Type: "string", Path: "id"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedId", Type: "string"},
+					{Name: "label", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "id-1"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Selections: map[string]plan.StepSelection{
+			"item": {From: "source.items", Strategy: "first"},
+		},
+		Values: map[string]plan.StepValue{
+			"selectedId": {FromSelection: "item.itemId"},
+			"label":      {Default: "my-label"}, // old-style value
+		},
+	}
+
+	inputs, _, resolutions, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, nil,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "id-1", inputs["selectedId"])
+	assert.Equal(t, "my-label", inputs["label"])
+
+	// Check resolution sources
+	sources := map[string]string{}
+	for _, r := range resolutions {
+		sources[r.InputName] = r.Source
+	}
+	assert.Equal(t, "named_selection", sources["selectedId"])
+	assert.Equal(t, "plan_default", sources["label"])
+}
+
+func TestResolveInputs_NamedSelection_UnknownName(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "val", Type: "string"}},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		// No Selections defined
+		Values: map[string]plan.StepValue{
+			"val": {FromSelection: "missing.field"},
+		},
+	}
+
+	_, _, _, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, nil,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown selection")
+}
+
+func TestResolveInputs_NamedSelection_FieldNotFound(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name:    "source",
+				Outputs: []graph.Output{{Name: "items", Type: "item[]"}},
+			},
+			"target": {
+				Name:   "target",
+				Inputs: []graph.Input{{Name: "val", Type: "string"}},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "id-1"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Selections: map[string]plan.StepSelection{
+			"item": {From: "source.items", Strategy: "first"},
+		},
+		Values: map[string]plan.StepValue{
+			"val": {FromSelection: "item.nonexistent"},
+		},
+	}
+
+	_, _, _, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, nil,
+	)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in element")
+}
+
+func TestResolveInputs_LLMDedup_OldStyle(t *testing.T) {
+	// Two inputs with strategy:llm, same source and prompt, different fields.
+	// Should make only ONE LLM call.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []graph.Field{
+							{Name: "itemId", Type: "string", Path: "id"},
+							{Name: "itemName", Type: "string", Path: "name"},
+						},
+					},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedId", Type: "string"},
+					{Name: "selectedName", Type: "string"},
+				},
+			},
+		},
+	}
+
+	stub := &stubLLMClient{responses: []string{"0"}} // only one response needed
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "id-1", "name": "first"},
+			map[string]any{"id": "id-2", "name": "second"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"selectedId": {
+				From: "source.items",
+				Select: &plan.SelectionConfig{
+					Strategy: "llm",
+					Field:    "itemId",
+					Prompt:   "pick the best item",
+				},
+			},
+			"selectedName": {
+				From: "source.items",
+				Select: &plan.SelectionConfig{
+					Strategy: "llm",
+					Field:    "itemName",
+					Prompt:   "pick the best item",
+				},
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "lean", LLM: stub}
+	inputs, _, _, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, rctx,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "id-1", inputs["selectedId"])
+	assert.Equal(t, "first", inputs["selectedName"])
+
+	// Only one LLM call should have been made
+	assert.Equal(t, 1, stub.calls, "expected exactly one LLM call due to dedup")
+}

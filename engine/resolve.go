@@ -69,6 +69,18 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	// Dedup cache: keyed by "from|strategy|filter|index" → cached selectionResult
 	dedupCache := make(map[string]*selectionResult)
 
+	// Pre-resolve named selections: each selection yields a single element
+	// that may be referenced by multiple values via fromSelection.
+	namedSelections := make(map[string]*namedSelectionEntry)
+	for selName, sel := range step.Selections {
+		entry, selDecisions, err := resolveNamedSelection(ctx, selName, sel, step, g, state, dedupCache, rctx)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("resolving selection %q for node %q: %w", selName, step.Node, err)
+		}
+		namedSelections[selName] = entry
+		decisions = append(decisions, selDecisions...)
+	}
+
 	// Build expression context if rctx is provided
 	var ectx *plan.ExprContext
 	if rctx != nil {
@@ -80,7 +92,7 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	}
 
 	for _, input := range node.Inputs {
-		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, g, edgeMap, state, dedupCache, rctx, ectx, inputs)
+		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, g, edgeMap, state, dedupCache, namedSelections, rctx, ectx, inputs)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
@@ -114,9 +126,108 @@ func dedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
 	return fmt.Sprintf("%s|%s|%s|%s|%d", fromNode, fromField, sel.Strategy, sel.Filter, sel.Index)
 }
 
+// llmDedupKey builds a cache key for LLM selection deduplication.
+// It excludes Field (since Field is extraction, not selection) so that
+// two inputs selecting from the same source with the same prompt share
+// one LLM call.
+func llmDedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
+	return fmt.Sprintf("%s|%s|llm|%s|%s", fromNode, fromField, sel.Filter, sel.Prompt)
+}
+
+// namedSelectionEntry holds the result of resolving a named selection.
+type namedSelectionEntry struct {
+	element    any    // the full selected element
+	sourceNode string // e.g. "searchFlights"
+	sourceField string // e.g. "catalogOfferings"
+	strategy   string
+	index      int
+	sourceSize int
+	filterExpr string
+}
+
+// resolveNamedSelection performs the array selection for a named StepSelection.
+// It returns the cached entry and any SelectionDecisions for the archive.
+func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSelection, step plan.Step, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext) (*namedSelectionEntry, []SelectionDecision, error) {
+	fromNode, fromField, err := splitRef(sel.From)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid 'from' reference %q: %w", sel.From, err)
+	}
+
+	arr, err := getArrayFromState(fromNode, fromField, state)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	strategy := sel.Strategy
+	if strategy == "" {
+		strategy = "first"
+	}
+
+	// Build a SelectionConfig for reuse with existing infrastructure
+	selCfg := &plan.SelectionConfig{
+		Strategy:  strategy,
+		Filter:    sel.Filter,
+		Index:     sel.Index,
+		SortField: sel.SortField,
+		Prompt:    sel.Prompt,
+	}
+
+	var result *selectionResult
+	var llmRec *LLMCallRecord
+
+	if strategy == "llm" {
+		result, llmRec, err = llmSelectElement(ctx, rctx, arr, selCfg, selName, g, fromNode, fromField)
+		if err != nil {
+			return nil, nil, fmt.Errorf("llm selection %q: %w", selName, err)
+		}
+	} else {
+		// Resolve elementField names in SortField
+		resolvedSel := resolveSelectionFields(selCfg, g, fromNode, fromField)
+
+		// Check dedup cache
+		key := dedupKey(fromNode, fromField, selCfg)
+		if cached, ok := dedupCache[key]; ok {
+			result = cached
+		} else {
+			result, err = applySelection(arr, resolvedSel)
+			if err != nil {
+				return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
+			}
+			dedupCache[key] = result
+		}
+	}
+
+	entry := &namedSelectionEntry{
+		element:     result.element,
+		sourceNode:  fromNode,
+		sourceField: fromField,
+		strategy:    strategy,
+		index:       result.index,
+		sourceSize:  len(arr),
+		filterExpr:  sel.Filter,
+	}
+
+	decision := SelectionDecision{
+		InputName:     selName,
+		SourceNode:    fromNode,
+		SourceField:   fromField,
+		SourceSize:    len(arr),
+		FilteredSize:  result.filteredSize,
+		Strategy:      strategy,
+		SelectedIndex: result.index,
+		LLMCall:       llmRec,
+		SelectionName: selName,
+	}
+	if sel.Filter != "" {
+		decision.FilterExpr = sel.Filter
+	}
+
+	return entry, []SelectionDecision{decision}, nil
+}
+
 // resolveInputEnhanced resolves a single input with optional enhanced features.
 // When rctx/ectx are nil, it behaves identically to the original resolveInput.
-func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, g *graph.Graph, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
+func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, g *graph.Graph, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult, namedSelections map[string]*namedSelectionEntry, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
 	// 1. Check for graph edge
 	if edge, ok := edgeMap[input.Name]; ok {
 		fromNode, fromField, err := splitRef(edge.From)
@@ -156,6 +267,48 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 			PoolIndex:  -1,
 		}
 		return val, nil, res, nil
+	}
+
+	// 2b. Named selection: fromSelection references a pre-resolved element
+	if sv, ok := step.Values[input.Name]; ok && sv.FromSelection != "" {
+		selName, fieldName := plan.ParseFromSelection(sv.FromSelection)
+		entry, exists := namedSelections[selName]
+		if !exists {
+			return nil, nil, nil, fmt.Errorf("fromSelection references unknown selection %q", selName)
+		}
+
+		var val any
+		if fieldName != "" {
+			// Resolve elementField name → gjson path
+			resolvedField := resolveElementFieldPath(g, entry.sourceNode, entry.sourceField, fieldName)
+			extracted, err := extractField(entry.element, resolvedField)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("extracting field %q from selection %q: %w", fieldName, selName, err)
+			}
+			val = extracted
+		} else {
+			val = entry.element
+		}
+
+		decision := &SelectionDecision{
+			InputName:     input.Name,
+			SourceNode:    entry.sourceNode,
+			SourceField:   entry.sourceField,
+			SourceSize:    entry.sourceSize,
+			Strategy:      entry.strategy,
+			SelectedIndex: entry.index,
+			FilterExpr:    entry.filterExpr,
+			SelectionName: selName,
+		}
+		res := &ValueResolution{
+			InputName:  input.Name,
+			Source:     "named_selection",
+			FinalValue: val,
+			FromStep:   entry.sourceNode,
+			FromOutput: entry.sourceField,
+			PoolIndex:  -1,
+		}
+		return val, decision, res, nil
 	}
 
 	// 3. Plan StepValue (via plan values or "from" with select)
@@ -242,12 +395,36 @@ func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName strin
 		sel = sv.Select
 	}
 
-	// LLM selection strategy
+	// LLM selection strategy — check dedup cache first
 	if sel != nil && sel.Strategy == "llm" {
+		llmKey := llmDedupKey(fromNode, fromField, sel)
+		if cached, ok := dedupCache[llmKey]; ok {
+			// Reuse cached element, extract field if needed
+			decision := &SelectionDecision{
+				InputName:     inputName,
+				SourceNode:    fromNode,
+				SourceField:   fromField,
+				SourceSize:    len(arr),
+				FilteredSize:  cached.filteredSize,
+				Strategy:      "llm",
+				SelectedIndex: cached.index,
+			}
+			if sel.Field != "" {
+				resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
+				val, exErr := extractField(cached.element, resolvedField)
+				if exErr != nil {
+					return nil, nil, exErr
+				}
+				return val, decision, nil
+			}
+			return cached.element, decision, nil
+		}
+
 		result, llmRec, llmErr := llmSelectElement(ctx, rctx, arr, sel, inputName, g, fromNode, fromField)
 		if llmErr != nil {
 			return nil, nil, fmt.Errorf("select edge from %s.%s: %w", fromNode, fromField, llmErr)
 		}
+		dedupCache[llmKey] = result
 		decision := &SelectionDecision{
 			InputName:     inputName,
 			SourceNode:    fromNode,
@@ -258,7 +435,6 @@ func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName strin
 			SelectedIndex: result.index,
 			LLMCall:       llmRec,
 		}
-		// Extract field if specified
 		if sel.Field != "" {
 			resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
 			val, exErr := extractField(result.element, resolvedField)
@@ -320,12 +496,35 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 		return nil, nil, err
 	}
 
-	// LLM selection strategy
+	// LLM selection strategy — check dedup cache first
 	if sel != nil && sel.Strategy == "llm" {
+		llmKey := llmDedupKey(fromNode, fromField, sel)
+		if cached, ok := dedupCache[llmKey]; ok {
+			decision := &SelectionDecision{
+				InputName:     inputName,
+				SourceNode:    fromNode,
+				SourceField:   fromField,
+				SourceSize:    len(arr),
+				FilteredSize:  cached.filteredSize,
+				Strategy:      "llm",
+				SelectedIndex: cached.index,
+			}
+			if sel.Field != "" {
+				resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
+				val, exErr := extractField(cached.element, resolvedField)
+				if exErr != nil {
+					return nil, nil, exErr
+				}
+				return val, decision, nil
+			}
+			return cached.element, decision, nil
+		}
+
 		result, llmRec, llmErr := llmSelectElement(ctx, rctx, arr, sel, inputName, g, fromNode, fromField)
 		if llmErr != nil {
 			return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, llmErr)
 		}
+		dedupCache[llmKey] = result
 		decision := &SelectionDecision{
 			InputName:     inputName,
 			SourceNode:    fromNode,

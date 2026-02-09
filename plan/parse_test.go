@@ -35,16 +35,19 @@ func TestParseFile_TravelportBooking(t *testing.T) {
 	// Intent
 	assert.Equal(t, "commitBooking", p.Intent.Goal)
 
-	// Step with selection config
+	// Step with named selection
 	priceStep := p.Execution.Steps[1]
 	assert.Equal(t, "priceOffer", priceStep.Node)
 	assert.Equal(t, []string{"searchFlights"}, priceStep.DependsOn)
 
+	require.Contains(t, priceStep.Selections, "catalogOffering")
+	assert.Equal(t, "searchFlights.catalogOfferings", priceStep.Selections["catalogOffering"].From)
+	assert.Equal(t, "first", priceStep.Selections["catalogOffering"].Strategy)
+
 	offeringVal := priceStep.Values["offeringId"]
-	assert.Equal(t, "searchFlights.catalogOfferings", offeringVal.From)
-	require.NotNil(t, offeringVal.Select)
-	assert.Equal(t, "first", offeringVal.Select.Strategy)
-	assert.Equal(t, "offeringId", offeringVal.Select.Field)
+	assert.Equal(t, "catalogOffering.offeringId", offeringVal.FromSelection)
+	productVal := priceStep.Values["productRef"]
+	assert.Equal(t, "catalogOffering.productRef", productVal.FromSelection)
 
 	// Step with isGoal
 	commitStep := p.Execution.Steps[5]
@@ -249,4 +252,76 @@ execution:
 	require.NotNil(t, sv.Select)
 	assert.Equal(t, "index", sv.Select.Strategy)
 	assert.Equal(t, 3, sv.Select.Index)
+}
+
+func TestParseFile_NamedSelections(t *testing.T) {
+	p, err := ParseFile("testdata/valid/named_selections.yaml")
+	require.NoError(t, err)
+	require.Len(t, p.Execution.Steps, 6)
+
+	// priceOffer step should have selections
+	priceStep := p.Execution.Steps[1]
+	assert.Equal(t, "priceOffer", priceStep.Node)
+	require.Len(t, priceStep.Selections, 1)
+
+	offering := priceStep.Selections["offering"]
+	assert.Equal(t, "searchFlights.catalogOfferings", offering.From)
+	assert.Equal(t, "first", offering.Strategy)
+
+	// Values use fromSelection
+	offeringId := priceStep.Values["offeringId"]
+	assert.Equal(t, "offering.offeringId", offeringId.FromSelection)
+	assert.Empty(t, offeringId.From)
+	assert.Nil(t, offeringId.Select)
+
+	productRef := priceStep.Values["productRef"]
+	assert.Equal(t, "offering.productRef", productRef.FromSelection)
+}
+
+func TestParse_NamedSelectionsInline(t *testing.T) {
+	data := []byte(`
+execution:
+  steps:
+    - node: test
+      selections:
+        result:
+          from: upstream.items
+          strategy: match
+          filter: "type == 'good'"
+      values:
+        id:
+          fromSelection: result.id
+        name:
+          fromSelection: result.name
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+
+	step := p.Execution.Steps[0]
+	require.Len(t, step.Selections, 1)
+	sel := step.Selections["result"]
+	assert.Equal(t, "upstream.items", sel.From)
+	assert.Equal(t, "match", sel.Strategy)
+	assert.Equal(t, "type == 'good'", sel.Filter)
+
+	assert.Equal(t, "result.id", step.Values["id"].FromSelection)
+	assert.Equal(t, "result.name", step.Values["name"].FromSelection)
+}
+
+func TestStepValue_FromSelectionNoWholeElement(t *testing.T) {
+	data := []byte(`
+execution:
+  steps:
+    - node: test
+      selections:
+        result:
+          from: upstream.items
+      values:
+        item:
+          fromSelection: result
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	sv := p.Execution.Steps[0].Values["item"]
+	assert.Equal(t, "result", sv.FromSelection)
 }

@@ -115,6 +115,7 @@ func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
 			FilteredSize:  s.FilteredSize,
 			Strategy:      s.Strategy,
 			SelectedIndex: s.SelectedIndex,
+			SelectionName: s.SelectionName,
 		}
 		if s.LLMCall != nil {
 			rec.LLMCall = convertLLMCall(s.LLMCall)

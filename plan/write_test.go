@@ -203,3 +203,61 @@ func TestMarshal_StepValueWithFallback(t *testing.T) {
 	assert.Contains(t, yaml, "fallbackPool:")
 	assert.Contains(t, yaml, "fallbackStrategy: random")
 }
+
+func TestMarshal_FromSelection(t *testing.T) {
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "priceOffer",
+					Selections: map[string]StepSelection{
+						"offering": {
+							From:     "searchFlights.catalogOfferings",
+							Strategy: "first",
+						},
+					},
+					Values: map[string]StepValue{
+						"offeringId": {FromSelection: "offering.offeringId"},
+						"productRef": {FromSelection: "offering.productRef"},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(p)
+	require.NoError(t, err)
+
+	yaml := string(data)
+	// Selections should appear
+	assert.Contains(t, yaml, "selections:")
+	assert.Contains(t, yaml, "offering:")
+	assert.Contains(t, yaml, "from: searchFlights.catalogOfferings")
+	assert.Contains(t, yaml, "strategy: first")
+
+	// FromSelection should appear as mapping, not bare scalar
+	assert.Contains(t, yaml, "fromSelection: offering.offeringId")
+	assert.Contains(t, yaml, "fromSelection: offering.productRef")
+	assert.NotContains(t, yaml, "default:")
+}
+
+func TestMarshalRoundTrip_NamedSelections(t *testing.T) {
+	original, err := ParseFile("testdata/valid/named_selections.yaml")
+	require.NoError(t, err)
+
+	data, err := Marshal(original)
+	require.NoError(t, err)
+
+	parsed, err := Parse(data)
+	require.NoError(t, err)
+
+	// Verify selections survive round trip
+	priceStep := parsed.Execution.Steps[1]
+	require.Len(t, priceStep.Selections, 1)
+	assert.Equal(t, "searchFlights.catalogOfferings", priceStep.Selections["offering"].From)
+	assert.Equal(t, "first", priceStep.Selections["offering"].Strategy)
+
+	// Verify fromSelection values survive
+	assert.Equal(t, "offering.offeringId", priceStep.Values["offeringId"].FromSelection)
+	assert.Equal(t, "offering.productRef", priceStep.Values["productRef"].FromSelection)
+}

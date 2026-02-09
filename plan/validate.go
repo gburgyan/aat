@@ -93,6 +93,38 @@ func Validate(p *Plan, g *graph.Graph) error {
 			}
 		}
 
+		// Validate step.Selections (named selections)
+		for selName, sel := range step.Selections {
+			if sel.From == "" {
+				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q has empty 'from'", i, step.Node, selName))
+				continue
+			}
+			srcNode, srcField, err := splitRef(sel.From)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q has invalid 'from' reference %q: %v", i, step.Node, selName, sel.From, err))
+				continue
+			}
+			if !stepNodes[srcNode] {
+				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references unknown step %q", i, step.Node, selName, srcNode))
+			} else {
+				// From implies dependsOn
+				if !depsSet[srcNode] {
+					errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references %q but does not list it in dependsOn", i, step.Node, selName, srcNode))
+				}
+			}
+			if outs, ok := outputsByNode[srcNode]; ok {
+				if out, outExists := outs[srcField]; !outExists {
+					errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references output %q which does not exist on node %q", i, step.Node, selName, srcField, srcNode))
+				} else {
+					// Must be an array type
+					ft, ftErr := graph.ParseFieldType(out.Type)
+					if ftErr == nil && !ft.IsArray {
+						errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references output %q which is not an array type", i, step.Node, selName, sel.From))
+					}
+				}
+			}
+		}
+
 		// Gap 6: Check value names match node inputs
 		for name := range step.Values {
 			if !inputNames[name] {
@@ -102,6 +134,17 @@ func Validate(p *Plan, g *graph.Graph) error {
 
 		// Per-value validation: From references, array selection, sortField, dependsOn completeness
 		for name, sv := range step.Values {
+			// Validate FromSelection
+			if sv.FromSelection != "" {
+				if sv.From != "" || sv.Select != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromSelection but also has from/select — these are mutually exclusive", i, step.Node, name))
+				}
+				selName, _ := ParseFromSelection(sv.FromSelection)
+				if _, exists := step.Selections[selName]; !exists {
+					errs = append(errs, fmt.Sprintf("step %d (%s): value %q references unknown selection %q", i, step.Node, name, selName))
+				}
+			}
+
 			// Gap 1: Validate From field references
 			if sv.From != "" {
 				srcNode, srcField, err := splitRef(sv.From)
@@ -215,8 +258,35 @@ func Validate(p *Plan, g *graph.Graph) error {
 		"llm":    true,
 	}
 
-	// Validate predicate expressions and selection strategies in step values and assertions
+	// Validate predicate expressions and selection strategies in step selections and values
 	for i, step := range p.Execution.Steps {
+		// Validate named selection strategies
+		for selName, sel := range step.Selections {
+			strategy := sel.Strategy
+			if !validStrategies[strategy] {
+				errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for selection %q", i, step.Node, strategy, selName))
+			}
+			if sel.Filter != "" {
+				if err := ValidatePredicate(sel.Filter); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for selection %q: %v", i, step.Node, selName, err))
+				}
+			}
+			if strategy == "min" || strategy == "max" {
+				if sel.SortField == "" {
+					errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires sortField for selection %q", i, step.Node, strategy, selName))
+				}
+			}
+			if strategy == "match" && sel.Filter == "" {
+				errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for selection %q", i, step.Node, selName))
+			}
+			if strategy == "index" && sel.Index < 0 {
+				errs = append(errs, fmt.Sprintf("step %d (%s): index strategy requires non-negative index for selection %q", i, step.Node, selName))
+			}
+			if strategy == "llm" && sel.Prompt == "" {
+				errs = append(errs, fmt.Sprintf("step %d (%s): llm strategy requires prompt for selection %q", i, step.Node, selName))
+			}
+		}
+
 		for name, sv := range step.Values {
 			if sv.Select != nil {
 				sel := sv.Select

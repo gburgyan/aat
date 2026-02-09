@@ -78,7 +78,7 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 }
 
 // fixSelectionConfigs ensures that inputs fed by select edges have proper
-// from/select config. If missing, defaults to strategy: first.
+// from/select config (or named selection). If missing, defaults to strategy: first.
 func fixSelectionConfigs(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 	// Build select edge index: "toNode.toInput" → "fromNode.fromOutput"
 	selectEdges := map[string]string{}
@@ -98,7 +98,20 @@ func fixSelectionConfigs(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool
 			p.Execution.Steps[i].Values = map[string]plan.StepValue{}
 		}
 
+		// Fix named selection strategies: default empty strategy to "first"
+		for selName, sel := range step.Selections {
+			if sel.Strategy == "" {
+				sel.Strategy = "first"
+				p.Execution.Steps[i].Selections[selName] = sel
+			}
+		}
+
 		for _, inp := range node.Inputs {
+			// Skip values that use fromSelection — they're handled by named selections
+			if sv, exists := step.Values[inp.Name]; exists && sv.FromSelection != "" {
+				continue
+			}
+
 			edgeKey := step.Node + "." + inp.Name
 			source, isSelect := selectEdges[edgeKey]
 			if !isSelect {
@@ -312,14 +325,52 @@ func BuildSkeleton(g *graph.Graph, cr *graph.ChainResult, ga *GoalAnalysis, prom
 		sortStrings(depList)
 		step.DependsOn = depList
 
-		// For each input, wire up from/select or leave empty for LLM.
+		// Collect select-edge inputs grouped by source to detect multi-field extraction.
+		// source → []inputName
+		selectBySource := map[string][]string{}
+		for _, inp := range node.Inputs {
+			edgeKey := nodeName + "." + inp.Name
+			if source, isSelect := selectEdges[edgeKey]; isSelect {
+				sourceNode := splitNodeName(source)
+				if stepIndex[sourceNode] {
+					selectBySource[source] = append(selectBySource[source], inp.Name)
+				}
+			}
+		}
+
+		// Create named selections for sources with 2+ inputs.
+		namedSources := map[string]string{} // source → selection name
+		for source, inputs := range selectBySource {
+			if len(inputs) >= 2 {
+				selName := deriveSelectionName(source)
+				if step.Selections == nil {
+					step.Selections = map[string]plan.StepSelection{}
+				}
+				step.Selections[selName] = plan.StepSelection{
+					From:     source,
+					Strategy: "first",
+				}
+				namedSources[source] = selName
+			}
+		}
+
+		// For each input, wire up from/select, fromSelection, or leave empty for LLM.
 		for _, inp := range node.Inputs {
 			edgeKey := nodeName + "." + inp.Name
 
 			if source, isSelect := selectEdges[edgeKey]; isSelect {
-				// Select edge: set from + select config.
 				sourceNode := splitNodeName(source)
-				if stepIndex[sourceNode] {
+				if !stepIndex[sourceNode] {
+					continue
+				}
+				if selName, isNamed := namedSources[source]; isNamed {
+					// Use named selection
+					fieldName := lookupElementFieldPath(g, source, inp.Name)
+					step.Values[inp.Name] = plan.StepValue{
+						FromSelection: selName + "." + fieldName,
+					}
+				} else {
+					// Single input from this source: use old-style from+select
 					step.Values[inp.Name] = plan.StepValue{
 						From: source,
 						Select: &plan.SelectionConfig{
@@ -422,6 +473,33 @@ func MergeLLMValues(skeleton, llmPlan *plan.Plan) {
 			skelStep.Retry = llmStep.Retry
 		}
 
+		// Merge named selection strategy overrides from LLM.
+		if len(skelStep.Selections) > 0 && len(llmStep.Selections) > 0 {
+			for selName, llmSel := range llmStep.Selections {
+				skelSel, exists := skelStep.Selections[selName]
+				if !exists {
+					continue // ignore selections the skeleton doesn't have
+				}
+				// Accept strategy/filter/sortField/prompt overrides
+				if llmSel.Strategy != "" {
+					skelSel.Strategy = llmSel.Strategy
+				}
+				if llmSel.Filter != "" {
+					skelSel.Filter = llmSel.Filter
+				}
+				if llmSel.SortField != "" {
+					skelSel.SortField = llmSel.SortField
+				}
+				if llmSel.Prompt != "" {
+					skelSel.Prompt = llmSel.Prompt
+				}
+				if llmSel.Index != 0 {
+					skelSel.Index = llmSel.Index
+				}
+				skelStep.Selections[selName] = skelSel
+			}
+		}
+
 		// Merge values.
 		if llmStep.Values == nil {
 			continue
@@ -435,7 +513,7 @@ func MergeLLMValues(skeleton, llmPlan *plan.Plan) {
 
 			if !exists {
 				// Skeleton has no entry for this input. Accept literal from LLM
-				// but strip any from/select (LLM shouldn't set structural fields).
+				// but strip any from/select/fromSelection (LLM shouldn't set structural fields).
 				if llmVal.Default != nil {
 					skelStep.Values[inputName] = plan.StepValue{
 						Default: llmVal.Default,
@@ -445,7 +523,11 @@ func MergeLLMValues(skeleton, llmPlan *plan.Plan) {
 			}
 
 			// Skeleton has an entry. Merge based on what skeleton has.
-			if skelVal.From != "" && skelVal.Select != nil {
+			if skelVal.FromSelection != "" {
+				// Named selection: skeleton is authoritative for fromSelection.
+				// LLM can't change the structural ref. Skip.
+				continue
+			} else if skelVal.From != "" && skelVal.Select != nil {
 				// Select edge: accept strategy/filter/sortField/index/prompt overrides.
 				if llmVal.Select != nil {
 					if llmVal.Select.Strategy != "" {
@@ -511,6 +593,22 @@ func lookupElementFieldPath(g *graph.Graph, sourceRef, inputName string) string 
 		}
 	}
 	return inputName
+}
+
+// deriveSelectionName creates a name for a named selection from the source
+// reference. It takes the last segment (e.g., "catalogOfferings" from
+// "searchFlights.catalogOfferings") and makes it singular-ish.
+func deriveSelectionName(source string) string {
+	parts := strings.SplitN(source, ".", 2)
+	if len(parts) < 2 {
+		return "selection"
+	}
+	name := parts[1]
+	// Simple singularization: strip trailing 's' if it exists
+	if len(name) > 1 && name[len(name)-1] == 's' {
+		name = name[:len(name)-1]
+	}
+	return name
 }
 
 // splitNodeName extracts the node name from a "node.field" reference.

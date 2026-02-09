@@ -1,11 +1,11 @@
 metadata:
-  created: 2026-02-07T12:00:00Z
-  prompt: "Book a flight from DEN to SFO"
+  created: 2026-02-08T12:00:00Z
+  prompt: "Book a flight from DEN to SFO using named selections"
   graphVersion: "1.0.0"
 
 intent:
   goal: commitBooking
-  description: "Complete a flight booking from Denver to San Francisco"
+  description: "Complete a flight booking using named selections"
 
 execution:
   steps:
@@ -18,20 +18,30 @@ execution:
 
     - node: priceOffer
       dependsOn: [searchFlights]
+      description: "Price the first available offering"
       selections:
-        catalogOffering:
+        offering:
           from: searchFlights.catalogOfferings
           strategy: first
       values:
         offeringId:
-          fromSelection: catalogOffering.offeringId
+          fromSelection: offering.offeringId
         productRef:
-          fromSelection: catalogOffering.productRef
+          fromSelection: offering.productRef
 
     - node: createWorkbench
 
     - node: addOffer
       dependsOn: [searchFlights, createWorkbench]
+      selections:
+        offering:
+          from: searchFlights.catalogOfferings
+          strategy: first
+      values:
+        offeringId:
+          fromSelection: offering.offeringId
+        productRef:
+          fromSelection: offering.productRef
 
     - node: addTraveler
       dependsOn: [createWorkbench]

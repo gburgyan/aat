@@ -84,6 +84,7 @@ type SelectionRecord struct {
 	Strategy      string         `json:"strategy"`
 	SelectedIndex int            `json:"selectedIndex"`
 	LLMCall       *LLMCallRecord `json:"llmCall,omitempty"`
+	SelectionName string         `json:"selectionName,omitempty"`
 }
 
 // ErrorClassRecord captures the error classification for a failed step.

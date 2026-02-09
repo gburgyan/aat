@@ -142,16 +142,23 @@ To change the traveler:
 
 ## Selection Strategies
 
-The plan uses `first` selection for choosing which offering to book:
+The plan uses named selections when multiple inputs need fields from the same array element. Both `priceOffer` and `addOffer` need `offeringId` and `productRef` from the same offering:
 
 ```yaml
     - node: addOffer
+      selections:
+        catalogOffering:
+          from: searchFlights.catalogOfferings
+          strategy: first
       values:
         offeringId:
-          from: searchFlights.catalogOfferings
-          select:
-            strategy: first
-            field: "id"
+          fromSelection: catalogOffering.offeringId
+        productRef:
+          fromSelection: catalogOffering.productRef
 ```
 
-Other strategies: `last`, `random`, `index` (specific position), `min`/`max` (by field value), `match` (by predicate filter).
+The `selections` block picks one element from the array, then each `fromSelection` extracts a field from that element. This guarantees both values come from the same offering.
+
+Other strategies: `last`, `random`, `index` (specific position), `min`/`max` (by field value), `match` (by predicate filter), `llm` (LLM-assisted choice).
+
+See [value-flow.md](value-flow.md) for the full guide on how values move between steps.

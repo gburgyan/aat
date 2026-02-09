@@ -193,7 +193,7 @@ func FormatPlanSchema() string {
 	return `# How to Fill the Plan Skeleton
 
 The skeleton already has all structural elements wired: nodes, dependsOn, from refs,
-select configs, cleanup, metadata, and intent. You only need to add:
+select configs, named selections, cleanup, metadata, and intent. You only need to add:
 
 ## 1. Literal Values
 
@@ -206,15 +206,25 @@ values:
 
 ## 2. Selection Strategy Overrides
 
-The skeleton defaults select inputs to strategy "first". You may override:
+The skeleton uses named selections when multiple inputs share the same array source.
+You may override the selection strategy:
+` + "```yaml" + `
+selections:
+  offering:
+    from: searchFlights.catalogOfferings
+    strategy: match                          # override from "first"
+    filter: "stops == 0"                     # add filter for match
+` + "```" + `
+
+For single-input selections, the skeleton uses old-style from+select:
 ` + "```yaml" + `
 values:
   offeringId:
-    from: searchFlights.catalogOfferings   # keep existing from
+    from: searchFlights.catalogOfferings
     select:
       strategy: match
-      field: id                             # keep existing field (uses gjson path from graph)
-      filter: "stops == 0"                  # add filter for match
+      field: id
+      filter: "stops == 0"
 ` + "```" + `
 
 Valid strategies: first, last, random, index, min, max, match

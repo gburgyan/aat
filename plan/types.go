@@ -1,6 +1,9 @@
 package plan
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Plan is the top-level execution plan parsed from YAML.
 // It describes what steps to execute, their input values,
@@ -50,15 +53,28 @@ type Execution struct {
 
 // Step describes a single execution step targeting a graph node.
 type Step struct {
-	Node          string               `yaml:"node" json:"node"`
-	DependsOn     []string             `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
-	Description   string               `yaml:"description,omitempty" json:"description,omitempty"`
-	IsGoal        bool                 `yaml:"isGoal,omitempty" json:"isGoal,omitempty"`
-	Values        map[string]StepValue `yaml:"values,omitempty" json:"values,omitempty"`
-	Retry         *RetryConfig         `yaml:"retry,omitempty" json:"retry,omitempty"`
-	Fallback      *FallbackConfig      `yaml:"fallback,omitempty" json:"fallback,omitempty"`
-	Assertions    *Assertions          `yaml:"assertions,omitempty" json:"assertions,omitempty"`
-	ExpectFailure *ExpectFailure       `yaml:"expectFailure,omitempty" json:"expectFailure,omitempty"`
+	Node          string                    `yaml:"node" json:"node"`
+	DependsOn     []string                  `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
+	Description   string                    `yaml:"description,omitempty" json:"description,omitempty"`
+	IsGoal        bool                      `yaml:"isGoal,omitempty" json:"isGoal,omitempty"`
+	Selections    map[string]StepSelection  `yaml:"selections,omitempty" json:"selections,omitempty"`
+	Values        map[string]StepValue      `yaml:"values,omitempty" json:"values,omitempty"`
+	Retry         *RetryConfig              `yaml:"retry,omitempty" json:"retry,omitempty"`
+	Fallback      *FallbackConfig           `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	Assertions    *Assertions               `yaml:"assertions,omitempty" json:"assertions,omitempty"`
+	ExpectFailure *ExpectFailure            `yaml:"expectFailure,omitempty" json:"expectFailure,omitempty"`
+}
+
+// StepSelection describes a named element selection from an upstream array.
+// Multiple values can reference the same selection to extract different fields
+// from the same element, ensuring coordinated multi-field extraction.
+type StepSelection struct {
+	From      string `yaml:"from" json:"from"`
+	Strategy  string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
+	Filter    string `yaml:"filter,omitempty" json:"filter,omitempty"`
+	Index     int    `yaml:"index,omitempty" json:"index,omitempty"`
+	SortField string `yaml:"sortField,omitempty" json:"sortField,omitempty"`
+	Prompt    string `yaml:"prompt,omitempty" json:"prompt,omitempty"`
 }
 
 // StepValue represents a value assignment for a step input.
@@ -71,6 +87,7 @@ type StepValue struct {
 	Constraint       string           `yaml:"constraint,omitempty" json:"constraint,omitempty"`
 	From             string           `yaml:"from,omitempty" json:"from,omitempty"`
 	Select           *SelectionConfig `yaml:"select,omitempty" json:"select,omitempty"`
+	FromSelection    string           `yaml:"fromSelection,omitempty" json:"fromSelection,omitempty"`
 }
 
 // SelectionConfig describes how to select an element from an array output.
@@ -129,4 +146,18 @@ type VerificationStep struct {
 type CleanupStep struct {
 	Node  string `yaml:"node" json:"node"`
 	RunOn string `yaml:"runOn,omitempty" json:"runOn,omitempty"` // always, failure, success
+}
+
+// ParseFromSelection splits a fromSelection reference like "offering.offeringId"
+// into (selectionName, fieldName). If there is no dot, fieldName is empty
+// (meaning the whole element). Returns empty strings for empty input.
+func ParseFromSelection(ref string) (selectionName, fieldName string) {
+	if ref == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(ref, ".", 2)
+	if len(parts) == 1 {
+		return parts[0], ""
+	}
+	return parts[0], parts[1]
 }

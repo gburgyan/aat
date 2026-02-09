@@ -319,6 +319,60 @@ func TestFormatNarrative(t *testing.T) {
 				"- cleanupNode (always)",
 			},
 		},
+		{
+			name: "named selections",
+			plan: &Plan{
+				Execution: Execution{
+					Steps: []Step{
+						{
+							Node: "priceOffer",
+							Selections: map[string]StepSelection{
+								"offering": {
+									From:     "searchFlights.catalogOfferings",
+									Strategy: "first",
+								},
+							},
+							Values: map[string]StepValue{
+								"offeringId": {FromSelection: "offering.offeringId"},
+								"productRef": {FromSelection: "offering.productRef"},
+							},
+						},
+					},
+				},
+			},
+			contains: []string{
+				"Selections:",
+				"offering: from searchFlights.catalogOfferings (strategy: first)",
+				"offeringId: from selection offering.offeringId",
+				"productRef: from selection offering.productRef",
+			},
+		},
+		{
+			name: "named selection with filter",
+			plan: &Plan{
+				Execution: Execution{
+					Steps: []Step{
+						{
+							Node: "target",
+							Selections: map[string]StepSelection{
+								"result": {
+									From:     "source.items",
+									Strategy: "match",
+									Filter:   "type == 'good'",
+								},
+							},
+							Values: map[string]StepValue{
+								"id": {FromSelection: "result.id"},
+							},
+						},
+					},
+				},
+			},
+			contains: []string{
+				"result: from source.items (strategy: match, filter: type == 'good')",
+				"id: from selection result.id",
+			},
+		},
 	}
 
 	for _, tt := range tests {

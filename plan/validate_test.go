@@ -1556,3 +1556,343 @@ func TestValidate_DependsOnCompleteness(t *testing.T) {
 		assert.Contains(t, err.Error(), "has 'from' reference to \"searchFlights\" but does not list it in dependsOn")
 	})
 }
+
+// --- Named Selections ---
+
+func TestValidate_NamedSelections_HappyPath(t *testing.T) {
+	g := loadTravelportGraph(t)
+	p, err := ParseFile("testdata/valid/named_selections.yaml")
+	require.NoError(t, err)
+
+	err = Validate(p, g)
+	assert.NoError(t, err)
+}
+
+func TestValidate_NamedSelections(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid selection", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {FromSelection: "offering.productRef"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("selection with empty from", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {From: ""},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "empty 'from'")
+	})
+
+	t.Run("selection references non-array output", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferingsId",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not an array type")
+	})
+
+	t.Run("selection references unknown step", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "nonexistent.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "references unknown step")
+	})
+
+	t.Run("selection missing dependsOn", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node: "priceOffer",
+						// Missing dependsOn
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "does not list it in dependsOn")
+	})
+
+	t.Run("fromSelection references unknown selection", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "nonexistent.offeringId"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "references unknown selection")
+	})
+
+	t.Run("fromSelection conflicts with from", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {
+								FromSelection: "offering.offeringId",
+								From:          "searchFlights.catalogOfferings",
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "mutually exclusive")
+	})
+
+	t.Run("fromSelection conflicts with select", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {
+								FromSelection: "offering.offeringId",
+								Select:        &SelectionConfig{Strategy: "first"},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "mutually exclusive")
+	})
+
+	t.Run("selection strategy validation", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "llm",
+								// Missing prompt for llm strategy
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "llm strategy requires prompt")
+	})
+}
+
+func TestParseFromSelection(t *testing.T) {
+	tests := []struct {
+		name  string
+		ref   string
+		sel   string
+		field string
+	}{
+		{name: "with dot", ref: "offering.offeringId", sel: "offering", field: "offeringId"},
+		{name: "without dot", ref: "offering", sel: "offering", field: ""},
+		{name: "empty", ref: "", sel: "", field: ""},
+		{name: "multiple dots", ref: "offering.nested.path", sel: "offering", field: "nested.path"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sel, field := ParseFromSelection(tc.ref)
+			assert.Equal(t, tc.sel, sel)
+			assert.Equal(t, tc.field, field)
+		})
+	}
+}
