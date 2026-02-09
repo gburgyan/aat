@@ -266,3 +266,25 @@
 - `cmd/aat/prompt.go` — Wire WithMaxRelaxationDepth
 
 **Open questions:** None.
+
+## 2026-02-09 — Strategic Review: Roadmap Resequencing
+
+**What:** Product Owner + Staff Engineer review of remaining work, technical debt, and feature sequencing.
+
+**Decisions:**
+- Defer GopherLua (Task 21) indefinitely. Templates + Tier 3 external adapters cover use cases.
+- Pull forward `aat docs generate` (Task 59) and `aat mcp serve` (Task 60) from Stage 4 into Stage 2.
+- Pull forward CI/CD mode (Task 28) from Stage 3a into Stage 2 — table stakes.
+- Move semantic validation (Task 22) from Stage 2 to Stage 3a.
+- Redefine Task 23: OAS is a reference/enrichment layer, not a generator. Scaffold generation is a starting point; graph-OAS validation closes the feedback loop; OAS enriches the MCP server with authoritative request/response shapes.
+- The onboarding story is AI-assisted authoring: MCP server + Claude Code + `aat graph validate`, not a code generator.
+- Add pre-release hardening: context cancellation, schema stub honesty, archive secret redaction, CLAUDE.md accuracy.
+- Add quickstart example using PetStore public API.
+
+**Rationale:** The engine quality is excellent. The gap is accessibility. MCP server positions AAT as "the API graph platform" — the graph is the asset; testing, docs, and AI integration are lenses on that asset. AI-assisted authoring via Claude Code + MCP is a more natural onboarding path than a code generator trying to own the full API surface.
+
+**Open questions:**
+- MCP server transport: stdio (Claude Code native) vs HTTP/SSE vs both
+- OAS library: kin-openapi vs libopenapi
+- Graph-OAS linking schema: how nodes reference operationIds
+- How much OAS detail the MCP server exposes (just schemas? or also examples, descriptions?)

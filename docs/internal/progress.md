@@ -47,15 +47,33 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 20b. Resolution-time relaxation (resolveWithFallback)
   - [x] 20c. Filter relaxation for selections
   - [x] 20d. Step-level relaxation (adaptive mode) + archive + CLI wiring
-- [ ] 21. Embed GopherLua with sandbox restrictions (Tier 2 adapters)
-- [ ] 22. Add semantic validation via LLM
+- [ ] ~~21. GopherLua~~ — deferred indefinitely (templates + Tier 3 cover use cases)
 - [ ] 22a. Implement negative assertions (expectFailure)
-- [ ] 23. Build basic OAS-to-adapter generator
+- [ ] 23. OAS integration: scaffold generation, graph-OAS validation, MCP enrichment
 - [ ] 24. Build prompt-to-plan regression test suite
+- [ ] 28. CI/CD mode (moved from Stage 3a — table stakes)
+- [ ] 59. `aat docs generate` (moved from Stage 4)
+- [ ] 60. `aat mcp serve` with OAS enrichment (moved from Stage 4)
+- [ ] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)
+- [ ] H2. Quickstart example (PetStore)
+- [ ] H3. `aat graph validate` (feedback loop for AI-assisted authoring)
 
 ## Stage 3a: CI/CD, Web UI & Polish
 
-Tasks 25-37 — expand when Stage 2 nears completion.
+- [ ] 10b. Initialize SQLite for local run history indexing
+- [ ] 22. Add semantic validation via LLM (moved from Stage 2 — mechanical validation sufficient for launch)
+- [ ] 25. Build the local API server
+- [ ] 26. Build the local web UI frontend
+- [ ] 27. Implement `aat serve` command
+- [ ] 29. Implement Markdown report generation
+- [ ] 30. Implement `aat inspect <archive>`
+- [ ] 31. Implement `aat diff <archive1> <archive2>`
+- [ ] 32. Implement plan persistence (`aat plan save/list/validate`)
+- [ ] 33. Implement FILO cleanup stack enhancements
+- [ ] 34. Implement Tier 3 external adapter protocol
+- [ ] 35. Document repo structure for team usage
+- [ ] 36. Implement verification steps
+- [ ] 37. (Optional) Implement opt-in telemetry
 
 ## Stage 3b: Team Tier Infrastructure
 
@@ -63,4 +81,4 @@ Tasks 38-45 — expand when Stage 3a nears completion.
 
 ## Stage 4: Marketplace and Scale
 
-Tasks 46-67 — expand when Stage 3b nears completion.
+Tasks 46-67 (excluding 59, 60 moved to Stage 2) — expand when Stage 3b nears completion.

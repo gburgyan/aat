@@ -12,7 +12,7 @@ AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API w
 |---------|---------------|
 | `cmd/aat/` | CLI binary — thin wrapper, wires packages together |
 | `graph/` | API graph model, YAML parsing, traversal, backward chaining, diffing |
-| `adapter/` | Adapter interface, HTTP executor, Tier 1/2/3 loaders |
+| `adapter/` | Adapter interface, HTTP executor, Tier 1/3 loaders |
 | `domain/` | Domain knowledge: concepts, types, value pools |
 | `plan/` | Plan model, expression evaluator, validation, persistence |
 | `intent/` | LLM-powered prompt → plan transformation |
@@ -38,27 +38,30 @@ Dependencies flow in one direction. No cycles. No lateral imports within a tier.
 
 Data flows down, decisions flow up. No business logic in `cmd/`.
 
-## go-ctxdep Patterns
+## Dependency Injection Patterns
 
-All cross-package dependencies are resolved from `context.Context` via `go-ctxdep`. No constructor injection, no global mutable state.
+Cross-package dependencies use direct struct fields and function parameters — explicit, no framework. No global mutable state.
 
 ```go
-// Production: register real implementation on context
-ctx := context.Background()
-ctx = ctxdep.RegisterValue(ctx, realHTTPClient)
-
-// Usage: resolve from context at call site
-func RunStep(ctx context.Context, step plan.Step) error {
-    client, err := ctxdep.Get[*http.Client](ctx)
-    if err != nil { return err }
-    // use client
+// Production: construct with real implementations
+eng := engine.Engine{
+    Registry: registry,
+    Mode:     "lean",
+    LLMClient: llmClient,
 }
 
-// Tests: build context with test implementations
-func TestRunStep(t *testing.T) {
-    ctx := context.Background()
-    ctx = ctxdep.RegisterValue(ctx, &fakeHTTPClient{})
-    err := RunStep(ctx, testStep)
+// Usage: collaborators are struct fields or function params
+func (e *Engine) Run(ctx context.Context, p *plan.Plan) (*RunResult, error) {
+    // use e.Registry, e.LLMClient, etc.
+}
+
+// Tests: construct with test implementations
+func TestRun(t *testing.T) {
+    eng := engine.Engine{
+        Registry: &fakeRegistry{},
+        Mode:     "strict",
+    }
+    result, err := eng.Run(ctx, testPlan)
     // assert
 }
 ```
@@ -67,7 +70,7 @@ func TestRunStep(t *testing.T) {
 
 - Each package has its own `_test.go` files; tests run with `go test ./...`
 - Use `github.com/stretchr/testify` — `assert` for non-fatal checks, `require` for fatal preconditions
-- Tests build a `context.Context` with test implementations via go-ctxdep
+- Tests construct types with test implementations directly (no DI framework)
 - Table-driven tests preferred for systematic coverage
 - Closed-loop: tests verify observable behavior, not internal state
 - `internal/testutil/` for shared helpers only — no test logic there
