@@ -234,3 +234,35 @@
 - `plan/validate_test.go` — 2 new tests (llm with/without prompt)
 
 **Open questions:** None.
+
+## 2026-02-09 — Task 20: Constraint-Aware Fallback with Relaxation Guard
+
+**What:** Implemented soft constraint relaxation across three scenarios: value resolution, filter selection, and step-level re-execution (adaptive mode only). Four sub-tasks (20a-20d), each independently testable.
+
+**Decisions:**
+- RelaxationTracker is per-step, not per-run — prevents cross-step state leakage and keeps budget accounting simple
+- Three relaxation reasons: `resolution_exhausted`, `filter_empty`, `step_failed` — explicit enum for archive readability
+- `tryRelaxResolution` returns `tried[0]` (first value that passed expression eval but failed constraint) — deterministic fallback, no re-evaluation needed
+- `tryRelaxFilter` retries selection with `filter = ""` via shallow copy — preserves original SelectionConfig for audit trail
+- Step-level relaxation (executeStepAdaptive) only triggers on CategoryClient (4xx), not CategoryServer (5xx) — server errors are infrastructure problems, not constraint mismatches
+- ExpectFailure steps skip relaxation entirely — they're supposed to fail
+- IsRelaxed pre-check at top of constraint evaluation in resolveWithFallback — enables step-level re-execution path to skip previously-blocking constraints without re-running the full resolution chain
+- `config.RuntimeSettings.MaxRelaxationDepth` already existed in the codebase — just wired it through to engine
+- `splitAppliesTo` handles both "node.input" and "node" formats in constraint AppliesTo refs
+
+**Files changed:**
+- `engine/relaxation.go` — NEW: RelaxationTracker, RelaxationRecord, FindSoftConstraintForInput, 14 tests
+- `engine/relaxation_test.go` — NEW: tracker lifecycle, circular detection, budget exhaustion, lookup
+- `engine/resolve.go` — ResolveContext.Plan/Tracker, resolveWithFallback relaxation, tryRelaxResolution, tryRelaxFilter, 8 new tests
+- `engine/engine.go` — MaxRelaxationDepth, plan field, WithMaxRelaxationDepth, executeStepAdaptive, splitAppliesTo, Run loop branching
+- `engine/retry.go` — executeStepWithTracking wrapper, tracker param threading
+- `engine/result.go` — Relaxed/RelaxedConstraint on ValueResolution, FilterRelaxed on SelectionDecision, Relaxations on StepResult
+- `engine/selection_test.go` — 8 new filter relaxation tests
+- `engine/engine_test.go` — 8 new step-level relaxation tests
+- `engine/archive.go` — convertRelaxations, extended convertStepResult/convertSelections/convertResolutions
+- `engine/archive_test.go` — 4 new archive conversion tests
+- `archive/types.go` — RelaxationArchiveRecord, Relaxations on StepRecord, FilterRelaxed on SelectionRecord, Relaxed/RelaxedConstraint on ValueResolutionRecord
+- `cmd/aat/main.go` — Wire WithMaxRelaxationDepth
+- `cmd/aat/prompt.go` — Wire WithMaxRelaxationDepth
+
+**Open questions:** None.

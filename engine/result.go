@@ -53,9 +53,10 @@ type StepResult struct {
 	Error      error
 	StartTime  time.Time
 	Duration   time.Duration
-	ErrorClass *ErrorClassification       // nil on success
-	RetryCount int                        // number of retries performed (0 = no retries)
-	Validation *validate.MechanicalResult // nil if no assertions configured
+	ErrorClass  *ErrorClassification       // nil on success
+	RetryCount  int                        // number of retries performed (0 = no retries)
+	Validation  *validate.MechanicalResult // nil if no assertions configured
+	Relaxations []RelaxationRecord         // soft constraints relaxed during this step
 }
 
 // SelectionDecision records how a particular array selection was resolved.
@@ -70,24 +71,27 @@ type SelectionDecision struct {
 	SelectedIndex int
 	LLMCall       *LLMCallRecord // non-nil for llm strategy
 	SelectionName string         // non-empty for named selections
+	FilterRelaxed bool           // true if filter was relaxed to produce this selection
 }
 
 // ValueResolution records how a single input was resolved.
 type ValueResolution struct {
-	InputName    string         // input being resolved
-	Source       string         // "edge", "select_edge", "plan_default", "expression",
-	                            // "fallback_pool", "graph_default", "llm", "optional_skip"
-	RawValue     any            // before expression evaluation (nil if N/A)
-	FinalValue   any            // after evaluation + coercion
-	FromStep     string         // source step (for edge/select_edge)
-	FromOutput   string         // source output (for edge/select_edge)
-	Expression   string         // template string if evaluated (e.g. "{{today + 5 days}}")
-	Constraint   string         // constraint expression if checked
-	ConstraintOK bool           // whether constraint passed
-	PoolIndex    int            // index in fallback pool (-1 if not from pool)
-	PoolSize     int            // fallback pool size (0 if no pool)
-	Tried        []any          // values tried and rejected before this one
-	LLMCall      *LLMCallRecord // non-nil if LLM was consulted
+	InputName         string         // input being resolved
+	Source            string         // "edge", "select_edge", "plan_default", "expression",
+	                                 // "fallback_pool", "graph_default", "llm", "optional_skip"
+	RawValue          any            // before expression evaluation (nil if N/A)
+	FinalValue        any            // after evaluation + coercion
+	FromStep          string         // source step (for edge/select_edge)
+	FromOutput        string         // source output (for edge/select_edge)
+	Expression        string         // template string if evaluated (e.g. "{{today + 5 days}}")
+	Constraint        string         // constraint expression if checked
+	ConstraintOK      bool           // whether constraint passed
+	PoolIndex         int            // index in fallback pool (-1 if not from pool)
+	PoolSize          int            // fallback pool size (0 if no pool)
+	Tried             []any          // values tried and rejected before this one
+	LLMCall           *LLMCallRecord // non-nil if LLM was consulted
+	Relaxed           bool           // true if a soft constraint was relaxed
+	RelaxedConstraint string         // name of the relaxed constraint
 }
 
 // LLMCallRecord captures details of a single LLM API call for value selection.

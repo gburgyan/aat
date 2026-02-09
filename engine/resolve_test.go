@@ -2051,3 +2051,482 @@ func TestResolveInputs_LLMDedup_OldStyle(t *testing.T) {
 	// Only one LLM call should have been made
 	assert.Equal(t, 1, stub.calls, "expected exactly one LLM call due to dedup")
 }
+
+// --- Resolution-time relaxation tests (Task 20b) ---
+
+func buildRelaxationPlan(softConstraintName, appliesTo, constraintExpr string) *plan.Plan {
+	return &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{
+						Type:      "preference",
+						Name:      softConstraintName,
+						AppliesTo: []string{appliesTo},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestResolveWithFallback_SoftConstraintRelaxation(t *testing.T) {
+	// Default value "DEN" fails constraint "value == 'LAX'", but since it's
+	// a soft constraint, relaxation should accept "DEN" as the result.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:    "DEN",
+				Constraint: "value == 'LAX'",
+			},
+		},
+	}
+
+	p := buildRelaxationPlan("airport_pref", "target.origin", "value == 'LAX'")
+	tracker := NewRelaxationTracker(3)
+
+	rctx := &ResolveContext{
+		Now:     fixedNow(),
+		Mode:    "strict",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	ectx := plan.ExprContext{
+		Now:    rctx.Now,
+		Values: make(map[string]any),
+	}
+
+	val, _, res, err := resolveWithFallback(
+		context.Background(),
+		step.Values["origin"],
+		g.Nodes["target"].Inputs[0],
+		ectx,
+		map[string]any{},
+		rctx,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", val)
+	require.NotNil(t, res)
+	assert.True(t, res.Relaxed)
+	assert.Equal(t, "airport_pref", res.RelaxedConstraint)
+	assert.Equal(t, "plan_default", res.Source)
+
+	// Tracker should record the relaxation
+	assert.Equal(t, 1, tracker.Depth())
+	records := tracker.Records()
+	require.Len(t, records, 1)
+	assert.Equal(t, "airport_pref", records[0].ConstraintName)
+	assert.Equal(t, "target.origin", records[0].InputRef)
+	assert.Equal(t, "resolution_exhausted", records[0].Reason)
+}
+
+func TestResolveWithFallback_HardConstraintNoRelaxation(t *testing.T) {
+	// Hard constraints should NOT be relaxed
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:    "DEN",
+				Constraint: "value == 'LAX'",
+			},
+		},
+	}
+
+	// Only hard constraint, no soft
+	p := &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Hard: []plan.Constraint{
+					{
+						Type:      "exact_airport",
+						Name:      "airport_req",
+						AppliesTo: []string{"target.origin"},
+					},
+				},
+			},
+		},
+	}
+
+	tracker := NewRelaxationTracker(3)
+	rctx := &ResolveContext{
+		Now:     fixedNow(),
+		Mode:    "strict",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	ectx := plan.ExprContext{
+		Now:    rctx.Now,
+		Values: make(map[string]any),
+	}
+
+	_, _, _, err := resolveWithFallback(
+		context.Background(),
+		step.Values["origin"],
+		g.Nodes["target"].Inputs[0],
+		ectx,
+		map[string]any{},
+		rctx,
+	)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed constraint")
+	assert.Equal(t, 0, tracker.Depth())
+}
+
+func TestResolveWithFallback_BudgetExhausted(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:    "DEN",
+				Constraint: "value == 'LAX'",
+			},
+		},
+	}
+
+	p := buildRelaxationPlan("airport_pref", "target.origin", "")
+	tracker := NewRelaxationTracker(1)
+
+	// Exhaust the budget
+	tracker.Relax("some_other", "ref", "reason")
+
+	rctx := &ResolveContext{
+		Now:     fixedNow(),
+		Mode:    "strict",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	ectx := plan.ExprContext{
+		Now:    rctx.Now,
+		Values: make(map[string]any),
+	}
+
+	_, _, _, err := resolveWithFallback(
+		context.Background(),
+		step.Values["origin"],
+		g.Nodes["target"].Inputs[0],
+		ectx,
+		map[string]any{},
+		rctx,
+	)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed constraint")
+}
+
+func TestResolveWithFallback_NilTrackerBackwardCompat(t *testing.T) {
+	// Without tracker, relaxation should not happen (backward compat)
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:    "DEN",
+				Constraint: "value == 'LAX'",
+			},
+		},
+	}
+
+	rctx := &ResolveContext{
+		Now:  fixedNow(),
+		Mode: "strict",
+		Node: g.Nodes["target"],
+		// Tracker and Plan are nil
+	}
+
+	ectx := plan.ExprContext{
+		Now:    rctx.Now,
+		Values: make(map[string]any),
+	}
+
+	_, _, _, err := resolveWithFallback(
+		context.Background(),
+		step.Values["origin"],
+		g.Nodes["target"].Inputs[0],
+		ectx,
+		map[string]any{},
+		rctx,
+	)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed constraint")
+}
+
+func TestResolveWithFallback_PoolExhausted_Relaxation(t *testing.T) {
+	// All pool values fail constraint, but soft constraint allows relaxation
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:      "DEN",
+				FallbackPool: []any{"SFO", "JFK"},
+				Constraint:   "value == 'LAX'",
+			},
+		},
+	}
+
+	p := buildRelaxationPlan("airport_pref", "target.origin", "")
+	tracker := NewRelaxationTracker(3)
+
+	rctx := &ResolveContext{
+		Now:     fixedNow(),
+		Mode:    "strict",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	ectx := plan.ExprContext{
+		Now:    rctx.Now,
+		Values: make(map[string]any),
+	}
+
+	val, _, res, err := resolveWithFallback(
+		context.Background(),
+		step.Values["origin"],
+		g.Nodes["target"].Inputs[0],
+		ectx,
+		map[string]any{},
+		rctx,
+	)
+	require.NoError(t, err)
+	// Should get the first tried value (DEN)
+	assert.Equal(t, "DEN", val)
+	require.NotNil(t, res)
+	assert.True(t, res.Relaxed)
+	assert.Equal(t, "airport_pref", res.RelaxedConstraint)
+	assert.Len(t, res.Tried, 3) // DEN, SFO, JFK all tried
+}
+
+func TestResolveWithFallback_IsRelaxedPreCheck(t *testing.T) {
+	// When a constraint is already relaxed in the tracker,
+	// the constraint should be skipped entirely.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:    "DEN",
+				Constraint: "value == 'LAX'", // would fail without relaxation
+			},
+		},
+	}
+
+	p := buildRelaxationPlan("airport_pref", "target.origin", "")
+	tracker := NewRelaxationTracker(3)
+	// Pre-relax the constraint (simulating step-level relaxation)
+	tracker.Relax("airport_pref", "target.origin", "step_failed")
+
+	rctx := &ResolveContext{
+		Now:     fixedNow(),
+		Mode:    "strict",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	ectx := plan.ExprContext{
+		Now:    rctx.Now,
+		Values: make(map[string]any),
+	}
+
+	val, _, res, err := resolveWithFallback(
+		context.Background(),
+		step.Values["origin"],
+		g.Nodes["target"].Inputs[0],
+		ectx,
+		map[string]any{},
+		rctx,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", val)
+	require.NotNil(t, res)
+	assert.True(t, res.Relaxed) // marked as relaxed since constraint was skipped
+	assert.Equal(t, "plan_default", res.Source)
+	assert.True(t, res.ConstraintOK) // passes because constraint was effectively removed
+}
+
+func TestResolveWithFallback_CircularRelaxation(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default:    "DEN",
+				Constraint: "value == 'LAX'",
+			},
+		},
+	}
+
+	p := buildRelaxationPlan("airport_pref", "target.origin", "")
+	tracker := NewRelaxationTracker(5)
+	// Already relaxed this exact constraint
+	tracker.Relax("airport_pref", "target.origin", "resolution_exhausted")
+
+	rctx := &ResolveContext{
+		Now:     fixedNow(),
+		Mode:    "strict",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	ectx := plan.ExprContext{
+		Now:    rctx.Now,
+		Values: make(map[string]any),
+	}
+
+	// With IsRelaxed pre-check, DEN should pass (constraint skipped)
+	val, _, res, err := resolveWithFallback(
+		context.Background(),
+		step.Values["origin"],
+		g.Nodes["target"].Inputs[0],
+		ectx,
+		map[string]any{},
+		rctx,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", val)
+	require.NotNil(t, res)
+	assert.True(t, res.Relaxed)
+}
+
+func TestResolveWithFallback_NoConstraint_NoRelaxation(t *testing.T) {
+	// Without a constraint expression, relaxation should not be attempted
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"origin": {
+				Default: "DEN",
+				// No constraint
+			},
+		},
+	}
+
+	p := buildRelaxationPlan("airport_pref", "target.origin", "")
+	tracker := NewRelaxationTracker(3)
+
+	rctx := &ResolveContext{
+		Now:     fixedNow(),
+		Mode:    "strict",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	ectx := plan.ExprContext{
+		Now:    rctx.Now,
+		Values: make(map[string]any),
+	}
+
+	val, _, res, err := resolveWithFallback(
+		context.Background(),
+		step.Values["origin"],
+		g.Nodes["target"].Inputs[0],
+		ectx,
+		map[string]any{},
+		rctx,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", val)
+	require.NotNil(t, res)
+	assert.False(t, res.Relaxed)
+	assert.Equal(t, 0, tracker.Depth())
+}

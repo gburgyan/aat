@@ -10,10 +10,20 @@ import (
 	"github.com/gburgyan/aat/plan"
 )
 
+// executeStepWithTracking wraps executeStepWithRetry, passing the tracker through
+// and attaching relaxation records to the result.
+func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, tracker *RelaxationTracker) StepResult {
+	result := e.executeStepWithRetry(ctx, step, node, state, tracker)
+	if tracker != nil {
+		result.Relaxations = tracker.Records()
+	}
+	return result
+}
+
 // executeStepWithRetry wraps executeStep with retry logic based on the step's
 // RetryConfig. If no RetryConfig is set, it behaves identically to executeStep.
-func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
-	result := e.executeStep(ctx, step, node, state)
+func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, tracker *RelaxationTracker) StepResult {
+	result := e.executeStep(ctx, step, node, state, tracker)
 
 	if step.Retry == nil {
 		// No retry config — classify for reporting but don't retry
@@ -61,7 +71,7 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 		}
 
 		// Retry the step
-		result = e.executeStep(ctx, step, node, state)
+		result = e.executeStep(ctx, step, node, state, tracker)
 		result.RetryCount = attempt
 
 		cls = classifyStepResult(&result)

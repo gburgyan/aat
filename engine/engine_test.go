@@ -751,3 +751,412 @@ func TestEngine_Run_StepDurations(t *testing.T) {
 	require.Len(t, result.Steps, 1)
 	assert.Greater(t, result.Steps[0].Duration.Nanoseconds(), int64(0))
 }
+
+// --- Step-level adaptive relaxation tests (Task 20d) ---
+
+func TestAdaptiveMode_StepRelaxation_400WithSoftConstraint(t *testing.T) {
+	// Step returns 400, then 200 after a soft constraint is relaxed.
+	var callCount int
+
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount <= 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"error": "bad request"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{"result": "ok"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+		WithMode("adaptive")
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "origin_pref", AppliesTo: []string{"step1.origin"}},
+				},
+			},
+		},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 200, result.Steps[0].StatusCode)
+
+	// Should have relaxation records
+	assert.Len(t, result.Steps[0].Relaxations, 1)
+	assert.Equal(t, "origin_pref", result.Steps[0].Relaxations[0].ConstraintName)
+	assert.Equal(t, "step_failed", result.Steps[0].Relaxations[0].Reason)
+	assert.Equal(t, 2, callCount) // 1 fail + 1 success
+}
+
+func TestAdaptiveMode_HardConstraintOnly_NoRelaxation(t *testing.T) {
+	// Step returns 400 with only hard constraints — no relaxation, just failure
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error": "bad request"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{"result": "ok"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+		WithMode("adaptive")
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Hard: []plan.Constraint{
+					{Type: "requirement", Name: "origin_req", AppliesTo: []string{"step1.origin"}},
+				},
+			},
+		},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 400, result.Steps[0].StatusCode)
+	assert.Empty(t, result.Steps[0].Relaxations)
+}
+
+func TestAdaptiveMode_500Error_NoRelaxation(t *testing.T) {
+	// 500 errors should NOT trigger relaxation (only 4xx client errors)
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"error": "server error"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+		WithMode("adaptive")
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "origin_pref", AppliesTo: []string{"step1.origin"}},
+				},
+			},
+		},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	assert.Empty(t, result.Steps[0].Relaxations)
+}
+
+func TestNonAdaptiveMode_NoStepRelaxation(t *testing.T) {
+	// In lean mode, step-level relaxation should NOT happen
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error": "bad request"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+		WithMode("lean")
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "origin_pref", AppliesTo: []string{"step1.origin"}},
+				},
+			},
+		},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	assert.Empty(t, result.Steps[0].Relaxations)
+}
+
+func TestAdaptiveMode_ExpectFailure_SkipsRelaxation(t *testing.T) {
+	// ExpectFailure steps should not trigger relaxation
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error": "bad request"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+		WithMode("adaptive")
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "origin_pref", AppliesTo: []string{"step1.origin"}},
+				},
+			},
+		},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					ExpectFailure: &plan.ExpectFailure{
+						Status: []int{400},
+					},
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+	// ExpectFailure step with matching status should not trigger relaxation
+	require.Len(t, result.Steps, 1)
+	assert.Empty(t, result.Steps[0].Relaxations)
+}
+
+func TestAdaptiveMode_BudgetExhausted(t *testing.T) {
+	// With MaxRelaxationDepth=1 and 2 soft constraints, only 1 relaxation
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Always return 400
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error": "bad request"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+		WithMode("adaptive").
+		WithMaxRelaxationDepth(1)
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "origin_pref", AppliesTo: []string{"step1.origin"}},
+					{Type: "preference", Name: "dest_pref", AppliesTo: []string{"step1.destination"}},
+				},
+			},
+		},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"origin":      {Default: "DEN"},
+						"destination": {Default: "LAX"},
+					},
+				},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	// Should have exactly 1 relaxation (budget is 1)
+	assert.Len(t, result.Steps[0].Relaxations, 1)
+}
+
+func TestWithMaxRelaxationDepth(t *testing.T) {
+	eng := &Engine{}
+	eng.WithMaxRelaxationDepth(5)
+	assert.Equal(t, 5, eng.MaxRelaxationDepth)
+	assert.Equal(t, 5, eng.maxRelaxationDepth())
+}
+
+func TestMaxRelaxationDepth_Default(t *testing.T) {
+	eng := &Engine{}
+	assert.Equal(t, 3, eng.maxRelaxationDepth())
+}

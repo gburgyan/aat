@@ -27,6 +27,8 @@ type ResolveContext struct {
 	KB        *domain.KnowledgeBase // may be nil
 	LLM       llm.Client            // may be nil
 	Node      *graph.Node
+	Plan      *plan.Plan            // for constraint classification (may be nil)
+	Tracker   *RelaxationTracker    // per-step relaxation tracker (may be nil)
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -174,6 +176,7 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 
 	var result *selectionResult
 	var llmRec *LLMCallRecord
+	var filterRelaxed bool
 
 	if strategy == "llm" {
 		result, llmRec, err = llmSelectElement(ctx, rctx, arr, selCfg, selName, g, fromNode, fromField)
@@ -191,7 +194,13 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		} else {
 			result, err = applySelection(arr, resolvedSel)
 			if err != nil {
-				return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
+				// Try filter relaxation
+				relaxedResult, wasRelaxed, relaxErr := tryRelaxFilter(rctx, step.Node, selName, arr, resolvedSel, err)
+				if relaxErr != nil || !wasRelaxed {
+					return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
+				}
+				result = relaxedResult
+				filterRelaxed = true
 			}
 			dedupCache[key] = result
 		}
@@ -217,6 +226,7 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		SelectedIndex: result.index,
 		LLMCall:       llmRec,
 		SelectionName: selName,
+		FilterRelaxed: filterRelaxed,
 	}
 	if sel.Filter != "" {
 		decision.FilterExpr = sel.Filter
@@ -454,12 +464,18 @@ func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName strin
 	cached, hasCached := dedupCache[key]
 
 	var result *selectionResult
+	var filterRelaxed bool
 	if hasCached {
 		result = cached
 	} else {
 		result, err = applySelection(arr, resolvedSel)
 		if err != nil {
-			return nil, nil, fmt.Errorf("select edge from %s.%s: %w", fromNode, fromField, err)
+			relaxedResult, wasRelaxed, relaxErr := tryRelaxFilter(rctx, step.Node, inputName, arr, resolvedSel, err)
+			if relaxErr != nil || !wasRelaxed {
+				return nil, nil, fmt.Errorf("select edge from %s.%s: %w", fromNode, fromField, err)
+			}
+			result = relaxedResult
+			filterRelaxed = true
 		}
 		dedupCache[key] = result
 	}
@@ -472,6 +488,7 @@ func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName strin
 		FilteredSize:  result.filteredSize,
 		Strategy:      strategyName(sel),
 		SelectedIndex: result.index,
+		FilterRelaxed: filterRelaxed,
 	}
 	if sel != nil && sel.Filter != "" {
 		decision.FilterExpr = sel.Filter
@@ -554,12 +571,22 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 	cached, hasCached := dedupCache[key]
 
 	var result *selectionResult
+	var filterRelaxed bool
 	if hasCached {
 		result = cached
 	} else {
 		result, err = applySelection(arr, resolvedSel)
 		if err != nil {
-			return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, err)
+			stepNode := ""
+			if rctx != nil && rctx.Node != nil {
+				stepNode = rctx.Node.Name
+			}
+			relaxedResult, wasRelaxed, relaxErr := tryRelaxFilter(rctx, stepNode, inputName, arr, resolvedSel, err)
+			if relaxErr != nil || !wasRelaxed {
+				return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, err)
+			}
+			result = relaxedResult
+			filterRelaxed = true
 		}
 		dedupCache[key] = result
 	}
@@ -572,6 +599,7 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 		FilteredSize:  result.filteredSize,
 		Strategy:      strategyName(sel),
 		SelectedIndex: result.index,
+		FilterRelaxed: filterRelaxed,
 	}
 	if sel != nil && sel.Filter != "" {
 		decision.FilterExpr = sel.Filter
@@ -693,8 +721,25 @@ func checkConstraint(constraint string, candidate any, resolvedInputs map[string
 // values are exhausted and mode allows, delegates to the LLM. Returns the first
 // value that passes the constraint. FallbackStrategy controls iteration order:
 // nil/"sequential" = in order, "random" = shuffled.
+//
+// When a RelaxationTracker is present (via rctx), and all resolution paths are
+// exhausted, resolveWithFallback will attempt to relax the corresponding soft
+// constraint and accept the first tried value.
 func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Input, ectx plan.ExprContext, resolvedInputs map[string]any, rctx *ResolveContext) (any, *SelectionDecision, *ValueResolution, error) {
 	inputName := input.Name
+
+	// IsRelaxed pre-check: if this input's soft constraint is already relaxed
+	// (e.g. from step-level relaxation), skip constraint checking entirely.
+	constraintSkipped := false
+	effectiveConstraint := sv.Constraint
+	if effectiveConstraint != "" && rctx != nil && rctx.Tracker != nil && rctx.Plan != nil && rctx.Node != nil {
+		sc, found := FindSoftConstraintForInput(rctx.Plan, rctx.Node.Name, inputName)
+		if found && rctx.Tracker.IsRelaxed(sc.Name) {
+			effectiveConstraint = ""
+			constraintSkipped = true
+		}
+	}
+
 	var tried []any
 
 	// Try the default value first
@@ -703,7 +748,7 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("evaluating expression for %q: %w", inputName, err)
 		}
-		passes, err := checkConstraint(sv.Constraint, evaluated, resolvedInputs)
+		passes, err := checkConstraint(effectiveConstraint, evaluated, resolvedInputs)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("checking constraint for %q: %w", inputName, err)
 		}
@@ -721,6 +766,9 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 				ConstraintOK: true,
 				PoolIndex:    -1,
 				PoolSize:     len(sv.FallbackPool),
+			}
+			if constraintSkipped {
+				res.Relaxed = true
 			}
 			if isExpression(sv.Default) {
 				if s, ok := sv.Default.(string); ok {
@@ -757,7 +805,7 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 				tried = append(tried, candidate)
 				continue // skip values that fail expression evaluation
 			}
-			passes, err := checkConstraint(sv.Constraint, evaluated, resolvedInputs)
+			passes, err := checkConstraint(effectiveConstraint, evaluated, resolvedInputs)
 			if err != nil {
 				tried = append(tried, evaluated)
 				continue // skip values that fail constraint evaluation
@@ -801,7 +849,11 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 			return val, nil, res, nil
 		}
 
-		// LLM also failed (or mode doesn't allow it) — return original pool-exhausted error
+		// All deterministic + LLM paths exhausted — try relaxation
+		if relaxedVal, res, ok := tryRelaxResolution(rctx, inputName, sv, tried); ok {
+			return relaxedVal, nil, res, nil
+		}
+
 		return nil, nil, nil, fmt.Errorf("all fallback pool values for %q failed constraint %q", inputName, sv.Constraint)
 	}
 
@@ -822,11 +874,95 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 			}
 			return val, nil, res, nil
 		}
+
+		// LLM also failed — try relaxation
+		if relaxedVal, res, ok := tryRelaxResolution(rctx, inputName, sv, tried); ok {
+			return relaxedVal, nil, res, nil
+		}
+
 		return nil, nil, nil, fmt.Errorf("default value for %q failed constraint %q and no fallback pool is configured", inputName, sv.Constraint)
 	}
 
 	// No default and no pool
 	return nil, nil, nil, fmt.Errorf("required input %q has no value", inputName)
+}
+
+// tryRelaxFilter attempts to relax a selection filter when the filter produces
+// zero matches. If relaxation is possible, it retries the selection without the
+// filter. Returns (result, decision, true) on success, or (nil, nil, false) if
+// relaxation isn't possible.
+func tryRelaxFilter(rctx *ResolveContext, stepNode, inputName string,
+	arr []any, sel *plan.SelectionConfig, origErr error) (*selectionResult, bool, error) {
+
+	if rctx == nil || rctx.Tracker == nil || rctx.Plan == nil {
+		return nil, false, origErr
+	}
+	if sel == nil || sel.Filter == "" {
+		return nil, false, origErr
+	}
+	if !strings.Contains(origErr.Error(), "matched no elements") {
+		return nil, false, origErr
+	}
+
+	sc, found := FindSoftConstraintForInput(rctx.Plan, stepNode, inputName)
+	if !found {
+		return nil, false, origErr
+	}
+	if err := rctx.Tracker.CanRelax(sc.Name); err != nil {
+		return nil, false, origErr
+	}
+
+	inputRef := stepNode + "." + inputName
+	rctx.Tracker.Relax(sc.Name, inputRef, "filter_empty")
+
+	// Retry without filter
+	relaxedSel := *sel
+	relaxedSel.Filter = ""
+	result, err := applySelection(arr, &relaxedSel)
+	if err != nil {
+		return nil, false, err
+	}
+	return result, true, nil
+}
+
+// tryRelaxResolution attempts to relax a soft constraint when all resolution
+// paths have been exhausted. Returns the first tried value and true if relaxation
+// succeeded, or (nil, nil, false) if relaxation is not possible.
+func tryRelaxResolution(rctx *ResolveContext, inputName string, sv plan.StepValue, tried []any) (any, *ValueResolution, bool) {
+	if rctx == nil || rctx.Tracker == nil || rctx.Plan == nil || rctx.Node == nil {
+		return nil, nil, false
+	}
+	if sv.Constraint == "" || len(tried) == 0 {
+		return nil, nil, false
+	}
+
+	sc, found := FindSoftConstraintForInput(rctx.Plan, rctx.Node.Name, inputName)
+	if !found {
+		return nil, nil, false
+	}
+
+	if err := rctx.Tracker.CanRelax(sc.Name); err != nil {
+		return nil, nil, false
+	}
+
+	inputRef := rctx.Node.Name + "." + inputName
+	rctx.Tracker.Relax(sc.Name, inputRef, "resolution_exhausted")
+
+	// Return the first tried value (it passed expression eval but failed constraint)
+	val := tried[0]
+	res := &ValueResolution{
+		InputName:         inputName,
+		Source:            "plan_default",
+		FinalValue:        val,
+		Constraint:        sv.Constraint,
+		ConstraintOK:      false,
+		PoolIndex:         -1,
+		PoolSize:          len(sv.FallbackPool),
+		Tried:             tried,
+		Relaxed:           true,
+		RelaxedConstraint: sc.Name,
+	}
+	return val, res, true
 }
 
 // isExpression returns true if the value is a string containing {{...}} templates.

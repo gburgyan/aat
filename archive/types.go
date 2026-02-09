@@ -28,19 +28,20 @@ type ArchiveMetadata struct {
 
 // StepRecord captures the execution trace for a single step.
 type StepRecord struct {
-	Node       string            `json:"node"`
-	StartTime  time.Time         `json:"startTime,omitempty"`
-	DurationMs int64             `json:"duration_ms"`
-	Inputs     map[string]any    `json:"inputs"`
-	Request    *RequestRecord    `json:"request,omitempty"`
-	Response   *ResponseRecord   `json:"response,omitempty"`
-	Outputs    map[string]any    `json:"outputs,omitempty"`
-	Validation *ValidationRecord `json:"validation,omitempty"`
-	Selections  []SelectionRecord        `json:"selections,omitempty"`
-	Resolutions []ValueResolutionRecord `json:"resolutions,omitempty"`
-	ErrorClass  *ErrorClassRecord       `json:"errorClassification,omitempty"`
-	Error      string            `json:"error,omitempty"`
-	RetryCount int               `json:"retryCount,omitempty"`
+	Node        string                    `json:"node"`
+	StartTime   time.Time                 `json:"startTime,omitempty"`
+	DurationMs  int64                     `json:"duration_ms"`
+	Inputs      map[string]any            `json:"inputs"`
+	Request     *RequestRecord            `json:"request,omitempty"`
+	Response    *ResponseRecord           `json:"response,omitempty"`
+	Outputs     map[string]any            `json:"outputs,omitempty"`
+	Validation  *ValidationRecord         `json:"validation,omitempty"`
+	Selections  []SelectionRecord         `json:"selections,omitempty"`
+	Resolutions []ValueResolutionRecord   `json:"resolutions,omitempty"`
+	Relaxations []RelaxationArchiveRecord `json:"relaxations,omitempty"`
+	ErrorClass  *ErrorClassRecord         `json:"errorClassification,omitempty"`
+	Error       string                    `json:"error,omitempty"`
+	RetryCount  int                       `json:"retryCount,omitempty"`
 }
 
 // RequestRecord captures the outbound HTTP request.
@@ -85,6 +86,15 @@ type SelectionRecord struct {
 	SelectedIndex int            `json:"selectedIndex"`
 	LLMCall       *LLMCallRecord `json:"llmCall,omitempty"`
 	SelectionName string         `json:"selectionName,omitempty"`
+	FilterRelaxed bool           `json:"filterRelaxed,omitempty"`
+}
+
+// RelaxationArchiveRecord captures a single constraint relaxation event.
+type RelaxationArchiveRecord struct {
+	ConstraintName string `json:"constraintName"`
+	InputRef       string `json:"inputRef"`
+	Reason         string `json:"reason"`
+	Depth          int    `json:"depth"`
 }
 
 // ErrorClassRecord captures the error classification for a failed step.
@@ -97,19 +107,21 @@ type ErrorClassRecord struct {
 
 // ValueResolutionRecord captures how a single input was resolved.
 type ValueResolutionRecord struct {
-	InputName    string          `json:"inputName"`
-	Source       string          `json:"source"`
-	RawValue     any             `json:"rawValue,omitempty"`
-	FinalValue   any             `json:"finalValue,omitempty"`
-	FromStep     string          `json:"fromStep,omitempty"`
-	FromOutput   string          `json:"fromOutput,omitempty"`
-	Expression   string          `json:"expression,omitempty"`
-	Constraint   string          `json:"constraint,omitempty"`
-	ConstraintOK *bool           `json:"constraintOk,omitempty"`
-	PoolIndex    int             `json:"poolIndex,omitempty"`
-	PoolSize     int             `json:"poolSize,omitempty"`
-	Tried        []any           `json:"tried,omitempty"`
-	LLMCall      *LLMCallRecord  `json:"llmCall,omitempty"`
+	InputName         string         `json:"inputName"`
+	Source            string         `json:"source"`
+	RawValue          any            `json:"rawValue,omitempty"`
+	FinalValue        any            `json:"finalValue,omitempty"`
+	FromStep          string         `json:"fromStep,omitempty"`
+	FromOutput        string         `json:"fromOutput,omitempty"`
+	Expression        string         `json:"expression,omitempty"`
+	Constraint        string         `json:"constraint,omitempty"`
+	ConstraintOK      *bool          `json:"constraintOk,omitempty"`
+	PoolIndex         int            `json:"poolIndex,omitempty"`
+	PoolSize          int            `json:"poolSize,omitempty"`
+	Tried             []any          `json:"tried,omitempty"`
+	LLMCall           *LLMCallRecord `json:"llmCall,omitempty"`
+	Relaxed           bool           `json:"relaxed,omitempty"`
+	RelaxedConstraint string         `json:"relaxedConstraint,omitempty"`
 }
 
 // LLMCallRecord captures details of a single LLM API call.

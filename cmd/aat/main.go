@@ -163,7 +163,8 @@ func runCommand(ctx context.Context, args *runArgs) error {
 	eng := engine.NewEngine(g, registry, executor, envConfig).
 		WithMode(effectiveMode).
 		WithDomain(kb).
-		WithLLM(llmClient)
+		WithLLM(llmClient).
+		WithMaxRelaxationDepth(env.Settings.MaxRelaxationDepth)
 	fmt.Printf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), effectiveMode)
 
 	result := eng.Run(ctx, p)

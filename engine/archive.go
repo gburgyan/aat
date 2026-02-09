@@ -63,6 +63,9 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 	if len(s.Resolutions) > 0 {
 		rec.Resolutions = convertResolutions(s.Resolutions)
 	}
+	if len(s.Relaxations) > 0 {
+		rec.Relaxations = convertRelaxations(s.Relaxations)
+	}
 	if s.ErrorClass != nil {
 		rec.ErrorClass = convertErrorClass(s.ErrorClass)
 	}
@@ -116,11 +119,25 @@ func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
 			Strategy:      s.Strategy,
 			SelectedIndex: s.SelectedIndex,
 			SelectionName: s.SelectionName,
+			FilterRelaxed: s.FilterRelaxed,
 		}
 		if s.LLMCall != nil {
 			rec.LLMCall = convertLLMCall(s.LLMCall)
 		}
 		records[i] = rec
+	}
+	return records
+}
+
+func convertRelaxations(relaxations []RelaxationRecord) []archive.RelaxationArchiveRecord {
+	records := make([]archive.RelaxationArchiveRecord, len(relaxations))
+	for i, r := range relaxations {
+		records[i] = archive.RelaxationArchiveRecord{
+			ConstraintName: r.ConstraintName,
+			InputRef:       r.InputRef,
+			Reason:         r.Reason,
+			Depth:          r.Depth,
+		}
 	}
 	return records
 }
@@ -138,17 +155,19 @@ func convertResolutions(resolutions []ValueResolution) []archive.ValueResolution
 	records := make([]archive.ValueResolutionRecord, len(resolutions))
 	for i, r := range resolutions {
 		rec := archive.ValueResolutionRecord{
-			InputName:  r.InputName,
-			Source:     r.Source,
-			RawValue:   r.RawValue,
-			FinalValue: r.FinalValue,
-			FromStep:   r.FromStep,
-			FromOutput: r.FromOutput,
-			Expression: r.Expression,
-			Constraint: r.Constraint,
-			PoolIndex:  r.PoolIndex,
-			PoolSize:   r.PoolSize,
-			Tried:      r.Tried,
+			InputName:         r.InputName,
+			Source:            r.Source,
+			RawValue:          r.RawValue,
+			FinalValue:        r.FinalValue,
+			FromStep:          r.FromStep,
+			FromOutput:        r.FromOutput,
+			Expression:        r.Expression,
+			Constraint:        r.Constraint,
+			PoolIndex:         r.PoolIndex,
+			PoolSize:          r.PoolSize,
+			Tried:             r.Tried,
+			Relaxed:           r.Relaxed,
+			RelaxedConstraint: r.RelaxedConstraint,
 		}
 		if r.Constraint != "" {
 			ok := r.ConstraintOK

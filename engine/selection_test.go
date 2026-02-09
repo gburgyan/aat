@@ -1,8 +1,11 @@
 package engine
 
 import (
+	"context"
+	"fmt"
 	"testing"
 
+	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -283,4 +286,351 @@ func TestToFloat64_Types(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- Filter relaxation tests (Task 20c) ---
+
+func TestTryRelaxFilter_SoftConstraintRelaxes(t *testing.T) {
+	p := &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "carrier_pref", AppliesTo: []string{"step1.offering"}},
+				},
+			},
+		},
+	}
+	tracker := NewRelaxationTracker(3)
+	rctx := &ResolveContext{
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	arr := []any{
+		map[string]any{"id": "a", "carrier": "UA"},
+		map[string]any{"id": "b", "carrier": "AA"},
+	}
+	sel := &plan.SelectionConfig{
+		Strategy: "first",
+		Filter:   "carrier == 'DL'", // no match
+	}
+
+	origErr := fmt.Errorf("filter %q matched no elements", sel.Filter)
+
+	result, wasRelaxed, err := tryRelaxFilter(rctx, "step1", "offering", arr, sel, origErr)
+	require.NoError(t, err)
+	assert.True(t, wasRelaxed)
+	require.NotNil(t, result)
+	assert.Equal(t, arr[0], result.element) // first element without filter
+
+	// Tracker records it
+	assert.Equal(t, 1, tracker.Depth())
+	records := tracker.Records()
+	require.Len(t, records, 1)
+	assert.Equal(t, "carrier_pref", records[0].ConstraintName)
+	assert.Equal(t, "filter_empty", records[0].Reason)
+}
+
+func TestTryRelaxFilter_HardConstraintNoRelax(t *testing.T) {
+	p := &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Hard: []plan.Constraint{
+					{Type: "requirement", Name: "carrier_req", AppliesTo: []string{"step1.offering"}},
+				},
+			},
+		},
+	}
+	tracker := NewRelaxationTracker(3)
+	rctx := &ResolveContext{
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	arr := []any{map[string]any{"id": "a"}}
+	sel := &plan.SelectionConfig{Strategy: "first", Filter: "carrier == 'DL'"}
+	origErr := fmt.Errorf("filter %q matched no elements", sel.Filter)
+
+	_, wasRelaxed, err := tryRelaxFilter(rctx, "step1", "offering", arr, sel, origErr)
+	assert.False(t, wasRelaxed)
+	assert.Equal(t, origErr, err)
+	assert.Equal(t, 0, tracker.Depth())
+}
+
+func TestTryRelaxFilter_BudgetExhausted(t *testing.T) {
+	p := &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "carrier_pref", AppliesTo: []string{"step1.offering"}},
+				},
+			},
+		},
+	}
+	tracker := NewRelaxationTracker(1)
+	tracker.Relax("something_else", "ref", "reason") // exhaust budget
+
+	rctx := &ResolveContext{
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	arr := []any{map[string]any{"id": "a"}}
+	sel := &plan.SelectionConfig{Strategy: "first", Filter: "carrier == 'DL'"}
+	origErr := fmt.Errorf("filter %q matched no elements", sel.Filter)
+
+	_, wasRelaxed, err := tryRelaxFilter(rctx, "step1", "offering", arr, sel, origErr)
+	assert.False(t, wasRelaxed)
+	assert.Equal(t, origErr, err)
+}
+
+func TestTryRelaxFilter_NilTracker(t *testing.T) {
+	arr := []any{map[string]any{"id": "a"}}
+	sel := &plan.SelectionConfig{Strategy: "first", Filter: "carrier == 'DL'"}
+	origErr := fmt.Errorf("filter %q matched no elements", sel.Filter)
+
+	_, wasRelaxed, err := tryRelaxFilter(nil, "step1", "offering", arr, sel, origErr)
+	assert.False(t, wasRelaxed)
+	assert.Equal(t, origErr, err)
+}
+
+func TestTryRelaxFilter_NonFilterError(t *testing.T) {
+	p := &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "carrier_pref", AppliesTo: []string{"step1.offering"}},
+				},
+			},
+		},
+	}
+	tracker := NewRelaxationTracker(3)
+	rctx := &ResolveContext{Plan: p, Tracker: tracker}
+
+	arr := []any{map[string]any{"id": "a"}}
+	sel := &plan.SelectionConfig{Strategy: "first", Filter: "carrier == 'DL'"}
+	origErr := fmt.Errorf("some other error")
+
+	_, wasRelaxed, err := tryRelaxFilter(rctx, "step1", "offering", arr, sel, origErr)
+	assert.False(t, wasRelaxed)
+	assert.Equal(t, origErr, err)
+}
+
+func TestFilterRelaxation_SelectEdge(t *testing.T) {
+	// Test filter relaxation through resolveSelectEdge path
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{Name: "items", Type: "array"},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedItem", Type: "string"},
+				},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "source.items", To: "target.selectedItem", Select: true},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "a", "carrier": "UA"},
+			map[string]any{"id": "b", "carrier": "AA"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"selectedItem": {
+				Select: &plan.SelectionConfig{
+					Strategy: "first",
+					Filter:   "carrier == 'DL'", // no match
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "carrier_pref", AppliesTo: []string{"target.selectedItem"}},
+				},
+			},
+		},
+	}
+	tracker := NewRelaxationTracker(3)
+	rctx := &ResolveContext{
+		Mode:    "adaptive",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	inputs, decisions, _, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, rctx,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, inputs["selectedItem"])
+
+	// Should have relaxed the filter
+	require.Len(t, decisions, 1)
+	assert.True(t, decisions[0].FilterRelaxed)
+	assert.Equal(t, 1, tracker.Depth())
+}
+
+func TestFilterRelaxation_SelectValue(t *testing.T) {
+	// Test filter relaxation through resolveSelectValue path (plan from+select)
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{Name: "items", Type: "array"},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedItem", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "a", "carrier": "UA"},
+			map[string]any{"id": "b", "carrier": "AA"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"selectedItem": {
+				From: "source.items",
+				Select: &plan.SelectionConfig{
+					Strategy: "first",
+					Filter:   "carrier == 'DL'", // no match
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "carrier_pref", AppliesTo: []string{"target.selectedItem"}},
+				},
+			},
+		},
+	}
+	tracker := NewRelaxationTracker(3)
+	rctx := &ResolveContext{
+		Mode:    "adaptive",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	inputs, decisions, _, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, rctx,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, inputs["selectedItem"])
+
+	require.Len(t, decisions, 1)
+	assert.True(t, decisions[0].FilterRelaxed)
+	assert.Equal(t, 1, tracker.Depth())
+}
+
+func TestFilterRelaxation_NamedSelection(t *testing.T) {
+	// Test filter relaxation through resolveNamedSelection path
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{Name: "items", Type: "array"},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "selectedId", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"id": "a", "carrier": "UA"},
+			map[string]any{"id": "b", "carrier": "AA"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Selections: map[string]plan.StepSelection{
+			"offering": {
+				From:     "source.items",
+				Strategy: "first",
+				Filter:   "carrier == 'DL'", // no match
+			},
+		},
+		Values: map[string]plan.StepValue{
+			"selectedId": {FromSelection: "offering.id"},
+		},
+	}
+
+	p := &plan.Plan{
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{Type: "preference", Name: "carrier_pref", AppliesTo: []string{"target.offering"}},
+				},
+			},
+		},
+	}
+	tracker := NewRelaxationTracker(3)
+	rctx := &ResolveContext{
+		Mode:    "adaptive",
+		Node:    g.Nodes["target"],
+		Plan:    p,
+		Tracker: tracker,
+	}
+
+	inputs, decisions, _, err := ResolveInputsWithContext(
+		context.Background(), step, g.Nodes["target"], g, state, rctx,
+	)
+	require.NoError(t, err)
+	assert.Equal(t, "a", inputs["selectedId"])
+
+	// The named selection's decision should show filter relaxation
+	var namedDecision *SelectionDecision
+	for i := range decisions {
+		if decisions[i].SelectionName == "offering" {
+			namedDecision = &decisions[i]
+			break
+		}
+	}
+	require.NotNil(t, namedDecision)
+	assert.True(t, namedDecision.FilterRelaxed)
+	assert.Equal(t, 1, tracker.Depth())
 }
