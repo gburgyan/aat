@@ -342,3 +342,30 @@
 - 23c (scaffold generation via `aat generate --oas`) deferred to a future session
 
 **Open questions:** None.
+
+## 2026-02-10 — Task 23c: OAS Scaffold Generation
+
+**What:** Implemented `aat generate --oas <spec.yaml>` to produce a starting-point graph YAML and template adapter stubs from an OpenAPI spec. Reduces onboarding friction — users get a scaffold to curate rather than authoring from scratch.
+
+**Decisions:**
+- `ScaffoldTemplate` type defined locally in `graph/oas/` to avoid importing `adapter/` (keeps dependency graph clean). YAML tags produce output compatible with `adapter.Template`.
+- Adapter names = operationId directly (e.g., `listPets`)
+- No edges generated — user/LLM adds data flow connections (scaffold is intentionally rough)
+- Inputs from OAS parameters (path, query, header) + request body properties; outputs from first 2xx response
+- Array responses produce a single `object[]` output with elementFields from item properties
+- `deriveArrayOutputName` strips common prefixes (`list`, `search`, `find`, etc.) for readable names
+- `convertPathParams` converts `{param}` → `{{param}}` for template compatibility
+- Body template uses `json.MarshalIndent` with `{{placeholder}}` values
+- Query params appended to path as `?k={{k}}&...`
+- Operations without operationId produce a warning and are skipped
+- `--output-graph -` writes to stdout for pipeline use
+- Verified: generated graph passes structural + OAS validation; generated templates parse with `adapter.ParseTemplateFile`
+
+**Files:**
+- `graph/oas/generate.go` — NEW: Generate(), ScaffoldTemplate types, helpers (~290 lines)
+- `graph/oas/generate_test.go` — NEW: 18 tests (petstore nodes/templates, type mapping, path params, array names, edge cases)
+- `cmd/aat/generate_cmd.go` — NEW: CLI wiring, flag parsing, file I/O (~85 lines)
+- `cmd/aat/generate_cmd_test.go` — NEW: 5 CLI tests (missing flag, invalid path, integration, stdout, flag parsing)
+- `cmd/aat/main.go` — modified: added `generate` case to command dispatch + usage string
+
+**Open questions:** None.
