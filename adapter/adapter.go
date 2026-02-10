@@ -57,6 +57,20 @@ func (r *Registry) Get(name string) (Adapter, error) {
 	return a, nil
 }
 
+// GetTemplate returns the underlying Template if the named adapter is
+// template-based. Returns nil, false if not found or not a TemplateAdapter.
+func (r *Registry) GetTemplate(name string) (*Template, bool) {
+	a, ok := r.adapters[name]
+	if !ok {
+		return nil, false
+	}
+	ta, ok := a.(*TemplateAdapter)
+	if !ok {
+		return nil, false
+	}
+	return &ta.tmpl, true
+}
+
 // Names returns all registered adapter names in sorted order.
 func (r *Registry) Names() []string {
 	names := make([]string, 0, len(r.adapters))

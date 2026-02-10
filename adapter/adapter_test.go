@@ -98,6 +98,41 @@ func TestRegistry(t *testing.T) {
 	}
 }
 
+func TestGetTemplate(t *testing.T) {
+	t.Run("found template adapter", func(t *testing.T) {
+		r := NewRegistry()
+		tmpl := Template{
+			Adapter:  "search",
+			Protocol: "http",
+			Request:  TemplateRequest{Method: "GET", Path: "/search"},
+		}
+		require.NoError(t, r.Register("search", NewTemplateAdapter(tmpl)))
+
+		got, ok := r.GetTemplate("search")
+		assert.True(t, ok)
+		require.NotNil(t, got)
+		assert.Equal(t, "GET", got.Request.Method)
+		assert.Equal(t, "/search", got.Request.Path)
+	})
+
+	t.Run("found non-template adapter", func(t *testing.T) {
+		r := NewRegistry()
+		require.NoError(t, r.Register("custom", &stubAdapter{}))
+
+		got, ok := r.GetTemplate("custom")
+		assert.False(t, ok)
+		assert.Nil(t, got)
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		r := NewRegistry()
+
+		got, ok := r.GetTemplate("missing")
+		assert.False(t, ok)
+		assert.Nil(t, got)
+	})
+}
+
 func TestValidationResult(t *testing.T) {
 	t.Run("NewValidationPass", func(t *testing.T) {
 		vr := NewValidationPass()
