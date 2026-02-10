@@ -1,0 +1,11 @@
+{
+  "goal": "consumer",
+  "description": "Process data through the preferred source path",
+  "conditionContext": {},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [],
+    "soft": [],
+    "free": []
+  }
+}

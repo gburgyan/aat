@@ -1,0 +1,31 @@
+```yaml
+metadata:
+  prompt: "process data through preferred path"
+  graphVersion: "1.0.0"
+intent:
+  goal: consumer
+  description: "Process data through the preferred source path"
+execution:
+  steps:
+    - node: source
+      description: "Fetch data from primary source"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: preferredSource
+      dependsOn: [source]
+      description: "Transform data via preferred path"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: consumer
+      dependsOn: [preferredSource]
+      description: "Consume the processed result"
+      isGoal: true
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+```

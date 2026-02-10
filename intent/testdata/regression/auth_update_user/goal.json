@@ -1,0 +1,11 @@
+{
+  "goal": "updateUser",
+  "description": "Authenticate, fetch user details, and update the user name",
+  "conditionContext": {},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [],
+    "soft": [],
+    "free": ["clientId", "clientSecret", "userId", "name"]
+  }
+}

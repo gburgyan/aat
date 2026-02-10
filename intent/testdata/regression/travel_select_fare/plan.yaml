@@ -1,0 +1,39 @@
+Here is the plan to search and select a fare:
+
+```yaml
+metadata:
+  prompt: "search for flights from DEN to ORD and select a fare"
+  graphVersion: "1.0.0"
+intent:
+  goal: selectFare
+  description: "Search and select a fare from Denver to Chicago"
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for flights from DEN to ORD"
+      values:
+        origin: "DEN"
+        destination: "ORD"
+        departureDate: "2026-10-15"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: selectFare
+      dependsOn: [searchFlights]
+      description: "Select a fare from the search results"
+      isGoal: true
+      values:
+        flightId:
+          from: searchFlights.flights
+          select:
+            strategy: first
+            field: flightId
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+  cleanup:
+    - node: cancelSearch
+      runOn: always
+```

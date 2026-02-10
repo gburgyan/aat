@@ -1,0 +1,73 @@
+Here is the completed plan for booking a flight:
+
+```yaml
+metadata:
+  prompt: "book a flight from DEN to SFO"
+  graphVersion: "1.0.0"
+intent:
+  goal: commitBooking
+  description: "Book a round-trip flight from Denver to San Francisco"
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for available flights from DEN to SFO"
+      values:
+        origin: "DEN"
+        destination: "SFO"
+        departureDate: "2026-08-15"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: createWorkbench
+      description: "Create a reservation workbench for the booking"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: addOffer
+      dependsOn: [createWorkbench, searchFlights]
+      description: "Add the selected flight offer to the workbench"
+      values:
+        offeringId:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: offeringId
+        productRef:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: productRef
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: addTraveler
+      dependsOn: [createWorkbench]
+      description: "Add traveler details to the reservation"
+      values:
+        surname: "Smith"
+        givenName: "John"
+        birthDate: "1990-01-15"
+        gender: "Male"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: commitBooking
+      dependsOn: [addOffer, addTraveler]
+      description: "Finalize the booking to create a PNR"
+      isGoal: true
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.locator"
+  cleanup:
+    - node: ignoreWorkbench
+      runOn: always
+```
+
+This plan books a flight from Denver to San Francisco.

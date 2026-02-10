@@ -1,0 +1,21 @@
+```yaml
+metadata:
+  prompt: "search for flights from DEN to LAX"
+  graphVersion: "1.0.0"
+intent:
+  goal: searchFlights
+  description: "Search for available flights from Denver to Los Angeles"
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for flights from DEN to LAX"
+      isGoal: true
+      values:
+        origin: "DEN"
+        destination: "LAX"
+        departureDate: "2026-07-01"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+```

@@ -1,0 +1,48 @@
+International flight plan with passport info:
+
+```yaml
+metadata:
+  prompt: "search for international flights from JFK to LHR and select a fare"
+  graphVersion: "1.0.0"
+intent:
+  goal: selectFare
+  description: "Search and select a fare for international travel JFK to LHR"
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for flights from JFK to LHR"
+      values:
+        origin: "JFK"
+        destination: "LHR"
+        departureDate: "2026-12-20"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: addPassportInfo
+      description: "Add passport information for international travel"
+      values:
+        passportNumber: "X12345678"
+        nationality: "US"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: selectFare
+      dependsOn: [searchFlights, addPassportInfo]
+      description: "Select a fare from the international search results"
+      isGoal: true
+      values:
+        flightId:
+          from: searchFlights.flights
+          select:
+            strategy: first
+            field: flightId
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+  cleanup:
+    - node: cancelSearch
+      runOn: always
+```

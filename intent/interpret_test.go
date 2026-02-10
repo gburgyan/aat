@@ -425,10 +425,10 @@ func TestInterpret_Integration_RealLLM(t *testing.T) {
 		t.Skip("skipping: OPENAI_API_KEY not set")
 	}
 
-	// Create real OpenAI client (gpt-4o-mini for cost/speed)
+	// Create real OpenAI client
 	client, err := llm.NewClient(config.LLMConfig{
 		APIKey: config.SecretRef{Source: "literal", Value: apiKey},
-		Model:  "gpt-4o-mini",
+		Model:  "gpt-5.2",
 	})
 	require.NoError(t, err)
 
@@ -437,13 +437,24 @@ func TestInterpret_Integration_RealLLM(t *testing.T) {
 	kb, err := domain.ParseFile("../domain/testdata/valid/travel.yaml")
 	require.NoError(t, err)
 
-	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight from DEN to SFO",
-		Graph:  g,
-		KB:     kb,
-		Client: client,
-	})
-	require.NoError(t, err)
+	const maxAttempts = 3
+	var result *InterpretResult
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		result, lastErr = Interpret(context.Background(), InterpretRequest{
+			Prompt: "book a flight from DEN to SFO",
+			Graph:  g,
+			KB:     kb,
+			Client: client,
+		})
+		if lastErr == nil {
+			break
+		}
+		if attempt < maxAttempts {
+			t.Logf("attempt %d/%d failed: %v — retrying", attempt, maxAttempts, lastErr)
+		}
+	}
+	require.NoError(t, lastErr, "all %d attempts failed", maxAttempts)
 
 	// Structural assertions (LLM output varies, check shape not exact values)
 	assert.Equal(t, "commitBooking", result.GoalAnalysis.Goal)

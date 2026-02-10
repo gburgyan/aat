@@ -1,0 +1,14 @@
+{
+  "goal": "selectFare",
+  "description": "Search for international flights and select a fare from JFK to LHR",
+  "conditionContext": {"route": {"type": "international"}, "international": "international"},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [
+      {"name": "origin", "description": "Departure must be JFK", "appliesTo": ["searchFlights.origin"]},
+      {"name": "destination", "description": "Arrival must be LHR", "appliesTo": ["searchFlights.destination"]}
+    ],
+    "soft": [],
+    "free": ["departureDate", "cabinClass", "passport details"]
+  }
+}

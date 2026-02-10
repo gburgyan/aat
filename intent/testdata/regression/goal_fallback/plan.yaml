@@ -1,0 +1,71 @@
+Here is the completed plan:
+
+```yaml
+metadata:
+  prompt: "book a flight from DEN to SFO"
+  graphVersion: "1.0.0"
+intent:
+  goal: commitBooking
+  description: "Book a flight from DEN to SFO"
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for flights from DEN to SFO"
+      values:
+        origin: "DEN"
+        destination: "SFO"
+        departureDate: "2026-08-15"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: createWorkbench
+      description: "Create a reservation workbench"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: addOffer
+      dependsOn: [createWorkbench, searchFlights]
+      description: "Add the selected flight offer"
+      values:
+        offeringId:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: offeringId
+        productRef:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: productRef
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: addTraveler
+      dependsOn: [createWorkbench]
+      description: "Add traveler details"
+      values:
+        surname: "Test"
+        givenName: "User"
+        birthDate: "1990-05-10"
+        gender: "Male"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: commitBooking
+      dependsOn: [addOffer, addTraveler]
+      description: "Commit the booking"
+      isGoal: true
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.locator"
+  cleanup:
+    - node: ignoreWorkbench
+      runOn: always
+```

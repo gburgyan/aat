@@ -1,0 +1,21 @@
+```yaml
+metadata:
+  prompt: "get user info"
+  graphVersion: "1.0.0"
+intent:
+  goal: getUser
+  description: "Retrieve user details"
+execution:
+  steps:
+    - node: getUser
+      description: "Retrieve user by ID"
+      isGoal: true
+      values:
+        userId: "user-789"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.name"
+```

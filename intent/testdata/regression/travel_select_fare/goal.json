@@ -1,0 +1,14 @@
+{
+  "goal": "selectFare",
+  "description": "Search for flights and select a fare from DEN to ORD",
+  "conditionContext": {"route": {"type": "domestic"}, "international": "international"},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [
+      {"name": "origin", "description": "Departure must be DEN", "appliesTo": ["searchFlights.origin"]},
+      {"name": "destination", "description": "Arrival must be ORD", "appliesTo": ["searchFlights.destination"]}
+    ],
+    "soft": [],
+    "free": ["departureDate", "returnDate", "cabinClass"]
+  }
+}

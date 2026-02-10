@@ -1,0 +1,11 @@
+{
+  "goal": "getUser",
+  "description": "Retrieve user details by ID",
+  "conditionContext": {},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [],
+    "soft": [],
+    "free": ["userId"]
+  }
+}

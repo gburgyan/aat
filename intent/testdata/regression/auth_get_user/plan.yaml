@@ -1,0 +1,31 @@
+```yaml
+metadata:
+  prompt: "get user details"
+  graphVersion: "1.0.0"
+intent:
+  goal: getUser
+  description: "Authenticate and retrieve user details"
+execution:
+  steps:
+    - node: authenticate
+      description: "Authenticate with the API"
+      values:
+        clientId: "test-client-id"
+        clientSecret: "test-secret"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: getUser
+      dependsOn: [authenticate]
+      description: "Get user details by ID"
+      isGoal: true
+      values:
+        userId: "user-123"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.name"
+```

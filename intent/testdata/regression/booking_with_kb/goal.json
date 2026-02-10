@@ -1,0 +1,17 @@
+{
+  "goal": "commitBooking",
+  "description": "Book a business class flight from JFK to LAX",
+  "conditionContext": {},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [
+      {"name": "origin", "description": "Departure must be JFK", "appliesTo": ["searchFlights.origin"]},
+      {"name": "destination", "description": "Arrival must be LAX", "appliesTo": ["searchFlights.destination"]},
+      {"name": "cabin", "description": "Must be business class", "appliesTo": ["searchFlights.cabinPreference"]}
+    ],
+    "soft": [
+      {"name": "nonstop", "description": "Prefer nonstop flights", "appliesTo": ["searchFlights"]}
+    ],
+    "free": ["departureDate", "traveler details"]
+  }
+}

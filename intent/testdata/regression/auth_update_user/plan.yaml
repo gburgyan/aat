@@ -1,0 +1,43 @@
+Plan to update user:
+
+```yaml
+metadata:
+  prompt: "update user name"
+  graphVersion: "1.0.0"
+intent:
+  goal: updateUser
+  description: "Authenticate, get user, and update name"
+execution:
+  steps:
+    - node: authenticate
+      description: "Authenticate with the API"
+      values:
+        clientId: "test-client"
+        clientSecret: "test-secret"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: getUser
+      dependsOn: [authenticate]
+      description: "Fetch current user details"
+      values:
+        userId: "user-456"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: updateUser
+      dependsOn: [authenticate, getUser]
+      description: "Update the user's name"
+      isGoal: true
+      values:
+        userId: "user-456"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldEquals
+            path: "$.updated"
+            value: true
+```

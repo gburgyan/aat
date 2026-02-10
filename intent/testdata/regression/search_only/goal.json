@@ -1,0 +1,14 @@
+{
+  "goal": "searchFlights",
+  "description": "Search for flights from DEN to LAX",
+  "conditionContext": {},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [
+      {"name": "origin", "description": "Must be DEN", "appliesTo": ["searchFlights.origin"]},
+      {"name": "destination", "description": "Must be LAX", "appliesTo": ["searchFlights.destination"]}
+    ],
+    "soft": [],
+    "free": ["departureDate", "returnDate", "passengers", "cabinPreference"]
+  }
+}

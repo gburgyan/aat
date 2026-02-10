@@ -1,0 +1,73 @@
+Here is the plan with domain knowledge applied:
+
+```yaml
+metadata:
+  prompt: "book a business class flight from JFK to LAX"
+  graphVersion: "1.0.0"
+intent:
+  goal: commitBooking
+  description: "Book a business class flight from New York JFK to Los Angeles"
+execution:
+  steps:
+    - node: searchFlights
+      description: "Search for business class flights from JFK to LAX"
+      values:
+        origin: "JFK"
+        destination: "LAX"
+        departureDate: "2026-09-01"
+        cabinPreference: "business"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: createWorkbench
+      description: "Create a reservation workbench"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: addOffer
+      dependsOn: [createWorkbench, searchFlights]
+      description: "Add the selected business class offer"
+      values:
+        offeringId:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: match
+            field: offeringId
+            filter: "stops == 0"
+        productRef:
+          from: searchFlights.catalogOfferings
+          select:
+            strategy: first
+            field: productRef
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: addTraveler
+      dependsOn: [createWorkbench]
+      description: "Add passenger information"
+      values:
+        surname: "Doe"
+        givenName: "Jane"
+        birthDate: "1985-03-22"
+        gender: "Female"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+    - node: commitBooking
+      dependsOn: [addOffer, addTraveler]
+      description: "Commit the business class booking"
+      isGoal: true
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "$.locator"
+  cleanup:
+    - node: ignoreWorkbench
+      runOn: always
+```

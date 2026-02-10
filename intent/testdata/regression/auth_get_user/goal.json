@@ -1,0 +1,11 @@
+{
+  "goal": "getUser",
+  "description": "Authenticate and retrieve user details",
+  "conditionContext": {},
+  "pathPreferences": {},
+  "constraints": {
+    "hard": [],
+    "soft": [],
+    "free": ["clientId", "clientSecret", "userId"]
+  }
+}
