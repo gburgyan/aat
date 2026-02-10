@@ -57,6 +57,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
 - [x] 24. Build prompt-to-plan regression test suite
 - [x] 28. CI/CD mode (granular exit codes, --json, --quiet, early plan validation)
 - [ ] 60. `aat mcp serve` — API lifecycle platform
+  - [x] 60a-WI1. Core skeleton + CLI (manifest, context, server, `aat mcp serve`)
   - [ ] 60a. Core MCP server + API knowledge tools (graph, templates, domain)
   - [ ] 60b. Documentation integration (per-node Markdown, links to OAS, expose workflows, etc.)
   - [ ] 60c. Testing lifecycle tools (can we make a client integration using the MCP server as an aid, then test the system using aat)

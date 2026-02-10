@@ -496,3 +496,33 @@ After all WIs complete:
    - Plan generation works (requires LLM config)
    - Plan execution works (requires environment config)
    - Archives are inspectable
+
+---
+
+## 2026-02-10 — WI-1: Core Skeleton + CLI Complete
+
+**What:** Implemented WI-1 — the foundational `mcp/` package with manifest, context, server, and CLI.
+
+**Files created:**
+- `mcp/doc.go` — package documentation
+- `mcp/manifest.go` — `ProjectManifest`, `LoadManifest()`, `FindManifest()` with path resolution
+- `mcp/manifest_test.go` — 10 tests (valid parse, missing fields, absolute paths, file search)
+- `mcp/context.go` — `ServerContext`, `BuildServerContext()` with graph/templates/domain/OAS loading
+- `mcp/context_test.go` — 11 tests (build with/without optional resources, spec path collection)
+- `mcp/server.go` — `Server`, `NewServer()`, `Serve()` (stdio transport via mcp-go)
+- `mcp/server_test.go` — 3 tests (creation with various context configurations)
+- `cmd/aat/mcp_cmd.go` — `mcpMain()`, `mcpServeMain()` with `--manifest` flag
+
+**Files modified:**
+- `cmd/aat/main.go` — added `case "mcp":` to command switch, updated usage strings
+- `go.mod` / `go.sum` — added `github.com/mark3labs/mcp-go v0.43.2`
+
+**Decisions:**
+- Server name uses `"aat:<project-name>"` format to distinguish multiple project servers
+- Capabilities (tool/resource/prompt) all registered with `false` for listChanged — will enable as tools are added in later WIs
+- `FindManifest()` walks up from cwd to filesystem root (same pattern as git repo detection)
+- OAS spec loading happens eagerly during context build (specs are small; avoids lazy-load complexity)
+- All paths in manifest resolved relative to manifest file directory (not cwd)
+- Server version hardcoded to "0.1.0" until we wire internal/version
+
+**Test count:** 24 tests, all passing
