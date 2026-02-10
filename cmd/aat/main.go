@@ -19,7 +19,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: aat <command> [options]")
-		fmt.Fprintln(os.Stderr, "commands: run, prompt")
+		fmt.Fprintln(os.Stderr, "commands: run, prompt, graph")
 		os.Exit(1)
 	}
 
@@ -30,9 +30,12 @@ func main() {
 	case "prompt":
 		code := promptMain(os.Args[2:])
 		os.Exit(code)
+	case "graph":
+		code := graphMain(os.Args[2:])
+		os.Exit(code)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "commands: run, prompt")
+		fmt.Fprintln(os.Stderr, "commands: run, prompt, graph")
 		os.Exit(1)
 	}
 }

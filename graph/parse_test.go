@@ -313,6 +313,67 @@ func TestParse_TravelportBooking(t *testing.T) {
 	assert.Equal(t, 3, selectCount)
 }
 
+func TestParse_WithOASFields(t *testing.T) {
+	data := []byte(`
+version: "1.0.0"
+oas: petstore.yaml
+nodes:
+  listPets:
+    description: "List pets"
+    adapter: listPets
+    oas:
+      operationId: listPets
+    inputs:
+      - name: limit
+        type: integer
+    outputs:
+      - name: pets
+        type: string
+  getPet:
+    description: "Get a pet"
+    adapter: getPet
+    oas:
+      operationId: getPet
+      spec: other-spec.yaml
+    inputs:
+      - name: petId
+        type: string
+    outputs:
+      - name: name
+        type: string
+edges: []
+`)
+
+	g, err := Parse(data)
+	require.NoError(t, err)
+
+	// Graph-level OAS
+	assert.Equal(t, "petstore.yaml", g.OAS)
+
+	// Node with OAS ref using graph default
+	listPets := g.Nodes["listPets"]
+	require.NotNil(t, listPets.OAS)
+	assert.Equal(t, "listPets", listPets.OAS.OperationID)
+	assert.Empty(t, listPets.OAS.Spec)
+
+	// Node with OAS ref and spec override
+	getPet := g.Nodes["getPet"]
+	require.NotNil(t, getPet.OAS)
+	assert.Equal(t, "getPet", getPet.OAS.OperationID)
+	assert.Equal(t, "other-spec.yaml", getPet.OAS.Spec)
+}
+
+func TestParse_WithoutOASFields(t *testing.T) {
+	// Existing minimal graph should still parse fine (backward compat)
+	g, err := ParseFile("testdata/valid/minimal.yaml")
+	require.NoError(t, err)
+
+	assert.Empty(t, g.OAS)
+	node := g.Nodes["getUser"]
+	require.NotNil(t, node)
+	assert.Nil(t, node.OAS)
+}
+
 func TestSplitRef(t *testing.T) {
 	tests := []struct {
 		ref      string

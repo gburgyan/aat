@@ -324,3 +324,21 @@
 - `FormatPlanSchema` documents the feature so the LLM knows about it
 
 **Open questions:** None.
+
+## 2026-02-09 — Task 23 (23a + 23b + 23d): OAS Integration + `aat graph validate`
+
+**What:** Added OpenAPI Spec integration as a reference/enrichment layer. Graph nodes can now reference OAS operations, and a new CLI command validates graph structure and OAS alignment.
+
+**Decisions:**
+- OAS linking is optional and fully backward-compatible: `Graph.OAS` (graph-level default spec) and `Node.OAS` (per-node `OASRef` with `operationId` + optional `spec` override)
+- Used `github.com/pb33f/libopenapi` v0.33 for OAS parsing — required Go 1.24 upgrade (from 1.23)
+- OAS validation has severity levels (`error` vs `warning`) unlike structural `Validate()` which is strict pass/fail
+- Input/output mismatches between graph and OAS are warnings (not errors) because the graph is the source of truth — intentional divergence is normal
+- Errors: empty operationId, no spec path, spec not loaded, operationId not found
+- Warnings: graph input not in OAS params/body, OAS required param missing from graph, graph output not in OAS response
+- `aat graph validate` absorbs Task H3, provides both structural and OAS validation in one command
+- Spec paths are resolved relative to the graph file's directory
+- `--strict` flag treats warnings as errors (exit 1 for any issue)
+- 23c (scaffold generation via `aat generate --oas`) deferred to a future session
+
+**Open questions:** None.

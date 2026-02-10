@@ -10,6 +10,7 @@ import (
 // and conditional requirements (conditions) for an API workflow.
 type Graph struct {
 	Version    string           `yaml:"version"`
+	OAS        string           `yaml:"oas,omitempty"`
 	Nodes      map[string]*Node `yaml:"nodes"`
 	Edges      []Edge           `yaml:"edges"`
 	Conditions []Condition      `yaml:"conditions,omitempty"`
@@ -24,6 +25,13 @@ type Node struct {
 	Outputs      []Output `yaml:"outputs"`
 	Cleanup      string   `yaml:"cleanup,omitempty"`
 	CycleBreaker bool     `yaml:"cycleBreaker,omitempty"`
+	OAS          *OASRef  `yaml:"oas,omitempty"`
+}
+
+// OASRef links a graph node to an OAS operation.
+type OASRef struct {
+	OperationID string `yaml:"operationId"`
+	Spec        string `yaml:"spec,omitempty"`
 }
 
 // Input describes a single input parameter for a node.

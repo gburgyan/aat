@@ -1,0 +1,19 @@
+version: "1.0.0"
+oas: oas/petstore.yaml
+
+nodes:
+  listPets:
+    description: "List all pets"
+    adapter: listPets
+    oas:
+      operationId: listPets
+    inputs:
+      - name: limit
+        type: integer
+    outputs:
+      - name: id
+        type: integer
+      - name: name
+        type: string
+
+edges: []

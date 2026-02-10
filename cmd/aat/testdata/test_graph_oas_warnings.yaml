@@ -1,0 +1,19 @@
+version: "1.0.0"
+oas: oas/petstore.yaml
+
+nodes:
+  listPets:
+    description: "List pets with extra input"
+    adapter: listPets
+    oas:
+      operationId: listPets
+    inputs:
+      - name: limit
+        type: integer
+      - name: extraInput
+        type: string
+    outputs:
+      - name: id
+        type: integer
+
+edges: []

@@ -49,7 +49,11 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 20d. Step-level relaxation (adaptive mode) + archive + CLI wiring
 - [ ] ~~21. GopherLua~~ — deferred indefinitely (templates + Tier 3 cover use cases)
 - [x] 22a. Implement negative assertions (expectFailure)
-- [ ] 23. OAS integration: scaffold generation, graph-OAS validation, MCP enrichment
+- [~] 23. OAS integration: scaffold generation, graph-OAS validation, MCP enrichment
+  - [x] 23a. OAS linking (graph nodes reference OAS spec + operationId)
+  - [x] 23b. Graph-OAS validation (`ValidateOAS`)
+  - [ ] 23c. Scaffold generation (`aat generate --oas`) — deferred
+  - [x] 23d. CLI: `aat graph validate` (absorbs H3)
 - [ ] 24. Build prompt-to-plan regression test suite
 - [ ] 28. CI/CD mode (moved from Stage 3a — table stakes)
 - [ ] 59. `aat docs generate` (moved from Stage 4)
@@ -59,7 +63,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [ ] 60c. Testing lifecycle tools (plan generation, execution, archives)
 - [ ] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)
 - [ ] H2. Quickstart example (PetStore)
-- [ ] H3. `aat graph validate` (feedback loop for AI-assisted authoring)
+- [x] H3. `aat graph validate` (absorbed by Task 23d)
 
 ## Stage 3a: CI/CD, Web UI & Polish
 

@@ -1,0 +1,17 @@
+version: "1.0.0"
+oas: oas/petstore.yaml
+
+nodes:
+  badNode:
+    description: "Bad operation ID"
+    adapter: test
+    oas:
+      operationId: nonExistentOperation
+    inputs:
+      - name: foo
+        type: string
+    outputs:
+      - name: bar
+        type: string
+
+edges: []
