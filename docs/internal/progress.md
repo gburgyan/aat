@@ -55,11 +55,11 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 23c. Scaffold generation (`aat generate --oas`)
   - [x] 23d. CLI: `aat graph validate` (absorbs H3)
 - [x] 24. Build prompt-to-plan regression test suite
-- [ ] 28. CI/CD mode (moved from Stage 3a — table stakes)
+- [x] 28. CI/CD mode (granular exit codes, --json, --quiet, early plan validation)
 - [ ] 60. `aat mcp serve` — API lifecycle platform
   - [ ] 60a. Core MCP server + API knowledge tools (graph, templates, domain)
-  - [ ] 60b. Documentation integration (per-node Markdown, enrichment)
-  - [ ] 60c. Testing lifecycle tools (plan generation, execution, archives)
+  - [ ] 60b. Documentation integration (per-node Markdown, links to OAS, expose workflows, etc.)
+  - [ ] 60c. Testing lifecycle tools (can we make a client integration using the MCP server as an aid, then test the system using aat)
 - [ ] 59. `aat docs generate` (moved from Stage 4)
 - [ ] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)
 - [ ] H2. Quickstart example (PetStore)

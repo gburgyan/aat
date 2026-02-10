@@ -1,5 +1,17 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-10 — Task 28: CI/CD Mode
+
+**What:** Made `aat run` pipeline-friendly with granular exit codes, `--json` flag for machine-readable output, and `--quiet` flag for suppressed progress.
+**Decisions:**
+- Exit codes: 0=passed, 1=test failure (OutcomeFailed), 2=infrastructure error (OutcomeError, config/parse/validation errors)
+- `runCommand` returns `*runResult` struct (outcome + summary + error + setupErr flag) instead of bare `error`, enabling `runMain` to determine exit code and output format
+- Logger pattern: `runCommand` takes `io.Writer` for progress messages; quiet mode passes `io.Discard`
+- `--json` implies `--quiet`; emits `RunSummary` JSON to stdout with per-step status, assertion counts, duration, archive path
+- Early `plan.Validate(p, g)` call before engine.Run gives clear exit-code-2 errors for invalid plans
+- `printSummary` renamed to `printRunSummary` accepting `io.Writer`; `writeArchive` renamed to `writeRunArchive` returning `(string, error)`
+**Open questions:** None.
+
 ## 2026-02-07 — Task 13: Domain Knowledge Layer
 
 **What:** Implemented domain knowledge package (concepts, types, value pools).

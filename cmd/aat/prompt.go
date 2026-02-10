@@ -224,12 +224,14 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	result := eng.Run(ctx, p)
 
 	// Print summary
-	printSummary(result)
+	printRunSummary(result, os.Stdout)
 
 	// Write archive
-	if err := writeArchive(result, p, env, g, args.OutputDir); err != nil {
-		return err
+	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir)
+	if archiveErr != nil {
+		return archiveErr
 	}
+	fmt.Printf("Archive: %s\n", archivePath)
 
 	// Exit code
 	if result.Outcome != engine.OutcomePassed {
@@ -299,8 +301,9 @@ func adjustPlan(p *plan.Plan, g *graph.Graph, reader io.Reader) (*plan.Plan, err
 	return edited, nil
 }
 
-// writeArchive creates a run archive in the output directory.
-func writeArchive(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string) error {
+// writeRunArchive creates a run archive in the output directory and returns
+// the archive path. It no longer prints the path itself; callers handle output.
+func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string) (string, error) {
 	runID := archive.GenerateRunID()
 	meta := archive.ArchiveMetadata{
 		Version:      "1.0.0",
@@ -314,8 +317,7 @@ func writeArchive(result *engine.RunResult, p *plan.Plan, env *config.Environmen
 	arc := engine.ToArchive(result, meta, env.APIBaseURL)
 	archivePath := filepath.Join(outputDir, runID, "archive.json")
 	if err := archive.Write(arc, archivePath); err != nil {
-		return fmt.Errorf("writing archive: %w", err)
+		return "", fmt.Errorf("writing archive: %w", err)
 	}
-	fmt.Printf("Archive: %s\n", archivePath)
-	return nil
+	return archivePath, nil
 }

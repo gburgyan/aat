@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -52,7 +54,53 @@ type runArgs struct {
 	OutputDir     string
 	Mode          string
 	DomainPath    string
+	JSON          bool
+	Quiet         bool
 }
+
+// RunSummary is the machine-readable JSON output for CI/CD pipelines.
+type RunSummary struct {
+	Outcome     string        `json:"outcome"`
+	Error       string        `json:"error,omitempty"`
+	Steps       []StepSummary `json:"steps"`
+	Cleanup     []StepSummary `json:"cleanup,omitempty"`
+	Summary     SummaryStats  `json:"summary"`
+	ArchivePath string        `json:"archive_path,omitempty"`
+}
+
+// StepSummary is a per-step entry in the JSON summary.
+type StepSummary struct {
+	Name             string `json:"name"`
+	Node             string `json:"node"`
+	Status           int    `json:"status"`
+	DurationMs       int64  `json:"duration_ms"`
+	Passed           bool   `json:"passed"`
+	Error            string `json:"error,omitempty"`
+	Retries          int    `json:"retries"`
+	AssertionsPassed int    `json:"assertions_passed"`
+	AssertionsFailed int    `json:"assertions_failed"`
+}
+
+// SummaryStats is the aggregate counts in the JSON summary.
+type SummaryStats struct {
+	TotalSteps  int   `json:"total_steps"`
+	PassedSteps int   `json:"passed_steps"`
+	FailedSteps int   `json:"failed_steps"`
+	DurationMs  int64 `json:"duration_ms"`
+}
+
+// runResult is the internal result from runCommand, used by runMain
+// to determine exit codes and output format.
+type runResult struct {
+	outcome     engine.Outcome
+	summary     *RunSummary
+	archivePath string
+	err         error
+	setupErr    bool // true when error occurred before engine execution
+}
+
+// exitCodeInfra is the exit code for infrastructure/config errors.
+const exitCodeInfra = 2
 
 // runMain parses flags and delegates to runCommand.
 func runMain(args []string) int {
@@ -65,81 +113,159 @@ func runMain(args []string) int {
 	fs.StringVar(&ra.OutputDir, "output", "runs", "directory for archive output")
 	fs.StringVar(&ra.Mode, "mode", "", "execution mode: strict, lean, adaptive (overrides env config)")
 	fs.StringVar(&ra.DomainPath, "domain", "", "path to domain knowledge YAML file")
+	fs.BoolVar(&ra.JSON, "json", false, "output machine-readable JSON summary to stdout")
+	fs.BoolVar(&ra.Quiet, "quiet", false, "suppress progress messages, show only final summary")
 
 	if err := fs.Parse(args); err != nil {
-		return 1
+		return exitCodeInfra
 	}
 
-	if err := runCommand(context.Background(), ra); err != nil {
-		fmt.Fprintf(os.Stderr, "aat: %s\n", err)
-		return 1
+	// --json implies --quiet
+	if ra.JSON {
+		ra.Quiet = true
 	}
-	return 0
+
+	// Choose output writer: --quiet suppresses progress
+	var out io.Writer = os.Stdout
+	if ra.Quiet {
+		out = io.Discard
+	}
+
+	res := runCommand(context.Background(), ra, out)
+
+	// JSON output
+	if ra.JSON {
+		if res.summary != nil {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			enc.Encode(res.summary)
+		} else {
+			// Setup error before we got a RunResult — emit minimal JSON
+			s := &RunSummary{
+				Outcome: "error",
+				Error:   errString(res.err),
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			enc.Encode(s)
+		}
+		return exitCode(res)
+	}
+
+	// Quiet (non-JSON): show the final summary line
+	if ra.Quiet && res.summary != nil {
+		switch res.summary.Outcome {
+		case "passed":
+			fmt.Fprintf(os.Stdout, "PASSED (%d/%d steps)\n", res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps)
+		case "failed":
+			fmt.Fprintf(os.Stdout, "FAILED: %s\n", res.summary.Error)
+		case "error":
+			fmt.Fprintf(os.Stdout, "ERROR: %s\n", res.summary.Error)
+		}
+		if res.archivePath != "" {
+			fmt.Fprintf(os.Stdout, "Archive: %s\n", res.archivePath)
+		}
+		return exitCode(res)
+	}
+
+	// Normal (non-quiet, non-JSON): errors already printed during execution
+	if res.err != nil {
+		fmt.Fprintf(os.Stderr, "aat: %s\n", res.err)
+	}
+	return exitCode(res)
+}
+
+// exitCode maps a runResult to the appropriate process exit code.
+func exitCode(res *runResult) int {
+	// Setup/config errors that occurred before engine execution
+	if res.setupErr {
+		return exitCodeInfra
+	}
+	switch res.outcome {
+	case engine.OutcomePassed:
+		return 0
+	case engine.OutcomeFailed:
+		return 1
+	case engine.OutcomeError:
+		return exitCodeInfra
+	default:
+		return 0
+	}
 }
 
 // runCommand executes the full run pipeline. Extracted for testability.
-func runCommand(ctx context.Context, args *runArgs) error {
+// The out writer receives progress messages; callers pass io.Discard for quiet mode.
+func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
+	logf := func(format string, a ...any) {
+		fmt.Fprintf(out, format, a...)
+	}
+
 	// Validate required flags
 	if args.PlanPath == "" {
-		return fmt.Errorf("--plan is required")
+		return &runResult{setupErr: true, err: fmt.Errorf("--plan is required")}
 	}
 	if args.EnvPath == "" {
-		return fmt.Errorf("--env is required")
+		return &runResult{setupErr: true, err: fmt.Errorf("--env is required")}
 	}
 	if args.GraphPath == "" {
-		return fmt.Errorf("--graph is required")
+		return &runResult{setupErr: true, err: fmt.Errorf("--graph is required")}
 	}
 	if args.TemplatesPath == "" {
-		return fmt.Errorf("--templates is required")
+		return &runResult{setupErr: true, err: fmt.Errorf("--templates is required")}
 	}
 
 	// 1. Load environment
-	fmt.Printf("aat: loading environment...\n")
+	logf("aat: loading environment...\n")
 	env, err := config.LoadEnvironment(args.EnvPath)
 	if err != nil {
-		return fmt.Errorf("loading environment: %w", err)
+		return &runResult{setupErr: true, err: fmt.Errorf("loading environment: %w", err)}
 	}
-	fmt.Printf("aat: loaded environment %q\n", env.Name)
+	logf("aat: loaded environment %q\n", env.Name)
 
 	// 2. Authenticate
 	apiConfig, err := env.BuildAPIConfig(ctx)
 	if err != nil {
-		return fmt.Errorf("building API config: %w", err)
+		return &runResult{setupErr: true, err: fmt.Errorf("building API config: %w", err)}
 	}
-	fmt.Printf("aat: authenticated via %s\n", env.Auth.Type)
+	logf("aat: authenticated via %s\n", env.Auth.Type)
 
 	// 3. Load graph
 	g, err := graph.ParseFile(args.GraphPath)
 	if err != nil {
-		return fmt.Errorf("loading graph: %w", err)
+		return &runResult{setupErr: true, err: fmt.Errorf("loading graph: %w", err)}
 	}
-	fmt.Printf("aat: loaded graph (%d nodes, %d edges)\n", len(g.Nodes), len(g.Edges))
+	logf("aat: loaded graph (%d nodes, %d edges)\n", len(g.Nodes), len(g.Edges))
 
 	// 4. Load plan
 	p, err := plan.ParseFile(args.PlanPath)
 	if err != nil {
-		return fmt.Errorf("loading plan: %w", err)
+		return &runResult{setupErr: true, err: fmt.Errorf("loading plan: %w", err)}
 	}
 
-	// 5. Load domain knowledge (optional)
+	// 5. Validate plan against graph (early validation for clear CI error reporting)
+	if err := plan.Validate(p, g); err != nil {
+		return &runResult{setupErr: true, err: fmt.Errorf("plan validation: %w", err)}
+	}
+
+	// 6. Load domain knowledge (optional)
 	var kb *domain.KnowledgeBase
 	if args.DomainPath != "" {
 		kb, err = domain.ParseFile(args.DomainPath)
 		if err != nil {
-			return fmt.Errorf("loading domain knowledge: %w", err)
+			return &runResult{setupErr: true, err: fmt.Errorf("loading domain knowledge: %w", err)}
 		}
-		fmt.Printf("aat: loaded domain knowledge\n")
+		logf("aat: loaded domain knowledge\n")
 	}
 
-	// 6. Load templates
+	// 7. Load templates
 	registry := adapter.NewRegistry()
 	count, err := adapter.LoadTemplates(args.TemplatesPath, registry)
 	if err != nil {
-		return fmt.Errorf("loading templates: %w", err)
+		return &runResult{setupErr: true, err: fmt.Errorf("loading templates: %w", err)}
 	}
-	fmt.Printf("aat: loaded %d templates\n", count)
+	logf("aat: loaded %d templates\n", count)
 
-	// 7. Create executor and environment config
+	// 8. Create executor and environment config
 	executor := adapter.NewHTTPExecutor(apiConfig.BaseURL)
 	envConfig := &adapter.EnvironmentConfig{
 		BaseURL: apiConfig.BaseURL,
@@ -147,7 +273,7 @@ func runCommand(ctx context.Context, args *runArgs) error {
 		Values:  apiConfig.Values,
 	}
 
-	// 8. Determine execution mode
+	// 9. Determine execution mode
 	effectiveMode := config.ExecutionMode(args.Mode)
 	if effectiveMode == "" {
 		effectiveMode = env.LLM.Mode
@@ -156,50 +282,136 @@ func runCommand(ctx context.Context, args *runArgs) error {
 		effectiveMode = config.ModeStrict
 	}
 
-	// 9. Create LLM client if mode requires it
+	// 10. Create LLM client if mode requires it
 	var llmClient llm.Client
 	if effectiveMode != config.ModeStrict && env.LLM.Endpoint != "" {
 		llmClient, err = llm.NewClient(env.LLM)
 		if err != nil {
-			return fmt.Errorf("creating LLM client: %w", err)
+			return &runResult{setupErr: true, err: fmt.Errorf("creating LLM client: %w", err)}
 		}
 	}
 
-	// 10. Create engine and run
+	// 11. Create engine and run
 	eng := engine.NewEngine(g, registry, executor, envConfig).
 		WithMode(effectiveMode).
 		WithDomain(kb).
 		WithLLM(llmClient).
 		WithMaxRelaxationDepth(env.Settings.MaxRelaxationDepth)
-	fmt.Printf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), effectiveMode)
+	logf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), effectiveMode)
 
 	result := eng.Run(ctx, p)
 
-	// 8. Print summary
-	printSummary(result)
+	// Print human-readable summary (suppressed in quiet mode via out=Discard)
+	printRunSummary(result, out)
 
-	// 9. Write archive
-	if err := writeArchive(result, p, env, g, args.OutputDir); err != nil {
-		return err
+	// Write archive
+	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir)
+	if archiveErr != nil {
+		logf("aat: warning: %s\n", archiveErr)
+	} else {
+		logf("Archive: %s\n", archivePath)
 	}
 
-	// 10. Exit code
-	if result.Outcome != engine.OutcomePassed {
-		return fmt.Errorf("%s", outcomeMessage(result))
+	// Build machine-readable summary
+	summary := buildRunSummary(result, archivePath)
+
+	return &runResult{
+		outcome:     result.Outcome,
+		summary:     summary,
+		archivePath: archivePath,
+		err:         result.Error,
 	}
-	return nil
 }
 
-// printSummary writes a human-readable step-by-step summary to stdout.
-func printSummary(result *engine.RunResult) {
+// buildRunSummary converts an engine.RunResult to a RunSummary.
+func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
+	s := &RunSummary{
+		Outcome:     result.Outcome.String(),
+		Error:       errString(result.Error),
+		ArchivePath: archivePath,
+	}
+
+	var totalDur time.Duration
+	var passed, failed int
+
+	for _, step := range result.Steps {
+		ss := toStepSummary(step)
+		s.Steps = append(s.Steps, ss)
+		totalDur += step.Duration
+		if ss.Passed {
+			passed++
+		} else {
+			failed++
+		}
+	}
+
+	for _, step := range result.CleanupResults {
+		ss := toStepSummary(step)
+		s.Cleanup = append(s.Cleanup, ss)
+		totalDur += step.Duration
+	}
+
+	s.Summary = SummaryStats{
+		TotalSteps:  len(result.Steps),
+		PassedSteps: passed,
+		FailedSteps: failed,
+		DurationMs:  totalDur.Milliseconds(),
+	}
+
+	return s
+}
+
+// toStepSummary converts a single engine.StepResult to a StepSummary.
+func toStepSummary(step engine.StepResult) StepSummary {
+	ss := StepSummary{
+		Name:       step.Node,
+		Node:       step.Node,
+		Status:     step.StatusCode,
+		DurationMs: step.Duration.Milliseconds(),
+		Retries:    step.RetryCount,
+	}
+
+	// Determine passed/failed
+	if step.Error != nil {
+		ss.Error = step.Error.Error()
+		ss.Passed = false
+	} else if step.ExpectFailure != nil {
+		ss.Passed = step.ExpectFailure.Passed
+		if !ss.Passed {
+			ss.Error = fmt.Sprintf("expected status %v, got %d", step.ExpectFailure.ExpectedStatuses, step.ExpectFailure.ActualStatus)
+		}
+	} else if step.StatusCode >= 400 {
+		ss.Passed = false
+		ss.Error = fmt.Sprintf("status %d", step.StatusCode)
+	} else {
+		ss.Passed = true
+	}
+
+	// Assertion counts
+	if step.Validation != nil {
+		for _, ar := range step.Validation.Results {
+			if ar.Passed {
+				ss.AssertionsPassed++
+			} else {
+				ss.AssertionsFailed++
+				ss.Passed = false
+			}
+		}
+	}
+
+	return ss
+}
+
+// printRunSummary writes a human-readable step-by-step summary to the given writer.
+func printRunSummary(result *engine.RunResult, out io.Writer) {
 	total := len(result.Steps)
 	for i, step := range result.Steps {
 		prefix := fmt.Sprintf("  [%d/%d] %-20s", i+1, total, step.Node)
 		if step.Error != nil {
 			if step.RetryCount > 0 {
-				fmt.Printf("%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(step), step.RetryCount)
+				fmt.Fprintf(out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(step), step.RetryCount)
 			} else {
-				fmt.Printf("%s ERROR: %s\n", prefix, step.Error)
+				fmt.Fprintf(out, "%s ERROR: %s\n", prefix, step.Error)
 			}
 		} else if step.Response != nil {
 			status := fmt.Sprintf("%d", step.StatusCode)
@@ -207,34 +419,34 @@ func printSummary(result *engine.RunResult) {
 			if step.Validation != nil && !step.Validation.Passed {
 				validMark = "  ASSERTIONS FAILED"
 			}
-			fmt.Printf("%s %s  %dms%s\n", prefix, status, step.Duration.Milliseconds(), validMark)
+			fmt.Fprintf(out, "%s %s  %dms%s\n", prefix, status, step.Duration.Milliseconds(), validMark)
 		} else {
-			fmt.Printf("%s (no response)\n", prefix)
+			fmt.Fprintf(out, "%s (no response)\n", prefix)
 		}
 	}
 
 	if len(result.CleanupResults) > 0 {
-		fmt.Println("\n  cleanup:")
+		fmt.Fprintln(out, "\n  cleanup:")
 		for _, step := range result.CleanupResults {
 			prefix := fmt.Sprintf("    %-22s", step.Node)
 			if step.Error != nil {
-				fmt.Printf("%s ERROR: %s\n", prefix, step.Error)
+				fmt.Fprintf(out, "%s ERROR: %s\n", prefix, step.Error)
 			} else if step.Response != nil {
-				fmt.Printf("%s %d  %dms\n", prefix, step.StatusCode, step.Duration.Milliseconds())
+				fmt.Fprintf(out, "%s %d  %dms\n", prefix, step.StatusCode, step.Duration.Milliseconds())
 			} else {
-				fmt.Printf("%s (no response)\n", prefix)
+				fmt.Fprintf(out, "%s (no response)\n", prefix)
 			}
 		}
 	}
 
-	fmt.Println()
+	fmt.Fprintln(out)
 	switch result.Outcome {
 	case engine.OutcomePassed:
-		fmt.Printf("PASSED (%d/%d steps, %s)\n", total, total, totalDuration(result))
+		fmt.Fprintf(out, "PASSED (%d/%d steps, %s)\n", total, total, totalDuration(result))
 	case engine.OutcomeFailed:
-		fmt.Printf("FAILED: %s\n", outcomeMessage(result))
+		fmt.Fprintf(out, "FAILED: %s\n", outcomeMessage(result))
 	case engine.OutcomeError:
-		fmt.Printf("ERROR: %s\n", outcomeMessage(result))
+		fmt.Fprintf(out, "ERROR: %s\n", outcomeMessage(result))
 	}
 }
 
@@ -267,4 +479,12 @@ func outcomeMessage(result *engine.RunResult) string {
 		return result.Error.Error()
 	}
 	return result.Outcome.String()
+}
+
+// errString returns the error string or empty.
+func errString(err error) string {
+	if err != nil {
+		return err.Error()
+	}
+	return ""
 }
