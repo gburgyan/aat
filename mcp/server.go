@@ -19,15 +19,17 @@ func NewServer(ctx *ServerContext) *Server {
 	}
 
 	mcpServer := server.NewMCPServer(name, "0.1.0",
-		server.WithToolCapabilities(false),
+		server.WithToolCapabilities(true),
 		server.WithResourceCapabilities(false, false),
 		server.WithPromptCapabilities(false),
 	)
 
-	return &Server{
+	s := &Server{
 		mcp: mcpServer,
 		ctx: ctx,
 	}
+	s.registerGraphTools()
+	return s
 }
 
 // Serve starts the MCP server on stdio and blocks until the connection closes.
