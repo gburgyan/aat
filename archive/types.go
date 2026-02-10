@@ -39,9 +39,17 @@ type StepRecord struct {
 	Selections  []SelectionRecord         `json:"selections,omitempty"`
 	Resolutions []ValueResolutionRecord   `json:"resolutions,omitempty"`
 	Relaxations []RelaxationArchiveRecord `json:"relaxations,omitempty"`
-	ErrorClass  *ErrorClassRecord         `json:"errorClassification,omitempty"`
-	Error       string                    `json:"error,omitempty"`
-	RetryCount  int                       `json:"retryCount,omitempty"`
+	ErrorClass    *ErrorClassRecord         `json:"errorClassification,omitempty"`
+	ExpectFailure *ExpectFailureRecord      `json:"expectFailure,omitempty"`
+	Error         string                    `json:"error,omitempty"`
+	RetryCount    int                       `json:"retryCount,omitempty"`
+}
+
+// ExpectFailureRecord captures the outcome of a negative assertion.
+type ExpectFailureRecord struct {
+	Expected []int `json:"expected"`
+	Actual   int   `json:"actual"`
+	Passed   bool  `json:"passed"`
 }
 
 // RequestRecord captures the outbound HTTP request.

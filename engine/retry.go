@@ -25,6 +25,11 @@ func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, no
 func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, tracker *RelaxationTracker) StepResult {
 	result := e.executeStep(ctx, step, node, state, tracker)
 
+	// Negative assertion steps should not retry — the failure IS the expected behavior.
+	if step.ExpectFailure != nil {
+		return result
+	}
+
 	if step.Retry == nil {
 		// No retry config — classify for reporting but don't retry
 		if cls := classifyStepResult(&result); cls != nil {

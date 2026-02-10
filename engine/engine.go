@@ -138,6 +138,53 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			}
 		}
 
+		// Handle expectFailure steps: inverted success/failure logic
+		if step.ExpectFailure != nil {
+			efr := &ExpectFailureResult{
+				ExpectedStatuses: step.ExpectFailure.Status,
+				ActualStatus:     result.StatusCode,
+				Description:      step.ExpectFailure.Description,
+			}
+			for _, expected := range step.ExpectFailure.Status {
+				if result.StatusCode == expected {
+					efr.Passed = true
+					break
+				}
+			}
+			result.ExpectFailure = efr
+			stepResults[len(stepResults)-1] = result
+
+			if efr.Passed {
+				// Expected failure occurred — this is a PASS.
+				// Do NOT store outputs (error responses have no useful outputs).
+				// Do NOT push cleanup (no resource was created).
+				// Mechanical assertions still ran in executeStep; check them.
+				if result.Validation != nil && !result.Validation.Passed {
+					outcome = OutcomeFailed
+					if !e.ContinueOnAssertionFailure {
+						cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+						return &RunResult{
+							Outcome:        outcome,
+							Steps:          stepResults,
+							CleanupResults: cleanupResults,
+							Error:          fmt.Errorf("step %q failed mechanical validation", step.Node),
+						}
+					}
+				}
+				continue
+			}
+
+			// Unexpected success or wrong error code — FAIL.
+			outcome = OutcomeFailed
+			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+			return &RunResult{
+				Outcome:        outcome,
+				Steps:          stepResults,
+				CleanupResults: cleanupResults,
+				Error:          fmt.Errorf("step %q: expected failure status %v but got %d", step.Node, step.ExpectFailure.Status, result.StatusCode),
+			}
+		}
+
 		if result.StatusCode >= 400 {
 			outcome = OutcomeFailed
 			// Run cleanup before returning

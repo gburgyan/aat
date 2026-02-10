@@ -48,7 +48,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 20c. Filter relaxation for selections
   - [x] 20d. Step-level relaxation (adaptive mode) + archive + CLI wiring
 - [ ] ~~21. GopherLua~~ — deferred indefinitely (templates + Tier 3 cover use cases)
-- [ ] 22a. Implement negative assertions (expectFailure)
+- [x] 22a. Implement negative assertions (expectFailure)
 - [ ] 23. OAS integration: scaffold generation, graph-OAS validation, MCP enrichment
 - [ ] 24. Build prompt-to-plan regression test suite
 - [ ] 28. CI/CD mode (moved from Stage 3a — table stakes)

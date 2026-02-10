@@ -895,6 +895,82 @@ func TestFixAssertions_StatusPrependedWhenMissing(t *testing.T) {
 	assert.Equal(t, "fieldExists", assertions[1].Type)
 }
 
+// --- fixAssertions with expectFailure tests ---
+
+func TestFixAssertions_ExpectFailure_UsesExpectedStatus(t *testing.T) {
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					ExpectFailure: &plan.ExpectFailure{
+						Status:      []int{401, 403},
+						Description: "Should be rejected",
+					},
+					// No assertions — fixAssertions should add status: 401
+				},
+			},
+		},
+	}
+
+	fixAssertions(p)
+
+	assertions := p.Execution.Steps[0].Assertions.Mechanical
+	require.Len(t, assertions, 1)
+	assert.Equal(t, "status", assertions[0].Type)
+	assert.Equal(t, 401, assertions[0].Expect) // first expected failure code, not 200
+}
+
+func TestFixAssertions_ExpectFailure_PreservesExistingStatus(t *testing.T) {
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					ExpectFailure: &plan.ExpectFailure{
+						Status: []int{403},
+					},
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							{Type: "status", Expect: 403},
+							{Type: "fieldExists", Path: "error.code"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	fixAssertions(p)
+
+	assertions := p.Execution.Steps[0].Assertions.Mechanical
+	require.Len(t, assertions, 2)
+	assert.Equal(t, "status", assertions[0].Type)
+	assert.Equal(t, 403, assertions[0].Expect) // preserved, not overwritten
+	assert.Equal(t, "fieldExists", assertions[1].Type)
+}
+
+func TestFixAssertions_NormalStep_StillGets200(t *testing.T) {
+	// Verify that normal steps (no expectFailure) still get status: 200
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					// No expectFailure, no assertions
+				},
+			},
+		},
+	}
+
+	fixAssertions(p)
+
+	assertions := p.Execution.Steps[0].Assertions.Mechanical
+	require.Len(t, assertions, 1)
+	assert.Equal(t, "status", assertions[0].Type)
+	assert.Equal(t, 200, assertions[0].Expect)
+}
+
 // --- lookupElementFieldPath tests ---
 
 func TestLookupElementFieldPath_WithPath(t *testing.T) {

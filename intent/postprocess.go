@@ -161,6 +161,9 @@ var validAssertionTypes = map[string]bool{
 // fixAssertions removes mechanical assertions with empty or unknown types and
 // ensures every step has at least a status assertion. LLMs sometimes produce
 // assertions with missing type fields; this cleans them up.
+//
+// For expectFailure steps, the default status assertion uses the first expected
+// failure code instead of 200 (which would contradict the expected failure).
 func fixAssertions(p *plan.Plan) {
 	for i := range p.Execution.Steps {
 		step := &p.Execution.Steps[i]
@@ -181,11 +184,15 @@ func fixAssertions(p *plan.Plan) {
 			valid = append(valid, a)
 		}
 
-		// Ensure at least a status 200 assertion.
+		// Ensure at least a status assertion.
 		if !hasStatus {
+			defaultStatus := 200
+			if step.ExpectFailure != nil && len(step.ExpectFailure.Status) > 0 {
+				defaultStatus = step.ExpectFailure.Status[0]
+			}
 			valid = append([]plan.MechanicalAssertion{{
 				Type:   "status",
-				Expect: 200,
+				Expect: defaultStatus,
 			}}, valid...)
 		}
 

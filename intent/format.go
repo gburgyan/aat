@@ -254,6 +254,19 @@ assertions:
 ` + "```yaml" + `
 description: "Search for flights from DEN to SFO"
 ` + "```" + `
+
+## 5. Negative Assertions (expectFailure)
+
+When a step should fail (e.g., security testing, input validation), use expectFailure:
+` + "```yaml" + `
+expectFailure:
+  status: [401, 403]
+  description: "Unauthenticated request must be rejected"
+` + "```" + `
+
+The step PASSES if the response status matches any listed code.
+The step FAILS if the response returns 2xx (security boundary not enforced).
+Retry and relaxation are automatically disabled.
 `
 }
 

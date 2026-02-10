@@ -1065,7 +1065,8 @@ func TestAdaptiveMode_ExpectFailure_SkipsRelaxation(t *testing.T) {
 				{
 					Node: "step1",
 					ExpectFailure: &plan.ExpectFailure{
-						Status: []int{400},
+						Status:      []int{400},
+						Description: "Bad request is expected",
 					},
 					Values: map[string]plan.StepValue{
 						"origin": {Default: "DEN"},
@@ -1076,9 +1077,374 @@ func TestAdaptiveMode_ExpectFailure_SkipsRelaxation(t *testing.T) {
 	}
 
 	result := eng.Run(context.Background(), p)
-	// ExpectFailure step with matching status should not trigger relaxation
+	// ExpectFailure step with matching status should pass and not trigger relaxation
+	assert.Equal(t, OutcomePassed, result.Outcome)
 	require.Len(t, result.Steps, 1)
 	assert.Empty(t, result.Steps[0].Relaxations)
+	require.NotNil(t, result.Steps[0].ExpectFailure)
+	assert.True(t, result.Steps[0].ExpectFailure.Passed)
+}
+
+// --- ExpectFailure tests (Task 22a) ---
+
+func TestExpectFailure_MatchingStatus_Passes(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "input", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "output", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error": "unauthorized"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{"output": "val"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"input": {Default: "test"},
+					},
+					ExpectFailure: &plan.ExpectFailure{
+						Status:      []int{401, 403},
+						Description: "Unauthenticated request must be rejected",
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	assert.Nil(t, result.Error)
+	require.Len(t, result.Steps, 1)
+
+	efr := result.Steps[0].ExpectFailure
+	require.NotNil(t, efr)
+	assert.True(t, efr.Passed)
+	assert.Equal(t, 401, efr.ActualStatus)
+	assert.Equal(t, []int{401, 403}, efr.ExpectedStatuses)
+	assert.Equal(t, "Unauthenticated request must be rejected", efr.Description)
+}
+
+func TestExpectFailure_NonMatchingStatus_Fails(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "input", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "output", Type: "string"},
+				},
+			},
+		},
+	}
+
+	// Returns 200 — but we expect failure
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"output": "success"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{"output": "success"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"input": {Default: "test"},
+					},
+					ExpectFailure: &plan.ExpectFailure{
+						Status: []int{401, 403},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	assert.Error(t, result.Error)
+	assert.Contains(t, result.Error.Error(), "expected failure status")
+	assert.Contains(t, result.Error.Error(), "but got 200")
+
+	require.Len(t, result.Steps, 1)
+	efr := result.Steps[0].ExpectFailure
+	require.NotNil(t, efr)
+	assert.False(t, efr.Passed)
+	assert.Equal(t, 200, efr.ActualStatus)
+}
+
+func TestExpectFailure_SkipsRetry(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "input", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "output", Type: "string"},
+				},
+			},
+		},
+	}
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error": "bad"}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"input": {Default: "test"},
+					},
+					Retry: &plan.RetryConfig{Max: 3},
+					ExpectFailure: &plan.ExpectFailure{
+						Status: []int{400},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 0, result.Steps[0].RetryCount) // no retries
+	assert.Equal(t, 1, callCount)                   // only one call
+	require.NotNil(t, result.Steps[0].ExpectFailure)
+	assert.True(t, result.Steps[0].ExpectFailure.Passed)
+}
+
+func TestExpectFailure_NoOutputsStored(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "input", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+				Cleanup: "cleanup1",
+			},
+			"cleanup1": {
+				Name:    "cleanup1",
+				Adapter: "test.cleanup1",
+				Inputs:  []graph.Input{},
+			},
+			"step2": {
+				Name:    "step2",
+				Adapter: "test.step2",
+				Inputs: []graph.Input{
+					{Name: "input", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "out", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/step1" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error": "unauthorized"}`))
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{"result": "val"},
+	}))
+	require.NoError(t, registry.Register("test.cleanup1", &stubAdapter{
+		method: "DELETE", path: "/cleanup",
+		response: map[string]any{},
+	}))
+	require.NoError(t, registry.Register("test.step2", &stubAdapter{
+		method: "POST", path: "/step2",
+		response: map[string]any{"out": "done"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"input": {Default: "test"},
+					},
+					ExpectFailure: &plan.ExpectFailure{
+						Status: []int{401},
+					},
+				},
+				{
+					Node: "step2",
+					Values: map[string]plan.StepValue{
+						"input": {Default: "test2"},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 2)
+
+	// ExpectFailure step should not have outputs stored
+	assert.Nil(t, result.Steps[0].Outputs)
+
+	// No cleanup should have been pushed (expectFailure step doesn't push cleanup)
+	assert.Empty(t, result.CleanupResults)
+
+	// step2 should have executed normally
+	assert.Equal(t, 200, result.Steps[1].StatusCode)
+}
+
+func TestExpectFailure_MechanicalAssertions(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs: []graph.Input{
+					{Name: "input", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "output", Type: "string"},
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error": {"message": "unauthorized", "code": "AUTH_REQUIRED"}}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method:   "POST",
+		path:     "/step1",
+		response: map[string]any{},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Values: map[string]plan.StepValue{
+						"input": {Default: "test"},
+					},
+					ExpectFailure: &plan.ExpectFailure{
+						Status: []int{401},
+					},
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							{Type: "fieldExists", Path: "error.message"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+
+	// ExpectFailure should pass
+	require.NotNil(t, result.Steps[0].ExpectFailure)
+	assert.True(t, result.Steps[0].ExpectFailure.Passed)
+
+	// Mechanical assertion should have run and passed
+	require.NotNil(t, result.Steps[0].Validation)
+	assert.True(t, result.Steps[0].Validation.Passed)
 }
 
 func TestAdaptiveMode_BudgetExhausted(t *testing.T) {

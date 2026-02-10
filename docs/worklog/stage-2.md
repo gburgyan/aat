@@ -309,3 +309,18 @@
 - OAS library: kin-openapi vs libopenapi
 - Graph-OAS linking schema: how nodes reference operationIds
 - How much OAS detail the MCP server exposes (just schemas? or also examples, descriptions?)
+
+## 2026-02-09 — Task 22a: Negative Assertions (expectFailure)
+
+**What:** Wired the existing `ExpectFailure` plan type into the engine execution loop with full lifecycle support: inverted success/failure logic, retry skip, archive recording, plan validation, and LLM schema documentation.
+
+**Decisions:**
+- ExpectFailure steps invert the success condition: matching an expected error status is a PASS; getting 2xx is a FAIL
+- Outputs are NOT stored and cleanup is NOT pushed for expectFailure steps (error responses have no useful outputs, no resource was created)
+- Retry is unconditionally skipped for expectFailure steps (the failure IS the expected behavior)
+- Mechanical assertions still run on expectFailure steps — users can assert on error response bodies (e.g., `fieldExists: "$.error.message"`)
+- Plan validation enforces: non-empty status list, all statuses >= 400, no contradicting `status: 200` assertion
+- Intent `fixAssertions` defaults to the first expected failure code instead of 200 for expectFailure steps
+- `FormatPlanSchema` documents the feature so the LLM knows about it
+
+**Open questions:** None.

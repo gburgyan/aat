@@ -69,6 +69,13 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 	if s.ErrorClass != nil {
 		rec.ErrorClass = convertErrorClass(s.ErrorClass)
 	}
+	if s.ExpectFailure != nil {
+		rec.ExpectFailure = &archive.ExpectFailureRecord{
+			Expected: s.ExpectFailure.ExpectedStatuses,
+			Actual:   s.ExpectFailure.ActualStatus,
+			Passed:   s.ExpectFailure.Passed,
+		}
+	}
 
 	return rec
 }

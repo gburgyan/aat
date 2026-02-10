@@ -1875,6 +1875,136 @@ func TestValidate_NamedSelections(t *testing.T) {
 	})
 }
 
+// --- ExpectFailure validation (Task 22a) ---
+
+func TestValidate_ExpectFailure(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid expectFailure", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						ExpectFailure: &ExpectFailure{
+							Status:      []int{400, 422},
+							Description: "Invalid request expected",
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("empty status list", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						ExpectFailure: &ExpectFailure{
+							Status: []int{},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "must have at least one status code")
+	})
+
+	t.Run("status less than 400", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						ExpectFailure: &ExpectFailure{
+							Status: []int{200},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "status 200 must be >= 400")
+	})
+
+	t.Run("contradicting status assertion", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						ExpectFailure: &ExpectFailure{
+							Status: []int{401},
+						},
+						Assertions: &Assertions{
+							Mechanical: []MechanicalAssertion{
+								{Type: "status", Expect: 200},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "contradicts expectFailure")
+	})
+
+	t.Run("non-contradicting error status assertion ok", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						ExpectFailure: &ExpectFailure{
+							Status: []int{401},
+						},
+						Assertions: &Assertions{
+							Mechanical: []MechanicalAssertion{
+								{Type: "status", Expect: 401},
+							},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+}
+
 func TestParseFromSelection(t *testing.T) {
 	tests := []struct {
 		name  string

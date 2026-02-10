@@ -255,6 +255,39 @@ func TestRoundTrip_WithValidation(t *testing.T) {
 	assert.Equal(t, "id", loaded.Steps[0].Validation.Results[1].Path)
 }
 
+func TestRoundTrip_WithExpectFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "expect-failure.json")
+
+	a := &Archive{
+		Metadata: ArchiveMetadata{Version: "1", RunID: "run-expect-failure"},
+		Steps: []StepRecord{
+			{
+				Node:   "authCheck",
+				Inputs: map[string]any{"token": "invalid"},
+				ExpectFailure: &ExpectFailureRecord{
+					Expected: []int{401, 403},
+					Actual:   401,
+					Passed:   true,
+				},
+			},
+		},
+		Result: ArchiveResult{Outcome: "passed"},
+	}
+
+	err := Write(a, path)
+	require.NoError(t, err)
+
+	loaded, err := Read(path)
+	require.NoError(t, err)
+
+	require.Len(t, loaded.Steps, 1)
+	require.NotNil(t, loaded.Steps[0].ExpectFailure)
+	assert.Equal(t, []int{401, 403}, loaded.Steps[0].ExpectFailure.Expected)
+	assert.Equal(t, 401, loaded.Steps[0].ExpectFailure.Actual)
+	assert.True(t, loaded.Steps[0].ExpectFailure.Passed)
+}
+
 func TestRoundTrip_WithError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "error.json")

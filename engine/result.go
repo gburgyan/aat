@@ -42,21 +42,30 @@ type RunResult struct {
 
 // StepResult captures the outcome of a single step execution.
 type StepResult struct {
-	Node       string
-	Inputs     map[string]any
-	Request    *adapter.Request
-	Response   *adapter.Response
-	Outputs    map[string]any
-	Selections  []SelectionDecision
-	Resolutions []ValueResolution
-	StatusCode  int
-	Error      error
-	StartTime  time.Time
-	Duration   time.Duration
-	ErrorClass  *ErrorClassification       // nil on success
-	RetryCount  int                        // number of retries performed (0 = no retries)
-	Validation  *validate.MechanicalResult // nil if no assertions configured
-	Relaxations []RelaxationRecord         // soft constraints relaxed during this step
+	Node          string
+	Inputs        map[string]any
+	Request       *adapter.Request
+	Response      *adapter.Response
+	Outputs       map[string]any
+	Selections    []SelectionDecision
+	Resolutions   []ValueResolution
+	StatusCode    int
+	Error         error
+	StartTime     time.Time
+	Duration      time.Duration
+	ErrorClass    *ErrorClassification       // nil on success
+	RetryCount    int                        // number of retries performed (0 = no retries)
+	Validation    *validate.MechanicalResult // nil if no assertions configured
+	Relaxations   []RelaxationRecord         // soft constraints relaxed during this step
+	ExpectFailure *ExpectFailureResult       // non-nil for negative assertion steps
+}
+
+// ExpectFailureResult captures the outcome of a negative assertion step.
+type ExpectFailureResult struct {
+	ExpectedStatuses []int  // status codes that were expected
+	ActualStatus     int    // the actual response status
+	Passed           bool   // true if ActualStatus is in ExpectedStatuses
+	Description      string // from plan's expectFailure.description
 }
 
 // SelectionDecision records how a particular array selection was resolved.

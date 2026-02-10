@@ -328,6 +328,28 @@ func Validate(p *Plan, g *graph.Graph) error {
 				}
 			}
 		}
+
+		// Validate expectFailure
+		if step.ExpectFailure != nil {
+			if len(step.ExpectFailure.Status) == 0 {
+				errs = append(errs, fmt.Sprintf("step %d (%s): expectFailure must have at least one status code", i, step.Node))
+			}
+			for _, code := range step.ExpectFailure.Status {
+				if code < 400 {
+					errs = append(errs, fmt.Sprintf("step %d (%s): expectFailure status %d must be >= 400", i, step.Node, code))
+				}
+			}
+			// Check for contradicting status assertion
+			if step.Assertions != nil {
+				for _, ma := range step.Assertions.Mechanical {
+					if ma.Type == "status" {
+						if expectInt, ok := toInt(ma.Expect); ok && expectInt < 400 {
+							errs = append(errs, fmt.Sprintf("step %d (%s): status assertion expecting %d contradicts expectFailure", i, step.Node, expectInt))
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Gap 4: Validate constraint AppliesTo references
@@ -456,6 +478,17 @@ func detectDependsOnCycles(p *Plan) []string {
 	}
 
 	return cycles
+}
+
+// toInt converts a value to int if possible. Handles int, float64 (JSON numbers).
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case float64:
+		return int(n), true
+	}
+	return 0, false
 }
 
 // splitRef splits a "node.field" reference into its components.
