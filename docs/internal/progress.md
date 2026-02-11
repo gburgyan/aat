@@ -63,7 +63,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 60a-WI4. OAS tools (operation details, schema resolution, search, validate, example gen)
   - [x] 60a-WI5. Resources (graph, templates, domain, metadata, node/{name}, template/{adapter}) + Prompts (explain_workflow, generate_client_code)
   - [x] 60a. Core MCP server + API knowledge tools (graph, templates, domain)
-  - [ ] 60b. Documentation integration (per-node Markdown, links to OAS, expose workflows, etc.)
+  - [x] 60b. Documentation integration (per-node Markdown, links to OAS, expose workflows, etc.)
   - [ ] 60c. Testing lifecycle tools (can we make a client integration using the MCP server as an aid, then test the system using aat)
 - [ ] 59. `aat docs generate` (moved from Stage 4)
 - [ ] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)

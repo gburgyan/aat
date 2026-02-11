@@ -28,6 +28,7 @@ func NewServer(ctx *ServerContext) *Server {
 	s.registerTemplateTools()
 	s.registerDomainTools()
 	s.registerOASTools()
+	s.registerDocsTools()
 	s.registerResources()
 	s.registerPrompts()
 	return s

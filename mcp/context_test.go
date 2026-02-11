@@ -171,6 +171,36 @@ func TestBuildServerContext_OptionalDirs(t *testing.T) {
 	assert.Equal(t, "/some/archives", ctx.ArchiveDir)
 }
 
+func TestBuildServerContext_WithDocsDir(t *testing.T) {
+	dir, manifest := setupTestProject(t)
+
+	docsDir := filepath.Join(dir, "docs")
+	require.NoError(t, os.MkdirAll(docsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(docsDir, "getUser.md"), []byte("# getUser\nUser docs"), 0644))
+
+	manifest.DocsDir = docsDir
+
+	ctx, err := BuildServerContext(manifest)
+	require.NoError(t, err)
+
+	assert.Equal(t, docsDir, ctx.DocsDir)
+	require.NotNil(t, ctx.NodeDocs)
+	assert.Len(t, ctx.NodeDocs, 1)
+	assert.Equal(t, "# getUser\nUser docs", ctx.NodeDocs["getUser"])
+}
+
+func TestBuildServerContext_DocsDirNonExistent(t *testing.T) {
+	_, manifest := setupTestProject(t)
+
+	manifest.DocsDir = filepath.Join(t.TempDir(), "nonexistent")
+
+	ctx, err := BuildServerContext(manifest)
+	require.NoError(t, err)
+
+	assert.Equal(t, manifest.DocsDir, ctx.DocsDir)
+	assert.Empty(t, ctx.NodeDocs)
+}
+
 func TestCollectSpecPaths_NoSpecs(t *testing.T) {
 	g := &graph.Graph{
 		Nodes: map[string]*graph.Node{

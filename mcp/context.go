@@ -88,6 +88,15 @@ func BuildServerContext(manifest *ProjectManifest) (*ServerContext, error) {
 	ctx.PlansDir = manifest.PlansDir
 	ctx.ArchiveDir = manifest.ArchiveDir
 
+	// Load node documentation (optional)
+	if ctx.DocsDir != "" {
+		nodeDocs, err := loadNodeDocs(ctx.DocsDir, ctx.Graph)
+		if err != nil {
+			return nil, fmt.Errorf("loading node docs: %w", err)
+		}
+		ctx.NodeDocs = nodeDocs
+	}
+
 	return ctx, nil
 }
 

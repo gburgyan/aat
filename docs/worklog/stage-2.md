@@ -1,5 +1,34 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-10 — Task 60b (WI-6): Documentation Integration
+
+**What:** Added per-node Markdown documentation support to the MCP server. Implemented doc loading from a configured directory, merged views combining graph metadata + user docs + OAS summaries, and exposed 4 tools + 1 prompt for documentation workflows.
+
+**Decisions:**
+- Case-sensitive file matching: `<NodeName>.md` must match graph node name exactly (consistent with YAML map key semantics throughout AAT)
+- Non-existent docs dir returns empty map, no error — supports the workflow where `DocsDir` is configured before files are created
+- `loadNodeDocs` is a pure function taking `(docsDir, graph)`, testable in isolation from the MCP server
+- `mergeNodeDoc` combines three sources (graph metadata, user doc, OAS summary) into a single Markdown document with labeled sections
+- `generateDocStub` creates a side-effect-free Markdown skeleton — the IDE AI tool decides whether/where to save it
+- `getOASSummary` helper (on Server) produces a one-line OAS summary, reusing `resolveNodeOperation` internally
+- `enrich_documentation` prompt lives in `tools_docs.go` alongside tool registration to keep all doc-related handlers self-contained
+- `enrich_documentation` includes connected nodes context (inbound/outbound edges) for richer LLM input
+- No new resources — `aat://node/{name}` already serves graph metadata; `get_node_documentation` provides the merged view
+- `list_undocumented_nodes` returns helpful message when DocsDir not configured, directing users to set the `docs` field
+- Doc loading wired into `BuildServerContext` after `DocsDir` is set — happens once at startup, not per-request
+
+**Files:**
+- `mcp/docs.go` — NEW: loadNodeDocs, mergeNodeDoc, generateDocStub (~115 lines)
+- `mcp/docs_test.go` — NEW: 12 tests for pure functions
+- `mcp/tools_docs.go` — NEW: registerDocsTools (4 tools + 1 prompt), 6 handlers, getOASSummary helper (~250 lines)
+- `mcp/tools_docs_test.go` — NEW: 20 tests for tool handlers and prompt
+- `mcp/context.go` — modified: added loadNodeDocs call in BuildServerContext
+- `mcp/context_test.go` — modified: added 2 tests for docs loading (valid dir, non-existent dir)
+- `mcp/server.go` — modified: added s.registerDocsTools() call
+- `docs/user/mcp-server.md` — NEW: user-facing MCP server guide (tools, resources, prompts, per-node docs workflow)
+
+**Open questions:** None.
+
 ## 2026-02-10 — Task 60a WI-5: Resources + Prompts (completes 60a)
 
 **What:** Added 6 resources (4 static + 2 URI templates) and 2 prompts to the MCP server, completing Task 60a. Resources provide static context for IDE AI clients; prompts provide reusable workflow templates with assembled context.
