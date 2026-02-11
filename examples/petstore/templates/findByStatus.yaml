@@ -1,0 +1,12 @@
+adapter: findByStatus
+protocol: http
+
+request:
+  method: GET
+  path: /pet/findByStatus?status={{status}}
+  headers:
+    Accept: application/json
+
+response:
+  extract:
+    pets: "$"

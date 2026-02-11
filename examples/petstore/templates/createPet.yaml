@@ -1,0 +1,21 @@
+adapter: createPet
+protocol: http
+
+request:
+  method: POST
+  path: /pet
+  headers:
+    Content-Type: application/json
+    Accept: application/json
+  body: |
+    {
+      "name": "{{name}}",
+      "status": "{{status}}",
+      "photoUrls": []
+    }
+
+response:
+  extract:
+    petId: "id"
+    petName: "name"
+    petStatus: "status"

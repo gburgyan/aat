@@ -1,0 +1,37 @@
+metadata:
+  created: 2026-02-11T12:00:00Z
+  prompt: "Create a pet and verify it exists"
+  graphVersion: "1.0.0"
+
+intent:
+  goal: getPet
+  description: "Create a new pet, then verify it was stored correctly"
+
+execution:
+  steps:
+    - node: createPet
+      description: "Create a new pet named Buddy"
+      values:
+        name: "Buddy"
+        status: "available"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldExists
+            path: "id"
+
+    - node: getPet
+      dependsOn: [createPet]
+      isGoal: true
+      description: "Verify the pet exists with correct data"
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: fieldEquals
+            path: "name"
+            expect: "Buddy"
+          - type: fieldEquals
+            path: "status"
+            expect: "available"

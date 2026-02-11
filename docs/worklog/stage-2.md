@@ -1,5 +1,33 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-11 — Task H2: Quickstart PetStore Example
+
+**What:** Created a complete, runnable example using the public Swagger Petstore v3 API. Added project root README and per-example tutorial. No API keys or setup required — the Petstore API is open.
+
+**Decisions:**
+- 4 graph nodes (createPet, getPet, findByStatus, deletePet) covering CRUD + array search
+- Two plans: `plan.yaml` (create + verify with automatic cleanup) and `plan-find-and-verify.yaml` (create + find + select + explicit delete) — demonstrates both cleanup approaches and array selection
+- `plan.yaml` is a 2-step plan relying on graph-level `cleanup: deletePet` to showcase the automatic cleanup feature
+- `plan-find-and-verify.yaml` is a 4-step plan with explicit deletePet step and `strategy: first` array selection
+- Minimal env config (`auth.type: none`, `defaultRetries: 1`) — simplest possible starting point
+- Included focused OAS spec (4 operations) for graph validation and scaffold generation demos
+- Domain knowledge file optional — demonstrates value pools and concepts for `--domain` flag
+- Root README kept concise: what, quickstart 3-liner, how it works, command table, doc links
+- Petstore README structured as tutorial: build → run → understand → extend
+
+**Files added:**
+- `examples/petstore/graph.yaml` — 4 nodes, 4 edges, OAS linking, cleanup declaration
+- `examples/petstore/templates/{createPet,getPet,findByStatus,deletePet}.yaml` — HTTP templates
+- `examples/petstore/env.yaml` — no-auth environment config
+- `examples/petstore/plan.yaml` — 2-step plan with assertions and automatic cleanup
+- `examples/petstore/plan-find-and-verify.yaml` — 4-step plan with array selection
+- `examples/petstore/petstore-spec.yaml` — focused OAS 3.0 spec
+- `examples/petstore/domain.yaml` — pet names pool + petAvailability concept
+- `examples/petstore/README.md` — step-by-step tutorial
+- `README.md` — project root README
+
+**Open questions:** None.
+
 ## 2026-02-11 — Task H1: Pre-release Hardening
 
 **What:** Four sub-tasks to improve release readiness: context cancellation, schema validation status, archive secret redaction, and CLAUDE.md accuracy.

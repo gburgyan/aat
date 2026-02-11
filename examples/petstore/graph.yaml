@@ -1,0 +1,110 @@
+version: "1.0.0"
+
+oas: petstore-spec.yaml
+
+nodes:
+  createPet:
+    description: "Create a new pet in the store"
+    adapter: createPet
+    oas:
+      operationId: addPet
+    inputs:
+      - name: name
+        type: string
+        description: "Name of the pet"
+      - name: status
+        type: enum[available, pending, sold]
+        description: "Availability status"
+        optional: true
+        default: available
+    outputs:
+      - name: petId
+        type: integer
+        description: "Assigned pet ID"
+        path: "id"
+      - name: petName
+        type: string
+        description: "Pet name as stored"
+        path: "name"
+      - name: petStatus
+        type: string
+        description: "Pet status as stored"
+        path: "status"
+    cleanup: deletePet
+
+  getPet:
+    description: "Retrieve a pet by its ID"
+    adapter: getPet
+    oas:
+      operationId: getPetById
+    inputs:
+      - name: petId
+        type: integer
+        description: "Pet ID to look up"
+    outputs:
+      - name: petId
+        type: integer
+        description: "Pet ID"
+        path: "id"
+      - name: petName
+        type: string
+        description: "Pet name"
+        path: "name"
+      - name: petStatus
+        type: string
+        description: "Pet status"
+        path: "status"
+
+  findByStatus:
+    description: "Find pets by their availability status"
+    adapter: findByStatus
+    oas:
+      operationId: findPetsByStatus
+    inputs:
+      - name: status
+        type: enum[available, pending, sold]
+        description: "Status to filter by"
+    outputs:
+      - name: pets
+        type: pet[]
+        description: "List of matching pets"
+        elementFields:
+          - name: petId
+            type: integer
+            path: "id"
+          - name: petName
+            type: string
+            path: "name"
+          - name: petStatus
+            type: string
+            path: "status"
+
+  deletePet:
+    description: "Delete a pet from the store"
+    adapter: deletePet
+    oas:
+      operationId: deletePet
+    inputs:
+      - name: petId
+        type: integer
+        description: "Pet ID to delete"
+    outputs: []
+
+edges:
+  # createPet → getPet (verify the pet exists)
+  - from: createPet.petId
+    to: getPet.petId
+
+  # createPet → deletePet (cleanup)
+  - from: createPet.petId
+    to: deletePet.petId
+
+  # findByStatus → getPet (select a pet from the list)
+  - from: findByStatus.pets
+    to: getPet.petId
+    select: true
+
+  # findByStatus → deletePet (select a pet to delete)
+  - from: findByStatus.pets
+    to: deletePet.petId
+    select: true

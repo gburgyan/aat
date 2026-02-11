@@ -1,0 +1,14 @@
+adapter: getPet
+protocol: http
+
+request:
+  method: GET
+  path: /pet/{{petId}}
+  headers:
+    Accept: application/json
+
+response:
+  extract:
+    petId: "id"
+    petName: "name"
+    petStatus: "status"

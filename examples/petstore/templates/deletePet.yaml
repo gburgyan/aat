@@ -1,0 +1,10 @@
+adapter: deletePet
+protocol: http
+
+request:
+  method: DELETE
+  path: /pet/{{petId}}
+  headers:
+    Accept: application/json
+
+response: {}

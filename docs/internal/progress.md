@@ -74,7 +74,11 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] H1b. Schema validation Skipped status
   - [x] H1c. Archive secret redaction (CollectSecrets, RedactValue, ToArchive threading)
   - [x] H1a. Context cancellation checks (engine, retry, cleanup, resolve, LLM)
-- [ ] H2. Quickstart example (PetStore)
+- [x] H2. Quickstart example (PetStore)
+  - [x] H2a. Core example files (graph, templates, env, plan)
+  - [x] H2b. Extended example files (OAS spec, second plan, domain knowledge)
+  - [x] H2c. Documentation (petstore README tutorial, project root README)
+  - [x] H2d. Housekeeping (progress, worklog)
 - [x] H3. `aat graph validate` (absorbed by Task 23d)
 
 ## Stage 3a: CI/CD, Web UI & Polish

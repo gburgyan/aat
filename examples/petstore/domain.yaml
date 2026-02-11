@@ -1,0 +1,25 @@
+concepts:
+  petAvailability:
+    description: "Whether a pet is available for adoption"
+    applies_to: [status]
+
+types:
+  petName:
+    description: "Common name for a pet"
+    validation: "^[A-Za-z][A-Za-z ]{0,49}$"
+    pool: petNames
+
+valuePools:
+  petNames:
+    type: string
+    values:
+      - Buddy
+      - Max
+      - Bella
+      - Charlie
+      - Luna
+      - Cooper
+      - Daisy
+      - Rocky
+      - Sadie
+      - Bear
