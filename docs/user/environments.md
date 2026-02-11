@@ -21,10 +21,10 @@ auth:
 Run a plan against it:
 
 ```
-aat run --plan plans/smoke.yaml --env test
+aat run --plan plans/smoke.yaml --env test.yaml
 ```
 
-The `--env` flag looks for `<name>.yaml` in the environments directory.
+The `--env` flag takes a direct file path to the environment YAML file.
 
 ## File Structure
 

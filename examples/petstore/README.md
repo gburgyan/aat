@@ -28,11 +28,13 @@ go build -o aat ./cmd/aat/
 You should see output like:
 
 ```
-Step 1/2: createPet ... PASSED (3 assertions)
-Step 2/2: getPet ... PASSED (3 assertions)
-Cleanup: deletePet ... OK
+  [1/2] createPet            200  312ms
+  [2/2] getPet               200  89ms
 
-PASSED (2/2 steps)
+  cleanup:
+    deletePet              200  45ms
+
+PASSED (2/2 steps, 446ms)
 Archive: runs/run-XXXXXXXX-XXXXXX-XXXXXXXX/archive.json
 ```
 
@@ -111,9 +113,13 @@ This produces a starting-point graph that you can refine with edges and custom o
 ## Next steps
 
 - [Graph Authoring Guide](../../docs/user/graph-authoring.md) — how to define nodes, edges, and conditions
+- [Templates](../../docs/user/templates.md) — HTTP request/response template format
+- [Plan Authoring](../../docs/user/plan-authoring.md) — test plan YAML schema and assertions
 - [Environments](../../docs/user/environments.md) — auth config, headers, LLM setup
+- [Domain Knowledge](../../docs/user/domain-knowledge.md) — concepts, types, value pools
 - [Value Flow](../../docs/user/value-flow.md) — expressions, selections, constraint resolution
 - [Running Tests](../../docs/user/running.md) — CLI flags, CI/CD mode, archives
+- [LLM-Assisted Planning](../../docs/user/prompt-workflow.md) — generating plans from prompts
 
 ## Note about the Petstore API
 

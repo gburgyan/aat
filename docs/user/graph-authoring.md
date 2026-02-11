@@ -12,6 +12,8 @@ An AAT graph defines the topology of an API: which operations exist, what data t
 4. **Validate** — Run `aat graph validate` to catch structural and OAS alignment issues
 5. **Iterate** — Repeat steps 2–4 until the graph accurately models your API workflow
 
+> **No OpenAPI spec?** You can write graph and template files directly — see [Getting Started: Manual Authoring](getting-started.md#path-b-without-a-spec-manual-authoring) for a walkthrough, then come back here for the [YAML reference](#graph-yaml-reference) and edge authoring guidance. The scaffold step is optional; everything from Step 2 onward applies regardless of how you created your initial graph.
+
 ## Step 1: Scaffold from an OpenAPI Spec
 
 If you have an OpenAPI 3.x spec, use `aat generate` to create a starting point:

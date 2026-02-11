@@ -12,6 +12,8 @@ aat run \
   --templates templates/
 ```
 
+> **Looking for LLM-assisted plan generation?** See [LLM-Assisted Planning](prompt-workflow.md) for the `aat prompt` command, which generates plans from natural language prompts.
+
 ## Command: `aat run`
 
 ### Flags

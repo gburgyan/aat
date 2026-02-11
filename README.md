@@ -18,7 +18,7 @@ go build -o aat ./cmd/aat/
   --templates examples/petstore/templates/
 ```
 
-See the [Petstore quickstart tutorial](examples/petstore/README.md) for a full walkthrough.
+See the [Petstore quickstart tutorial](examples/petstore/README.md) for a full walkthrough, or follow the [Getting Started guide](docs/user/getting-started.md) to set up AAT for your own API.
 
 ## How it works
 
@@ -68,11 +68,16 @@ go test ./...
 
 ## Documentation
 
+- [Getting Started](docs/user/getting-started.md) — install AAT and set it up for your own API
 - [Petstore Quickstart](examples/petstore/README.md) — runnable example with no setup
 - [Graph Authoring](docs/user/graph-authoring.md) — nodes, edges, conditions, OAS linking
+- [Templates](docs/user/templates.md) — HTTP request/response template format
+- [Plan Authoring](docs/user/plan-authoring.md) — test plan YAML schema and assertions
 - [Environments](docs/user/environments.md) — auth, headers, LLM configuration
+- [Domain Knowledge](docs/user/domain-knowledge.md) — concepts, types, value pools
 - [Value Flow](docs/user/value-flow.md) — expressions, selections, constraints, resolution hierarchy
 - [Running Tests](docs/user/running.md) — CLI usage, archives, CI/CD integration
+- [LLM-Assisted Planning](docs/user/prompt-workflow.md) — generating plans from natural language
 - [MCP Server](docs/user/mcp-server.md) — IDE integration for AI-assisted workflows
 
 ## Status
