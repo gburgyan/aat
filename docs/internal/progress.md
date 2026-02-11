@@ -68,7 +68,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
     - [x] 60c-WI7. Plan CRUD + generation tools (generate, validate, list, load, save)
     - [x] 60c-WI8. Execution + archive inspection tools (execute_plan, list/inspect/analyze/diff archives)
     - [x] 60c-WI9. Developer workflow prompts (integration_guide, test_workflow, debug_failing_test)
-- [ ] 59. `aat docs generate` (moved from Stage 4)
+- [x] 59. `aat docs generate` — Markdown + Mermaid documentation from graph definitions
 - [ ] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)
 - [ ] H2. Quickstart example (PetStore)
 - [x] H3. `aat graph validate` (absorbed by Task 23d)

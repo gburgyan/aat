@@ -1,5 +1,25 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-11 — Task 59: `aat docs generate`
+
+**What:** Implemented auto-generated documentation from graph definitions. New CLI command `aat docs generate` produces Markdown with embedded Mermaid diagrams from any graph YAML file.
+
+**Decisions:**
+- Placed generation logic in `graph/` package (not a new package) since it's another output format for graph data, alongside parsing, validation, and scaffolding
+- Fresh formatters in `graph/docgen.go` rather than refactoring `mcp/format.go` — different needs (enrichment columns, section ordering, dependency annotations)
+- Domain enrichment via heuristic matching in the CLI layer (`cmd/aat/docs_cmd.go`) to avoid `graph/` importing `domain/`
+- Nodes ordered by topological sort (dependency order) using existing `chainTopoSort` from `graph/chain.go`
+- Examples column only shown when at least one input on a node has enrichment data (avoids empty columns)
+- Split mode generates `index.md` + `nodes/<Name>.md` for larger workflows
+
+**Files added:**
+- `graph/mermaid.go` — Mermaid diagram generation (cleanup styling, edge dedup, truncated labels)
+- `graph/docgen.go` — Main doc generator (single file + split mode)
+- `graph/mermaid_test.go` — 8 tests
+- `graph/docgen_test.go` — 19 tests
+- `cmd/aat/docs_cmd.go` — CLI wiring with domain enrichment
+- `cmd/aat/docs_cmd_test.go` — 14 tests
+
 ## 2026-02-11 — Task 60c WI-9: Developer Workflow Prompts (completes 60c)
 
 **What:** Added 3 workflow prompts to the MCP server, completing Task 60c. These prompts tie individual MCP tools together into coherent multi-step workflows, enabling Claude Code to guide users through integration, testing, and debugging without requiring them to know which tools to invoke.
