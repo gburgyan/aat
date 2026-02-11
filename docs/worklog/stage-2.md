@@ -1,5 +1,27 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-11 — Task 60c WI-9: Developer Workflow Prompts (completes 60c)
+
+**What:** Added 3 workflow prompts to the MCP server, completing Task 60c. These prompts tie individual MCP tools together into coherent multi-step workflows, enabling Claude Code to guide users through integration, testing, and debugging without requiring them to know which tools to invoke.
+
+**Decisions:**
+- `integration_guide` (arg: `goal`): backward chains to goal, assembles chain trace + per-node detail with docs/template/OAS + domain knowledge. Instruction covers prerequisites, step-by-step walkthrough, example payloads, data flow, error handling, and complete code example.
+- `test_workflow` (arg: `description`): lists graph nodes, domain context, and available capabilities (conditional on PlansDir/ArchiveDir/Environment). Instruction walks through the full test lifecycle: analyze graph → generate plan → review → save → execute → inspect → diagnose.
+- `debug_failing_test` (arg: `run_id`): loads archive, returns graceful message if passed, otherwise assembles failure analysis + successful steps before failure + full failed step detail + graph context for failed nodes + plan goal. Instruction covers root cause identification, data flow tracing, and fix suggestions.
+- All three prompts return 2 messages (context + instruction), both with RoleUser, consistent with existing prompt patterns
+- `debug_failing_test` returns errors (not tool result errors) for missing archive dir and not-found archives, consistent with other prompt handlers
+- `uniqueFailedNodeNames` helper deduplicates failed node names for graph context assembly
+- Reuses existing helpers: `formatChainTrace`, `formatNodeDetail`, `formatTemplate`, `formatOperationDetail`, `formatFailureAnalysis`, `formatStepRecord`, `loadArchive`, `findFailedSteps`, `sortedNodeNames`, `formatNodeSummary`
+
+**Files:**
+- `mcp/prompts_workflow.go` — NEW: registerWorkflowPrompts, 3 handlers, uniqueFailedNodeNames helper (~265 lines)
+- `mcp/prompts_workflow_test.go` — NEW: 20 tests (7 integration_guide + 6 test_workflow + 7 debug_failing_test)
+- `mcp/server.go` — modified: added `s.registerWorkflowPrompts()` call
+- `docs/internal/progress.md` — marked 60c-WI9 and 60c complete
+- `docs/user/mcp-server.md` — added 3 prompts to table + workflow prompts section
+
+**Open questions:** None.
+
 ## 2026-02-10 — Task 60c WI-8: Execution + Archive Inspection Tools
 
 **What:** Added 5 tools completing the testing lifecycle: `execute_plan` for running plans via MCP, plus `list_archives`, `inspect_archive`, `analyze_failure`, and `diff_archives` for result inspection and debugging. These enable Claude Code to execute tests and diagnose failures without dropping to the CLI.

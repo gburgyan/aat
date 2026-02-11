@@ -129,8 +129,21 @@ Prompts are reusable templates that assemble rich context for specific tasks.
 | `explain_workflow` | `goal` (required) | Assemble context to explain how a workflow achieves a goal |
 | `generate_client_code` | `node` (required), `language` (optional, default: go) | Assemble context for generating client code for an endpoint |
 | `enrich_documentation` | `node` (required) | Assemble context for enriching or creating node documentation |
+| `integration_guide` | `goal` (required) | Comprehensive integration guide with chain trace, templates, OAS details, and domain context |
+| `test_workflow` | `description` (required) | Guide the full test lifecycle: generate plan, validate, execute, inspect results |
+| `debug_failing_test` | `run_id` (required) | Load a failed archive and diagnose root causes with failure context |
 
 The `enrich_documentation` prompt is especially useful for bootstrapping docs. It includes the node's graph metadata, any existing documentation, OAS operation details, domain knowledge, and connected node context — giving the LLM everything it needs to write comprehensive docs.
+
+### Workflow Prompts
+
+The three workflow prompts (`integration_guide`, `test_workflow`, `debug_failing_test`) are multi-step workflow guides that tie individual tools together into coherent processes:
+
+- **`integration_guide`** traces a workflow to a goal node and assembles chain trace, per-node detail (including docs, template shapes, and OAS operations), and domain knowledge. It instructs the LLM to produce a step-by-step integration guide with prerequisites, example payloads, data flow, and error handling.
+
+- **`test_workflow`** provides a graph overview, domain context, and a summary of available capabilities (which tools are configured), then instructs the LLM to walk the user through the full test lifecycle: analyze the graph, generate a plan, review it, save it, execute it, and inspect results.
+
+- **`debug_failing_test`** loads a failed run archive and assembles failure analysis, successful steps before the failure, full failed step detail, graph context for failed nodes, and the plan goal. It instructs the LLM to diagnose root causes, trace data flow, and suggest fixes.
 
 ## Per-Node Documentation
 

@@ -34,6 +34,7 @@ func NewServer(ctx *ServerContext) *Server {
 	s.registerArchiveTools()
 	s.registerResources()
 	s.registerPrompts()
+	s.registerWorkflowPrompts()
 	return s
 }
 
