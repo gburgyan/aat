@@ -1,5 +1,28 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-10 — Task 60c WI-7: Plan CRUD + Generation Tools
+
+**What:** Added 5 plan lifecycle tools to the MCP server: `generate_plan`, `validate_plan`, `list_saved_plans`, `load_plan`, `save_plan`. These enable Claude Code to manage the full plan workflow through MCP — from generating plans via LLM, to validating, saving, loading, and listing them.
+
+**Decisions:**
+- All 5 tools registered unconditionally; graceful degradation at handler level (consistent with docs tools pattern)
+- PlansDir-dependent tools (`list_saved_plans`, `load_plan`, `save_plan`) return clear messages when PlansDir is empty rather than erroring
+- `generate_plan` checks for Environment and LLM config presence before attempting `intent.Interpret()` — constructs `llm.Client` on-demand via `llm.NewClient(env.LLM)`
+- `validate_plan` always works (only needs graph, which is always present) — no PlansDir dependency
+- `save_plan` validates before writing: parse → validate → write. Invalid plans never hit disk
+- `resolveplanPath` helper auto-appends `.yaml` if no `.yaml`/`.yml` extension provided — consistent UX for load/save
+- `list_saved_plans` handles unparseable YAML files gracefully — shows them with "(parse error)" instead of failing
+- `generate_plan` returns Markdown with YAML in a code block + narrative text; optional `save_as` parameter saves to PlansDir
+- Used existing test helpers (`newTestServer`, `callTool`, `resultText`) from `tools_graph_test.go`
+- Added `newTestServerWithPlans` helper for tests needing PlansDir; all tests use `t.TempDir()` for isolation
+
+**Files:**
+- `mcp/tools_plan.go` — NEW: registerPlanTools, 5 handlers, resolveplanPath helper (~250 lines)
+- `mcp/tools_plan_test.go` — NEW: 24 tests covering all tools + edge cases (~310 lines)
+- `mcp/server.go` — modified: added `s.registerPlanTools()` call in NewServer
+
+**Open questions:** None.
+
 ## 2026-02-10 — Task 60b (WI-6): Documentation Integration
 
 **What:** Added per-node Markdown documentation support to the MCP server. Implemented doc loading from a configured directory, merged views combining graph metadata + user docs + OAS summaries, and exposed 4 tools + 1 prompt for documentation workflows.
