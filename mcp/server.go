@@ -30,6 +30,8 @@ func NewServer(ctx *ServerContext) *Server {
 	s.registerOASTools()
 	s.registerDocsTools()
 	s.registerPlanTools()
+	s.registerExecTools()
+	s.registerArchiveTools()
 	s.registerResources()
 	s.registerPrompts()
 	return s

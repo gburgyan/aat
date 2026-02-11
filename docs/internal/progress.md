@@ -66,6 +66,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] 60b. Documentation integration (per-node Markdown, links to OAS, expose workflows, etc.)
   - [ ] 60c. Testing lifecycle tools (can we make a client integration using the MCP server as an aid, then test the system using aat)
     - [x] 60c-WI7. Plan CRUD + generation tools (generate, validate, list, load, save)
+    - [x] 60c-WI8. Execution + archive inspection tools (execute_plan, list/inspect/analyze/diff archives)
 - [ ] 59. `aat docs generate` (moved from Stage 4)
 - [ ] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)
 - [ ] H2. Quickstart example (PetStore)

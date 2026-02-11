@@ -1,5 +1,31 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-10 — Task 60c WI-8: Execution + Archive Inspection Tools
+
+**What:** Added 5 tools completing the testing lifecycle: `execute_plan` for running plans via MCP, plus `list_archives`, `inspect_archive`, `analyze_failure`, and `diff_archives` for result inspection and debugging. These enable Claude Code to execute tests and diagnose failures without dropping to the CLI.
+
+**Decisions:**
+- `execute_plan` replicates the CLI `runCommand` pipeline: load plan → validate → authenticate → build engine → run → write archive → return summary
+- Authentication is performed fresh each call (tokens expire), using `Environment.BuildAPIConfig(ctx)`
+- Execution mode defaults: param → env.LLM.Mode → "strict"; invalid modes rejected before engine run
+- Archive tools use `errors.Is(err, os.ErrNotExist)` for wrapped errors from `archive.Read`
+- Format helpers in separate `format_archive.go` file: `truncateBody` pretty-prints JSON and caps at maxLen; `formatDurationMs` handles negative durations
+- `analyze_failure` categorizes errors (auth/client/server/timeout/validation/network) and provides actionable suggestions
+- `diff_archives` matches steps by node name (positional for duplicates), shows status/duration deltas and output key diffs
+- `list_archives` sorts by name descending (timestamp-based = newest first), default limit 10
+- All archive tools gracefully handle unconfigured ArchiveDir, corrupt archives, and missing run IDs
+
+**Files:**
+- `mcp/format_archive.go` — NEW: 8 format helpers + 5 internal helpers (~370 lines)
+- `mcp/format_archive_test.go` — NEW: 30 tests for format helpers
+- `mcp/tools_archive.go` — NEW: registerArchiveTools, 4 handlers, loadArchive helper (~190 lines)
+- `mcp/tools_archive_test.go` — NEW: 25 tests for archive tools
+- `mcp/tools_exec.go` — NEW: registerExecTools, handleExecutePlan, formatExecutionSummary (~160 lines)
+- `mcp/tools_exec_test.go` — NEW: 11 tests (precondition guards + format summary)
+- `mcp/server.go` — modified: added `s.registerExecTools()` and `s.registerArchiveTools()` calls
+
+**Open questions:** None.
+
 ## 2026-02-10 — Task 60c WI-7: Plan CRUD + Generation Tools
 
 **What:** Added 5 plan lifecycle tools to the MCP server: `generate_plan`, `validate_plan`, `list_saved_plans`, `load_plan`, `save_plan`. These enable Claude Code to manage the full plan workflow through MCP — from generating plans via LLM, to validating, saving, loading, and listing them.
