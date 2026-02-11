@@ -11,18 +11,14 @@ type Server struct {
 }
 
 // NewServer creates an MCP server backed by the given project context.
-// Tools, resources, and prompts will be registered in later work items.
+// Registers tools, resources, and prompts for the AAT lifecycle platform.
 func NewServer(ctx *ServerContext) *Server {
 	name := "aat"
 	if ctx.Manifest != nil && ctx.Manifest.Name != "" {
 		name = "aat:" + ctx.Manifest.Name
 	}
 
-	mcpServer := server.NewMCPServer(name, "0.1.0",
-		server.WithToolCapabilities(true),
-		server.WithResourceCapabilities(false, false),
-		server.WithPromptCapabilities(false),
-	)
+	mcpServer := server.NewMCPServer(name, "0.1.0")
 
 	s := &Server{
 		mcp: mcpServer,
@@ -32,6 +28,8 @@ func NewServer(ctx *ServerContext) *Server {
 	s.registerTemplateTools()
 	s.registerDomainTools()
 	s.registerOASTools()
+	s.registerResources()
+	s.registerPrompts()
 	return s
 }
 

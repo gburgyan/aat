@@ -1,5 +1,32 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-10 — Task 60a WI-5: Resources + Prompts (completes 60a)
+
+**What:** Added 6 resources (4 static + 2 URI templates) and 2 prompts to the MCP server, completing Task 60a. Resources provide static context for IDE AI clients; prompts provide reusable workflow templates with assembled context.
+
+**Decisions:**
+- Removed explicit capability flags (`WithToolCapabilities`, `WithResourceCapabilities`, `WithPromptCapabilities`) from `NewServer` — mcp-go implicitly registers capabilities when `AddResource`/`AddPrompt` are called
+- Static resources (`aat://graph`, `aat://templates`, `aat://domain`, `aat://metadata`) provide project-wide context; dynamic resources (`aat://node/{name}`, `aat://template/{adapter}`) drill into specifics
+- `aat://graph` reuses `intent.FormatGraph()` — new import allowed (mcp is orchestrator tier)
+- `aat://templates` iterates `Registry.Names()` + `GetTemplate()`, distinguishing template-based from non-template adapters
+- `aat://domain` is nil-safe: returns "not configured" when KB is nil
+- `aat://metadata` assembles from Manifest (name, description, tags) + Graph stats (version, node/edge/condition counts)
+- Dynamic resources use `extractURIParam()` helper for safe `map[string]any` extraction from SDK-populated `req.Params.Arguments`
+- Dynamic resource errors (unknown node/adapter) return `error` — SDK wraps as internal error response
+- `explain_workflow` prompt: backward chains to goal, assembles chain trace + per-node detail + domain KB (if available), returns 2 user messages (context + instruction)
+- `generate_client_code` prompt: assembles node detail + template shape + OAS operation detail + domain KB, defaults to "go" when language arg omitted
+- Both prompts validate node existence upfront and return descriptive errors
+- 29 new tests (15 resource + 14 prompt), all passing. 174 total mcp package tests.
+
+**Files:**
+- `mcp/resources.go` — NEW: registerResources, 6 handlers, extractURIParam helper (~200 lines)
+- `mcp/resources_test.go` — NEW: 15 tests (all resources + edge cases)
+- `mcp/prompts.go` — NEW: registerPrompts, 2 handlers (~160 lines)
+- `mcp/prompts_test.go` — NEW: 14 tests (both prompts + edge cases)
+- `mcp/server.go` — modified: removed capability flags, added registerResources/registerPrompts calls, updated doc comment
+
+**Open questions:** None.
+
 ## 2026-02-10 — Task 60a WI-4: OAS Tools for MCP Server
 
 **What:** Added 5 OAS tools to the MCP server: `get_oas_operation`, `get_oas_schema`, `search_oas_schemas`, `validate_oas_request`, `build_oas_example`. Also added schema resolution engine with allOf merge, depth limiting, cycle detection, payload validation, and example generation.
