@@ -314,7 +314,8 @@ func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environ
 		GraphVersion: g.Version,
 		ToolVersion:  "0.1.0",
 	}
-	arc := engine.ToArchive(result, meta, env.APIBaseURL)
+	secrets := env.CollectSecrets()
+	arc := engine.ToArchive(result, meta, env.APIBaseURL, secrets)
 	archivePath := filepath.Join(outputDir, runID, "archive.json")
 	if err := archive.Write(arc, archivePath); err != nil {
 		return "", fmt.Errorf("writing archive: %w", err)

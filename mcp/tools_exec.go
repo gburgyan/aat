@@ -123,7 +123,8 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		GraphVersion: s.ctx.Graph.Version,
 		ToolVersion:  "0.1.0",
 	}
-	arc := engine.ToArchive(result, meta, s.ctx.Environment.APIBaseURL)
+	secrets := s.ctx.Environment.CollectSecrets()
+	arc := engine.ToArchive(result, meta, s.ctx.Environment.APIBaseURL, secrets)
 	archivePath := filepath.Join(s.ctx.ArchiveDir, runID, "archive.json")
 	if err := archive.Write(arc, archivePath); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("writing archive: %v", err)), nil

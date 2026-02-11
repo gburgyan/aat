@@ -51,8 +51,22 @@ func TestCheckStatus(t *testing.T) {
 func TestCheckSchema(t *testing.T) {
 	ar := checkSchema(MechanicalAssertion{Type: AssertSchema, Ref: "some-schema.json"})
 	assert.True(t, ar.Passed)
+	assert.True(t, ar.Skipped)
 	assert.Contains(t, ar.Message, "not yet implemented")
 	assert.Equal(t, AssertSchema, ar.Type)
+}
+
+func TestCheckSchema_AggregateStillPasses(t *testing.T) {
+	// Schema assertion is skipped but Passed=true, so aggregate should still pass.
+	assertions := []MechanicalAssertion{
+		{Type: AssertStatus, Expect: 200},
+		{Type: AssertSchema, Ref: "schema.json"},
+	}
+	result := RunMechanical(200, []byte(`{}`), assertions, nil)
+	assert.True(t, result.Passed)
+	require.Len(t, result.Results, 2)
+	assert.True(t, result.Results[1].Skipped)
+	assert.True(t, result.Results[1].Passed)
 }
 
 func TestCheckFieldExists(t *testing.T) {

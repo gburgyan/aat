@@ -2530,3 +2530,36 @@ func TestResolveWithFallback_NoConstraint_NoRelaxation(t *testing.T) {
 	assert.False(t, res.Relaxed)
 	assert.Equal(t, 0, tracker.Depth())
 }
+
+func TestResolveInputsWithContext_CancelledContext(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name: "step1",
+				Inputs: []graph.Input{
+					{Name: "a", Type: "string"},
+					{Name: "b", Type: "string"},
+					{Name: "c", Type: "string"},
+				},
+			},
+		},
+	}
+
+	step := plan.Step{
+		Node: "step1",
+		Values: map[string]plan.StepValue{
+			"a": {Default: "val-a"},
+			"b": {Default: "val-b"},
+			"c": {Default: "val-c"},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Pre-cancel
+
+	_, _, _, err := ResolveInputsWithContext(ctx, step, g.Nodes["step1"], g, NewRunState(), nil)
+	require.Error(t, err)
+	assert.ErrorIs(t, err, context.Canceled)
+	assert.Contains(t, err.Error(), "cancelled")
+}

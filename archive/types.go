@@ -77,6 +77,7 @@ type ValidationRecord struct {
 type AssertionRecord struct {
 	Type    string `json:"type"`
 	Passed  bool   `json:"passed"`
+	Skipped bool   `json:"skipped,omitempty"`
 	Message string `json:"message"`
 	Path    string `json:"path,omitempty"`
 	Expr    string `json:"expr,omitempty"`

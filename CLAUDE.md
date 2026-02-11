@@ -4,7 +4,7 @@ AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API w
 
 ## Module
 
-`github.com/gburgyan/aat` — Go 1.23+
+`github.com/gburgyan/aat` — Go 1.24+
 
 ## Package Structure
 
@@ -44,25 +44,22 @@ Data flows down, decisions flow up. No business logic in `cmd/`.
 Cross-package dependencies use direct struct fields and function parameters — explicit, no framework. No global mutable state.
 
 ```go
-// Production: construct with real implementations
-eng := engine.Engine{
-    Registry: registry,
-    Mode:     "lean",
-    LLMClient: llmClient,
-}
+// Production: construct with NewEngine + builder methods
+eng := engine.NewEngine(g, registry, executor, envConfig).
+    WithMode(config.ModeLean).
+    WithLLM(llmClient).
+    WithDomain(kb)
 
 // Usage: collaborators are struct fields or function params
-func (e *Engine) Run(ctx context.Context, p *plan.Plan) (*RunResult, error) {
-    // use e.Registry, e.LLMClient, etc.
+func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
+    // use e.graph, e.LLMClient, etc.
 }
 
 // Tests: construct with test implementations
 func TestRun(t *testing.T) {
-    eng := engine.Engine{
-        Registry: &fakeRegistry{},
-        Mode:     "strict",
-    }
-    result, err := eng.Run(ctx, testPlan)
+    eng := engine.NewEngine(g, &fakeRegistry{}, executor, envConfig).
+        WithMode(config.ModeStrict)
+    result := eng.Run(ctx, testPlan)
     // assert
 }
 ```

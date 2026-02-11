@@ -71,6 +71,12 @@ func llmSelectElement(ctx context.Context, rctx *ResolveContext, arr []any,
 		},
 	}
 
+	select {
+	case <-ctx.Done():
+		return nil, nil, fmt.Errorf("LLM element selection cancelled: %w", ctx.Err())
+	default:
+	}
+
 	start := time.Now()
 	resp, err := rctx.LLM.Complete(ctx, &llm.Request{
 		Messages:    messages,

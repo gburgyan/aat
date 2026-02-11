@@ -110,3 +110,80 @@ func TestRedactHeaders_DoesNotMutateInput(t *testing.T) {
 	RedactHeaders(original)
 	assert.Equal(t, "Bearer secret", original["Authorization"])
 }
+
+func TestRedactValue(t *testing.T) {
+	secrets := map[string]bool{"my-secret-key": true, "api-key-123": true}
+
+	tests := []struct {
+		name    string
+		val     any
+		secrets map[string]bool
+		want    any
+	}{
+		{"exact match", "my-secret-key", secrets, "[REDACTED]"},
+		{"exact match other", "api-key-123", secrets, "[REDACTED]"},
+		{"substring match", "Bearer my-secret-key here", secrets, "Bearer [REDACTED] here"},
+		{"no match", "safe-value", secrets, "safe-value"},
+		{"non-string int", 42, secrets, 42},
+		{"non-string bool", true, secrets, true},
+		{"nil value", nil, secrets, nil},
+		{"nil secrets", "my-secret-key", nil, "my-secret-key"},
+		{"empty secrets", "my-secret-key", map[string]bool{}, "my-secret-key"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RedactValue(tt.val, tt.secrets)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestRedactSlice(t *testing.T) {
+	secrets := map[string]bool{"secret": true}
+
+	t.Run("redacts matching elements", func(t *testing.T) {
+		vals := []any{"secret", "safe", 42, "contains secret value"}
+		got := RedactSlice(vals, secrets)
+		assert.Equal(t, []any{"[REDACTED]", "safe", 42, "contains [REDACTED] value"}, got)
+	})
+
+	t.Run("nil secrets returns original", func(t *testing.T) {
+		vals := []any{"secret"}
+		got := RedactSlice(vals, nil)
+		assert.Equal(t, vals, got)
+	})
+
+	t.Run("empty slice returns original", func(t *testing.T) {
+		got := RedactSlice([]any{}, secrets)
+		assert.Equal(t, []any{}, got)
+	})
+
+	t.Run("nil slice returns nil", func(t *testing.T) {
+		got := RedactSlice(nil, secrets)
+		assert.Nil(t, got)
+	})
+}
+
+func TestRedactMap(t *testing.T) {
+	secrets := map[string]bool{"secret-val": true}
+
+	t.Run("redacts matching values", func(t *testing.T) {
+		m := map[string]any{"key1": "secret-val", "key2": "safe", "key3": 42}
+		got := RedactMap(m, secrets)
+		assert.Equal(t, "[REDACTED]", got["key1"])
+		assert.Equal(t, "safe", got["key2"])
+		assert.Equal(t, 42, got["key3"])
+	})
+
+	t.Run("nil secrets returns original", func(t *testing.T) {
+		m := map[string]any{"key": "secret-val"}
+		got := RedactMap(m, nil)
+		assert.Equal(t, m, got)
+	})
+
+	t.Run("nil map returns nil", func(t *testing.T) {
+		got := RedactMap(nil, secrets)
+		assert.Nil(t, got)
+	})
+}

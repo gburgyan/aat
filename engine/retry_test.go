@@ -340,3 +340,26 @@ func TestRetryBackoff(t *testing.T) {
 		assert.LessOrEqual(t, d, maxWithJitter)
 	}
 }
+
+func TestRetry_CancelledContextReturnsImmediately(t *testing.T) {
+	callCount := int32(0)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&callCount, 1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"unavailable"}`))
+	}))
+	defer server.Close()
+
+	eng := buildRetryEngine(t, server.URL)
+	p := buildRetryPlan(&plan.RetryConfig{Max: 5, On: []string{"transient"}})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Pre-cancel
+
+	result := eng.Run(ctx, p)
+
+	assert.Equal(t, OutcomeError, result.Outcome)
+	assert.ErrorIs(t, result.Error, context.Canceled)
+	// The main loop should catch cancellation before even executing the step
+	assert.Equal(t, int32(0), atomic.LoadInt32(&callCount))
+}

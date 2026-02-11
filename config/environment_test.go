@@ -523,3 +523,45 @@ func TestBuildAPIConfig_None(t *testing.T) {
 	assert.Equal(t, "https://api.example.com", cfg.BaseURL)
 	assert.Empty(t, cfg.Headers)
 }
+
+func TestCollectSecrets_WithEnvVars(t *testing.T) {
+	t.Setenv("TEST_SECRET_1", "secret-value-1")
+	t.Setenv("TEST_SECRET_2", "secret-value-2")
+
+	env := &Environment{
+		Auth: AuthConfig{
+			Credentials: map[string]SecretRef{
+				"clientId":     {Source: "env", Var: "TEST_SECRET_1"},
+				"clientSecret": {Source: "env", Var: "TEST_SECRET_2"},
+			},
+		},
+		LLM: LLMConfig{
+			APIKey: SecretRef{Source: "literal", Value: "literal-key"},
+		},
+	}
+
+	secrets := env.CollectSecrets()
+	assert.True(t, secrets["secret-value-1"])
+	assert.True(t, secrets["secret-value-2"])
+	assert.True(t, secrets["literal-key"])
+	assert.Len(t, secrets, 3)
+}
+
+func TestCollectSecrets_EmptyEnvironment(t *testing.T) {
+	env := &Environment{}
+	secrets := env.CollectSecrets()
+	assert.Empty(t, secrets)
+}
+
+func TestCollectSecrets_UnresolvableRefsIgnored(t *testing.T) {
+	env := &Environment{
+		Auth: AuthConfig{
+			Credentials: map[string]SecretRef{
+				"missing": {Source: "env", Var: "SURELY_NOT_SET_12345"},
+			},
+		},
+	}
+
+	secrets := env.CollectSecrets()
+	assert.Empty(t, secrets)
+}

@@ -1,5 +1,17 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-11 — Task H1: Pre-release Hardening
+
+**What:** Four sub-tasks to improve release readiness: context cancellation, schema validation status, archive secret redaction, and CLAUDE.md accuracy.
+
+**Decisions:**
+- H1d: Updated CLAUDE.md Go version to 1.24, fixed DI example to use `NewEngine()` + `WithMode()`/`WithLLM()` builder pattern
+- H1b: Added `Skipped bool` to `AssertionResult` and `AssertionRecord` — `Passed` stays `true` so aggregate is unaffected, `Skipped` is purely informational for archive consumers
+- H1c: Value-matching redaction approach — `CollectSecrets()` on Environment, `RedactValue/Slice/Map` in archive package, threaded through `ToArchive` as 4th parameter. Exact match → `[REDACTED]`, substring → `ReplaceAll`. Nil secrets = no-op for backward compat
+- H1a: Non-blocking `select { case <-ctx.Done(): ... default: }` pattern at 7 locations (main loop, adaptive loop, retry loop, input resolution, pool iteration, LLM value selection, LLM element selection). `context.Canceled` classified as `CategoryTimeout`. Cleanup uses `context.WithoutCancel(ctx)` so resource deletion still executes
+
+**Open questions:** None
+
 ## 2026-02-11 — Task 59: `aat docs generate`
 
 **What:** Implemented auto-generated documentation from graph definitions. New CLI command `aat docs generate` produces Markdown with embedded Mermaid diagrams from any graph YAML file.

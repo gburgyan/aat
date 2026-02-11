@@ -46,10 +46,15 @@ func (s *CleanupStack) ExecuteAll(
 
 	results := make([]StepResult, 0, len(s.entries))
 
+	// Use context.WithoutCancel so cleanup HTTP calls still execute
+	// even when the parent context is cancelled. Cleanup is for resource
+	// deletion — it must run.
+	cleanupCtx := context.WithoutCancel(ctx)
+
 	// Execute in reverse order (FILO)
 	for i := len(s.entries) - 1; i >= 0; i-- {
 		entry := s.entries[i]
-		result := executeCleanupEntry(ctx, entry, g, registry, executor, config, state)
+		result := executeCleanupEntry(cleanupCtx, entry, g, registry, executor, config, state)
 		results = append(results, result)
 	}
 

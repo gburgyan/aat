@@ -108,6 +108,18 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 	}()
 
 	for _, step := range sorted {
+		select {
+		case <-ctx.Done():
+			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+			return &RunResult{
+				Outcome:        OutcomeError,
+				Steps:          stepResults,
+				CleanupResults: cleanupResults,
+				Error:          fmt.Errorf("execution cancelled: %w", ctx.Err()),
+			}
+		default:
+		}
+
 		node, ok := e.graph.Nodes[step.Node]
 		if !ok {
 			return &RunResult{
@@ -360,6 +372,16 @@ func (e *Engine) executeStepAdaptive(ctx context.Context, step plan.Step, node *
 	}
 
 	for {
+		select {
+		case <-ctx.Done():
+			return StepResult{
+				Node:        step.Node,
+				Error:       fmt.Errorf("adaptive retry cancelled: %w", ctx.Err()),
+				Relaxations: tracker.Records(),
+			}
+		default:
+		}
+
 		result := e.executeStepWithRetry(ctx, step, node, state, tracker)
 
 		// Success or non-client error → done

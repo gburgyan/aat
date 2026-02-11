@@ -104,6 +104,16 @@ func TestClassifyError(t *testing.T) {
 			wantCat: CategoryTimeout,
 		},
 		{
+			name:    "context canceled",
+			err:     context.Canceled,
+			wantCat: CategoryTimeout,
+		},
+		{
+			name:    "wrapped context canceled",
+			err:     fmt.Errorf("executing request: %w", context.Canceled),
+			wantCat: CategoryTimeout,
+		},
+		{
 			name: "DNS error",
 			err: &net.DNSError{
 				Err:  "no such host",

@@ -11,7 +11,8 @@ import (
 
 // ToArchive converts an engine RunResult into a serializable Archive.
 // The baseURL is prepended to request paths to produce full URLs.
-func ToArchive(result *RunResult, meta archive.ArchiveMetadata, baseURL string) *archive.Archive {
+// If secrets is non-nil, matching values in Inputs, Resolutions, etc. are redacted.
+func ToArchive(result *RunResult, meta archive.ArchiveMetadata, baseURL string, secrets map[string]bool) *archive.Archive {
 	a := &archive.Archive{
 		Metadata: meta,
 		Result: archive.ArchiveResult{
@@ -20,29 +21,29 @@ func ToArchive(result *RunResult, meta archive.ArchiveMetadata, baseURL string) 
 		},
 	}
 
-	a.Steps = convertStepResults(result.Steps, baseURL)
-	a.Cleanup = convertStepResults(result.CleanupResults, baseURL)
+	a.Steps = convertStepResults(result.Steps, baseURL, secrets)
+	a.Cleanup = convertStepResults(result.CleanupResults, baseURL, secrets)
 
 	return a
 }
 
-func convertStepResults(steps []StepResult, baseURL string) []archive.StepRecord {
+func convertStepResults(steps []StepResult, baseURL string, secrets map[string]bool) []archive.StepRecord {
 	if len(steps) == 0 {
 		return nil
 	}
 	records := make([]archive.StepRecord, len(steps))
 	for i, s := range steps {
-		records[i] = convertStepResult(s, baseURL)
+		records[i] = convertStepResult(s, baseURL, secrets)
 	}
 	return records
 }
 
-func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
+func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) archive.StepRecord {
 	rec := archive.StepRecord{
 		Node:       s.Node,
 		StartTime:  s.StartTime,
 		DurationMs: s.Duration.Milliseconds(),
-		Inputs:     s.Inputs,
+		Inputs:     archive.RedactMap(s.Inputs, secrets),
 		Outputs:    s.Outputs,
 		Error:      errString(s.Error),
 		RetryCount: s.RetryCount,
@@ -61,7 +62,7 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		rec.Selections = convertSelections(s.Selections)
 	}
 	if len(s.Resolutions) > 0 {
-		rec.Resolutions = convertResolutions(s.Resolutions)
+		rec.Resolutions = convertResolutions(s.Resolutions, secrets)
 	}
 	if len(s.Relaxations) > 0 {
 		rec.Relaxations = convertRelaxations(s.Relaxations)
@@ -105,6 +106,7 @@ func convertValidation(v *validate.MechanicalResult) *archive.ValidationRecord {
 		rec.Results = append(rec.Results, archive.AssertionRecord{
 			Type:    string(r.Type),
 			Passed:  r.Passed,
+			Skipped: r.Skipped,
 			Message: r.Message,
 			Path:    r.Path,
 			Expr:    r.Expr,
@@ -158,21 +160,21 @@ func convertErrorClass(ec *ErrorClassification) *archive.ErrorClassRecord {
 	}
 }
 
-func convertResolutions(resolutions []ValueResolution) []archive.ValueResolutionRecord {
+func convertResolutions(resolutions []ValueResolution, secrets map[string]bool) []archive.ValueResolutionRecord {
 	records := make([]archive.ValueResolutionRecord, len(resolutions))
 	for i, r := range resolutions {
 		rec := archive.ValueResolutionRecord{
 			InputName:         r.InputName,
 			Source:            r.Source,
-			RawValue:          r.RawValue,
-			FinalValue:        r.FinalValue,
+			RawValue:          archive.RedactValue(r.RawValue, secrets),
+			FinalValue:        archive.RedactValue(r.FinalValue, secrets),
 			FromStep:          r.FromStep,
 			FromOutput:        r.FromOutput,
 			Expression:        r.Expression,
 			Constraint:        r.Constraint,
 			PoolIndex:         r.PoolIndex,
 			PoolSize:          r.PoolSize,
-			Tried:             r.Tried,
+			Tried:             archive.RedactSlice(r.Tried, secrets),
 			Relaxed:           r.Relaxed,
 			RelaxedConstraint: r.RelaxedConstraint,
 		}

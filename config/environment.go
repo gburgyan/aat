@@ -109,6 +109,29 @@ type Environment struct {
 	Notes      string            `yaml:"notes,omitempty"`
 }
 
+// CollectSecrets resolves all SecretRef values from the environment and returns
+// them as a set. This is used for value-matching redaction in archives.
+// Resolution errors are silently ignored (missing env var = no secret to redact).
+func (env *Environment) CollectSecrets() map[string]bool {
+	secrets := make(map[string]bool)
+
+	// Auth credentials
+	for _, ref := range env.Auth.Credentials {
+		if val, err := ref.Resolve(); err == nil && val != "" {
+			secrets[val] = true
+		}
+	}
+
+	// LLM API key
+	if env.LLM.APIKey.IsSet() {
+		if val, err := env.LLM.APIKey.Resolve(); err == nil && val != "" {
+			secrets[val] = true
+		}
+	}
+
+	return secrets
+}
+
 // APIConfig is a flat output structure for bridging to adapter.EnvironmentConfig.
 type APIConfig struct {
 	BaseURL string

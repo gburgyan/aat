@@ -69,7 +69,11 @@ Cross-references task numbers from `vision/implementation-plan.md`.
     - [x] 60c-WI8. Execution + archive inspection tools (execute_plan, list/inspect/analyze/diff archives)
     - [x] 60c-WI9. Developer workflow prompts (integration_guide, test_workflow, debug_failing_test)
 - [x] 59. `aat docs generate` — Markdown + Mermaid documentation from graph definitions
-- [ ] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)
+- [x] H1. Pre-release hardening (ctx cancellation, schema stub, archive redaction, CLAUDE.md)
+  - [x] H1d. CLAUDE.md accuracy (Go 1.24, DI example, builder pattern)
+  - [x] H1b. Schema validation Skipped status
+  - [x] H1c. Archive secret redaction (CollectSecrets, RedactValue, ToArchive threading)
+  - [x] H1a. Context cancellation checks (engine, retry, cleanup, resolve, LLM)
 - [ ] H2. Quickstart example (PetStore)
 - [x] H3. `aat graph validate` (absorbed by Task 23d)
 

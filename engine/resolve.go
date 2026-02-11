@@ -94,6 +94,12 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	}
 
 	for _, input := range node.Inputs {
+		select {
+		case <-ctx.Done():
+			return nil, nil, nil, fmt.Errorf("input resolution cancelled: %w", ctx.Err())
+		default:
+		}
+
 		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, g, edgeMap, state, dedupCache, namedSelections, rctx, ectx, inputs)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
@@ -800,6 +806,12 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 		}
 
 		for pi, candidate := range pool {
+			select {
+			case <-ctx.Done():
+				return nil, nil, nil, fmt.Errorf("pool iteration cancelled: %w", ctx.Err())
+			default:
+			}
+
 			evaluated, err := evaluateValue(candidate, ectx)
 			if err != nil {
 				tried = append(tried, candidate)

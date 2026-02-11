@@ -33,6 +33,7 @@ type MechanicalAssertion struct {
 type AssertionResult struct {
 	Type    AssertionType
 	Passed  bool
+	Skipped bool // true when assertion was not evaluated (e.g., not yet implemented)
 	Message string
 	Path    string
 	Expr    string
@@ -111,10 +112,12 @@ func checkStatus(statusCode int, a MechanicalAssertion) AssertionResult {
 }
 
 // checkSchema is a stub for Stage 1 — always returns passed with a not-yet-implemented message.
+// Skipped is true so archive consumers can distinguish "passed" from "not evaluated".
 func checkSchema(a MechanicalAssertion) AssertionResult {
 	return AssertionResult{
 		Type:    AssertSchema,
 		Passed:  true,
+		Skipped: true,
 		Message: "schema validation not yet implemented",
 	}
 }

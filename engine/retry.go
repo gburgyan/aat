@@ -47,6 +47,20 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 
 	// Retry loop
 	for attempt := 1; attempt <= step.Retry.Max; attempt++ {
+		select {
+		case <-ctx.Done():
+			result.Error = ctx.Err()
+			result.ErrorClass = &ErrorClassification{
+				Category:     CategoryTimeout,
+				Detail:       ctx.Err().Error(),
+				Action:       "failed",
+				RetryAttempt: attempt,
+			}
+			result.RetryCount = attempt - 1
+			return result
+		default:
+		}
+
 		if !shouldRetry(cls.Category, step.Retry, attempt) {
 			cls.Action = "failed_fast"
 			cls.RetryAttempt = attempt - 1

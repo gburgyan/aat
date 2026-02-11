@@ -49,7 +49,7 @@ func TestToArchive_BasicConversion(t *testing.T) {
 		Environment: "test",
 	}
 
-	a := ToArchive(result, meta, "https://api.example.com")
+	a := ToArchive(result, meta, "https://api.example.com", nil)
 
 	assert.Equal(t, "passed", a.Result.Outcome)
 	assert.Empty(t, a.Result.Error)
@@ -86,7 +86,7 @@ func TestToArchive_NilRequestResponse(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-nil-test"}
-	a := ToArchive(result, meta, "https://api.example.com")
+	a := ToArchive(result, meta, "https://api.example.com", nil)
 
 	assert.Equal(t, "error", a.Result.Outcome)
 	assert.Equal(t, "step failed", a.Result.Error)
@@ -123,7 +123,7 @@ func TestToArchive_HeaderRedaction(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-redact"}
-	a := ToArchive(result, meta, "https://api.example.com")
+	a := ToArchive(result, meta, "https://api.example.com", nil)
 
 	assert.Equal(t, "[REDACTED]", a.Steps[0].Request.Headers["Authorization"])
 	assert.Equal(t, "application/json", a.Steps[0].Request.Headers["Content-Type"])
@@ -151,7 +151,7 @@ func TestToArchive_DurationConversion(t *testing.T) {
 				Steps:   []StepResult{{Node: "s", Duration: tt.duration}},
 			}
 			meta := archive.ArchiveMetadata{Version: "1", RunID: "run-dur"}
-			a := ToArchive(result, meta, "")
+			a := ToArchive(result, meta, "", nil)
 			assert.Equal(t, tt.wantMs, a.Steps[0].DurationMs)
 		})
 	}
@@ -188,7 +188,7 @@ func TestToArchive_BodyHandling(t *testing.T) {
 				}},
 			}
 			meta := archive.ArchiveMetadata{Version: "1", RunID: "run-body"}
-			a := ToArchive(result, meta, "")
+			a := ToArchive(result, meta, "", nil)
 
 			if tt.wantNil {
 				assert.Nil(t, a.Steps[0].Request.Body)
@@ -220,7 +220,7 @@ func TestToArchive_ValidationConversion(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-val"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.NotNil(t, a.Steps[0].Validation)
 	assert.False(t, a.Steps[0].Validation.Passed)
@@ -235,6 +235,47 @@ func TestToArchive_ValidationConversion(t *testing.T) {
 
 	assert.Equal(t, "predicate", a.Steps[0].Validation.Results[2].Type)
 	assert.Equal(t, "x > 0", a.Steps[0].Validation.Results[2].Expr)
+}
+
+func TestToArchive_ValidationSkippedPassthrough(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "step1",
+				Validation: &validate.MechanicalResult{
+					Passed: true,
+					Results: []validate.AssertionResult{
+						{Type: validate.AssertStatus, Passed: true, Message: "status code is 200"},
+						{Type: validate.AssertSchema, Passed: true, Skipped: true, Message: "schema validation not yet implemented"},
+					},
+				},
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-skipped"}
+	a := ToArchive(result, meta, "", nil)
+
+	require.NotNil(t, a.Steps[0].Validation)
+	require.Len(t, a.Steps[0].Validation.Results, 2)
+
+	// Status assertion: not skipped
+	assert.False(t, a.Steps[0].Validation.Results[0].Skipped)
+
+	// Schema assertion: skipped
+	assert.True(t, a.Steps[0].Validation.Results[1].Skipped)
+	assert.True(t, a.Steps[0].Validation.Results[1].Passed)
+
+	// Verify omitempty: non-skipped assertion should not have "skipped" in JSON
+	data, err := json.Marshal(a.Steps[0].Validation.Results[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "skipped")
+
+	// Skipped assertion should have "skipped":true
+	data, err = json.Marshal(a.Steps[0].Validation.Results[1])
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"skipped":true`)
 }
 
 func TestToArchive_SelectionConversion(t *testing.T) {
@@ -260,7 +301,7 @@ func TestToArchive_SelectionConversion(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-sel"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.Len(t, a.Steps[0].Selections, 1)
 	sel := a.Steps[0].Selections[0]
@@ -292,7 +333,7 @@ func TestToArchive_ErrorClassConversion(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-err"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.NotNil(t, a.Steps[0].ErrorClass)
 	assert.Equal(t, "transient", a.Steps[0].ErrorClass.Category)
@@ -314,7 +355,7 @@ func TestToArchive_CleanupSteps(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-cleanup"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.Len(t, a.Steps, 1)
 	require.Len(t, a.Cleanup, 1)
@@ -329,7 +370,7 @@ func TestToArchive_EmptyResult(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-empty"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	assert.Nil(t, a.Steps)
 	assert.Nil(t, a.Cleanup)
@@ -357,7 +398,7 @@ func TestToArchive_FlattenHeaders(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-flatten"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	assert.Equal(t, "val1, val2", a.Steps[0].Response.Headers["X-Custom"])
 }
@@ -371,7 +412,7 @@ func TestToArchive_NilNilError(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-noerr"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	assert.Empty(t, a.Result.Error)
 	assert.Empty(t, a.Steps[0].Error)
@@ -463,7 +504,7 @@ func TestToArchive_FullRoundTrip(t *testing.T) {
 		Timestamp: start,
 	}
 
-	a := ToArchive(result, meta, "https://api.example.com")
+	a := ToArchive(result, meta, "https://api.example.com", nil)
 
 	data, err := json.MarshalIndent(a, "", "  ")
 	require.NoError(t, err)
@@ -525,7 +566,7 @@ func TestToArchive_ResolutionConversion(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-res"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.Len(t, a.Steps[0].Resolutions, 4)
 
@@ -593,7 +634,7 @@ func TestToArchive_ResolutionWithLLMCall(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-llm"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.Len(t, a.Steps[0].Resolutions, 1)
 	r := a.Steps[0].Resolutions[0]
@@ -650,7 +691,7 @@ func TestToArchive_RelaxationConversion(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-relax"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.Len(t, a.Steps[0].Relaxations, 2)
 
@@ -689,7 +730,7 @@ func TestToArchive_RelaxedResolutionConversion(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-relax-res"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.Len(t, a.Steps[0].Resolutions, 1)
 	r := a.Steps[0].Resolutions[0]
@@ -735,7 +776,7 @@ func TestToArchive_FilterRelaxedSelectionConversion(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-filter-relax"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	require.Len(t, a.Steps[0].Selections, 1)
 	sel := a.Steps[0].Selections[0]
@@ -762,7 +803,7 @@ func TestToArchive_NoRelaxations(t *testing.T) {
 	}
 
 	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-norelax"}
-	a := ToArchive(result, meta, "")
+	a := ToArchive(result, meta, "", nil)
 
 	assert.Nil(t, a.Steps[0].Relaxations)
 
@@ -770,4 +811,68 @@ func TestToArchive_NoRelaxations(t *testing.T) {
 	data, err := json.Marshal(a.Steps[0])
 	require.NoError(t, err)
 	assert.NotContains(t, string(data), "relaxations")
+}
+
+func TestToArchive_SecretRedaction(t *testing.T) {
+	secrets := map[string]bool{"my-secret-token": true}
+
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node:   "step1",
+				Inputs: map[string]any{"apiKey": "my-secret-token", "origin": "DEN"},
+				Resolutions: []ValueResolution{
+					{
+						InputName:  "apiKey",
+						Source:     "plan_default",
+						RawValue:   "my-secret-token",
+						FinalValue: "my-secret-token",
+						PoolIndex:  -1,
+					},
+					{
+						InputName:  "code",
+						Source:     "fallback_pool",
+						RawValue:   "GOOD",
+						FinalValue: "GOOD",
+						PoolIndex:  1,
+						Tried:      []any{"my-secret-token", "other"},
+					},
+				},
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-secrets"}
+	a := ToArchive(result, meta, "", secrets)
+
+	// Inputs should be redacted
+	assert.Equal(t, "[REDACTED]", a.Steps[0].Inputs["apiKey"])
+	assert.Equal(t, "DEN", a.Steps[0].Inputs["origin"])
+
+	// Resolutions should be redacted
+	assert.Equal(t, "[REDACTED]", a.Steps[0].Resolutions[0].RawValue)
+	assert.Equal(t, "[REDACTED]", a.Steps[0].Resolutions[0].FinalValue)
+
+	// Tried values should be redacted
+	assert.Equal(t, "[REDACTED]", a.Steps[0].Resolutions[1].Tried[0])
+	assert.Equal(t, "other", a.Steps[0].Resolutions[1].Tried[1])
+}
+
+func TestToArchive_NilSecretsNoRedaction(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node:   "step1",
+				Inputs: map[string]any{"apiKey": "secret-value"},
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-nosecrets"}
+	a := ToArchive(result, meta, "", nil)
+
+	// Without secrets, values pass through unchanged
+	assert.Equal(t, "secret-value", a.Steps[0].Inputs["apiKey"])
 }

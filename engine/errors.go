@@ -68,8 +68,11 @@ func classifyError(err error) ErrorCategory {
 		return CategoryAdapter
 	}
 
-	// Check for timeout first (context deadline or net timeout)
+	// Check for timeout first (context deadline, cancellation, or net timeout)
 	if errors.Is(err, context.DeadlineExceeded) {
+		return CategoryTimeout
+	}
+	if errors.Is(err, context.Canceled) {
 		return CategoryTimeout
 	}
 

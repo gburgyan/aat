@@ -48,6 +48,12 @@ func llmSelectValue(ctx context.Context, rctx *ResolveContext, input graph.Input
 		},
 	}
 
+	select {
+	case <-ctx.Done():
+		return nil, nil, fmt.Errorf("LLM value selection cancelled: %w", ctx.Err())
+	default:
+	}
+
 	start := time.Now()
 	resp, err := rctx.LLM.Complete(ctx, &llm.Request{
 		Messages:    messages,
