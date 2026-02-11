@@ -14,14 +14,14 @@ import (
 func (s *Server) registerTemplateTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("list_adapters",
-			mcp.WithDescription("List all registered adapter names"),
+			mcp.WithDescription("List all registered adapter names. Use inspect_template to see HTTP details for a specific adapter."),
 		),
 		s.handleListAdapters,
 	)
 
 	s.mcp.AddTool(
 		mcp.NewTool("inspect_template",
-			mcp.WithDescription("Show full template detail for an adapter: method, path, headers, body, and extract rules"),
+			mcp.WithDescription("Show the HTTP template for an adapter: method, path, headers, body template, and response extract rules. This shows what AAT actually sends at runtime. For the OAS spec view of the same endpoint, use get_oas_operation with the graph node name."),
 			mcp.WithString("adapter",
 				mcp.Description("Adapter name"),
 				mcp.Required(),

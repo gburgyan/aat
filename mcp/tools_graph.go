@@ -13,14 +13,14 @@ import (
 func (s *Server) registerGraphTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("list_nodes",
-			mcp.WithDescription("List all nodes in the API graph with descriptions and input/output counts"),
+			mcp.WithDescription("List all nodes in the API graph with descriptions and input/output counts. Use describe_node to drill into a specific node."),
 		),
 		s.handleListNodes,
 	)
 
 	s.mcp.AddTool(
 		mcp.NewTool("describe_node",
-			mcp.WithDescription("Show full details for a graph node: inputs, outputs, edges, adapter, and OAS reference"),
+			mcp.WithDescription("Show full details for a graph node: inputs, outputs, edges, adapter, and OAS reference. For OAS spec details use get_oas_operation with the same node name. For HTTP template details use inspect_template with the adapter name shown here."),
 			mcp.WithString("node",
 				mcp.Description("Node name"),
 				mcp.Required(),
@@ -31,7 +31,7 @@ func (s *Server) registerGraphTools() {
 
 	s.mcp.AddTool(
 		mcp.NewTool("trace_workflow",
-			mcp.WithDescription("Trace the dependency chain for a goal node using backward chaining — shows required nodes, data flow, and entry points"),
+			mcp.WithDescription("Trace the dependency chain for a goal node using backward chaining — shows required nodes, data flow, and entry points. Use describe_node on individual nodes in the chain for details."),
 			mcp.WithString("goal",
 				mcp.Description("Goal node name to trace backward from"),
 				mcp.Required(),
@@ -42,7 +42,7 @@ func (s *Server) registerGraphTools() {
 
 	s.mcp.AddTool(
 		mcp.NewTool("find_workflows",
-			mcp.WithDescription("Search for nodes by keyword across names, descriptions, and input/output names"),
+			mcp.WithDescription("Search for nodes by keyword across names, descriptions, and input/output names. Use describe_node on results to see full details."),
 			mcp.WithString("query",
 				mcp.Description("Search keyword (case-insensitive)"),
 				mcp.Required(),

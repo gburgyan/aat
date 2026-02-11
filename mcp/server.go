@@ -31,6 +31,7 @@ func NewServer(ctx *ServerContext) *Server {
 	s.registerGraphTools()
 	s.registerTemplateTools()
 	s.registerDomainTools()
+	s.registerOASTools()
 	return s
 }
 

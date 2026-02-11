@@ -1,5 +1,19 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-10 — Task 60a WI-4: OAS Tools for MCP Server
+
+**What:** Added 5 OAS tools to the MCP server: `get_oas_operation`, `get_oas_schema`, `search_oas_schemas`, `validate_oas_request`, `build_oas_example`. Also added schema resolution engine with allOf merge, depth limiting, cycle detection, payload validation, and example generation.
+**Decisions:**
+- Schema resolution uses `resolvedSchema` intermediate type to decouple from libopenapi's proxy model
+- allOf merge: recursively resolve members, merge properties (later wins), union required fields, track source names as breadcrumbs
+- Cycle/depth handling: pointer-based `seen` set with defer-delete for stack tracking; depth limit (default 2, max 5) provides reliable termination for self-referencing schemas
+- `resolveNodeOperation` shared helper used by 3 tools (get_oas_operation, validate, build_example) — resolves node → spec → operation in one call
+- `findSchemaByName` does exact match then case-insensitive fallback with suggestions on miss
+- Validation is recursive (depth 5), checks: required fields, type correctness, enum membership, string constraints (min/maxLength, pattern), numeric constraints (min/max)
+- Example generation supports minimal/typical/full scenarios; smart defaults by format (uuid, date-time, enum→first value)
+- Rich test fixture (`testdata/richpetstore.yaml`) with allOf inheritance, nested $ref, self-referencing TreeNode, enums, constraints
+**Open questions:** None.
+
 ## 2026-02-10 — Task 28: CI/CD Mode
 
 **What:** Made `aat run` pipeline-friendly with granular exit codes, `--json` flag for machine-readable output, and `--quiet` flag for suppressed progress.
