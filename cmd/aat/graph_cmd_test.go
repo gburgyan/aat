@@ -87,3 +87,35 @@ func TestGraphValidateMain_FlagParsing(t *testing.T) {
 	})
 	assert.Equal(t, 0, code)
 }
+
+func TestGraphValidate_WithTemplates_OK(t *testing.T) {
+	code := graphValidateCommand(&graphValidateArgs{
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+	})
+	assert.Equal(t, 0, code)
+}
+
+func TestGraphValidate_WithTemplates_Mismatch(t *testing.T) {
+	code := graphValidateCommand(&graphValidateArgs{
+		GraphPath:     "testdata/test_graph_bad_outputs.yaml",
+		TemplatesPath: "testdata/templates",
+	})
+	assert.Equal(t, 1, code)
+}
+
+func TestGraphValidate_WithTemplates_BadPath(t *testing.T) {
+	code := graphValidateCommand(&graphValidateArgs{
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/nonexistent_dir",
+	})
+	assert.Equal(t, 1, code)
+}
+
+func TestGraphValidateMain_TemplatesFlag(t *testing.T) {
+	code := graphValidateMain([]string{
+		"--graph", "testdata/test_graph.yaml",
+		"--templates", "testdata/templates",
+	})
+	assert.Equal(t, 0, code)
+}

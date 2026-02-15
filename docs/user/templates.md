@@ -270,6 +270,18 @@ nodes:
     ...
 ```
 
+## Validating Templates Against the Graph
+
+Use `aat graph validate --templates` to check that graph-declared outputs match template extract keys:
+
+```bash
+aat graph validate --graph graph.yaml --templates templates/
+```
+
+This catches outputs declared in the graph that the template never extracts (will be nil at runtime) and extract keys in the template that the graph doesn't declare (dead extraction, likely a typo). See [Graph Authoring — Adapter output validation](graph-authoring.md#adapter-output-validation) for details.
+
+This check also runs automatically at the start of `aat run`, so mismatches are caught before any API calls are made.
+
 ## See Also
 
 - [Graph Authoring](graph-authoring.md) — how nodes reference templates via `adapter`

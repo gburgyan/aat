@@ -1,0 +1,16 @@
+version: "1.0.0"
+
+nodes:
+  testNode:
+    description: "Node with output not matching template"
+    adapter: test.adapter
+    inputs:
+      - name: input1
+        type: string
+    outputs:
+      - name: output1
+        type: string
+      - name: ghost
+        type: string
+
+edges: []

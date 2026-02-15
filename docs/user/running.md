@@ -480,6 +480,8 @@ The graph (`--graph`) defines the API's topology: which nodes (API operations) e
 
 Templates (`--templates`) are YAML files that define how to build HTTP requests and extract responses for each node. They use `{{placeholder}}` substitution for inputs and gjson paths for output extraction.
 
+Before execution begins, AAT validates that each node's declared outputs match the extract keys in its template. This pre-flight check catches typos and stale renames before any API calls are made. You can also run this check standalone with `aat graph validate --templates`.
+
 ### Plan
 
 The plan (`--plan`) specifies what to execute: which graph nodes to run, in what order (via `dependsOn`), with what input values, retry policies, and assertions. Plans can provide literal values, reference upstream outputs, or use selection strategies (first, last, random, min, max, match, llm) on array outputs.

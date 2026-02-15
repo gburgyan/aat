@@ -229,6 +229,24 @@ Run structural and OAS validation after each round of edits:
 aat graph validate --graph graph.yaml
 ```
 
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--graph` | Path to graph YAML file (required) |
+| `--oas` | Override OAS spec path (replaces graph-level `oas` field) |
+| `--templates` | Path to templates directory (cross-validates outputs vs extract keys) |
+| `--strict` | Treat warnings as errors |
+
+### Structural validation
+
+- All edge references (`from`, `to`) point to existing nodes and fields
+- No orphan nodes (every node is reachable)
+- No cycles (unless broken by `cycleBreaker: true`)
+- Input/output names are unique per node
+
+### OAS validation
+
 If your graph references an OAS spec (via the `oas` field or per-node `oas.spec`), validation also checks alignment:
 
 ```bash
@@ -242,20 +260,25 @@ aat graph validate --graph graph.yaml --oas api-spec.yaml
 aat graph validate --graph graph.yaml --strict
 ```
 
-### Structural validation
-
-- All edge references (`from`, `to`) point to existing nodes and fields
-- No orphan nodes (every node is reachable)
-- No cycles (unless broken by `cycleBreaker: true`)
-- Input/output names are unique per node
-
-### OAS validation
-
 For nodes with `oas.operationId`:
 - **Errors**: operationId not found in spec, missing spec path
 - **Warnings**: graph input not in OAS params, required OAS param missing from graph, graph output not in OAS response
 
 Warnings are informational — the graph is the source of truth, and intentional divergence from the OAS spec is normal (e.g., you might omit optional parameters or extract only specific response fields).
+
+### Adapter output validation
+
+When `--templates` is provided, validation checks that each node's declared outputs match the extract keys in its template:
+
+```bash
+aat graph validate --graph graph.yaml --templates templates/
+```
+
+This catches two kinds of mismatch:
+- **Graph output not extracted by template** — the node declares an output but the template has no extract entry for it, so the output will always be nil at runtime
+- **Template extracts undeclared output** — the template extracts a key the graph doesn't declare, which is dead extraction (likely a typo or stale rename)
+
+Nodes with no outputs (cleanup/void operations) and non-template adapters are skipped. This check also runs automatically at the start of `aat run`.
 
 ## Step 5: Iterate
 

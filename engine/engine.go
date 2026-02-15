@@ -94,7 +94,12 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
-	// 3. Execute steps
+	// 3. Validate adapter outputs match graph declarations
+	if err := ValidateAdapterOutputs(e.graph, e.registry); err != nil {
+		return &RunResult{Outcome: OutcomeError, Error: err}
+	}
+
+	// 4. Execute steps
 	e.plan = p
 	defer func() { e.plan = nil }()
 
