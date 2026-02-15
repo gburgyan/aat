@@ -22,6 +22,9 @@ func GenerateDocs(g *Graph, opts *DocGenOptions) string {
 	var b strings.Builder
 
 	title := opts.Title
+	if title == "" && g.Title != "" {
+		title = g.Title
+	}
 	if title == "" {
 		title = "API Workflow"
 	}
@@ -34,11 +37,31 @@ func GenerateDocs(g *Graph, opts *DocGenOptions) string {
 	}
 	b.WriteString("\n\n")
 
+	// Description
+	if g.Description != "" {
+		b.WriteString(strings.TrimRight(g.Description, "\n"))
+		b.WriteString("\n\n")
+	}
+
 	// Mermaid diagram
 	b.WriteString("## Workflow Diagram\n\n")
 	b.WriteString("```mermaid\n")
 	b.WriteString(GenerateMermaid(g))
 	b.WriteString("```\n\n")
+
+	// Workflows
+	if len(g.Workflows) > 0 {
+		b.WriteString("## Workflows\n\n")
+		for _, wf := range g.Workflows {
+			fmt.Fprintf(&b, "### %s\n\n", wf.Name)
+			if wf.Description != "" {
+				fmt.Fprintf(&b, "%s\n\n", wf.Description)
+			}
+			if len(wf.Steps) > 0 {
+				fmt.Fprintf(&b, "**Steps:** %s\n\n", strings.Join(wf.Steps, " → "))
+			}
+		}
+	}
 
 	// Entry points
 	entryNodes := findEntryNodes(g)
@@ -69,6 +92,13 @@ func GenerateDocs(g *Graph, opts *DocGenOptions) string {
 	// Cleanup table
 	writeCleanupTable(&b, g)
 
+	// Notes
+	if g.Notes != "" {
+		b.WriteString("## Notes\n\n")
+		b.WriteString(strings.TrimRight(g.Notes, "\n"))
+		b.WriteString("\n\n")
+	}
+
 	return b.String()
 }
 
@@ -82,6 +112,9 @@ func GenerateDocsSplit(g *Graph, opts *DocGenOptions) map[string]string {
 	result := make(map[string]string)
 
 	title := opts.Title
+	if title == "" && g.Title != "" {
+		title = g.Title
+	}
 	if title == "" {
 		title = "API Workflow"
 	}
@@ -95,11 +128,31 @@ func GenerateDocsSplit(g *Graph, opts *DocGenOptions) map[string]string {
 	}
 	idx.WriteString("\n\n")
 
+	// Description
+	if g.Description != "" {
+		idx.WriteString(strings.TrimRight(g.Description, "\n"))
+		idx.WriteString("\n\n")
+	}
+
 	// Mermaid diagram
 	idx.WriteString("## Workflow Diagram\n\n")
 	idx.WriteString("```mermaid\n")
 	idx.WriteString(GenerateMermaid(g))
 	idx.WriteString("```\n\n")
+
+	// Workflows
+	if len(g.Workflows) > 0 {
+		idx.WriteString("## Workflows\n\n")
+		for _, wf := range g.Workflows {
+			fmt.Fprintf(&idx, "### %s\n\n", wf.Name)
+			if wf.Description != "" {
+				fmt.Fprintf(&idx, "%s\n\n", wf.Description)
+			}
+			if len(wf.Steps) > 0 {
+				fmt.Fprintf(&idx, "**Steps:** %s\n\n", strings.Join(wf.Steps, " → "))
+			}
+		}
+	}
 
 	// Entry points
 	entryNodes := findEntryNodes(g)
@@ -134,6 +187,13 @@ func GenerateDocsSplit(g *Graph, opts *DocGenOptions) map[string]string {
 
 	// Cleanup table
 	writeCleanupTable(&idx, g)
+
+	// Notes
+	if g.Notes != "" {
+		idx.WriteString("## Notes\n\n")
+		idx.WriteString(strings.TrimRight(g.Notes, "\n"))
+		idx.WriteString("\n\n")
+	}
 
 	result["index.md"] = idx.String()
 
@@ -173,15 +233,23 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 
 	// Inputs table
 	hasExamples := hasExamplesForNode(name, node, opts)
+	hasConstraints := hasConstraintsForNode(node)
 	if len(node.Inputs) > 0 {
 		b.WriteString("**Inputs:**\n\n")
-		if hasExamples {
-			b.WriteString("| Name | Type | Required | Default | Description | Examples |\n")
-			b.WriteString("|------|------|----------|---------|-------------|----------|\n")
-		} else {
-			b.WriteString("| Name | Type | Required | Default | Description |\n")
-			b.WriteString("|------|------|----------|---------|-------------|\n")
+		header := "| Name | Type | Required | Default | Description"
+		divider := "|------|------|----------|---------|-------------"
+		if hasConstraints {
+			header += " | Constraints"
+			divider += "|------------"
 		}
+		if hasExamples {
+			header += " | Examples"
+			divider += "|----------"
+		}
+		header += " |\n"
+		divider += "|\n"
+		b.WriteString(header)
+		b.WriteString(divider)
 		for _, inp := range node.Inputs {
 			required := "yes"
 			if inp.Optional {
@@ -190,6 +258,11 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 			def := ""
 			if inp.Default != nil {
 				def = fmt.Sprintf("%v", inp.Default)
+			}
+			fmt.Fprintf(b, "| %s | %s | %s | %s | %s",
+				inp.Name, inp.Type, required, def, inp.Description)
+			if hasConstraints {
+				fmt.Fprintf(b, " | %s", formatConstraintCell(inp.Constraints))
 			}
 			if hasExamples {
 				examples := ""
@@ -206,12 +279,9 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 						examples = strings.Join(ft.EnumValues, ", ")
 					}
 				}
-				fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s |\n",
-					inp.Name, inp.Type, required, def, inp.Description, examples)
-			} else {
-				fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n",
-					inp.Name, inp.Type, required, def, inp.Description)
+				fmt.Fprintf(b, " | %s", examples)
 			}
+			b.WriteString(" |\n")
 		}
 		b.WriteString("\n")
 	}
@@ -334,6 +404,49 @@ func topoSortNodes(g *Graph) []string {
 		return sortedKeys(g.Nodes)
 	}
 	return sorted
+}
+
+// hasConstraintsForNode returns true if any input has constraints.
+func hasConstraintsForNode(node *Node) bool {
+	for _, inp := range node.Inputs {
+		if inp.Constraints != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// formatConstraintCell formats constraints for a Markdown table cell.
+func formatConstraintCell(c *Constraint) string {
+	if c == nil {
+		return ""
+	}
+	var parts []string
+	if c.Pattern != "" {
+		parts = append(parts, "`"+c.Pattern+"`")
+	}
+	if c.Min != nil && c.Max != nil {
+		parts = append(parts, fmt.Sprintf("%v..%v", *c.Min, *c.Max))
+	} else if c.Min != nil {
+		parts = append(parts, fmt.Sprintf("min: %v", *c.Min))
+	} else if c.Max != nil {
+		parts = append(parts, fmt.Sprintf("max: %v", *c.Max))
+	}
+	if c.MinLength != nil && c.MaxLength != nil {
+		if *c.MinLength == *c.MaxLength {
+			parts = append(parts, fmt.Sprintf("len=%d", *c.MinLength))
+		} else {
+			parts = append(parts, fmt.Sprintf("len: %d..%d", *c.MinLength, *c.MaxLength))
+		}
+	} else if c.MinLength != nil {
+		parts = append(parts, fmt.Sprintf("minLen: %d", *c.MinLength))
+	} else if c.MaxLength != nil {
+		parts = append(parts, fmt.Sprintf("maxLen: %d", *c.MaxLength))
+	}
+	if c.Description != "" {
+		parts = append(parts, c.Description)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // hasExamplesForNode checks whether any input has example values

@@ -3,6 +3,7 @@ package oas
 import (
 	"testing"
 
+	"github.com/pb33f/libopenapi/datamodel/high/base"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -342,4 +343,43 @@ func TestGenerate_NodeAdapterMatchesOperationId(t *testing.T) {
 	for name, node := range fix.result.Graph.Nodes {
 		assert.Equal(t, name, node.Adapter, "node adapter should match operationId")
 	}
+}
+
+func TestExtractConstraints_FromSchema(t *testing.T) {
+	// Test with a schema that has constraint properties
+	minLen := int64(3)
+	maxLen := int64(3)
+	pattern := "^[A-Z]{3}$"
+	min := float64(1)
+	max := float64(100)
+	desc := "Airport code"
+
+	schema := &base.Schema{
+		MinLength: &minLen,
+		MaxLength: &maxLen,
+		Pattern:   pattern,
+		Minimum:   &min,
+		Maximum:   &max,
+		Description: desc,
+	}
+
+	c := extractConstraints(schema)
+	require.NotNil(t, c)
+	assert.Equal(t, 3, *c.MinLength)
+	assert.Equal(t, 3, *c.MaxLength)
+	assert.Equal(t, "^[A-Z]{3}$", c.Pattern)
+	assert.Equal(t, 1.0, *c.Min)
+	assert.Equal(t, 100.0, *c.Max)
+	assert.Equal(t, "Airport code", c.Description)
+}
+
+func TestExtractConstraints_Nil(t *testing.T) {
+	assert.Nil(t, extractConstraints(nil))
+}
+
+func TestExtractConstraints_NoConstraints(t *testing.T) {
+	schema := &base.Schema{
+		Type: []string{"string"},
+	}
+	assert.Nil(t, extractConstraints(schema))
 }

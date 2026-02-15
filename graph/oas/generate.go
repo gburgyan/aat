@@ -175,7 +175,9 @@ func collectNodeInputs(op *v3high.Operation) []graph.Input {
 			Name: param.Name,
 		}
 		if param.Schema != nil {
-			inp.Type = mapSchemaType(param.Schema.Schema())
+			schema := param.Schema.Schema()
+			inp.Type = mapSchemaType(schema)
+			inp.Constraints = extractConstraints(schema)
 		} else {
 			inp.Type = "string"
 		}
@@ -205,7 +207,9 @@ func collectNodeInputs(op *v3high.Operation) []graph.Input {
 						Name: propName,
 					}
 					if propProxy != nil {
-						inp.Type = mapSchemaType(propProxy.Schema())
+						propSchema := propProxy.Schema()
+						inp.Type = mapSchemaType(propSchema)
+						inp.Constraints = extractConstraints(propSchema)
 					} else {
 						inp.Type = "string"
 					}
@@ -353,6 +357,51 @@ func mapSchemaType(schema *base.Schema) string {
 	default:
 		return "string"
 	}
+}
+
+// extractConstraints builds a Constraint from OAS schema validation properties.
+// Returns nil if the schema has no relevant constraints.
+func extractConstraints(schema *base.Schema) *graph.Constraint {
+	if schema == nil {
+		return nil
+	}
+
+	var c graph.Constraint
+	hasAny := false
+
+	if schema.MinLength != nil {
+		v := int(*schema.MinLength)
+		c.MinLength = &v
+		hasAny = true
+	}
+	if schema.MaxLength != nil {
+		v := int(*schema.MaxLength)
+		c.MaxLength = &v
+		hasAny = true
+	}
+	if schema.Pattern != "" {
+		c.Pattern = schema.Pattern
+		hasAny = true
+	}
+	if schema.Minimum != nil {
+		v := *schema.Minimum
+		c.Min = &v
+		hasAny = true
+	}
+	if schema.Maximum != nil {
+		v := *schema.Maximum
+		c.Max = &v
+		hasAny = true
+	}
+	if schema.Description != "" {
+		c.Description = schema.Description
+		hasAny = true
+	}
+
+	if !hasAny {
+		return nil
+	}
+	return &c
 }
 
 // convertPathParams replaces OAS path parameters {param} with template placeholders {{param}}.

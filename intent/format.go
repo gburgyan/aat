@@ -13,7 +13,41 @@ import (
 func FormatGraph(g *graph.Graph) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# API Graph (version %s)\n\n", g.Version)
+	// Title
+	title := "API Graph"
+	if g.Title != "" {
+		title = g.Title
+	}
+	fmt.Fprintf(&b, "# %s (version %s)\n\n", title, g.Version)
+
+	// Description
+	if g.Description != "" {
+		b.WriteString(strings.TrimRight(g.Description, "\n"))
+		b.WriteString("\n\n")
+	}
+
+	// Workflows
+	if len(g.Workflows) > 0 {
+		b.WriteString("## Workflows\n\n")
+		for _, wf := range g.Workflows {
+			fmt.Fprintf(&b, "- **%s**", wf.Name)
+			if wf.Description != "" {
+				fmt.Fprintf(&b, ": %s", wf.Description)
+			}
+			b.WriteString("\n")
+			if len(wf.Steps) > 0 {
+				fmt.Fprintf(&b, "  Steps: %s\n", strings.Join(wf.Steps, " → "))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Notes
+	if g.Notes != "" {
+		b.WriteString("## Notes\n\n")
+		b.WriteString(strings.TrimRight(g.Notes, "\n"))
+		b.WriteString("\n\n")
+	}
 
 	// Nodes in sorted order
 	nodeNames := sortedNodeNames(g)
@@ -23,6 +57,9 @@ func FormatGraph(g *graph.Graph) string {
 		fmt.Fprintf(&b, "%s\n", node.Description)
 		if node.Adapter != "" {
 			fmt.Fprintf(&b, "Adapter: %s\n", node.Adapter)
+		}
+		if len(node.Tags) > 0 {
+			fmt.Fprintf(&b, "Tags: %s\n", strings.Join(node.Tags, ", "))
 		}
 		if node.Cleanup != "" {
 			fmt.Fprintf(&b, "Cleanup: %s\n", node.Cleanup)
@@ -46,7 +83,8 @@ func FormatGraph(g *graph.Graph) string {
 				if inp.Description != "" {
 					desc = " — " + inp.Description
 				}
-				fmt.Fprintf(&b, "  - %s: %s%s%s%s\n", inp.Name, inp.Type, opt, def, desc)
+				constraint := formatConstraintAnnotation(inp.Constraints)
+				fmt.Fprintf(&b, "  - %s: %s%s%s%s%s\n", inp.Name, inp.Type, constraint, opt, def, desc)
 			}
 		}
 
@@ -70,10 +108,19 @@ func FormatGraph(g *graph.Graph) string {
 		b.WriteString("\n")
 	}
 
-	// Edges
-	if len(g.Edges) > 0 {
+	// Edges — omit auto-wired edges to keep LLM context compact
+	var explicitEdges []graph.Edge
+	for _, edge := range g.Edges {
+		if !edge.AutoWired {
+			explicitEdges = append(explicitEdges, edge)
+		}
+	}
+	if len(explicitEdges) > 0 {
 		b.WriteString("## Edges\n")
-		for _, edge := range g.Edges {
+		if g.AutoWire.IsEnabled() {
+			b.WriteString("Auto-wired: inputs with matching output names are connected automatically.\n")
+		}
+		for _, edge := range explicitEdges {
 			sel := ""
 			if edge.Select {
 				sel = " [select]"
@@ -85,6 +132,9 @@ func FormatGraph(g *graph.Graph) string {
 			fmt.Fprintf(&b, "- %s → %s%s%s\n", edge.From, edge.To, sel, pref)
 		}
 		b.WriteString("\n")
+	} else if g.AutoWire.IsEnabled() {
+		b.WriteString("## Edges\n")
+		b.WriteString("Auto-wired: inputs with matching output names are connected automatically.\n\n")
 	}
 
 	// Conditions
@@ -138,7 +188,8 @@ func FormatChainResult(cr *graph.ChainResult, g *graph.Graph) string {
 				if inp.Default != nil {
 					def = fmt.Sprintf(" [default: %v]", inp.Default)
 				}
-				fmt.Fprintf(&b, "  - %s: %s%s%s\n", inp.Name, inp.Type, opt, def)
+				constraint := formatConstraintAnnotation(inp.Constraints)
+				fmt.Fprintf(&b, "  - %s: %s%s%s%s\n", inp.Name, inp.Type, constraint, opt, def)
 			}
 		}
 
@@ -268,6 +319,43 @@ The step PASSES if the response status matches any listed code.
 The step FAILS if the response returns 2xx (security boundary not enforced).
 Retry and relaxation are automatically disabled.
 `
+}
+
+// formatConstraintAnnotation returns a compact annotation string for input constraints.
+// Returns empty string if no constraints are set.
+func formatConstraintAnnotation(c *graph.Constraint) string {
+	if c == nil {
+		return ""
+	}
+	var parts []string
+	if c.Pattern != "" {
+		parts = append(parts, "pattern: "+c.Pattern)
+	}
+	if c.Min != nil && c.Max != nil {
+		parts = append(parts, fmt.Sprintf("range: %v..%v", *c.Min, *c.Max))
+	} else if c.Min != nil {
+		parts = append(parts, fmt.Sprintf("min: %v", *c.Min))
+	} else if c.Max != nil {
+		parts = append(parts, fmt.Sprintf("max: %v", *c.Max))
+	}
+	if c.MinLength != nil && c.MaxLength != nil {
+		if *c.MinLength == *c.MaxLength {
+			parts = append(parts, fmt.Sprintf("length: %d", *c.MinLength))
+		} else {
+			parts = append(parts, fmt.Sprintf("length: %d..%d", *c.MinLength, *c.MaxLength))
+		}
+	} else if c.MinLength != nil {
+		parts = append(parts, fmt.Sprintf("minLength: %d", *c.MinLength))
+	} else if c.MaxLength != nil {
+		parts = append(parts, fmt.Sprintf("maxLength: %d", *c.MaxLength))
+	}
+	if c.Description != "" {
+		parts = append(parts, c.Description)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(parts, ", ") + ")"
 }
 
 // sortedNodeNames returns graph node names in sorted order.

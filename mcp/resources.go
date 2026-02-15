@@ -44,6 +44,16 @@ func (s *Server) registerResources() {
 		s.handleMetadataResource,
 	)
 
+	if s.ctx.ReadmeContent != "" {
+		s.mcp.AddResource(
+			mcp.NewResource("aat://readme", "Project README",
+				mcp.WithResourceDescription("Project README.md documentation from the graph directory"),
+				mcp.WithMIMEType("text/markdown"),
+			),
+			s.handleReadmeResource,
+		)
+	}
+
 	// Dynamic resources (URI templates)
 	s.mcp.AddResourceTemplate(
 		mcp.NewResourceTemplate("aat://node/{name}", "Node Detail",
@@ -144,8 +154,29 @@ func (s *Server) handleMetadataResource(_ context.Context, req mcp.ReadResourceR
 		b.WriteString("\n")
 	}
 
-	b.WriteString("## Graph Statistics\n\n")
 	g := s.ctx.Graph
+
+	if g.Title != "" {
+		fmt.Fprintf(&b, "**Graph Title:** %s\n", g.Title)
+	}
+	if g.Description != "" {
+		fmt.Fprintf(&b, "**Graph Description:** %s\n", strings.TrimRight(g.Description, "\n"))
+	}
+	if len(g.Workflows) > 0 {
+		b.WriteString("**Workflows:** ")
+		names := make([]string, len(g.Workflows))
+		for i, wf := range g.Workflows {
+			names[i] = wf.Name
+		}
+		b.WriteString(strings.Join(names, ", "))
+		b.WriteString("\n")
+	}
+	if g.Notes != "" {
+		fmt.Fprintf(&b, "**Notes:** %s\n", strings.TrimRight(g.Notes, "\n"))
+	}
+	b.WriteString("\n")
+
+	b.WriteString("## Graph Statistics\n\n")
 	fmt.Fprintf(&b, "**Version:** %s\n", g.Version)
 	fmt.Fprintf(&b, "**Nodes:** %d\n", len(g.Nodes))
 	fmt.Fprintf(&b, "**Edges:** %d\n", len(g.Edges))
@@ -156,6 +187,17 @@ func (s *Server) handleMetadataResource(_ context.Context, req mcp.ReadResourceR
 			URI:      req.Params.URI,
 			MIMEType: "text/markdown",
 			Text:     b.String(),
+		},
+	}, nil
+}
+
+// handleReadmeResource returns the project README.md content.
+func (s *Server) handleReadmeResource(_ context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	return []mcp.ResourceContents{
+		mcp.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "text/markdown",
+			Text:     s.ctx.ReadmeContent,
 		},
 	}, nil
 }

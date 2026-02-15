@@ -59,8 +59,19 @@ func (s *Server) handleListNodes(_ context.Context, _ mcp.CallToolRequest) (*mcp
 		return mcp.NewToolResultText("No nodes in the graph."), nil
 	}
 
-	names := sortedNodeNames(g)
 	var b strings.Builder
+
+	// Graph intro
+	if g.Title != "" {
+		fmt.Fprintf(&b, "# %s\n\n", g.Title)
+	}
+	if g.Description != "" {
+		b.WriteString(strings.TrimRight(g.Description, "\n"))
+		b.WriteString("\n\n")
+	}
+
+	names := sortedNodeNames(g)
+	fmt.Fprintf(&b, "%d nodes:\n\n", len(names))
 	for i, name := range names {
 		if i > 0 {
 			b.WriteString("\n")
@@ -108,7 +119,7 @@ func (s *Server) handleTraceWorkflow(_ context.Context, req mcp.CallToolRequest)
 }
 
 // handleFindWorkflows performs case-insensitive keyword search across node
-// names, descriptions, and input/output names.
+// names, descriptions, input/output names, tags, and named workflows.
 func (s *Server) handleFindWorkflows(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	query, err := req.RequireString("query")
 	if err != nil {
@@ -116,7 +127,35 @@ func (s *Server) handleFindWorkflows(_ context.Context, req mcp.CallToolRequest)
 	}
 
 	q := strings.ToLower(query)
-	names := sortedNodeNames(s.ctx.Graph)
+	g := s.ctx.Graph
+
+	var b strings.Builder
+
+	// Search named workflows
+	var wfMatches []graph.Workflow
+	for _, wf := range g.Workflows {
+		if strings.Contains(strings.ToLower(wf.Name), q) ||
+			strings.Contains(strings.ToLower(wf.Description), q) {
+			wfMatches = append(wfMatches, wf)
+		}
+	}
+	if len(wfMatches) > 0 {
+		fmt.Fprintf(&b, "Found %d workflow(s) matching %q:\n\n", len(wfMatches), query)
+		for _, wf := range wfMatches {
+			fmt.Fprintf(&b, "- **%s**", wf.Name)
+			if wf.Description != "" {
+				fmt.Fprintf(&b, ": %s", wf.Description)
+			}
+			b.WriteString("\n")
+			if len(wf.Steps) > 0 {
+				fmt.Fprintf(&b, "  Steps: %s\n", strings.Join(wf.Steps, " → "))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	// Search nodes
+	names := sortedNodeNames(g)
 
 	type match struct {
 		node    *graph.Node
@@ -125,7 +164,7 @@ func (s *Server) handleFindWorkflows(_ context.Context, req mcp.CallToolRequest)
 	var matches []match
 
 	for _, name := range names {
-		node := s.ctx.Graph.Nodes[name]
+		node := g.Nodes[name]
 		var reasons []string
 
 		if strings.Contains(strings.ToLower(name), q) {
@@ -133,6 +172,12 @@ func (s *Server) handleFindWorkflows(_ context.Context, req mcp.CallToolRequest)
 		}
 		if strings.Contains(strings.ToLower(node.Description), q) {
 			reasons = append(reasons, "description")
+		}
+		for _, tag := range node.Tags {
+			if strings.Contains(strings.ToLower(tag), q) {
+				reasons = append(reasons, fmt.Sprintf("tag %q", tag))
+				break
+			}
 		}
 		for _, inp := range node.Inputs {
 			if strings.Contains(strings.ToLower(inp.Name), q) {
@@ -152,14 +197,15 @@ func (s *Server) handleFindWorkflows(_ context.Context, req mcp.CallToolRequest)
 		}
 	}
 
-	if len(matches) == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("No nodes matching %q.", query)), nil
+	if len(matches) == 0 && len(wfMatches) == 0 {
+		return mcp.NewToolResultText(fmt.Sprintf("No nodes or workflows matching %q.", query)), nil
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "Found %d node(s) matching %q:\n\n", len(matches), query)
-	for _, m := range matches {
-		fmt.Fprintf(&b, "%s\n  Matched: %s\n", formatNodeSummary(m.node), strings.Join(m.reasons, ", "))
+	if len(matches) > 0 {
+		fmt.Fprintf(&b, "Found %d node(s) matching %q:\n\n", len(matches), query)
+		for _, m := range matches {
+			fmt.Fprintf(&b, "%s\n  Matched: %s\n", formatNodeSummary(m.node), strings.Join(m.reasons, ", "))
+		}
 	}
 	return mcp.NewToolResultText(b.String()), nil
 }

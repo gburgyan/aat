@@ -305,7 +305,7 @@ func TestHandleFindWorkflows_NoMatches(t *testing.T) {
 
 	assert.False(t, result.IsError)
 	text := resultText(t, result)
-	assert.Contains(t, text, "No nodes matching")
+	assert.Contains(t, text, "No nodes or workflows matching")
 }
 
 func TestHandleFindWorkflows_CaseInsensitive(t *testing.T) {
@@ -326,6 +326,37 @@ func TestHandleFindWorkflows_MissingParam(t *testing.T) {
 	result := callTool(t, srv.handleFindWorkflows, nil)
 	assert.True(t, result.IsError)
 	assert.Contains(t, resultText(t, result), "missing required parameter")
+}
+
+func TestHandleDescribeNode_WithConstraints(t *testing.T) {
+	minLen, maxLen := 3, 3
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "search",
+				Inputs: []graph.Input{
+					{
+						Name: "code",
+						Type: "string",
+						Constraints: &graph.Constraint{
+							MinLength: &minLen,
+							MaxLength: &maxLen,
+							Pattern:   "^[A-Z]{3}$",
+						},
+					},
+				},
+				Outputs: []graph.Output{{Name: "results", Type: "string"}},
+			},
+		},
+	}
+	srv := newTestServer(g)
+	result := callTool(t, srv.handleDescribeNode, map[string]any{"node": "search"})
+
+	text := resultText(t, result)
+	assert.Contains(t, text, "Constraints")
+	assert.Contains(t, text, "`^[A-Z]{3}$`")
+	assert.Contains(t, text, "len=3")
 }
 
 // indexOf returns the byte offset of the first occurrence of substr in s.

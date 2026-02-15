@@ -14,8 +14,12 @@ func formatNodeSummary(node *graph.Node) string {
 	if node.Description != "" {
 		desc = " — " + node.Description
 	}
-	return fmt.Sprintf("**%s**%s (%d inputs, %d outputs)",
-		node.Name, desc, len(node.Inputs), len(node.Outputs))
+	tags := ""
+	if len(node.Tags) > 0 {
+		tags = " [" + strings.Join(node.Tags, ", ") + "]"
+	}
+	return fmt.Sprintf("**%s**%s (%d inputs, %d outputs)%s",
+		node.Name, desc, len(node.Inputs), len(node.Outputs), tags)
 }
 
 // formatNodeDetail returns a full Markdown block describing a node and its
@@ -38,6 +42,9 @@ func formatNodeDetail(node *graph.Node, g *graph.Graph) string {
 	}
 	if node.CycleBreaker {
 		b.WriteString("**CycleBreaker:** true\n")
+	}
+	if len(node.Tags) > 0 {
+		fmt.Fprintf(&b, "**Tags:** %s\n", strings.Join(node.Tags, ", "))
 	}
 	if node.OAS != nil {
 		fmt.Fprintf(&b, "**OAS:** operationId=%s", node.OAS.OperationID)
@@ -81,9 +88,23 @@ func formatInputTable(inputs []graph.Input) string {
 	if len(inputs) == 0 {
 		return ""
 	}
+
+	hasConstraints := false
+	for _, inp := range inputs {
+		if inp.Constraints != nil {
+			hasConstraints = true
+			break
+		}
+	}
+
 	var b strings.Builder
-	b.WriteString("| Name | Type | Required | Default | Description |\n")
-	b.WriteString("|------|------|----------|---------|-------------|\n")
+	if hasConstraints {
+		b.WriteString("| Name | Type | Required | Default | Constraints | Description |\n")
+		b.WriteString("|------|------|----------|---------|-------------|-------------|\n")
+	} else {
+		b.WriteString("| Name | Type | Required | Default | Description |\n")
+		b.WriteString("|------|------|----------|---------|-------------|\n")
+	}
 	for _, inp := range inputs {
 		required := "yes"
 		if inp.Optional {
@@ -94,10 +115,48 @@ func formatInputTable(inputs []graph.Input) string {
 			def = fmt.Sprintf("%v", inp.Default)
 		}
 		desc := inp.Description
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
-			inp.Name, inp.Type, required, def, desc)
+		if hasConstraints {
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n",
+				inp.Name, inp.Type, required, def, formatConstraintCell(inp.Constraints), desc)
+		} else {
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
+				inp.Name, inp.Type, required, def, desc)
+		}
 	}
 	return b.String()
+}
+
+// formatConstraintCell formats constraints for a Markdown table cell.
+func formatConstraintCell(c *graph.Constraint) string {
+	if c == nil {
+		return ""
+	}
+	var parts []string
+	if c.Pattern != "" {
+		parts = append(parts, "`"+c.Pattern+"`")
+	}
+	if c.Min != nil && c.Max != nil {
+		parts = append(parts, fmt.Sprintf("%v..%v", *c.Min, *c.Max))
+	} else if c.Min != nil {
+		parts = append(parts, fmt.Sprintf("min: %v", *c.Min))
+	} else if c.Max != nil {
+		parts = append(parts, fmt.Sprintf("max: %v", *c.Max))
+	}
+	if c.MinLength != nil && c.MaxLength != nil {
+		if *c.MinLength == *c.MaxLength {
+			parts = append(parts, fmt.Sprintf("len=%d", *c.MinLength))
+		} else {
+			parts = append(parts, fmt.Sprintf("len: %d..%d", *c.MinLength, *c.MaxLength))
+		}
+	} else if c.MinLength != nil {
+		parts = append(parts, fmt.Sprintf("minLen: %d", *c.MinLength))
+	} else if c.MaxLength != nil {
+		parts = append(parts, fmt.Sprintf("maxLen: %d", *c.MaxLength))
+	}
+	if c.Description != "" {
+		parts = append(parts, c.Description)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // formatOutputTable returns a Markdown table for a slice of outputs,

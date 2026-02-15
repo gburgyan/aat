@@ -274,3 +274,141 @@ func TestHasExamplesForNode_NoExamples(t *testing.T) {
 
 	assert.False(t, hasExamplesForNode("any", node, opts))
 }
+
+func TestGenerateDocs_GraphTitle(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Title:   "My Custom API",
+		Nodes: map[string]*Node{
+			"getUser": {Name: "getUser", Description: "Get user", Adapter: "http"},
+		},
+	}
+	result := GenerateDocs(g, nil)
+	assert.Contains(t, result, "# My Custom API")
+	assert.NotContains(t, result, "# API Workflow")
+}
+
+func TestGenerateDocs_TitleOverridesGraphTitle(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Title:   "Graph Title",
+		Nodes: map[string]*Node{
+			"getUser": {Name: "getUser", Description: "Get user", Adapter: "http"},
+		},
+	}
+	result := GenerateDocs(g, &DocGenOptions{Title: "CLI Override"})
+	assert.Contains(t, result, "# CLI Override")
+	assert.NotContains(t, result, "# Graph Title")
+}
+
+func TestGenerateDocs_WithDescription(t *testing.T) {
+	g := &Graph{
+		Version:     "1.0.0",
+		Description: "This API handles user management.",
+		Nodes: map[string]*Node{
+			"getUser": {Name: "getUser", Description: "Get user", Adapter: "http"},
+		},
+	}
+	result := GenerateDocs(g, nil)
+	assert.Contains(t, result, "This API handles user management.")
+}
+
+func TestGenerateDocs_WithWorkflows(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{
+				Name:        "User Flow",
+				Description: "Create and fetch users",
+				Steps:       []string{"createUser", "getUser"},
+			},
+		},
+		Nodes: map[string]*Node{
+			"createUser": {Name: "createUser", Description: "Create user", Adapter: "http"},
+			"getUser":    {Name: "getUser", Description: "Get user", Adapter: "http"},
+		},
+	}
+	result := GenerateDocs(g, nil)
+	assert.Contains(t, result, "## Workflows")
+	assert.Contains(t, result, "### User Flow")
+	assert.Contains(t, result, "Create and fetch users")
+	assert.Contains(t, result, "createUser → getUser")
+}
+
+func TestGenerateDocs_WithNotes(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Notes:   "Important design notes.",
+		Nodes: map[string]*Node{
+			"getUser": {Name: "getUser", Description: "Get user", Adapter: "http"},
+		},
+	}
+	result := GenerateDocs(g, nil)
+	assert.Contains(t, result, "## Notes")
+	assert.Contains(t, result, "Important design notes.")
+}
+
+func TestGenerateDocs_WithConstraints(t *testing.T) {
+	minLen, maxLen := 3, 3
+	min, max := 1.0, 100.0
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"search": {
+				Name: "search", Description: "Search", Adapter: "http",
+				Inputs: []Input{
+					{
+						Name: "code", Type: "string",
+						Constraints: &Constraint{
+							MinLength: &minLen, MaxLength: &maxLen,
+							Pattern:     "^[A-Z]{3}$",
+							Description: "IATA code",
+						},
+					},
+					{
+						Name: "count", Type: "integer",
+						Constraints: &Constraint{
+							Min: &min, Max: &max,
+						},
+					},
+					{Name: "plain", Type: "string"},
+				},
+				Outputs: []Output{{Name: "results", Type: "string"}},
+			},
+		},
+	}
+	result := GenerateDocs(g, nil)
+
+	// Should have Constraints column
+	assert.Contains(t, result, "| Constraints")
+	// Pattern rendered with backticks
+	assert.Contains(t, result, "`^[A-Z]{3}$`")
+	// Length constraint
+	assert.Contains(t, result, "len=3")
+	// Range constraint
+	assert.Contains(t, result, "1..100")
+}
+
+func TestGenerateDocsSplit_WithMetadata(t *testing.T) {
+	g := &Graph{
+		Version:     "1.0.0",
+		Title:       "Split API",
+		Description: "A split test.",
+		Workflows: []Workflow{
+			{Name: "Flow A", Description: "Test flow"},
+		},
+		Notes: "Split notes.",
+		Nodes: map[string]*Node{
+			"getUser": {Name: "getUser", Description: "Get user", Adapter: "http"},
+		},
+	}
+	files := GenerateDocsSplit(g, nil)
+	index := files["index.md"]
+
+	assert.Contains(t, index, "# Split API")
+	assert.Contains(t, index, "A split test.")
+	assert.Contains(t, index, "## Workflows")
+	assert.Contains(t, index, "### Flow A")
+	assert.Contains(t, index, "## Notes")
+	assert.Contains(t, index, "Split notes.")
+}

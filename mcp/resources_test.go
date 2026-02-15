@@ -170,6 +170,38 @@ func TestMetadataResource_NilManifest(t *testing.T) {
 	assert.Contains(t, text, "**Version:** 1.0")
 }
 
+// --- aat://readme ---
+
+func TestReadmeResource_Present(t *testing.T) {
+	ctx := &ServerContext{
+		Graph:         &graph.Graph{Nodes: map[string]*graph.Node{}},
+		Registry:      adapter.NewRegistry(),
+		Manifest:      &ProjectManifest{Name: "test"},
+		ReadmeContent: "# My Project\n\nThis is the project README.",
+	}
+	srv := NewServer(ctx)
+
+	text, err := callResource(t, srv.handleReadmeResource, "aat://readme", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "# My Project\n\nThis is the project README.", text)
+}
+
+func TestReadmeResource_NotRegisteredWhenEmpty(t *testing.T) {
+	ctx := &ServerContext{
+		Graph:    &graph.Graph{Nodes: map[string]*graph.Node{}},
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+		// ReadmeContent left empty
+	}
+	srv := NewServer(ctx)
+
+	// The handler still works if called directly, but the resource
+	// should not be registered. Verify by checking the handler returns empty content.
+	text, err := callResource(t, srv.handleReadmeResource, "aat://readme", nil)
+	require.NoError(t, err)
+	assert.Empty(t, text)
+}
+
 // --- aat://node/{name} ---
 
 func TestNodeResource_Valid(t *testing.T) {

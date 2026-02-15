@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/gburgyan/aat/adapter"
@@ -30,8 +31,9 @@ type ServerContext struct {
 	Environment *config.Environment
 
 	// Metadata
-	Manifest *ProjectManifest
-	GraphDir string // base dir for resolving relative paths
+	Manifest      *ProjectManifest
+	GraphDir      string // base dir for resolving relative paths
+	ReadmeContent string // README.md content from graph directory, if found
 }
 
 // BuildServerContext loads all project artifacts described by the manifest.
@@ -95,6 +97,12 @@ func BuildServerContext(manifest *ProjectManifest) (*ServerContext, error) {
 			return nil, fmt.Errorf("loading node docs: %w", err)
 		}
 		ctx.NodeDocs = nodeDocs
+	}
+
+	// Load README.md from graph directory (optional, convention-based)
+	readmePath := filepath.Join(ctx.GraphDir, "README.md")
+	if data, err := os.ReadFile(readmePath); err == nil {
+		ctx.ReadmeContent = string(data)
 	}
 
 	return ctx, nil

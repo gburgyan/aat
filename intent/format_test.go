@@ -159,3 +159,179 @@ func TestFormatChainResult_EmptyChain(t *testing.T) {
 	result := FormatChainResult(cr, g)
 	assert.Contains(t, result, "Execution Chain")
 }
+
+func TestFormatGraph_WithTitle(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Title:   "My API",
+		Nodes:   map[string]*graph.Node{},
+	}
+	result := FormatGraph(g)
+	assert.Contains(t, result, "# My API (version 1.0.0)")
+	assert.NotContains(t, result, "API Graph")
+}
+
+func TestFormatGraph_WithDescription(t *testing.T) {
+	g := &graph.Graph{
+		Version:     "1.0.0",
+		Description: "This is a test API graph.",
+		Nodes:       map[string]*graph.Node{},
+	}
+	result := FormatGraph(g)
+	assert.Contains(t, result, "This is a test API graph.")
+}
+
+func TestFormatGraph_WithWorkflows(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{
+				Name:        "Booking Flow",
+				Description: "Standard booking",
+				Steps:       []string{"search", "price", "commit"},
+			},
+			{
+				Name: "Simple Flow",
+			},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+	result := FormatGraph(g)
+	assert.Contains(t, result, "## Workflows")
+	assert.Contains(t, result, "**Booking Flow**: Standard booking")
+	assert.Contains(t, result, "search → price → commit")
+	assert.Contains(t, result, "**Simple Flow**")
+}
+
+func TestFormatGraph_WithNotes(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Notes:   "Important design notes here.",
+		Nodes:   map[string]*graph.Node{},
+	}
+	result := FormatGraph(g)
+	assert.Contains(t, result, "## Notes")
+	assert.Contains(t, result, "Important design notes here.")
+}
+
+func TestFormatGraph_WithTags(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:        "search",
+				Description: "Search flights",
+				Adapter:     "searchFlights",
+				Tags:        []string{"search", "air"},
+			},
+		},
+	}
+	result := FormatGraph(g)
+	assert.Contains(t, result, "Tags: search, air")
+}
+
+func TestFormatGraph_TitleFallback(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*graph.Node{},
+	}
+	result := FormatGraph(g)
+	assert.Contains(t, result, "# API Graph (version 1.0.0)")
+}
+
+func TestFormatGraph_WithConstraints(t *testing.T) {
+	minLen, maxLen := 3, 3
+	min, max := 1.0, 100.0
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "search",
+				Inputs: []graph.Input{
+					{
+						Name: "origin",
+						Type: "string",
+						Constraints: &graph.Constraint{
+							MinLength:   &minLen,
+							MaxLength:   &maxLen,
+							Pattern:     "^[A-Z]{3}$",
+							Description: "IATA airport code",
+						},
+					},
+					{
+						Name: "count",
+						Type: "integer",
+						Constraints: &graph.Constraint{
+							Min: &min,
+							Max: &max,
+						},
+					},
+				},
+				Outputs: []graph.Output{{Name: "results", Type: "string"}},
+			},
+		},
+	}
+	result := FormatGraph(g)
+	assert.Contains(t, result, "pattern: ^[A-Z]{3}$")
+	assert.Contains(t, result, "length: 3")
+	assert.Contains(t, result, "IATA airport code")
+	assert.Contains(t, result, "range: 1..100")
+}
+
+func TestFormatGraph_AutoWireOmitsEdges(t *testing.T) {
+	g := &graph.Graph{
+		Version:  "1.0.0",
+		AutoWire: graph.AutoWireSources,
+		Nodes: map[string]*graph.Node{
+			"producer": {
+				Name:    "producer",
+				Adapter: "p",
+				Outputs: []graph.Output{{Name: "token", Type: "string"}},
+			},
+			"consumer": {
+				Name:    "consumer",
+				Adapter: "c",
+				Inputs:  []graph.Input{{Name: "token", Type: "string"}},
+				Outputs: []graph.Output{{Name: "result", Type: "string"}},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "producer.token", To: "consumer.token", AutoWired: true},
+		},
+	}
+	result := FormatGraph(g)
+	assert.Contains(t, result, "Auto-wired")
+	assert.NotContains(t, result, "producer.token → consumer.token")
+}
+
+func TestFormatGraph_AutoWireWithExplicit(t *testing.T) {
+	g := &graph.Graph{
+		Version:  "1.0.0",
+		AutoWire: graph.AutoWireSources,
+		Nodes: map[string]*graph.Node{
+			"a": {
+				Name: "a", Adapter: "a",
+				Outputs: []graph.Output{
+					{Name: "token", Type: "string"},
+					{Name: "items", Type: "item[]"},
+				},
+			},
+			"b": {
+				Name: "b", Adapter: "b",
+				Inputs:  []graph.Input{{Name: "token", Type: "string"}, {Name: "itemId", Type: "string"}},
+				Outputs: []graph.Output{{Name: "out", Type: "string"}},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "a.items", To: "b.itemId", Select: true}, // explicit
+			{From: "a.token", To: "b.token", AutoWired: true},
+		},
+	}
+	result := FormatGraph(g)
+	// Explicit edge should appear
+	assert.Contains(t, result, "a.items → b.itemId [select]")
+	// Auto-wired edge should not
+	assert.NotContains(t, result, "a.token → b.token")
+	assert.Contains(t, result, "Auto-wired")
+}
