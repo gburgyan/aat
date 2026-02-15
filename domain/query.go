@@ -181,14 +181,14 @@ func (kb *KnowledgeBase) FormatForPrompt() string {
 			fmt.Fprintf(&b, "Type: %s\n", p.Type)
 			if len(p.Values) > 0 {
 				b.WriteString("Values: ")
-				writePoolValues(&b, p.Values, 10)
+				writePoolValues(&b, p.Values, 10, p.Annotations)
 				b.WriteString("\n")
 			}
 			if len(p.Groups) > 0 {
 				b.WriteString("Groups:\n")
 				for _, gk := range sortedKeys(p.Groups) {
 					fmt.Fprintf(&b, "  %s: ", gk)
-					writePoolValues(&b, p.Groups[gk], 10)
+					writePoolValues(&b, p.Groups[gk], 10, p.Annotations)
 					b.WriteString("\n")
 				}
 			}
@@ -281,11 +281,24 @@ func (kb *KnowledgeBase) FormatTypesForPrompt(names ...string) string {
 }
 
 // writePoolValues writes up to max values, followed by "..." if truncated.
-func writePoolValues(b *strings.Builder, values []string, max int) {
-	if len(values) <= max {
-		b.WriteString(strings.Join(values, ", "))
-	} else {
-		b.WriteString(strings.Join(values[:max], ", "))
+// When annotations are provided, values with annotations are formatted as "VAL (annotation)".
+func writePoolValues(b *strings.Builder, values []string, max int, annotations map[string]string) {
+	n := len(values)
+	if n > max {
+		n = max
+	}
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(values[i])
+		if ann, ok := annotations[values[i]]; ok {
+			b.WriteString(" (")
+			b.WriteString(ann)
+			b.WriteString(")")
+		}
+	}
+	if len(values) > max {
 		b.WriteString(", ...")
 	}
 }

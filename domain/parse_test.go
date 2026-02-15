@@ -218,3 +218,97 @@ func TestMerge_DoesNotMutateOriginal(t *testing.T) {
 	// Original kb1 pool should be unchanged
 	assert.Equal(t, []string{"a"}, kb1.ValuePools["pool1"].Values)
 }
+
+func TestParse_ValuePoolAnnotations(t *testing.T) {
+	kb, err := ParseFile("testdata/valid/annotated.yaml")
+	require.NoError(t, err)
+
+	// Flat values with inline comments
+	ptc := kb.ValuePools["passengerTypeCodes"]
+	require.NotNil(t, ptc)
+	require.NotNil(t, ptc.Annotations)
+	assert.Equal(t, "Adult", ptc.Annotations["ADT"])
+	assert.Equal(t, "Child (2-11)", ptc.Annotations["CNN"])
+	assert.Equal(t, "Infant under 2 (lap)", ptc.Annotations["INF"])
+	assert.Equal(t, "Infant with seat", ptc.Annotations["INS"])
+	assert.Equal(t, "Military", ptc.Annotations["MIL"])
+	assert.Len(t, ptc.Annotations, 8)
+
+	// Grouped values with inline comments
+	ssr := kb.ValuePools["ssrCodes"]
+	require.NotNil(t, ssr)
+	require.NotNil(t, ssr.Annotations)
+	assert.Equal(t, "Wheelchair (ramp)", ssr.Annotations["WCHR"])
+	assert.Equal(t, "Medical case", ssr.Annotations["MEDA"])
+	assert.Len(t, ssr.Annotations, 5)
+}
+
+func TestParse_ValuePoolAnnotations_NoComments(t *testing.T) {
+	kb, err := ParseFile("testdata/valid/annotated.yaml")
+	require.NoError(t, err)
+
+	plain := kb.ValuePools["plainValues"]
+	require.NotNil(t, plain)
+	assert.Nil(t, plain.Annotations)
+}
+
+func TestMerge_CombineAnnotations(t *testing.T) {
+	kb1 := &KnowledgeBase{
+		Concepts: map[string]*Concept{},
+		Types:    map[string]*TypeDef{},
+		ValuePools: map[string]*ValuePool{
+			"pool1": {
+				Name: "pool1", Description: "p1", Type: "string",
+				Values:      []string{"A", "B"},
+				Annotations: map[string]string{"A": "Alpha", "B": "Bravo"},
+			},
+		},
+	}
+	kb2 := &KnowledgeBase{
+		Concepts: map[string]*Concept{},
+		Types:    map[string]*TypeDef{},
+		ValuePools: map[string]*ValuePool{
+			"pool1": {
+				Name: "pool1", Description: "p1", Type: "string",
+				Values:      []string{"C"},
+				Annotations: map[string]string{"B": "Beta", "C": "Charlie"},
+			},
+		},
+	}
+
+	merged := Merge(kb1, kb2)
+	p := merged.ValuePools["pool1"]
+	require.NotNil(t, p)
+	assert.Equal(t, "Alpha", p.Annotations["A"])
+	assert.Equal(t, "Beta", p.Annotations["B"])   // later wins
+	assert.Equal(t, "Charlie", p.Annotations["C"])
+}
+
+func TestMerge_DoesNotMutateOriginalAnnotations(t *testing.T) {
+	kb1 := &KnowledgeBase{
+		Concepts: map[string]*Concept{},
+		Types:    map[string]*TypeDef{},
+		ValuePools: map[string]*ValuePool{
+			"pool1": {
+				Name: "pool1", Description: "p1", Type: "string",
+				Values:      []string{"A"},
+				Annotations: map[string]string{"A": "Alpha"},
+			},
+		},
+	}
+	kb2 := &KnowledgeBase{
+		Concepts: map[string]*Concept{},
+		Types:    map[string]*TypeDef{},
+		ValuePools: map[string]*ValuePool{
+			"pool1": {
+				Name: "pool1", Description: "p1", Type: "string",
+				Values:      []string{"B"},
+				Annotations: map[string]string{"B": "Bravo"},
+			},
+		},
+	}
+
+	Merge(kb1, kb2)
+	// Original kb1 annotations should be unchanged
+	assert.Equal(t, map[string]string{"A": "Alpha"}, kb1.ValuePools["pool1"].Annotations)
+}

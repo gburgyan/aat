@@ -47,4 +47,7 @@ type ValuePool struct {
 	Type        string              `yaml:"type"        json:"type"`
 	Values      []string            `yaml:"values"      json:"values,omitempty"`
 	Groups      map[string][]string `yaml:"groups"      json:"groups,omitempty"`
+	// Annotations maps value → comment text extracted from YAML inline comments.
+	// For example, {"ADT": "Adult", "CNN": "Child (2-11)"}.
+	Annotations map[string]string `yaml:"-" json:"annotations,omitempty"`
 }

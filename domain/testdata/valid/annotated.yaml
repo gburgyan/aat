@@ -1,0 +1,39 @@
+concepts:
+  passengerTypes:
+    description: "Common passenger type categories"
+    applies_to: [passengerTypeCode]
+    constraint: "must use valid ATPCO passenger type code"
+
+valuePools:
+  passengerTypeCodes:
+    description: "Common passenger type identifiers"
+    type: string
+    values:
+      - ADT  # Adult
+      - CNN  # Child (2-11)
+      - INF  # Infant under 2 (lap)
+      - INS  # Infant with seat
+      - UNN  # Unaccompanied minor
+      - MIL  # Military
+      - SRC  # Senior citizen
+      - STU  # Student
+
+  ssrCodes:
+    description: "Special service request codes"
+    type: string
+    groups:
+      mobility:
+        - WCHR  # Wheelchair (ramp)
+        - WCHS  # Wheelchair (steps)
+        - WCHC  # Wheelchair (carry)
+      medical:
+        - MEDA  # Medical case
+        - OXYG  # Supplemental oxygen
+
+  plainValues:
+    description: "A pool with no annotations"
+    type: string
+    values:
+      - alpha
+      - beta
+      - gamma

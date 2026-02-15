@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -35,6 +36,8 @@ func Parse(data []byte) (*KnowledgeBase, error) {
 		p.Name = name
 	}
 
+	extractValueAnnotations(data, &kb)
+
 	if err := Validate(&kb); err != nil {
 		return nil, err
 	}
@@ -49,6 +52,86 @@ func ParseFile(path string) (*KnowledgeBase, error) {
 		return nil, fmt.Errorf("reading domain file: %w", err)
 	}
 	return Parse(data)
+}
+
+// extractValueAnnotations does a second YAML parse using yaml.Node to capture
+// inline comments (LineComment) from value pool entries, storing them as
+// annotations on the corresponding ValuePool.
+func extractValueAnnotations(data []byte, kb *KnowledgeBase) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(data, &root); err != nil {
+		return
+	}
+	if root.Kind != yaml.DocumentNode || len(root.Content) == 0 {
+		return
+	}
+	doc := root.Content[0]
+	if doc.Kind != yaml.MappingNode {
+		return
+	}
+
+	// Find the "valuePools" key in the top-level mapping.
+	var poolsNode *yaml.Node
+	for i := 0; i+1 < len(doc.Content); i += 2 {
+		if doc.Content[i].Value == "valuePools" {
+			poolsNode = doc.Content[i+1]
+			break
+		}
+	}
+	if poolsNode == nil || poolsNode.Kind != yaml.MappingNode {
+		return
+	}
+
+	// Iterate each pool: key=poolName, value=pool mapping
+	for i := 0; i+1 < len(poolsNode.Content); i += 2 {
+		poolName := poolsNode.Content[i].Value
+		poolNode := poolsNode.Content[i+1]
+		if poolNode.Kind != yaml.MappingNode {
+			continue
+		}
+		pool := kb.ValuePools[poolName]
+		if pool == nil {
+			continue
+		}
+
+		for j := 0; j+1 < len(poolNode.Content); j += 2 {
+			key := poolNode.Content[j].Value
+			valNode := poolNode.Content[j+1]
+
+			switch key {
+			case "values":
+				extractSequenceAnnotations(valNode, pool)
+			case "groups":
+				if valNode.Kind != yaml.MappingNode {
+					continue
+				}
+				for k := 0; k+1 < len(valNode.Content); k += 2 {
+					extractSequenceAnnotations(valNode.Content[k+1], pool)
+				}
+			}
+		}
+	}
+}
+
+// extractSequenceAnnotations extracts LineComment annotations from scalar items
+// in a YAML sequence node and stores them in pool.Annotations.
+func extractSequenceAnnotations(seqNode *yaml.Node, pool *ValuePool) {
+	if seqNode.Kind != yaml.SequenceNode {
+		return
+	}
+	for _, item := range seqNode.Content {
+		if item.Kind != yaml.ScalarNode || item.LineComment == "" {
+			continue
+		}
+		comment := strings.TrimSpace(strings.TrimLeft(item.LineComment, "#"))
+		if comment == "" {
+			continue
+		}
+		if pool.Annotations == nil {
+			pool.Annotations = make(map[string]string)
+		}
+		pool.Annotations[item.Value] = comment
+	}
 }
 
 // Merge combines multiple KnowledgeBases into one. For concepts and types,
@@ -85,6 +168,12 @@ func Merge(bases ...*KnowledgeBase) *KnowledgeBase {
 						merged.Groups[k] = append([]string(nil), v...)
 					}
 				}
+				if p.Annotations != nil {
+					merged.Annotations = make(map[string]string, len(p.Annotations))
+					for k, v := range p.Annotations {
+						merged.Annotations[k] = v
+					}
+				}
 				result.ValuePools[name] = &merged
 			} else {
 				// Merge additively
@@ -95,6 +184,14 @@ func Merge(bases ...*KnowledgeBase) *KnowledgeBase {
 					}
 					for k, v := range p.Groups {
 						existing.Groups[k] = append(existing.Groups[k], v...)
+					}
+				}
+				if p.Annotations != nil {
+					if existing.Annotations == nil {
+						existing.Annotations = make(map[string]string)
+					}
+					for k, v := range p.Annotations {
+						existing.Annotations[k] = v
 					}
 				}
 			}

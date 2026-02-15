@@ -260,3 +260,40 @@ func TestFormatForPrompt_CompositeTypeFields(t *testing.T) {
 	assert.Contains(t, output, "Fields:")
 	assert.Contains(t, output, "given (string)")
 }
+
+func TestFormatForPrompt_AnnotatedValues(t *testing.T) {
+	kb, err := ParseFile("testdata/valid/annotated.yaml")
+	require.NoError(t, err)
+
+	output := kb.FormatForPrompt()
+
+	// Flat values with annotations
+	assert.Contains(t, output, "ADT (Adult)")
+	assert.Contains(t, output, "CNN (Child (2-11))")
+	assert.Contains(t, output, "INF (Infant under 2 (lap))")
+
+	// Grouped values with annotations
+	assert.Contains(t, output, "WCHR (Wheelchair (ramp))")
+	assert.Contains(t, output, "MEDA (Medical case)")
+
+	// Plain values without annotations (no parenthetical)
+	assert.Contains(t, output, "alpha")
+	assert.NotContains(t, output, "alpha (")
+}
+
+func TestFormatForPrompt_AnnotationsNil(t *testing.T) {
+	// Ensure no panic or change when annotations are nil
+	kb := &KnowledgeBase{
+		ValuePools: map[string]*ValuePool{
+			"test": {
+				Name:        "test",
+				Description: "test pool",
+				Type:        "string",
+				Values:      []string{"X", "Y"},
+			},
+		},
+	}
+	output := kb.FormatForPrompt()
+	assert.Contains(t, output, "Values: X, Y")
+	assert.NotContains(t, output, "X (")
+}
