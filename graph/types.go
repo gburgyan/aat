@@ -3,17 +3,98 @@ package graph
 import (
 	"fmt"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
+
+// AutoWireMode controls how auto-wiring generates edges in a graph.
+type AutoWireMode string
+
+const (
+	// AutoWireOff disables auto-wiring (default).
+	AutoWireOff AutoWireMode = ""
+	// AutoWireSources only wires from source nodes — nodes that produce a field
+	// without also consuming it. Pass-through nodes are skipped as producers.
+	AutoWireSources AutoWireMode = "sources"
+	// AutoWireAll creates edges for every matching output→input pair (full Cartesian product).
+	AutoWireAll AutoWireMode = "all"
+)
+
+// IsEnabled returns true if auto-wiring is active (sources or all).
+func (m AutoWireMode) IsEnabled() bool {
+	return m == AutoWireSources || m == AutoWireAll
+}
+
+// UnmarshalYAML handles bool and string values for AutoWireMode.
+// YAML true maps to AutoWireSources, false maps to AutoWireOff.
+// String values "sources" and "all" are accepted directly.
+func (m *AutoWireMode) UnmarshalYAML(value *yaml.Node) error {
+	// Try bool first (YAML true/false)
+	var b bool
+	if err := value.Decode(&b); err == nil {
+		if b {
+			*m = AutoWireSources
+		} else {
+			*m = AutoWireOff
+		}
+		return nil
+	}
+	// Try string
+	var s string
+	if err := value.Decode(&s); err != nil {
+		return fmt.Errorf("autoWire must be a boolean or string (\"sources\", \"all\"): %w", err)
+	}
+	switch s {
+	case "sources":
+		*m = AutoWireSources
+	case "all":
+		*m = AutoWireAll
+	case "":
+		*m = AutoWireOff
+	default:
+		return fmt.Errorf("invalid autoWire value %q: must be true, false, \"sources\", or \"all\"", s)
+	}
+	return nil
+}
+
+// MarshalYAML serializes AutoWireMode. Sources mode is written as true
+// for backward compatibility; all mode is written as "all".
+func (m AutoWireMode) MarshalYAML() (interface{}, error) {
+	switch m {
+	case AutoWireSources:
+		return true, nil
+	case AutoWireAll:
+		return "all", nil
+	default:
+		return false, nil
+	}
+}
 
 // Graph is the top-level API graph model parsed from YAML.
 // It describes the logical operations (nodes), data flow (edges),
 // and conditional requirements (conditions) for an API workflow.
 type Graph struct {
-	Version    string           `yaml:"version"`
-	OAS        string           `yaml:"oas,omitempty"`
-	Nodes      map[string]*Node `yaml:"nodes"`
-	Edges      []Edge           `yaml:"edges"`
-	Conditions []Condition      `yaml:"conditions,omitempty"`
+	Version     string           `yaml:"version"`
+	Title       string           `yaml:"title,omitempty"`
+	Description string           `yaml:"description,omitempty"`
+	AutoWire    AutoWireMode     `yaml:"autoWire,omitempty"`
+	Workflows   []Workflow       `yaml:"workflows,omitempty"`
+	Notes       string           `yaml:"notes,omitempty"`
+	OAS         string           `yaml:"oas,omitempty"`
+	Nodes       map[string]*Node `yaml:"nodes"`
+	Edges       []Edge           `yaml:"edges"`
+	Conditions  []Condition      `yaml:"conditions,omitempty"`
+
+	// Computed indices (not serialized). Built by BuildEdgeIndex().
+	edgesByTarget map[string][]int `yaml:"-"` // "node.input" → edge indices
+	edgesBySource map[string][]int `yaml:"-"` // "node.output" → edge indices
+}
+
+// Workflow describes a named workflow (sequence of operations) within the graph.
+type Workflow struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description,omitempty"`
+	Steps       []string `yaml:"steps,omitempty"`
 }
 
 // Node represents a single logical API operation in the graph.
@@ -21,6 +102,7 @@ type Node struct {
 	Name         string   // populated from map key during parsing, not from YAML
 	Description  string   `yaml:"description"`
 	Adapter      string   `yaml:"adapter"`
+	Tags         []string `yaml:"tags,omitempty"`
 	Inputs       []Input  `yaml:"inputs"`
 	Outputs      []Output `yaml:"outputs"`
 	Cleanup      string   `yaml:"cleanup,omitempty"`
@@ -36,12 +118,23 @@ type OASRef struct {
 
 // Input describes a single input parameter for a node.
 type Input struct {
-	Name        string `yaml:"name"`
-	Type        string `yaml:"type"`
-	Description string `yaml:"description,omitempty"`
-	Optional    bool   `yaml:"optional,omitempty"`
-	Default     any    `yaml:"default,omitempty"`
-	Source      string `yaml:"source,omitempty"`
+	Name        string      `yaml:"name"`
+	Type        string      `yaml:"type"`
+	Description string      `yaml:"description,omitempty"`
+	Optional    bool        `yaml:"optional,omitempty"`
+	Default     any         `yaml:"default,omitempty"`
+	NoAutoWire  bool        `yaml:"noAutoWire,omitempty"`
+	Constraints *Constraint `yaml:"constraints,omitempty"`
+}
+
+// Constraint captures validation rules for an input value.
+type Constraint struct {
+	Min         *float64 `yaml:"min,omitempty"`
+	Max         *float64 `yaml:"max,omitempty"`
+	MinLength   *int     `yaml:"minLength,omitempty"`
+	MaxLength   *int     `yaml:"maxLength,omitempty"`
+	Pattern     string   `yaml:"pattern,omitempty"`
+	Description string   `yaml:"description,omitempty"`
 }
 
 // Output describes a single output value produced by a node.
@@ -74,6 +167,7 @@ type Edge struct {
 	To        string `yaml:"to"`
 	Select    bool   `yaml:"select,omitempty"`
 	Preferred bool   `yaml:"preferred,omitempty"`
+	AutoWired bool   `yaml:"-"` // true if generated by auto-wire
 }
 
 // Condition describes a conditional requirement or ordering constraint.
@@ -81,6 +175,42 @@ type Condition struct {
 	When    string   `yaml:"when"`
 	Require []string `yaml:"require,omitempty"`
 	Before  []string `yaml:"before,omitempty"`
+}
+
+// BuildEdgeIndex populates the computed edge indices for fast lookup.
+func (g *Graph) BuildEdgeIndex() {
+	g.edgesByTarget = make(map[string][]int, len(g.Edges))
+	g.edgesBySource = make(map[string][]int, len(g.Edges))
+	for i, edge := range g.Edges {
+		g.edgesByTarget[edge.To] = append(g.edgesByTarget[edge.To], i)
+		g.edgesBySource[edge.From] = append(g.edgesBySource[edge.From], i)
+	}
+}
+
+// EdgesTo returns all edges targeting the given ref ("node.input").
+func (g *Graph) EdgesTo(ref string) []Edge {
+	if g.edgesByTarget == nil {
+		return nil
+	}
+	indices := g.edgesByTarget[ref]
+	edges := make([]Edge, len(indices))
+	for i, idx := range indices {
+		edges[i] = g.Edges[idx]
+	}
+	return edges
+}
+
+// EdgesFrom returns all edges sourced from the given ref ("node.output").
+func (g *Graph) EdgesFrom(ref string) []Edge {
+	if g.edgesBySource == nil {
+		return nil
+	}
+	indices := g.edgesBySource[ref]
+	edges := make([]Edge, len(indices))
+	for i, idx := range indices {
+		edges[i] = g.Edges[idx]
+	}
+	return edges
 }
 
 // TypeKind classifies a field type.

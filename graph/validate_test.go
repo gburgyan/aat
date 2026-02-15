@@ -275,3 +275,252 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+func TestValidateWarnings_ValidWorkflowSteps(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{Name: "test", Steps: []string{"n1", "n2"}},
+		},
+		Nodes: map[string]*Node{
+			"n1": {Name: "n1", Adapter: "a"},
+			"n2": {Name: "n2", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	assert.Empty(t, warnings)
+}
+
+func TestValidateWarnings_UnknownWorkflowStep(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{Name: "test", Steps: []string{"n1", "missing"}},
+		},
+		Nodes: map[string]*Node{
+			"n1": {Name: "n1", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0], "missing")
+	assert.Contains(t, warnings[0], "unknown node")
+}
+
+func TestValidateWarnings_NoWorkflows(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*Node{},
+	}
+	warnings := ValidateWarnings(g)
+	assert.Empty(t, warnings)
+}
+
+func TestValidateWarnings_EmptySteps(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{Name: "test"},
+		},
+		Nodes: map[string]*Node{},
+	}
+	warnings := ValidateWarnings(g)
+	assert.Empty(t, warnings)
+}
+
+// --- Constraint validation ---
+
+func TestValidate_ConstraintBadPattern(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				Inputs: []Input{
+					{Name: "x", Type: "string", Constraints: &Constraint{Pattern: "[invalid"}},
+				},
+				Outputs: []Output{{Name: "y", Type: "string"}},
+			},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "invalid constraint pattern")
+}
+
+func TestValidate_ConstraintMinGtMax(t *testing.T) {
+	min, max := 10.0, 5.0
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				Inputs: []Input{
+					{Name: "x", Type: "integer", Constraints: &Constraint{Min: &min, Max: &max}},
+				},
+				Outputs: []Output{{Name: "y", Type: "string"}},
+			},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "min (10) > max (5)")
+}
+
+func TestValidate_ConstraintMinLengthGtMaxLength(t *testing.T) {
+	minLen, maxLen := 10, 3
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				Inputs: []Input{
+					{Name: "x", Type: "string", Constraints: &Constraint{MinLength: &minLen, MaxLength: &maxLen}},
+				},
+				Outputs: []Output{{Name: "y", Type: "string"}},
+			},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "minLength (10) > maxLength (3)")
+}
+
+func TestValidate_ConstraintValid(t *testing.T) {
+	min, max := 1.0, 100.0
+	minLen, maxLen := 3, 3
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				Inputs: []Input{
+					{Name: "code", Type: "string", Constraints: &Constraint{
+						MinLength: &minLen, MaxLength: &maxLen,
+						Pattern:     "^[A-Z]{3}$",
+						Description: "IATA airport code",
+					}},
+					{Name: "count", Type: "integer", Constraints: &Constraint{
+						Min: &min, Max: &max,
+					}},
+				},
+				Outputs: []Output{{Name: "y", Type: "string"}},
+			},
+		},
+	}
+	err := Validate(g)
+	assert.NoError(t, err)
+}
+
+// --- elementField path validation ---
+
+func TestValidate_ElementFieldPathTrailingDot(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				Outputs: []Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []Field{
+							{Name: "id", Type: "string", Path: "data.id."},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "trailing dot")
+}
+
+func TestValidate_ElementFieldPathEmptySegment(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				Outputs: []Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []Field{
+							{Name: "id", Type: "string", Path: "data..id"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "empty segment")
+}
+
+func TestValidate_ElementFieldPathValid(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				Outputs: []Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []Field{
+							{Name: "ref", Type: "string", Path: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"},
+						},
+					},
+				},
+			},
+		},
+	}
+	err := Validate(g)
+	assert.NoError(t, err)
+}
+
+// --- Edge index ---
+
+func TestBuildEdgeIndex(t *testing.T) {
+	g := &Graph{
+		Edges: []Edge{
+			{From: "a.x", To: "b.y"},
+			{From: "a.x", To: "c.y"},
+			{From: "b.z", To: "c.w"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	// EdgesTo
+	toB := g.EdgesTo("b.y")
+	require.Len(t, toB, 1)
+	assert.Equal(t, "a.x", toB[0].From)
+
+	toC := g.EdgesTo("c.y")
+	require.Len(t, toC, 1)
+	assert.Equal(t, "a.x", toC[0].From)
+
+	toCw := g.EdgesTo("c.w")
+	require.Len(t, toCw, 1)
+	assert.Equal(t, "b.z", toCw[0].From)
+
+	// EdgesFrom
+	fromA := g.EdgesFrom("a.x")
+	require.Len(t, fromA, 2)
+
+	fromB := g.EdgesFrom("b.z")
+	require.Len(t, fromB, 1)
+
+	// No results
+	assert.Empty(t, g.EdgesTo("nonexistent.ref"))
+	assert.Empty(t, g.EdgesFrom("nonexistent.ref"))
+}
+
+func TestEdgeIndex_NilIndex(t *testing.T) {
+	g := &Graph{}
+	assert.Empty(t, g.EdgesTo("a.b"))
+	assert.Empty(t, g.EdgesFrom("a.b"))
+}

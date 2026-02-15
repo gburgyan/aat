@@ -2,7 +2,9 @@ package graph
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 )
 
 // ValidationError collects all structural validation errors for a graph.
@@ -48,6 +50,21 @@ func Validate(g *Graph) error {
 			} else if _, err := ParseFieldType(inp.Type); err != nil {
 				errs = append(errs, fmt.Sprintf("node %q: input %q: invalid type %q: %v", name, inp.Name, inp.Type, err))
 			}
+			// Constraint validation
+			if inp.Constraints != nil {
+				c := inp.Constraints
+				if c.Pattern != "" {
+					if _, err := regexp.Compile(c.Pattern); err != nil {
+						errs = append(errs, fmt.Sprintf("node %q: input %q: invalid constraint pattern %q: %v", name, inp.Name, c.Pattern, err))
+					}
+				}
+				if c.Min != nil && c.Max != nil && *c.Min > *c.Max {
+					errs = append(errs, fmt.Sprintf("node %q: input %q: constraint min (%v) > max (%v)", name, inp.Name, *c.Min, *c.Max))
+				}
+				if c.MinLength != nil && c.MaxLength != nil && *c.MinLength > *c.MaxLength {
+					errs = append(errs, fmt.Sprintf("node %q: input %q: constraint minLength (%d) > maxLength (%d)", name, inp.Name, *c.MinLength, *c.MaxLength))
+				}
+			}
 			if inputNames[inp.Name] {
 				errs = append(errs, fmt.Sprintf("node %q: duplicate input name %q", name, inp.Name))
 			}
@@ -82,6 +99,11 @@ func Validate(g *Graph) error {
 							errs = append(errs, fmt.Sprintf("node %q: output %q: elementField %q missing type", name, out.Name, ef.Name))
 						} else if _, err := ParseFieldType(ef.Type); err != nil {
 							errs = append(errs, fmt.Sprintf("node %q: output %q: elementField %q: invalid type %q: %v", name, out.Name, ef.Name, ef.Type, err))
+						}
+						if ef.Path != "" {
+							if msg := validateGjsonPath(ef.Path); msg != "" {
+								errs = append(errs, fmt.Sprintf("node %q: output %q: elementField %q: invalid path %q: %s", name, out.Name, ef.Name, ef.Path, msg))
+							}
 						}
 					}
 				}
@@ -183,6 +205,77 @@ func Validate(g *Graph) error {
 		return &ValidationError{Errors: errs}
 	}
 	return nil
+}
+
+// ValidateWarnings returns non-fatal warnings about the graph.
+// These do not prevent the graph from being used, but may indicate
+// configuration issues (e.g., workflow steps referencing unknown nodes,
+// auto-wired edges with type mismatches).
+func ValidateWarnings(g *Graph) []string {
+	var warnings []string
+
+	for i, wf := range g.Workflows {
+		for _, step := range wf.Steps {
+			if g.Nodes[step] == nil {
+				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): step %q references unknown node", i, wf.Name, step))
+			}
+		}
+	}
+
+	// Warn on auto-wired edges where output type != input type
+	if g.AutoWire.IsEnabled() {
+		// Build input type index
+		inputTypes := make(map[string]string) // "node.input" → type
+		for name, node := range g.Nodes {
+			for _, inp := range node.Inputs {
+				if inp.Name != "" && inp.Type != "" {
+					inputTypes[name+"."+inp.Name] = inp.Type
+				}
+			}
+		}
+		for _, edge := range g.Edges {
+			if !edge.AutoWired {
+				continue
+			}
+			fromNode, fromField, err1 := splitRef(edge.From)
+			if err1 != nil {
+				continue
+			}
+			// Find source output type
+			var outType string
+			if node := g.Nodes[fromNode]; node != nil {
+				for _, out := range node.Outputs {
+					if out.Name == fromField {
+						outType = out.Type
+						break
+					}
+				}
+			}
+			inType := inputTypes[edge.To]
+			if outType != "" && inType != "" && outType != inType {
+				warnings = append(warnings, fmt.Sprintf("auto-wired edge %s → %s: type mismatch (output %q, input %q)", edge.From, edge.To, outType, inType))
+			}
+		}
+	}
+
+	return warnings
+}
+
+// validateGjsonPath performs basic plausibility checks on a gjson path.
+// Returns an error message if the path looks wrong, or empty string if OK.
+func validateGjsonPath(path string) string {
+	if strings.HasSuffix(path, ".") {
+		return "trailing dot"
+	}
+	if strings.Contains(path, "..") {
+		return "empty segment (consecutive dots)"
+	}
+	for _, r := range path {
+		if !unicode.IsPrint(r) {
+			return "contains non-printable character"
+		}
+	}
+	return ""
 }
 
 // detectCycles uses DFS with three-color marking to detect cycles

@@ -63,7 +63,6 @@ func TestParse_TravelFlow(t *testing.T) {
 	// selectFare node
 	sel := g.Nodes["selectFare"]
 	require.NotNil(t, sel)
-	assert.Equal(t, "searchFlights.searchId", sel.Inputs[0].Source)
 
 	// Edges
 	assert.Len(t, g.Edges, 2)
@@ -372,6 +371,84 @@ func TestParse_WithoutOASFields(t *testing.T) {
 	node := g.Nodes["getUser"]
 	require.NotNil(t, node)
 	assert.Nil(t, node.OAS)
+}
+
+func TestParse_WithConstraints(t *testing.T) {
+	data := []byte(`
+version: "1.0.0"
+nodes:
+  search:
+    description: "Search"
+    adapter: search
+    inputs:
+      - name: origin
+        type: string
+        constraints:
+          minLength: 3
+          maxLength: 3
+          pattern: "^[A-Z]{3}$"
+          description: "IATA airport code"
+      - name: count
+        type: integer
+        constraints:
+          min: 1
+          max: 100
+    outputs:
+      - name: results
+        type: string
+edges: []
+`)
+	g, err := Parse(data)
+	require.NoError(t, err)
+
+	origin := g.Nodes["search"].Inputs[0]
+	require.NotNil(t, origin.Constraints)
+	assert.Equal(t, 3, *origin.Constraints.MinLength)
+	assert.Equal(t, 3, *origin.Constraints.MaxLength)
+	assert.Equal(t, "^[A-Z]{3}$", origin.Constraints.Pattern)
+	assert.Equal(t, "IATA airport code", origin.Constraints.Description)
+
+	count := g.Nodes["search"].Inputs[1]
+	require.NotNil(t, count.Constraints)
+	assert.Equal(t, 1.0, *count.Constraints.Min)
+	assert.Equal(t, 100.0, *count.Constraints.Max)
+}
+
+func TestParse_WithAutoWire(t *testing.T) {
+	data := []byte(`
+version: "1.0.0"
+autoWire: true
+nodes:
+  producer:
+    description: "Produces token"
+    adapter: producer
+    outputs:
+      - name: token
+        type: string
+  consumer:
+    description: "Consumes token"
+    adapter: consumer
+    inputs:
+      - name: token
+        type: string
+    outputs:
+      - name: result
+        type: string
+edges: []
+`)
+	g, err := Parse(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, AutoWireSources, g.AutoWire)
+	require.Len(t, g.Edges, 1)
+	assert.Equal(t, "producer.token", g.Edges[0].From)
+	assert.Equal(t, "consumer.token", g.Edges[0].To)
+	assert.True(t, g.Edges[0].AutoWired)
+
+	// Edge index should be populated
+	edges := g.EdgesTo("consumer.token")
+	require.Len(t, edges, 1)
+	assert.Equal(t, "producer.token", edges[0].From)
 }
 
 func TestSplitRef(t *testing.T) {
