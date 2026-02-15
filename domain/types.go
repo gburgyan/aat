@@ -50,4 +50,7 @@ type ValuePool struct {
 	// Annotations maps value → comment text extracted from YAML inline comments.
 	// For example, {"ADT": "Adult", "CNN": "Child (2-11)"}.
 	Annotations map[string]string `yaml:"-" json:"annotations,omitempty"`
+	// SectionLabels maps the first value of a section → section label text
+	// extracted from YAML head comments. For example, {"JFK": "Major US hubs"}.
+	SectionLabels map[string]string `yaml:"-" json:"sectionLabels,omitempty"`
 }

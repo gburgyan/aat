@@ -113,24 +113,43 @@ func extractValueAnnotations(data []byte, kb *KnowledgeBase) {
 	}
 }
 
-// extractSequenceAnnotations extracts LineComment annotations from scalar items
-// in a YAML sequence node and stores them in pool.Annotations.
+// extractSequenceAnnotations extracts LineComment annotations and HeadComment
+// section labels from scalar items in a YAML sequence node. LineComment values
+// are stored in pool.Annotations; HeadComment values mark section boundaries
+// and the first value in each section is stored in pool.SectionLabels.
 func extractSequenceAnnotations(seqNode *yaml.Node, pool *ValuePool) {
 	if seqNode.Kind != yaml.SequenceNode {
 		return
 	}
+	var currentSection string
 	for _, item := range seqNode.Content {
-		if item.Kind != yaml.ScalarNode || item.LineComment == "" {
+		if item.Kind != yaml.ScalarNode {
 			continue
 		}
-		comment := strings.TrimSpace(strings.TrimLeft(item.LineComment, "#"))
-		if comment == "" {
-			continue
+
+		// HeadComment: standalone comment line(s) above this value
+		if item.HeadComment != "" {
+			section := strings.TrimSpace(strings.TrimLeft(item.HeadComment, "#"))
+			if section != "" {
+				currentSection = section
+				if pool.SectionLabels == nil {
+					pool.SectionLabels = make(map[string]string)
+				}
+				pool.SectionLabels[item.Value] = currentSection
+				currentSection = "" // consumed by first value
+			}
 		}
-		if pool.Annotations == nil {
-			pool.Annotations = make(map[string]string)
+
+		// LineComment: inline comment on same line
+		if item.LineComment != "" {
+			comment := strings.TrimSpace(strings.TrimLeft(item.LineComment, "#"))
+			if comment != "" {
+				if pool.Annotations == nil {
+					pool.Annotations = make(map[string]string)
+				}
+				pool.Annotations[item.Value] = comment
+			}
 		}
-		pool.Annotations[item.Value] = comment
 	}
 }
 
@@ -174,6 +193,12 @@ func Merge(bases ...*KnowledgeBase) *KnowledgeBase {
 						merged.Annotations[k] = v
 					}
 				}
+				if p.SectionLabels != nil {
+					merged.SectionLabels = make(map[string]string, len(p.SectionLabels))
+					for k, v := range p.SectionLabels {
+						merged.SectionLabels[k] = v
+					}
+				}
 				result.ValuePools[name] = &merged
 			} else {
 				// Merge additively
@@ -192,6 +217,14 @@ func Merge(bases ...*KnowledgeBase) *KnowledgeBase {
 					}
 					for k, v := range p.Annotations {
 						existing.Annotations[k] = v
+					}
+				}
+				if p.SectionLabels != nil {
+					if existing.SectionLabels == nil {
+						existing.SectionLabels = make(map[string]string)
+					}
+					for k, v := range p.SectionLabels {
+						existing.SectionLabels[k] = v
 					}
 				}
 			}

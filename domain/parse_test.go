@@ -284,6 +284,89 @@ func TestMerge_CombineAnnotations(t *testing.T) {
 	assert.Equal(t, "Charlie", p.Annotations["C"])
 }
 
+func TestParse_ValuePoolSectionLabels(t *testing.T) {
+	kb, err := ParseFile("testdata/valid/annotated.yaml")
+	require.NoError(t, err)
+
+	// Head comments only
+	ap := kb.ValuePools["airportCodes"]
+	require.NotNil(t, ap)
+	require.NotNil(t, ap.SectionLabels)
+	assert.Equal(t, "Major US hubs", ap.SectionLabels["JFK"])
+	assert.Equal(t, "Major international", ap.SectionLabels["LHR"])
+	assert.Len(t, ap.SectionLabels, 2)
+	// No line comment annotations expected
+	assert.Nil(t, ap.Annotations)
+}
+
+func TestParse_ValuePoolSectionLabels_Mixed(t *testing.T) {
+	kb, err := ParseFile("testdata/valid/annotated.yaml")
+	require.NoError(t, err)
+
+	mp := kb.ValuePools["mixedPool"]
+	require.NotNil(t, mp)
+
+	// Section labels from head comments
+	require.NotNil(t, mp.SectionLabels)
+	assert.Equal(t, "Domestic", mp.SectionLabels["JFK"])
+	assert.Equal(t, "International", mp.SectionLabels["LHR"])
+	assert.Len(t, mp.SectionLabels, 2)
+
+	// Annotations from line comments
+	require.NotNil(t, mp.Annotations)
+	assert.Equal(t, "New York", mp.Annotations["JFK"])
+	assert.Equal(t, "Los Angeles", mp.Annotations["LAX"])
+	assert.Equal(t, "London Heathrow", mp.Annotations["LHR"])
+	assert.Equal(t, "Tokyo Narita", mp.Annotations["NRT"])
+	assert.Len(t, mp.Annotations, 4)
+}
+
+func TestParse_ValuePoolSectionLabels_NoHeadComments(t *testing.T) {
+	kb, err := ParseFile("testdata/valid/annotated.yaml")
+	require.NoError(t, err)
+
+	// Pool with only line comments should have no section labels
+	ptc := kb.ValuePools["passengerTypeCodes"]
+	require.NotNil(t, ptc)
+	assert.Nil(t, ptc.SectionLabels)
+
+	// Pool with no comments at all
+	plain := kb.ValuePools["plainValues"]
+	require.NotNil(t, plain)
+	assert.Nil(t, plain.SectionLabels)
+}
+
+func TestMerge_CombineSectionLabels(t *testing.T) {
+	kb1 := &KnowledgeBase{
+		Concepts: map[string]*Concept{},
+		Types:    map[string]*TypeDef{},
+		ValuePools: map[string]*ValuePool{
+			"pool1": {
+				Name: "pool1", Description: "p1", Type: "string",
+				Values:        []string{"A", "B"},
+				SectionLabels: map[string]string{"A": "First section"},
+			},
+		},
+	}
+	kb2 := &KnowledgeBase{
+		Concepts: map[string]*Concept{},
+		Types:    map[string]*TypeDef{},
+		ValuePools: map[string]*ValuePool{
+			"pool1": {
+				Name: "pool1", Description: "p1", Type: "string",
+				Values:        []string{"C"},
+				SectionLabels: map[string]string{"A": "Overridden", "C": "Second section"},
+			},
+		},
+	}
+
+	merged := Merge(kb1, kb2)
+	p := merged.ValuePools["pool1"]
+	require.NotNil(t, p)
+	assert.Equal(t, "Overridden", p.SectionLabels["A"])   // later wins
+	assert.Equal(t, "Second section", p.SectionLabels["C"])
+}
+
 func TestMerge_DoesNotMutateOriginalAnnotations(t *testing.T) {
 	kb1 := &KnowledgeBase{
 		Concepts: map[string]*Concept{},

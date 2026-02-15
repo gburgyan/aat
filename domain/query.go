@@ -181,14 +181,14 @@ func (kb *KnowledgeBase) FormatForPrompt() string {
 			fmt.Fprintf(&b, "Type: %s\n", p.Type)
 			if len(p.Values) > 0 {
 				b.WriteString("Values: ")
-				writePoolValues(&b, p.Values, 10, p.Annotations)
+				writePoolValues(&b, p.Values, 10, p.Annotations, p.SectionLabels)
 				b.WriteString("\n")
 			}
 			if len(p.Groups) > 0 {
 				b.WriteString("Groups:\n")
 				for _, gk := range sortedKeys(p.Groups) {
 					fmt.Fprintf(&b, "  %s: ", gk)
-					writePoolValues(&b, p.Groups[gk], 10, p.Annotations)
+					writePoolValues(&b, p.Groups[gk], 10, p.Annotations, p.SectionLabels)
 					b.WriteString("\n")
 				}
 			}
@@ -282,13 +282,22 @@ func (kb *KnowledgeBase) FormatTypesForPrompt(names ...string) string {
 
 // writePoolValues writes up to max values, followed by "..." if truncated.
 // When annotations are provided, values with annotations are formatted as "VAL (annotation)".
-func writePoolValues(b *strings.Builder, values []string, max int, annotations map[string]string) {
+// When sectionLabels are provided, values that start a section are prefixed with "[Label] ".
+// Sections are separated by "; " for visual clarity.
+func writePoolValues(b *strings.Builder, values []string, max int, annotations, sectionLabels map[string]string) {
 	n := len(values)
 	if n > max {
 		n = max
 	}
 	for i := 0; i < n; i++ {
-		if i > 0 {
+		if label, ok := sectionLabels[values[i]]; ok {
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			b.WriteString("[")
+			b.WriteString(label)
+			b.WriteString("] ")
+		} else if i > 0 {
 			b.WriteString(", ")
 		}
 		b.WriteString(values[i])

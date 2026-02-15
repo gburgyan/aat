@@ -281,6 +281,73 @@ func TestFormatForPrompt_AnnotatedValues(t *testing.T) {
 	assert.NotContains(t, output, "alpha (")
 }
 
+func TestFormatForPrompt_SectionLabels(t *testing.T) {
+	kb := &KnowledgeBase{
+		ValuePools: map[string]*ValuePool{
+			"airports": {
+				Name:          "airports",
+				Description:   "Airport codes",
+				Type:          "string",
+				Values:        []string{"JFK", "LAX", "ORD", "LHR", "CDG", "NRT"},
+				SectionLabels: map[string]string{"JFK": "Major US hubs", "LHR": "Major international"},
+			},
+		},
+	}
+	output := kb.FormatForPrompt()
+	assert.Contains(t, output, "[Major US hubs] JFK, LAX, ORD; [Major international] LHR, CDG, NRT")
+}
+
+func TestFormatForPrompt_SectionLabels_Truncation(t *testing.T) {
+	// Verify truncation still works with section labels
+	values := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"}
+	kb := &KnowledgeBase{
+		ValuePools: map[string]*ValuePool{
+			"test": {
+				Name:          "test",
+				Description:   "test pool",
+				Type:          "string",
+				Values:        values,
+				SectionLabels: map[string]string{"A": "First", "G": "Second"},
+			},
+		},
+	}
+	output := kb.FormatForPrompt()
+	// Only first 10 shown, then "..."
+	assert.Contains(t, output, "[First] A")
+	assert.Contains(t, output, "[Second] G")
+	assert.Contains(t, output, ", ...")
+}
+
+func TestFormatForPrompt_MixedAnnotationsAndSections(t *testing.T) {
+	kb := &KnowledgeBase{
+		ValuePools: map[string]*ValuePool{
+			"mixed": {
+				Name:        "mixed",
+				Description: "Mixed pool",
+				Type:        "string",
+				Values:      []string{"JFK", "LAX", "ORD", "LHR", "CDG"},
+				Annotations:   map[string]string{"LAX": "Los Angeles", "LHR": "London Heathrow"},
+				SectionLabels: map[string]string{"JFK": "US hubs", "LHR": "International"},
+			},
+		},
+	}
+	output := kb.FormatForPrompt()
+	assert.Contains(t, output, "[US hubs] JFK, LAX (Los Angeles), ORD; [International] LHR (London Heathrow), CDG")
+}
+
+func TestFormatForPrompt_SectionLabelsFromFixture(t *testing.T) {
+	kb, err := ParseFile("testdata/valid/annotated.yaml")
+	require.NoError(t, err)
+
+	output := kb.FormatForPrompt()
+
+	// airportCodes pool: head comments only
+	assert.Contains(t, output, "[Major US hubs] JFK, LAX, ORD; [Major international] LHR, CDG, NRT")
+
+	// mixedPool: head comments + line comments
+	assert.Contains(t, output, "[Domestic] JFK (New York), LAX (Los Angeles), ORD; [International] LHR (London Heathrow), CDG, NRT (Tokyo Narita)")
+}
+
 func TestFormatForPrompt_AnnotationsNil(t *testing.T) {
 	// Ensure no panic or change when annotations are nil
 	kb := &KnowledgeBase{

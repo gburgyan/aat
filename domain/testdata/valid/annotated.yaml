@@ -37,3 +37,29 @@ valuePools:
       - alpha
       - beta
       - gamma
+
+  airportCodes:
+    description: "Airport codes grouped by region"
+    type: string
+    values:
+      # Major US hubs
+      - JFK
+      - LAX
+      - ORD
+      # Major international
+      - LHR
+      - CDG
+      - NRT
+
+  mixedPool:
+    description: "Pool mixing head comments and line comments"
+    type: string
+    values:
+      # Domestic
+      - JFK  # New York
+      - LAX  # Los Angeles
+      - ORD
+      # International
+      - LHR  # London Heathrow
+      - CDG
+      - NRT  # Tokyo Narita
