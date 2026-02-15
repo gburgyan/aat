@@ -21,15 +21,12 @@ nodes:
       - name: petId
         type: integer
         description: "Assigned pet ID"
-        path: "id"
       - name: petName
         type: string
         description: "Pet name as stored"
-        path: "name"
       - name: petStatus
         type: string
         description: "Pet status as stored"
-        path: "status"
     cleanup: deletePet
 
   getPet:
@@ -45,15 +42,12 @@ nodes:
       - name: petId
         type: integer
         description: "Pet ID"
-        path: "id"
       - name: petName
         type: string
         description: "Pet name"
-        path: "name"
       - name: petStatus
         type: string
         description: "Pet status"
-        path: "status"
 
   findByStatus:
     description: "Find pets by their availability status"
