@@ -20,10 +20,19 @@ type ChainOptions struct {
 type ChainResult struct {
 	Nodes              []string          // dependency-ordered (topo sort)
 	Edges              []Edge            // subset of graph edges connecting chain nodes
+	RequiresEdges      []RequiresEdge    // virtual edges from requires/satisfies relationships
 	EntryNodes         []string          // in-degree 0 within the chain
-	Decisions          []ChainDecision   // cycle breaks, path choices
+	Decisions          []ChainDecision   // cycle breaks, path choices, satisfier selections
 	IncludedConditions []ConditionResult // conditions that evaluated true
 	ExcludedConditions []ConditionResult // conditions that evaluated false
+}
+
+// RequiresEdge represents a virtual ordering edge from a satisfier node to a
+// requiring node, created by the requires/satisfies mechanism.
+type RequiresEdge struct {
+	From  string // satisfier node name
+	To    string // requiring node name
+	Token string // the requirement token
 }
 
 // ChainDecision records a decision made during backward chaining.
@@ -42,6 +51,8 @@ const (
 	DecisionCycleBreak DecisionType = iota
 	// DecisionPathChoice indicates a path was chosen among alternatives.
 	DecisionPathChoice
+	// DecisionSatisfier indicates a satisfier was chosen for a requirement token.
+	DecisionSatisfier
 )
 
 // ConditionResult records the evaluation result of a graph condition.
@@ -151,6 +162,12 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 	includedNodes := map[string]bool{}
 	var includedEdges []Edge
 
+	// Track requirement tokens encountered and their candidate satisfiers.
+	// tokenCandidates maps each token to the set of candidate satisfier node names.
+	tokenCandidates := map[string]map[string]bool{}
+	// tokenRequirers maps each token to the set of nodes that require it.
+	tokenRequirers := map[string]map[string]bool{}
+
 	for len(queue) > 0 {
 		node := queue[0]
 		queue = queue[1:]
@@ -171,6 +188,7 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 			continue // don't traverse upstream
 		}
 
+		// Traverse data-flow edges backward.
 		for _, edge := range edgesByConsumer[node] {
 			fromNode, _, err := splitRef(edge.From)
 			if err != nil {
@@ -179,6 +197,27 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 			includedEdges = append(includedEdges, edge)
 			if !visited[fromNode] {
 				queue = append(queue, fromNode)
+			}
+		}
+
+		// Traverse requires tokens: enqueue all candidate satisfiers.
+		if n != nil {
+			for _, token := range n.Requires {
+				if tokenRequirers[token] == nil {
+					tokenRequirers[token] = map[string]bool{}
+				}
+				tokenRequirers[token][node] = true
+
+				satisfiers := g.SatisfiersByToken[token]
+				if tokenCandidates[token] == nil {
+					tokenCandidates[token] = map[string]bool{}
+				}
+				for _, s := range satisfiers {
+					tokenCandidates[token][s] = true
+					if !visited[s] {
+						queue = append(queue, s)
+					}
+				}
 			}
 		}
 	}
@@ -217,7 +256,7 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		}
 
 		// Multiple producers for same input — pick one
-		chosen := pickProducer(producerEdges, depth)
+		chosen := pickProducer(producerEdges, depth, g)
 		finalEdges = append(finalEdges, producerEdges[chosen]...)
 
 		var alternatives []string
@@ -234,13 +273,114 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		})
 	}
 
-	// Prune nodes that become unreachable after path selection
-	reachable := computeReachable(opts.Goals, conditionRequired, finalEdges)
+	// 3a-ii. Satisfier resolution: pick one satisfier per requirement token.
+	var requiresEdges []RequiresEdge
+	for _, token := range sortedKeys(tokenCandidates) {
+		candidates := tokenCandidates[token]
+		requirers := tokenRequirers[token]
+
+		// Filter to candidates still in includedNodes.
+		var validCandidates []string
+		for c := range candidates {
+			if includedNodes[c] {
+				validCandidates = append(validCandidates, c)
+			}
+		}
+		sortStrings(validCandidates)
+
+		if len(validCandidates) == 0 {
+			// No satisfier — will be caught by validation, skip here.
+			continue
+		}
+
+		chosen := pickSatisfier(validCandidates, g, depth)
+
+		// Record decision if there were alternatives.
+		if len(validCandidates) > 1 {
+			var alternatives []string
+			for _, c := range validCandidates {
+				if c != chosen {
+					alternatives = append(alternatives, c)
+				}
+			}
+			result.Decisions = append(result.Decisions, ChainDecision{
+				Type:         DecisionSatisfier,
+				Node:         chosen,
+				Detail:       fmt.Sprintf("token %q: chose satisfier %q", token, chosen),
+				Alternatives: alternatives,
+			})
+		}
+
+		// Create requires edges from the chosen satisfier to all requirers.
+		for req := range requirers {
+			if includedNodes[req] {
+				requiresEdges = append(requiresEdges, RequiresEdge{
+					From:  chosen,
+					To:    req,
+					Token: token,
+				})
+			}
+		}
+
+		// Prune unchosen satisfiers if they're not needed for other reasons.
+		for _, c := range validCandidates {
+			if c != chosen {
+				// Check if this node is needed as a satisfier for another token
+				// or as a data-flow source.
+				neededElsewhere := false
+				for _, otherToken := range sortedKeys(tokenCandidates) {
+					if otherToken == token {
+						continue
+					}
+					if tokenCandidates[otherToken][c] {
+						neededElsewhere = true
+						break
+					}
+				}
+				if !neededElsewhere {
+					// Check if any finalEdge references this node.
+					for _, edge := range finalEdges {
+						fromNode, _, _ := splitRef(edge.From)
+						if fromNode == c {
+							neededElsewhere = true
+							break
+						}
+					}
+				}
+				// Also check if it's a goal or condition-required node.
+				for _, goal := range opts.Goals {
+					if c == goal {
+						neededElsewhere = true
+						break
+					}
+				}
+				if conditionRequired[c] {
+					neededElsewhere = true
+				}
+				if !neededElsewhere {
+					delete(includedNodes, c)
+				}
+			}
+		}
+	}
+
+	// Prune nodes that become unreachable after path selection.
+	// Include requires edges in reachability.
+	reachable := computeReachableWithRequires(opts.Goals, conditionRequired, finalEdges, requiresEdges)
 	for node := range includedNodes {
 		if !reachable[node] {
 			delete(includedNodes, node)
 		}
 	}
+
+	// Filter requires edges to only those with both endpoints still included.
+	var filteredRequiresEdges []RequiresEdge
+	for _, re := range requiresEdges {
+		if includedNodes[re.From] && includedNodes[re.To] {
+			filteredRequiresEdges = append(filteredRequiresEdges, re)
+		}
+	}
+	requiresEdges = filteredRequiresEdges
 
 	// 3b. Condition Before ordering
 	var virtualEdges []orderingEdge
@@ -258,6 +398,11 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		}
 	}
 
+	// Add requires edges as virtual ordering edges for topo sort.
+	for _, re := range requiresEdges {
+		virtualEdges = append(virtualEdges, orderingEdge{from: re.From, to: re.To})
+	}
+
 	// 3c. Topological sort
 	sorted, err := chainTopoSort(includedNodes, finalEdges, virtualEdges)
 	if err != nil {
@@ -266,6 +411,7 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 
 	result.Nodes = sorted
 	result.Edges = finalEdges
+	result.RequiresEdges = requiresEdges
 
 	// 3d. Identify entry nodes (in-degree 0)
 	inDegree := map[string]int{}
@@ -344,8 +490,9 @@ func computeDepth(nodes map[string]bool, edges []Edge) map[string]int {
 }
 
 // pickProducer selects the best producer for an input.
-// Prefers edges marked Preferred, then shallowest depth.
-func pickProducer(producerEdges map[string][]Edge, depth map[string]int) string {
+// Prefers edges marked Preferred, then nodes marked Preferred, then shallowest depth.
+func pickProducer(producerEdges map[string][]Edge, depth map[string]int, g *Graph) string {
+	// 1. Edge-level preferred
 	for producer, edges := range producerEdges {
 		for _, e := range edges {
 			if e.Preferred {
@@ -354,6 +501,22 @@ func pickProducer(producerEdges map[string][]Edge, depth map[string]int) string 
 		}
 	}
 
+	// 2. Node-level preferred (reconciles with satisfier resolution)
+	if g != nil {
+		var preferredProducer string
+		for producer := range producerEdges {
+			if n := g.Nodes[producer]; n != nil && n.Preferred {
+				if preferredProducer == "" || producer < preferredProducer {
+					preferredProducer = producer
+				}
+			}
+		}
+		if preferredProducer != "" {
+			return preferredProducer
+		}
+	}
+
+	// 3. Shallowest depth, then alphabetical
 	bestProducer := ""
 	bestDepth := -1
 	for producer := range producerEdges {
@@ -366,8 +529,32 @@ func pickProducer(producerEdges map[string][]Edge, depth map[string]int) string 
 	return bestProducer
 }
 
-// computeReachable finds all nodes reachable by backward traversal from goals.
-func computeReachable(goals []string, condRequired map[string]bool, edges []Edge) map[string]bool {
+// pickSatisfier selects the best satisfier node for a requirement token.
+// Prefers nodes marked Preferred, then shallowest depth, then alphabetical.
+func pickSatisfier(candidates []string, g *Graph, depth map[string]int) string {
+	// Check for preferred nodes.
+	for _, c := range candidates {
+		if n := g.Nodes[c]; n != nil && n.Preferred {
+			return c
+		}
+	}
+
+	// Pick shallowest depth, then alphabetical.
+	best := candidates[0]
+	bestDepth := depth[best]
+	for _, c := range candidates[1:] {
+		d := depth[c]
+		if d < bestDepth || (d == bestDepth && c < best) {
+			best = c
+			bestDepth = d
+		}
+	}
+	return best
+}
+
+// computeReachableWithRequires finds all nodes reachable by backward traversal
+// from goals, considering both data-flow edges and requires edges.
+func computeReachableWithRequires(goals []string, condRequired map[string]bool, edges []Edge, requiresEdges []RequiresEdge) map[string]bool {
 	reverseAdj := map[string]map[string]bool{}
 	for _, edge := range edges {
 		fromNode, _, err1 := splitRef(edge.From)
@@ -379,6 +566,12 @@ func computeReachable(goals []string, condRequired map[string]bool, edges []Edge
 			reverseAdj[toNode] = map[string]bool{}
 		}
 		reverseAdj[toNode][fromNode] = true
+	}
+	for _, re := range requiresEdges {
+		if reverseAdj[re.To] == nil {
+			reverseAdj[re.To] = map[string]bool{}
+		}
+		reverseAdj[re.To][re.From] = true
 	}
 
 	reachable := map[string]bool{}

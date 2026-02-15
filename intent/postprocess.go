@@ -31,9 +31,10 @@ func buildStepIndex(p *plan.Plan) map[string]bool {
 	return idx
 }
 
-// fixDependsOn ensures dependsOn reflects actual graph edge dependencies.
-// For each step, if a source node (from graph edges) is in the plan, it
-// must be in dependsOn. Invalid dependsOn entries are removed.
+// fixDependsOn ensures dependsOn reflects actual graph edge dependencies
+// and requires/satisfies relationships. For each step, if a source node
+// (from graph edges or requires edges) is in the plan, it must be in dependsOn.
+// Invalid dependsOn entries are removed.
 func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 	// Build edge-based dependencies: targetNode → set of sourceNodes
 	edgeDeps := map[string]map[string]bool{}
@@ -47,6 +48,27 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 			edgeDeps[toNode] = map[string]bool{}
 		}
 		edgeDeps[toNode][fromNode] = true
+	}
+
+	// Add requires/satisfies dependencies: for each node that requires a token,
+	// add dependencies on nodes in the plan that satisfy that token.
+	if g.SatisfiersByToken != nil {
+		for _, step := range p.Execution.Steps {
+			node := g.Nodes[step.Node]
+			if node == nil {
+				continue
+			}
+			for _, token := range node.Requires {
+				for _, satisfier := range g.SatisfiersByToken[token] {
+					if stepIndex[satisfier] && satisfier != step.Node {
+						if edgeDeps[step.Node] == nil {
+							edgeDeps[step.Node] = map[string]bool{}
+						}
+						edgeDeps[step.Node][satisfier] = true
+					}
+				}
+			}
+		}
 	}
 
 	for i, step := range p.Execution.Steps {
@@ -303,6 +325,14 @@ func BuildSkeleton(g *graph.Graph, cr *graph.ChainResult, ga *GoalAnalysis, prom
 			edgeDeps[toNode] = map[string]bool{}
 		}
 		edgeDeps[toNode][fromNode] = true
+	}
+
+	// Include requires edges in dependency map.
+	for _, re := range cr.RequiresEdges {
+		if edgeDeps[re.To] == nil {
+			edgeDeps[re.To] = map[string]bool{}
+		}
+		edgeDeps[re.To][re.From] = true
 	}
 
 	// Create steps in chain order.

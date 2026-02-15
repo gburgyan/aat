@@ -86,8 +86,9 @@ type Graph struct {
 	Conditions  []Condition      `yaml:"conditions,omitempty"`
 
 	// Computed indices (not serialized). Built by BuildEdgeIndex().
-	edgesByTarget map[string][]int `yaml:"-"` // "node.input" → edge indices
-	edgesBySource map[string][]int `yaml:"-"` // "node.output" → edge indices
+	edgesByTarget    map[string][]int     `yaml:"-"` // "node.input" → edge indices
+	edgesBySource    map[string][]int     `yaml:"-"` // "node.output" → edge indices
+	SatisfiersByToken map[string][]string `yaml:"-"` // requirement token → node names that satisfy it
 }
 
 // Workflow describes a named workflow (sequence of operations) within the graph.
@@ -108,6 +109,9 @@ type Node struct {
 	Cleanup      string   `yaml:"cleanup,omitempty"`
 	CycleBreaker bool     `yaml:"cycleBreaker,omitempty"`
 	OAS          *OASRef  `yaml:"oas,omitempty"`
+	Requires     []string `yaml:"requires,omitempty"`
+	Satisfies    []string `yaml:"satisfies,omitempty"`
+	Preferred    bool     `yaml:"preferred,omitempty"`
 }
 
 // OASRef links a graph node to an OAS operation.
@@ -184,6 +188,14 @@ func (g *Graph) BuildEdgeIndex() {
 	for i, edge := range g.Edges {
 		g.edgesByTarget[edge.To] = append(g.edgesByTarget[edge.To], i)
 		g.edgesBySource[edge.From] = append(g.edgesBySource[edge.From], i)
+	}
+
+	// Build satisfier index: token → node names that satisfy it.
+	g.SatisfiersByToken = map[string][]string{}
+	for name, node := range g.Nodes {
+		for _, token := range node.Satisfies {
+			g.SatisfiersByToken[token] = append(g.SatisfiersByToken[token], name)
+		}
 	}
 }
 

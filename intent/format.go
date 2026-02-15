@@ -67,6 +67,15 @@ func FormatGraph(g *graph.Graph) string {
 		if node.CycleBreaker {
 			b.WriteString("CycleBreaker: true\n")
 		}
+		if node.Preferred {
+			b.WriteString("Preferred: true\n")
+		}
+		if len(node.Requires) > 0 {
+			fmt.Fprintf(&b, "Requires: %s\n", strings.Join(node.Requires, ", "))
+		}
+		if len(node.Satisfies) > 0 {
+			fmt.Fprintf(&b, "Satisfies: %s\n", strings.Join(node.Satisfies, ", "))
+		}
 
 		if len(node.Inputs) > 0 {
 			b.WriteString("Inputs:\n")
@@ -176,6 +185,12 @@ func FormatChainResult(cr *graph.ChainResult, g *graph.Graph) string {
 		if node.Cleanup != "" {
 			fmt.Fprintf(&b, "Cleanup: %s\n", node.Cleanup)
 		}
+		if len(node.Requires) > 0 {
+			fmt.Fprintf(&b, "Requires: %s\n", strings.Join(node.Requires, ", "))
+		}
+		if len(node.Satisfies) > 0 {
+			fmt.Fprintf(&b, "Satisfies: %s\n", strings.Join(node.Satisfies, ", "))
+		}
 
 		if len(node.Inputs) > 0 {
 			b.WriteString("Inputs:\n")
@@ -218,6 +233,15 @@ func FormatChainResult(cr *graph.ChainResult, g *graph.Graph) string {
 				sel = " [select]"
 			}
 			fmt.Fprintf(&b, "- %s → %s%s\n", edge.From, edge.To, sel)
+		}
+		b.WriteString("\n")
+	}
+
+	// Requires edges
+	if len(cr.RequiresEdges) > 0 {
+		b.WriteString("## Semantic Prerequisites\n")
+		for _, re := range cr.RequiresEdges {
+			fmt.Fprintf(&b, "- %s → %s (token: %s)\n", re.From, re.To, re.Token)
 		}
 		b.WriteString("\n")
 	}

@@ -699,3 +699,493 @@ func TestBackwardChain_WithConditionContextValues(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, result.Nodes, "addPassportInfo")
 }
+
+// --- Requires/Satisfies Tests ---
+
+// buildRequiresGraph creates the Travelport-like graph from the plan design.
+// commitReservation requires [offerAdded, travelerAdded, paymentApplied]
+// addOffer satisfies [offerAdded], requires [offerPriced, workbenchCreated]
+// addTraveler satisfies [travelerAdded], requires [workbenchCreated]
+// addPayment satisfies [paymentApplied], requires [formOfPaymentAdded, offerAdded]
+// addFormOfPayment satisfies [formOfPaymentAdded], requires [workbenchCreated]
+// createWorkbench satisfies [workbenchCreated]
+// priceOffer satisfies [offerPriced], requires [flightsSearched]
+// searchFlights satisfies [flightsSearched]
+func buildRequiresGraph() *Graph {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"searchFlights": {
+				Name: "searchFlights", Adapter: "search",
+				Satisfies: []string{"flightsSearched"},
+				Inputs:    []Input{{Name: "origin", Type: "string"}},
+				Outputs:   []Output{{Name: "offerings", Type: "offering[]"}},
+			},
+			"priceOffer": {
+				Name: "priceOffer", Adapter: "price",
+				Requires:  []string{"flightsSearched"},
+				Satisfies: []string{"offerPriced"},
+				Preferred: true,
+				Inputs:    []Input{{Name: "offeringId", Type: "string"}},
+				Outputs:   []Output{{Name: "pricedOffer", Type: "string"}},
+			},
+			"createWorkbench": {
+				Name: "createWorkbench", Adapter: "createWB",
+				Satisfies: []string{"workbenchCreated"},
+				Preferred: true,
+				Outputs:   []Output{{Name: "workbenchId", Type: "string"}},
+			},
+			"addOffer": {
+				Name: "addOffer", Adapter: "addOffer",
+				Requires:  []string{"offerPriced", "workbenchCreated"},
+				Satisfies: []string{"offerAdded"},
+				Inputs:    []Input{{Name: "workbenchId", Type: "string"}},
+				Outputs:   []Output{{Name: "offerStatus", Type: "string"}},
+			},
+			"addTraveler": {
+				Name: "addTraveler", Adapter: "addTraveler",
+				Requires:  []string{"workbenchCreated"},
+				Satisfies: []string{"travelerAdded"},
+				Inputs:    []Input{{Name: "workbenchId", Type: "string"}},
+				Outputs:   []Output{{Name: "travelerId", Type: "string"}},
+			},
+			"addFormOfPayment": {
+				Name: "addFormOfPayment", Adapter: "addFOP",
+				Requires:  []string{"workbenchCreated"},
+				Satisfies: []string{"formOfPaymentAdded"},
+				Preferred: true,
+				Inputs:    []Input{{Name: "workbenchId", Type: "string"}},
+				Outputs:   []Output{{Name: "fopId", Type: "string"}},
+			},
+			"addPayment": {
+				Name: "addPayment", Adapter: "addPayment",
+				Requires:  []string{"formOfPaymentAdded", "offerAdded"},
+				Satisfies: []string{"paymentApplied"},
+				Inputs:    []Input{{Name: "workbenchId", Type: "string"}},
+				Outputs:   []Output{{Name: "paymentId", Type: "string"}},
+			},
+			"commitReservation": {
+				Name: "commitReservation", Adapter: "commit",
+				Requires: []string{"offerAdded", "travelerAdded", "paymentApplied"},
+				Inputs:   []Input{{Name: "workbenchId", Type: "string"}},
+				Outputs:  []Output{{Name: "locator", Type: "string"}},
+			},
+		},
+		// Data-flow: workbenchId flows from createWorkbench to all consumers.
+		Edges: []Edge{
+			{From: "createWorkbench.workbenchId", To: "addOffer.workbenchId"},
+			{From: "createWorkbench.workbenchId", To: "addTraveler.workbenchId"},
+			{From: "createWorkbench.workbenchId", To: "addFormOfPayment.workbenchId"},
+			{From: "createWorkbench.workbenchId", To: "addPayment.workbenchId"},
+			{From: "createWorkbench.workbenchId", To: "commitReservation.workbenchId"},
+		},
+	}
+	g.BuildEdgeIndex()
+	return g
+}
+
+func TestBackwardChain_RequiresSatisfies_BasicChain(t *testing.T) {
+	g := buildRequiresGraph()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commitReservation"}})
+	require.NoError(t, err)
+
+	// All state-mutation nodes should be included.
+	assert.Contains(t, result.Nodes, "searchFlights")
+	assert.Contains(t, result.Nodes, "priceOffer")
+	assert.Contains(t, result.Nodes, "createWorkbench")
+	assert.Contains(t, result.Nodes, "addOffer")
+	assert.Contains(t, result.Nodes, "addTraveler")
+	assert.Contains(t, result.Nodes, "addFormOfPayment")
+	assert.Contains(t, result.Nodes, "addPayment")
+	assert.Contains(t, result.Nodes, "commitReservation")
+
+	// commitReservation should be last.
+	assert.Equal(t, "commitReservation", result.Nodes[len(result.Nodes)-1])
+
+	// RequiresEdges should be populated.
+	assert.NotEmpty(t, result.RequiresEdges)
+
+	// Verify ordering via indexOf.
+	indexOf := map[string]int{}
+	for i, n := range result.Nodes {
+		indexOf[n] = i
+	}
+	// searchFlights before priceOffer (flightsSearched)
+	assert.Less(t, indexOf["searchFlights"], indexOf["priceOffer"])
+	// priceOffer before addOffer (offerPriced)
+	assert.Less(t, indexOf["priceOffer"], indexOf["addOffer"])
+	// createWorkbench before addOffer, addTraveler, addFormOfPayment
+	assert.Less(t, indexOf["createWorkbench"], indexOf["addOffer"])
+	assert.Less(t, indexOf["createWorkbench"], indexOf["addTraveler"])
+	assert.Less(t, indexOf["createWorkbench"], indexOf["addFormOfPayment"])
+	// addOffer before addPayment (offerAdded)
+	assert.Less(t, indexOf["addOffer"], indexOf["addPayment"])
+	// addFormOfPayment before addPayment (formOfPaymentAdded)
+	assert.Less(t, indexOf["addFormOfPayment"], indexOf["addPayment"])
+	// addOffer, addTraveler, addPayment before commitReservation
+	assert.Less(t, indexOf["addOffer"], indexOf["commitReservation"])
+	assert.Less(t, indexOf["addTraveler"], indexOf["commitReservation"])
+	assert.Less(t, indexOf["addPayment"], indexOf["commitReservation"])
+}
+
+func TestBackwardChain_RequiresSatisfies_SingleSatisfier(t *testing.T) {
+	// Simple case: A requires [tokenX], B satisfies [tokenX].
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"producer": {Name: "producer", Adapter: "p", Satisfies: []string{"dataReady"},
+				Outputs: []Output{{Name: "data", Type: "string"}}},
+			"consumer": {Name: "consumer", Adapter: "c", Requires: []string{"dataReady"},
+				Inputs: []Input{{Name: "x", Type: "string"}}},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"consumer"}})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"producer", "consumer"}, result.Nodes)
+	require.Len(t, result.RequiresEdges, 1)
+	assert.Equal(t, "producer", result.RequiresEdges[0].From)
+	assert.Equal(t, "consumer", result.RequiresEdges[0].To)
+	assert.Equal(t, "dataReady", result.RequiresEdges[0].Token)
+}
+
+func TestBackwardChain_RequiresSatisfies_PreferredWins(t *testing.T) {
+	// Two nodes satisfy the same token; preferred one should be chosen.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"fastPath": {Name: "fastPath", Adapter: "fast", Satisfies: []string{"processed"},
+				Preferred: true, Outputs: []Output{{Name: "out", Type: "string"}}},
+			"slowPath": {Name: "slowPath", Adapter: "slow", Satisfies: []string{"processed"},
+				Outputs: []Output{{Name: "out", Type: "string"}}},
+			"consumer": {Name: "consumer", Adapter: "c", Requires: []string{"processed"},
+				Inputs: []Input{{Name: "x", Type: "string"}}},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"consumer"}})
+	require.NoError(t, err)
+
+	assert.Contains(t, result.Nodes, "fastPath")
+	assert.Contains(t, result.Nodes, "consumer")
+	assert.NotContains(t, result.Nodes, "slowPath")
+
+	// Should have a satisfier decision.
+	var hasSatisfierDecision bool
+	for _, d := range result.Decisions {
+		if d.Type == DecisionSatisfier {
+			hasSatisfierDecision = true
+			assert.Equal(t, "fastPath", d.Node)
+			assert.Contains(t, d.Alternatives, "slowPath")
+		}
+	}
+	assert.True(t, hasSatisfierDecision)
+}
+
+func TestBackwardChain_RequiresSatisfies_NoPreferredPicksAlphabetical(t *testing.T) {
+	// Two satisfiers, neither preferred. Should pick alphabetically.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"beta":     {Name: "beta", Adapter: "b", Satisfies: []string{"processed"}, Outputs: []Output{{Name: "out", Type: "string"}}},
+			"alpha":    {Name: "alpha", Adapter: "a", Satisfies: []string{"processed"}, Outputs: []Output{{Name: "out", Type: "string"}}},
+			"consumer": {Name: "consumer", Adapter: "c", Requires: []string{"processed"}, Inputs: []Input{{Name: "x", Type: "string"}}},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"consumer"}})
+	require.NoError(t, err)
+
+	assert.Contains(t, result.Nodes, "alpha")
+	assert.Contains(t, result.Nodes, "consumer")
+	assert.NotContains(t, result.Nodes, "beta")
+}
+
+func TestBackwardChain_RequiresSatisfies_RecursiveRequires(t *testing.T) {
+	// A requires B requires C (transitive chain via tokens).
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"step1":  {Name: "step1", Adapter: "s1", Satisfies: []string{"phase1Done"}, Outputs: []Output{{Name: "out", Type: "string"}}},
+			"step2":  {Name: "step2", Adapter: "s2", Requires: []string{"phase1Done"}, Satisfies: []string{"phase2Done"}, Outputs: []Output{{Name: "out", Type: "string"}}},
+			"step3":  {Name: "step3", Adapter: "s3", Requires: []string{"phase2Done"}, Satisfies: []string{"phase3Done"}, Outputs: []Output{{Name: "out", Type: "string"}}},
+			"finish": {Name: "finish", Adapter: "f", Requires: []string{"phase3Done"}, Inputs: []Input{{Name: "x", Type: "string"}}},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"finish"}})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"step1", "step2", "step3", "finish"}, result.Nodes)
+}
+
+func TestBackwardChain_RequiresSatisfies_MixedWithDataFlow(t *testing.T) {
+	// Some dependencies via data-flow edges, some via requires/satisfies.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"search": {Name: "search", Adapter: "s", Satisfies: []string{"searched"},
+				Outputs: []Output{{Name: "results", Type: "string"}}},
+			"prepare": {Name: "prepare", Adapter: "p", Requires: []string{"searched"},
+				Satisfies: []string{"prepared"},
+				Inputs:    []Input{{Name: "data", Type: "string"}},
+				Outputs:   []Output{{Name: "out", Type: "string"}}},
+			"commit": {Name: "commit", Adapter: "c", Requires: []string{"prepared"},
+				Inputs:  []Input{{Name: "out", Type: "string"}},
+				Outputs: []Output{{Name: "result", Type: "string"}}},
+		},
+		Edges: []Edge{
+			// Data-flow: search.results → prepare.data
+			{From: "search.results", To: "prepare.data"},
+			// Data-flow: prepare.out → commit.out
+			{From: "prepare.out", To: "commit.out"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commit"}})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"search", "prepare", "commit"}, result.Nodes)
+	// Should have both data-flow edges and requires edges.
+	assert.NotEmpty(t, result.Edges)
+	assert.NotEmpty(t, result.RequiresEdges)
+}
+
+func TestBackwardChain_RequiresSatisfies_CycleBreakerStopsRequires(t *testing.T) {
+	// CycleBreaker should stop requires traversal.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"root":   {Name: "root", Adapter: "r", Satisfies: []string{"rootReady"}, Outputs: []Output{{Name: "out", Type: "string"}}},
+			"middle": {Name: "middle", Adapter: "m", CycleBreaker: true, Requires: []string{"rootReady"}, Satisfies: []string{"middleDone"}, Outputs: []Output{{Name: "out", Type: "string"}}},
+			"end":    {Name: "end", Adapter: "e", Requires: []string{"middleDone"}, Inputs: []Input{{Name: "x", Type: "string"}}},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"end"}})
+	require.NoError(t, err)
+
+	// middle is a cycle-breaker, so root should NOT be included.
+	assert.Contains(t, result.Nodes, "middle")
+	assert.Contains(t, result.Nodes, "end")
+	assert.NotContains(t, result.Nodes, "root")
+}
+
+func TestBackwardChain_RequiresSatisfies_NodeAlsoViaDataFlow(t *testing.T) {
+	// Node included via both data-flow and requires — should appear once.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"source": {Name: "source", Adapter: "s", Satisfies: []string{"sourceReady"},
+				Outputs: []Output{{Name: "data", Type: "string"}}},
+			"target": {Name: "target", Adapter: "t", Requires: []string{"sourceReady"},
+				Inputs:  []Input{{Name: "data", Type: "string"}},
+				Outputs: []Output{{Name: "out", Type: "string"}}},
+		},
+		Edges: []Edge{
+			{From: "source.data", To: "target.data"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"target"}})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"source", "target"}, result.Nodes)
+	// Should have both data-flow edge and requires edge.
+	assert.Len(t, result.Edges, 1)
+	assert.Len(t, result.RequiresEdges, 1)
+}
+
+func TestBackwardChain_RequiresSatisfies_EmptyRequiresSatisfies(t *testing.T) {
+	// Graph with no requires/satisfies — should work exactly as before.
+	g := buildLinearGraph("a", "b", "c")
+	g.BuildEdgeIndex()
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"c"}})
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"a", "b", "c"}, result.Nodes)
+	assert.Empty(t, result.RequiresEdges)
+}
+
+// --- Full Travelport Graph Tests ---
+
+func TestBackwardChain_TravelportFullGraph_CommitReservation(t *testing.T) {
+	g, err := ParseFile("../travelport/graph.yaml")
+	require.NoError(t, err)
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commitReservation"}})
+	require.NoError(t, err)
+
+	// Expected 8-node booking chain:
+	// searchFlights → priceOfferReference → createWorkbench → addOfferReference →
+	// addTraveler → addFormOfPaymentCash → addPayment → commitReservation
+	expectedNodes := []string{
+		"searchFlights",
+		"priceOfferReference",
+		"createWorkbench",
+		"addOfferReference",
+		"addTraveler",
+		"addFormOfPaymentCash",
+		"addPayment",
+		"commitReservation",
+	}
+	assert.Len(t, result.Nodes, len(expectedNodes), "expected %d nodes, got %d: %v", len(expectedNodes), len(result.Nodes), result.Nodes)
+	for _, n := range expectedNodes {
+		assert.Contains(t, result.Nodes, n, "expected node %q in chain", n)
+	}
+
+	// commitReservation should be last.
+	assert.Equal(t, "commitReservation", result.Nodes[len(result.Nodes)-1])
+
+	// Verify ordering constraints.
+	indexOf := map[string]int{}
+	for i, n := range result.Nodes {
+		indexOf[n] = i
+	}
+	// searchFlights before priceOfferReference (flightsSearched)
+	assert.Less(t, indexOf["searchFlights"], indexOf["priceOfferReference"])
+	// priceOfferReference before addOfferReference (offerPriced)
+	assert.Less(t, indexOf["priceOfferReference"], indexOf["addOfferReference"])
+	// createWorkbench before addOfferReference (workbenchCreated)
+	assert.Less(t, indexOf["createWorkbench"], indexOf["addOfferReference"])
+	// createWorkbench before addTraveler (workbenchCreated)
+	assert.Less(t, indexOf["createWorkbench"], indexOf["addTraveler"])
+	// createWorkbench before addFormOfPaymentCash (workbenchCreated)
+	assert.Less(t, indexOf["createWorkbench"], indexOf["addFormOfPaymentCash"])
+	// addFormOfPaymentCash before addPayment (formOfPaymentAdded)
+	assert.Less(t, indexOf["addFormOfPaymentCash"], indexOf["addPayment"])
+	// addOfferReference before addPayment (data edge: offerIdentifierValue)
+	assert.Less(t, indexOf["addOfferReference"], indexOf["addPayment"])
+	// addPayment before commitReservation (paymentApplied)
+	assert.Less(t, indexOf["addPayment"], indexOf["commitReservation"])
+	// addOfferReference before commitReservation (offerAdded)
+	assert.Less(t, indexOf["addOfferReference"], indexOf["commitReservation"])
+	// addTraveler before commitReservation (travelerAdded)
+	assert.Less(t, indexOf["addTraveler"], indexOf["commitReservation"])
+
+	// Preferred nodes should have been chosen over alternatives.
+	assert.NotContains(t, result.Nodes, "priceOfferFullPayload")
+	assert.NotContains(t, result.Nodes, "addOfferFullPayload")
+	assert.NotContains(t, result.Nodes, "addFormOfPaymentCard")
+	assert.NotContains(t, result.Nodes, "createWorkbenchFromLocator")
+	assert.NotContains(t, result.Nodes, "createWorkbenchFromIdentifier")
+
+	// RequiresEdges should be present.
+	assert.NotEmpty(t, result.RequiresEdges)
+
+	// searchFlights and createWorkbench should be entry nodes.
+	assert.Contains(t, result.EntryNodes, "searchFlights")
+	assert.Contains(t, result.EntryNodes, "createWorkbench")
+}
+
+func TestBackwardChain_TravelportFullGraph_CommitExchangeTicket(t *testing.T) {
+	g, err := ParseFile("../travelport/graph.yaml")
+	require.NoError(t, err)
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commitExchangeTicket"}})
+	require.NoError(t, err)
+
+	// Exchange chain must include exchange-specific nodes.
+	assert.Contains(t, result.Nodes, "commitExchangeTicket")
+	assert.Contains(t, result.Nodes, "addExchangeOffer")
+	assert.Contains(t, result.Nodes, "addPayment")
+	assert.Contains(t, result.Nodes, "searchExchange")
+
+	// Should include a workbench creator (createWorkbenchFromLocator via data edges).
+	hasWorkbenchCreator := false
+	for _, n := range result.Nodes {
+		if n == "createWorkbenchFromLocator" || n == "createWorkbenchFromIdentifier" {
+			hasWorkbenchCreator = true
+			break
+		}
+	}
+	assert.True(t, hasWorkbenchCreator, "expected a workbench creator node in exchange chain")
+
+	// Should include a form-of-payment node.
+	hasFOP := false
+	for _, n := range result.Nodes {
+		if n == "addFormOfPaymentCash" || n == "addFormOfPaymentForfeit" || n == "addFormOfPaymentWaiver" || n == "addFormOfPaymentInvoice" || n == "addFormOfPaymentCard" {
+			hasFOP = true
+			break
+		}
+	}
+	assert.True(t, hasFOP, "expected a form-of-payment node in exchange chain")
+
+	// commitExchangeTicket should be last.
+	assert.Equal(t, "commitExchangeTicket", result.Nodes[len(result.Nodes)-1])
+
+	// Verify ordering: exchange-specific ordering constraints.
+	indexOf := map[string]int{}
+	for i, n := range result.Nodes {
+		indexOf[n] = i
+	}
+	// searchExchange before addExchangeOffer (data edge)
+	assert.Less(t, indexOf["searchExchange"], indexOf["addExchangeOffer"])
+	// addExchangeOffer before commitExchangeTicket (exchangeOfferAdded)
+	assert.Less(t, indexOf["addExchangeOffer"], indexOf["commitExchangeTicket"])
+	// addPayment before commitExchangeTicket (paymentApplied)
+	assert.Less(t, indexOf["addPayment"], indexOf["commitExchangeTicket"])
+
+	// Note: addPayment has shared data-flow dependencies that may pull in
+	// booking-chain nodes (addOfferReference, etc.) because addPayment's
+	// inputs like offerId/amount have preferred edges to addOfferReference.
+	// This is expected — backward chaining finds ALL dependencies.
+}
+
+func TestBackwardChain_TravelportFullGraph_CommitTicket(t *testing.T) {
+	g, err := ParseFile("../travelport/graph.yaml")
+	require.NoError(t, err)
+
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commitTicket"}})
+	require.NoError(t, err)
+
+	// Ticketing chain must include ticketing-specific nodes.
+	assert.Contains(t, result.Nodes, "commitTicket")
+	assert.Contains(t, result.Nodes, "addPayment")
+
+	// Should include a workbench creator.
+	hasWorkbenchCreator := false
+	for _, n := range result.Nodes {
+		if n == "createWorkbenchFromLocator" || n == "createWorkbenchFromIdentifier" {
+			hasWorkbenchCreator = true
+			break
+		}
+	}
+	assert.True(t, hasWorkbenchCreator, "expected a workbench creator node in ticketing chain")
+
+	// Should include a form-of-payment node.
+	hasFOP := false
+	for _, n := range result.Nodes {
+		if n == "addFormOfPaymentCash" || n == "addFormOfPaymentForfeit" || n == "addFormOfPaymentWaiver" || n == "addFormOfPaymentInvoice" || n == "addFormOfPaymentCard" {
+			hasFOP = true
+			break
+		}
+	}
+	assert.True(t, hasFOP, "expected a form-of-payment node in ticketing chain")
+
+	// commitTicket should be last.
+	assert.Equal(t, "commitTicket", result.Nodes[len(result.Nodes)-1])
+
+	// Verify ordering: ticketing-specific ordering constraints.
+	indexOf := map[string]int{}
+	for i, n := range result.Nodes {
+		indexOf[n] = i
+	}
+	// addPayment before commitTicket (paymentApplied)
+	assert.Less(t, indexOf["addPayment"], indexOf["commitTicket"])
+
+	// Note: addPayment has shared data-flow dependencies that pull in
+	// booking-chain nodes via preferred edges. This is expected behavior —
+	// backward chaining finds ALL transitive dependencies. The intent
+	// package narrows the chain to context-specific nodes during plan generation.
+}

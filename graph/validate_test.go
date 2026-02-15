@@ -524,3 +524,119 @@ func TestEdgeIndex_NilIndex(t *testing.T) {
 	assert.Empty(t, g.EdgesTo("a.b"))
 	assert.Empty(t, g.EdgesFrom("a.b"))
 }
+
+// --- Requires/Satisfies Validation ---
+
+func TestValidate_UnsatisfiedRequirement(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				Requires: []string{"noSuchToken"},
+				Inputs:   []Input{{Name: "x", Type: "string"}},
+				Outputs:  []Output{{Name: "y", Type: "string"}},
+			},
+		},
+	}
+
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "requires token")
+	assertValidationContains(t, err, "noSuchToken")
+}
+
+func TestValidate_RequiresSatisfiesCycle(t *testing.T) {
+	// A requires B, B requires A via tokens.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a",
+				Requires: []string{"tokenB"}, Satisfies: []string{"tokenA"},
+				Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b",
+				Requires: []string{"tokenA"}, Satisfies: []string{"tokenB"},
+				Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "requires/satisfies cycle")
+}
+
+func TestValidate_RequiresSatisfiesCycle_CycleBreakerSuppresses(t *testing.T) {
+	// Same cycle as above, but one node is a CycleBreaker.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a",
+				Requires: []string{"tokenB"}, Satisfies: []string{"tokenA"},
+				CycleBreaker: true,
+				Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b",
+				Requires: []string{"tokenA"}, Satisfies: []string{"tokenB"},
+				Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+
+	err := Validate(g)
+	assert.NoError(t, err) // CycleBreaker suppresses the cycle
+}
+
+func TestValidate_RequiresSatisfies_ValidGraph(t *testing.T) {
+	// A valid graph with requires/satisfies, no cycles.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"source": {Name: "source", Adapter: "s",
+				Satisfies: []string{"dataReady"},
+				Outputs:   []Output{{Name: "out", Type: "string"}}},
+			"consumer": {Name: "consumer", Adapter: "c",
+				Requires: []string{"dataReady"},
+				Inputs:   []Input{{Name: "x", Type: "string"}},
+				Outputs:  []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+
+	err := Validate(g)
+	assert.NoError(t, err)
+}
+
+func TestValidateWarnings_MultipleSatisfiersNoPreferred(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a", Satisfies: []string{"token1"}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Satisfies: []string{"token1"}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"c": {Name: "c", Adapter: "c", Requires: []string{"token1"}, Inputs: []Input{{Name: "x", Type: "string"}}},
+		},
+	}
+
+	warnings := ValidateWarnings(g)
+	require.NotEmpty(t, warnings)
+	found := false
+	for _, w := range warnings {
+		if containsSubstring(w, "token1") && containsSubstring(w, "preferred") {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected warning about multiple satisfiers without preferred, got: %v", warnings)
+}
+
+func TestValidateWarnings_MultipleSatisfiersWithPreferred(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a", Satisfies: []string{"token1"}, Preferred: true, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Satisfies: []string{"token1"}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"c": {Name: "c", Adapter: "c", Requires: []string{"token1"}, Inputs: []Input{{Name: "x", Type: "string"}}},
+		},
+	}
+
+	warnings := ValidateWarnings(g)
+	// No warning about multiple satisfiers since one is preferred.
+	for _, w := range warnings {
+		assert.False(t, containsSubstring(w, "preferred"), "unexpected warning: %s", w)
+	}
+}

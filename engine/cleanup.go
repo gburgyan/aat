@@ -82,30 +82,34 @@ func executeCleanupEntry(
 	}
 
 	// Resolve inputs from current state
-	// Build edge lookup for this cleanup node
-	edgeMap := make(map[string]graph.Edge)
+	// Build edge lookup for this cleanup node — collect ALL edges per input
+	// since auto-wiring may produce multiple sources and only one will have
+	// actually executed.
+	edgeMultiMap := make(map[string][]graph.Edge)
 	for _, edge := range g.Edges {
 		toNode, toField, err := splitRef(edge.To)
 		if err != nil {
 			continue
 		}
 		if toNode == entry.NodeName {
-			edgeMap[toField] = edge
+			edgeMultiMap[toField] = append(edgeMultiMap[toField], edge)
 		}
 	}
 
 	inputs := make(map[string]any)
 	for _, input := range node.Inputs {
-		if edge, ok := edgeMap[input.Name]; ok {
+		edges := edgeMultiMap[input.Name]
+		for _, edge := range edges {
 			fromNode, fromField, err := splitRef(edge.From)
 			if err != nil {
 				continue
 			}
 			val, err := state.GetOutput(fromNode, fromField)
 			if err != nil {
-				continue // best-effort for cleanup
+				continue // try next edge
 			}
 			inputs[input.Name] = val
+			break // found a value
 		}
 	}
 

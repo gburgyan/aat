@@ -194,9 +194,34 @@ func Validate(g *Graph) error {
 		}
 	}
 
-	// 9. Cycle detection
+	// 9. Cycle detection (data-flow edges)
 	if cycles := detectCycles(g); len(cycles) > 0 {
 		for _, c := range cycles {
+			errs = append(errs, c)
+		}
+	}
+
+	// 10. Requires/satisfies validation
+	// Build satisfier index for validation.
+	satisfierIndex := map[string][]string{} // token → node names
+	for name, node := range g.Nodes {
+		for _, token := range node.Satisfies {
+			satisfierIndex[token] = append(satisfierIndex[token], name)
+		}
+	}
+
+	// 10a. Unsatisfied requirements
+	for name, node := range g.Nodes {
+		for _, token := range node.Requires {
+			if len(satisfierIndex[token]) == 0 {
+				errs = append(errs, fmt.Sprintf("node %q: requires token %q but no node satisfies it", name, token))
+			}
+		}
+	}
+
+	// 10b. Cycle detection in requires/satisfies graph
+	if reqCycles := detectRequiresCycles(g, satisfierIndex); len(reqCycles) > 0 {
+		for _, c := range reqCycles {
 			errs = append(errs, c)
 		}
 	}
@@ -210,7 +235,7 @@ func Validate(g *Graph) error {
 // ValidateWarnings returns non-fatal warnings about the graph.
 // These do not prevent the graph from being used, but may indicate
 // configuration issues (e.g., workflow steps referencing unknown nodes,
-// auto-wired edges with type mismatches).
+// auto-wired edges with type mismatches, multiple satisfiers without preferred).
 func ValidateWarnings(g *Graph) []string {
 	var warnings []string
 
@@ -219,6 +244,29 @@ func ValidateWarnings(g *Graph) []string {
 			if g.Nodes[step] == nil {
 				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): step %q references unknown node", i, wf.Name, step))
 			}
+		}
+	}
+
+	// Multiple satisfiers for a token without a preferred node
+	satisfierIndex := map[string][]string{}
+	for name, node := range g.Nodes {
+		for _, token := range node.Satisfies {
+			satisfierIndex[token] = append(satisfierIndex[token], name)
+		}
+	}
+	for token, satisfiers := range satisfierIndex {
+		if len(satisfiers) <= 1 {
+			continue
+		}
+		hasPreferred := false
+		for _, s := range satisfiers {
+			if g.Nodes[s] != nil && g.Nodes[s].Preferred {
+				hasPreferred = true
+				break
+			}
+		}
+		if !hasPreferred {
+			warnings = append(warnings, fmt.Sprintf("token %q has multiple satisfiers %v but none is marked preferred", token, satisfiers))
 		}
 	}
 
@@ -276,6 +324,78 @@ func validateGjsonPath(path string) string {
 		}
 	}
 	return ""
+}
+
+// detectRequiresCycles detects cycles in the requires/satisfies graph.
+// A cycle exists when A requires token X, B satisfies X and requires token Y,
+// and C satisfies Y and requires X (or any longer cycle). Cycles involving
+// CycleBreaker nodes are suppressed.
+func detectRequiresCycles(g *Graph, satisfierIndex map[string][]string) []string {
+	// Build adjacency: for each node that requires a token, add edges to
+	// all nodes that satisfy it (these are the nodes it depends on).
+	adj := map[string]map[string]bool{}
+	for name := range g.Nodes {
+		adj[name] = map[string]bool{}
+	}
+	for name, node := range g.Nodes {
+		for _, token := range node.Requires {
+			for _, satisfier := range satisfierIndex[token] {
+				if satisfier != name {
+					adj[satisfier][name] = true // satisfier → requirer (ordering direction)
+				}
+			}
+		}
+	}
+
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+
+	color := map[string]int{}
+	parent := map[string]string{}
+	var cycles []string
+
+	var dfs func(node string)
+	dfs = func(node string) {
+		color[node] = gray
+		for neighbor := range adj[node] {
+			if color[neighbor] == gray {
+				path := []string{neighbor, node}
+				cur := node
+				for cur != neighbor {
+					cur = parent[cur]
+					path = append(path, cur)
+				}
+				for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+					path[i], path[j] = path[j], path[i]
+				}
+				hasCycleBreaker := false
+				for _, p := range path {
+					if n := g.Nodes[p]; n != nil && n.CycleBreaker {
+						hasCycleBreaker = true
+						break
+					}
+				}
+				if !hasCycleBreaker {
+					cycles = append(cycles, fmt.Sprintf("requires/satisfies cycle detected: %s", strings.Join(path, " → ")))
+				}
+			} else if color[neighbor] == white {
+				parent[neighbor] = node
+				dfs(neighbor)
+			}
+		}
+		color[node] = black
+	}
+
+	for name := range g.Nodes {
+		if color[name] == white {
+			dfs(name)
+		}
+	}
+
+	return cycles
 }
 
 // detectCycles uses DFS with three-color marking to detect cycles

@@ -243,49 +243,17 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 
 // resolveInputEnhanced resolves a single input with optional enhanced features.
 // When rctx/ectx are nil, it behaves identically to the original resolveInput.
+//
+// Resolution priority:
+//  1. Plan-level fromSelection (named selection reference)
+//  2. Plan-level from (explicit upstream reference, with or without select)
+//  3. Graph edge (auto-wired or explicit edges from the graph definition)
+//  4. Plan default (literal value, expression, or fallback pool)
+//  5. Graph node Input.Default
+//  6. Optional → skip
+//  7. Error: required input has no value
 func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, g *graph.Graph, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult, namedSelections map[string]*namedSelectionEntry, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
-	// 1. Check for graph edge
-	if edge, ok := edgeMap[input.Name]; ok {
-		fromNode, fromField, err := splitRef(edge.From)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("invalid edge source %q: %w", edge.From, err)
-		}
-
-		if edge.Select {
-			// 2. SELECT edge: select from upstream array using strategy
-			val, decision, err := resolveSelectEdge(ctx, fromNode, fromField, input.Name, step, g, state, dedupCache, rctx)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			res := &ValueResolution{
-				InputName:  input.Name,
-				Source:     "select_edge",
-				FinalValue: val,
-				FromStep:   fromNode,
-				FromOutput: fromField,
-				PoolIndex:  -1,
-			}
-			return val, decision, res, nil
-		}
-
-		// Regular edge: get the output value directly
-		// Edge-resolved values are NOT subject to expression evaluation.
-		val, err := state.GetOutput(fromNode, fromField)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("edge from %q: %w", edge.From, err)
-		}
-		res := &ValueResolution{
-			InputName:  input.Name,
-			Source:     "edge",
-			FinalValue: val,
-			FromStep:   fromNode,
-			FromOutput: fromField,
-			PoolIndex:  -1,
-		}
-		return val, nil, res, nil
-	}
-
-	// 2b. Named selection: fromSelection references a pre-resolved element
+	// 1. Named selection: fromSelection references a pre-resolved element
 	if sv, ok := step.Values[input.Name]; ok && sv.FromSelection != "" {
 		selName, fieldName := plan.ParseFromSelection(sv.FromSelection)
 		entry, exists := namedSelections[selName]
@@ -327,14 +295,18 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 		return val, decision, res, nil
 	}
 
-	// 3. Plan StepValue (via plan values or "from" with select)
-	if sv, ok := step.Values[input.Name]; ok {
-		if sv.From != "" && sv.Select != nil {
-			// Plan-defined selection from upstream output
-			fromNode, fromField, err := splitRef(sv.From)
-			if err != nil {
-				return nil, nil, nil, fmt.Errorf("invalid 'from' reference %q: %w", sv.From, err)
-			}
+	// 2. Plan-level "from" reference (explicit upstream output)
+	// This takes priority over graph edges because the plan is more specific:
+	// auto-wired graphs may have multiple edges for the same input, but the
+	// plan's "from" tells us exactly which upstream step to use.
+	if sv, ok := step.Values[input.Name]; ok && sv.From != "" {
+		fromNode, fromField, err := splitRef(sv.From)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid 'from' reference %q: %w", sv.From, err)
+		}
+
+		if sv.Select != nil {
+			// Plan-defined selection from upstream array output
 			val, decision, err := resolveSelectValue(ctx, fromNode, fromField, input.Name, sv.Select, g, state, dedupCache, rctx)
 			if err != nil {
 				return nil, nil, nil, err
@@ -349,6 +321,66 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 			}
 			return val, decision, res, nil
 		}
+
+		// Plain from reference — resolve directly from upstream output
+		val, err := state.GetOutput(fromNode, fromField)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("from reference %q: %w", sv.From, err)
+		}
+		res := &ValueResolution{
+			InputName:  input.Name,
+			Source:     "plan_from",
+			FinalValue: val,
+			FromStep:   fromNode,
+			FromOutput: fromField,
+			PoolIndex:  -1,
+		}
+		return val, nil, res, nil
+	}
+
+	// 3. Graph edge (auto-wired or explicit)
+	if edge, ok := edgeMap[input.Name]; ok {
+		fromNode, fromField, err := splitRef(edge.From)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid edge source %q: %w", edge.From, err)
+		}
+
+		if edge.Select {
+			// SELECT edge: select from upstream array using strategy
+			val, decision, err := resolveSelectEdge(ctx, fromNode, fromField, input.Name, step, g, state, dedupCache, rctx)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			res := &ValueResolution{
+				InputName:  input.Name,
+				Source:     "select_edge",
+				FinalValue: val,
+				FromStep:   fromNode,
+				FromOutput: fromField,
+				PoolIndex:  -1,
+			}
+			return val, decision, res, nil
+		}
+
+		// Regular edge: get the output value directly
+		// Edge-resolved values are NOT subject to expression evaluation.
+		val, err := state.GetOutput(fromNode, fromField)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("edge from %q: %w", edge.From, err)
+		}
+		res := &ValueResolution{
+			InputName:  input.Name,
+			Source:     "edge",
+			FinalValue: val,
+			FromStep:   fromNode,
+			FromOutput: fromField,
+			PoolIndex:  -1,
+		}
+		return val, nil, res, nil
+	}
+
+	// 4. Plan StepValue default / fallback pool
+	if sv, ok := step.Values[input.Name]; ok {
 		if sv.Default != nil {
 			// Enhanced path: evaluate expressions, check constraints, try fallback pool
 			if rctx != nil && ectx != nil {

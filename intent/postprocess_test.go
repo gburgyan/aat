@@ -1334,6 +1334,106 @@ func TestMergeLLMValues_IgnoresUnknownNamedSelection(t *testing.T) {
 	assert.Equal(t, "first", skeleton.Execution.Steps[0].Selections["offering"].Strategy)
 }
 
+// --- BuildSkeleton with RequiresEdges ---
+
+func TestBuildSkeleton_WithRequiresEdges(t *testing.T) {
+	// Build a graph with requires/satisfies but no data-flow edges between
+	// some nodes. The requires edges should generate dependsOn.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights", Adapter: "search",
+				Satisfies: []string{"flightsSearched"},
+				Inputs:    []graph.Input{{Name: "origin", Type: "string"}},
+				Outputs:   []graph.Output{{Name: "results", Type: "string"}},
+			},
+			"createWorkbench": {
+				Name: "createWorkbench", Adapter: "createWB",
+				Satisfies: []string{"workbenchCreated"},
+				Outputs:   []graph.Output{{Name: "workbenchId", Type: "string"}},
+			},
+			"addOffer": {
+				Name: "addOffer", Adapter: "addOffer",
+				Requires:  []string{"flightsSearched", "workbenchCreated"},
+				Satisfies: []string{"offerAdded"},
+				Inputs:    []graph.Input{{Name: "workbenchId", Type: "string"}},
+				Outputs:   []graph.Output{{Name: "status", Type: "string"}},
+			},
+			"commit": {
+				Name: "commit", Adapter: "commit",
+				Requires: []string{"offerAdded"},
+				Inputs:   []graph.Input{{Name: "workbenchId", Type: "string"}},
+				Outputs:  []graph.Output{{Name: "locator", Type: "string"}},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "createWorkbench.workbenchId", To: "addOffer.workbenchId"},
+			{From: "createWorkbench.workbenchId", To: "commit.workbenchId"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	cr := &graph.ChainResult{
+		Nodes:      []string{"searchFlights", "createWorkbench", "addOffer", "commit"},
+		EntryNodes: []string{"searchFlights", "createWorkbench"},
+		Edges: []graph.Edge{
+			{From: "createWorkbench.workbenchId", To: "addOffer.workbenchId"},
+			{From: "createWorkbench.workbenchId", To: "commit.workbenchId"},
+		},
+		RequiresEdges: []graph.RequiresEdge{
+			{From: "searchFlights", To: "addOffer", Token: "flightsSearched"},
+			{From: "createWorkbench", To: "addOffer", Token: "workbenchCreated"},
+			{From: "addOffer", To: "commit", Token: "offerAdded"},
+		},
+	}
+	ga := &GoalAnalysis{Goal: "commit", Description: "Commit booking"}
+	now := time.Date(2026, 2, 15, 12, 0, 0, 0, time.UTC)
+
+	skel := BuildSkeleton(g, cr, ga, "commit booking", now)
+
+	require.Len(t, skel.Execution.Steps, 4)
+
+	// addOffer should depend on searchFlights (via requires edge) and createWorkbench (via data + requires).
+	addOfferStep := skel.Execution.Steps[2]
+	assert.Equal(t, "addOffer", addOfferStep.Node)
+	assert.Contains(t, addOfferStep.DependsOn, "searchFlights")
+	assert.Contains(t, addOfferStep.DependsOn, "createWorkbench")
+
+	// commit should depend on addOffer (via requires edge) and createWorkbench (via data edge).
+	commitStep := skel.Execution.Steps[3]
+	assert.Equal(t, "commit", commitStep.Node)
+	assert.Contains(t, commitStep.DependsOn, "addOffer")
+	assert.Contains(t, commitStep.DependsOn, "createWorkbench")
+}
+
+func TestFixDependsOn_IncludesRequiresSatisfies(t *testing.T) {
+	// Graph where node B requires token from A but no data-flow edge A→B.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"a": {Name: "a", Adapter: "a", Satisfies: []string{"tokenA"}, Outputs: []graph.Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Requires: []string{"tokenA"}, Inputs: []graph.Input{{Name: "x", Type: "string"}}},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "a"},
+				{Node: "b"},
+			},
+		},
+	}
+
+	stepIndex := buildStepIndex(p)
+	fixDependsOn(p, g, stepIndex)
+
+	// b should depend on a via requires/satisfies.
+	assert.Contains(t, p.Execution.Steps[1].DependsOn, "a")
+}
+
 func TestMergeLLMValues_SkipsFromSelectionValues(t *testing.T) {
 	skeleton := &plan.Plan{
 		Execution: plan.Execution{
