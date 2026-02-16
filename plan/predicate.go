@@ -49,6 +49,25 @@ func ValidatePredicate(expr string) error {
 	return nil
 }
 
+// PredicateFields extracts all identifier (field) names referenced in a
+// predicate expression. Returns nil on parse error (caller should use
+// ValidatePredicate separately for syntax checking).
+func PredicateFields(expr string) []string {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var fields []string
+	for _, tok := range tokens {
+		if tok.kind == tokenIdent && !seen[tok.value] {
+			seen[tok.value] = true
+			fields = append(fields, tok.value)
+		}
+	}
+	return fields
+}
+
 // --- Token types ---
 
 type tokenKind int

@@ -8,7 +8,9 @@ import (
 
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
+	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/llm"
+	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -417,6 +419,225 @@ func containsHelper(s, substr string) bool {
 func loadKBFromYAML(t *testing.T, yamlStr string) (*domain.KnowledgeBase, error) {
 	t.Helper()
 	return domain.Parse([]byte(yamlStr))
+}
+
+// buildMismatchGraph creates a minimal graph where an input name ("origin")
+// doesn't match any elementField name on the source output. This triggers
+// the lookupElementFieldPath fallback, producing a broken fromSelection
+// that validation catches — exercising the retry path.
+func buildMismatchGraph() *graph.Graph {
+	return &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:        "search",
+				Description: "Search for items",
+				Adapter:     "searchAdapter",
+				Inputs: []graph.Input{
+					{Name: "query", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{
+						Name: "items",
+						Type: "item[]",
+						ElementFields: []graph.Field{
+							{Name: "itemId", Type: "string"},
+							{Name: "departure", Type: "string"},
+							{Name: "arrival", Type: "string"},
+						},
+					},
+				},
+			},
+			"process": {
+				Name:        "process",
+				Description: "Process selected item",
+				Adapter:     "processAdapter",
+				Inputs: []graph.Input{
+					{Name: "itemId", Type: "string"},
+					// "origin" doesn't match any elementField — triggers fallback
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "search.items", To: "process.itemId", Select: true},
+			{From: "search.items", To: "process.origin", Select: true},
+		},
+	}
+}
+
+func TestInterpret_RetryOnValidationFailure(t *testing.T) {
+	g := buildMismatchGraph()
+
+	goalJSON := `{
+		"goal": "process",
+		"description": "Process an item",
+		"conditionContext": {},
+		"pathPreferences": {},
+		"constraints": {"hard": [], "soft": [], "free": ["query"]}
+	}`
+
+	// The LLM response for the initial plan call — the skeleton already has
+	// the broken fromSelection so we just need to return the skeleton as-is
+	// (the LLM isn't changing structural fields anyway).
+	initialPlanYAML := "```yaml\n" + `
+metadata:
+  prompt: "process an item"
+  graphVersion: "1.0.0"
+execution:
+  steps:
+    - node: search
+      values:
+        query: "test query"
+    - node: process
+      dependsOn: [search]
+      values:
+        itemId:
+          fromSelection: item.itemId
+        origin:
+          fromSelection: item.origin
+` + "```\n"
+
+	// The retry response with the corrected field name
+	retryPlanYAML := "```yaml\n" + `
+metadata:
+  prompt: "process an item"
+  graphVersion: "1.0.0"
+execution:
+  steps:
+    - node: search
+      values:
+        query: "test query"
+    - node: process
+      dependsOn: [search]
+      values:
+        itemId:
+          fromSelection: item.itemId
+        origin:
+          fromSelection: item.departure
+` + "```\n"
+
+	t.Run("retry succeeds", func(t *testing.T) {
+		client := &stubClient{
+			responses: []string{
+				goalJSON,       // Call 1: goal analysis
+				initialPlanYAML, // Call 2: plan (skeleton has bad fromSelection)
+				retryPlanYAML,   // Call 3: retry with corrected fromSelection
+			},
+		}
+
+		result, err := Interpret(context.Background(), InterpretRequest{
+			Prompt: "process an item",
+			Graph:  g,
+			Client: client,
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, result.Plan)
+
+		// Should have made 3 LLM calls (goal + bad plan + retry)
+		assert.Len(t, client.calls, 3)
+
+		// The retry prompt should contain validation error context
+		retrySystem := client.calls[2].Messages[0].Content
+		assert.Contains(t, retrySystem, "validation errors")
+		assert.Contains(t, retrySystem, "elementField")
+
+		// The final plan should have the corrected fromSelection
+		for _, step := range result.Plan.Execution.Steps {
+			if step.Node == "process" {
+				originVal := step.Values["origin"]
+				_, field := plan.ParseFromSelection(originVal.FromSelection)
+				assert.Equal(t, "departure", field, "origin input should use 'departure' elementField")
+			}
+		}
+	})
+
+	t.Run("retry succeeds with trace", func(t *testing.T) {
+		client := &stubClient{
+			responses: []string{
+				goalJSON,
+				initialPlanYAML,
+				retryPlanYAML,
+			},
+		}
+
+		result, err := Interpret(context.Background(), InterpretRequest{
+			Prompt:      "process an item",
+			Graph:       g,
+			Client:      client,
+			EnableTrace: true,
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, result.Plan)
+		require.NotNil(t, result.Trace)
+
+		// Trace should capture the initial validation error
+		assert.NotEmpty(t, result.Trace.ValidationErr)
+		assert.Contains(t, result.Trace.ValidationErr, "origin")
+
+		// Trace should capture the retry call
+		require.NotNil(t, result.Trace.RetryCall)
+		assert.NotEmpty(t, result.Trace.RetryCall.RawResponse)
+		assert.Empty(t, result.Trace.RetryCall.Error)
+
+		// Retry validation should have succeeded (empty error)
+		assert.Empty(t, result.Trace.RetryValidationErr)
+
+		// Final plan should be present
+		assert.NotNil(t, result.Trace.FinalPlan)
+	})
+
+	t.Run("retry fails returns original error", func(t *testing.T) {
+		client := &stubClient{
+			responses: []string{
+				goalJSON,        // Call 1: goal analysis
+				initialPlanYAML, // Call 2: plan with bad fromSelection
+				initialPlanYAML, // Call 3: retry still has bad fromSelection
+			},
+		}
+
+		_, err := Interpret(context.Background(), InterpretRequest{
+			Prompt: "process an item",
+			Graph:  g,
+			Client: client,
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "validating generated plan")
+		// Should have attempted 3 calls
+		assert.Len(t, client.calls, 3)
+	})
+
+	t.Run("retry fails returns trace with retry info", func(t *testing.T) {
+		client := &stubClient{
+			responses: []string{
+				goalJSON,
+				initialPlanYAML,
+				initialPlanYAML,
+			},
+		}
+
+		result, err := Interpret(context.Background(), InterpretRequest{
+			Prompt:      "process an item",
+			Graph:       g,
+			Client:      client,
+			EnableTrace: true,
+		})
+
+		require.Error(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Trace)
+
+		// Both validation errors should be captured
+		assert.NotEmpty(t, result.Trace.ValidationErr)
+		assert.NotEmpty(t, result.Trace.RetryValidationErr)
+		require.NotNil(t, result.Trace.RetryCall)
+	})
 }
 
 func TestInterpret_Integration_RealLLM(t *testing.T) {

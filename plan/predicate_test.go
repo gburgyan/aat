@@ -7,6 +7,62 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPredicateFields(t *testing.T) {
+	tests := []struct {
+		name   string
+		expr   string
+		expect []string
+	}{
+		{
+			name:   "single field",
+			expr:   "carrier == 'QF'",
+			expect: []string{"carrier"},
+		},
+		{
+			name:   "multiple fields",
+			expr:   "price > 100 && cabin == 'Economy'",
+			expect: []string{"price", "cabin"},
+		},
+		{
+			name:   "literals only",
+			expr:   "'literal' == 'literal'",
+			expect: nil,
+		},
+		{
+			name:   "dotted field",
+			expr:   "a.b.c > 0",
+			expect: []string{"a.b.c"},
+		},
+		{
+			name:   "empty expression",
+			expr:   "",
+			expect: nil,
+		},
+		{
+			name:   "invalid expression",
+			expr:   "bad @@@ expr",
+			expect: nil,
+		},
+		{
+			name:   "deduplicates",
+			expr:   "carrier == 'QF' && carrier != 'AA'",
+			expect: []string{"carrier"},
+		},
+		{
+			name:   "complex with in",
+			expr:   "carrier in ['QF', 'AA'] && stops == 0",
+			expect: []string{"carrier", "stops"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := PredicateFields(tc.expr)
+			assert.Equal(t, tc.expect, result)
+		})
+	}
+}
+
 func TestTokenize(t *testing.T) {
 	tests := []struct {
 		name   string

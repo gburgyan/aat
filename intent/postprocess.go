@@ -16,6 +16,7 @@ func PostProcess(p *plan.Plan, g *graph.Graph, cr *graph.ChainResult, ga *GoalAn
 
 	fixDependsOn(p, g, stepIndex)
 	fixSelectionConfigs(p, g, stepIndex)
+	fixFilterPrefixes(p)
 	fixAssertions(p)
 	addCleanupSteps(p, g, stepIndex)
 	setMetadata(p, g, ga, prompt)
@@ -167,6 +168,35 @@ func fixSelectionConfigs(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool
 			}
 
 			p.Execution.Steps[i].Values[inp.Name] = sv
+		}
+	}
+}
+
+// fixFilterPrefixes strips selection-name prefixes from filter expressions.
+// LLMs sometimes generate filters like "catalogProductOffering.carrier == 'QF'"
+// when the correct form is "carrier == 'QF'" (field names are relative to the
+// selected element, not qualified by selection name).
+func fixFilterPrefixes(p *plan.Plan) {
+	for i, step := range p.Execution.Steps {
+		for selName, sel := range step.Selections {
+			if sel.Filter == "" {
+				continue
+			}
+			prefix := selName + "."
+			if strings.Contains(sel.Filter, prefix) {
+				sel.Filter = strings.ReplaceAll(sel.Filter, prefix, "")
+				p.Execution.Steps[i].Selections[selName] = sel
+			}
+		}
+		for name, sv := range step.Values {
+			if sv.Select != nil && sv.Select.Filter != "" {
+				// For inline selections, the "selection name" is the value name
+				prefix := name + "."
+				if strings.Contains(sv.Select.Filter, prefix) {
+					sv.Select.Filter = strings.ReplaceAll(sv.Select.Filter, prefix, "")
+					p.Execution.Steps[i].Values[name] = sv
+				}
+			}
 		}
 	}
 }
@@ -655,6 +685,107 @@ func splitNodeName(ref string) string {
 		return ""
 	}
 	return parts[0]
+}
+
+// blankBrokenFromSelections scans the plan for fromSelection values whose
+// field component is not a valid elementField on the source output. Any such
+// values have their FromSelection cleared (making them unfed inputs for the
+// LLM retry). Returns the list of blanked "step.input" keys and a description
+// of what the correct elementFields are for the retry prompt.
+func blankBrokenFromSelections(p *plan.Plan, g *graph.Graph) (blanked []string, hints []string) {
+	outputsByNode := make(map[string]map[string]graph.Output)
+	for name, node := range g.Nodes {
+		outs := make(map[string]graph.Output, len(node.Outputs))
+		for _, out := range node.Outputs {
+			outs[out.Name] = out
+		}
+		outputsByNode[name] = outs
+	}
+
+	for i, step := range p.Execution.Steps {
+		for inputName, sv := range step.Values {
+			if sv.FromSelection == "" {
+				continue
+			}
+			selName, fieldName := plan.ParseFromSelection(sv.FromSelection)
+			if fieldName == "" {
+				continue
+			}
+			sel, selExists := step.Selections[selName]
+			if !selExists || sel.From == "" {
+				continue
+			}
+			parts := strings.SplitN(sel.From, ".", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			srcNode, srcField := parts[0], parts[1]
+			outs, ok := outputsByNode[srcNode]
+			if !ok {
+				continue
+			}
+			out, outExists := outs[srcField]
+			if !outExists || len(out.ElementFields) == 0 {
+				continue
+			}
+			found := false
+			for _, ef := range out.ElementFields {
+				if ef.Name == fieldName {
+					found = true
+					break
+				}
+			}
+			if !found {
+				blanked = append(blanked, step.Node+"."+inputName)
+				sv.FromSelection = ""
+				p.Execution.Steps[i].Values[inputName] = sv
+
+				// Build hint showing available elementFields
+				var efNames []string
+				for _, ef := range out.ElementFields {
+					efNames = append(efNames, ef.Name)
+				}
+				hints = append(hints, fmt.Sprintf(
+					"Available elementFields for %s.%s: %s",
+					srcNode, srcField, strings.Join(efNames, ", ")))
+			}
+		}
+	}
+	return blanked, hints
+}
+
+// restoreBlankedFromSelections copies fromSelection values from the LLM plan
+// into the skeleton for inputs that were blanked during retry preparation.
+// This is needed because MergeLLMValues treats fromSelection as structural
+// and won't accept it from the LLM.
+func restoreBlankedFromSelections(skeleton, llmPlan *plan.Plan, blanked []string) {
+	blankedSet := make(map[string]bool, len(blanked))
+	for _, b := range blanked {
+		blankedSet[b] = true
+	}
+
+	// Build LLM step index
+	llmSteps := map[string]*plan.Step{}
+	for i := range llmPlan.Execution.Steps {
+		llmSteps[llmPlan.Execution.Steps[i].Node] = &llmPlan.Execution.Steps[i]
+	}
+
+	for i, step := range skeleton.Execution.Steps {
+		llmStep, ok := llmSteps[step.Node]
+		if !ok {
+			continue
+		}
+		for inputName, skelVal := range step.Values {
+			key := step.Node + "." + inputName
+			if !blankedSet[key] {
+				continue
+			}
+			if llmVal, exists := llmStep.Values[inputName]; exists && llmVal.FromSelection != "" {
+				skelVal.FromSelection = llmVal.FromSelection
+				skeleton.Execution.Steps[i].Values[inputName] = skelVal
+			}
+		}
+	}
 }
 
 // sortStrings sorts a string slice in place.

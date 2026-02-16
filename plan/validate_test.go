@@ -2026,3 +2026,263 @@ func TestParseFromSelection(t *testing.T) {
 		})
 	}
 }
+
+// --- fromSelection field validation ---
+
+func TestValidate_FromSelectionFieldValidation(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid elementField", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {FromSelection: "offering.productRef"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid elementField", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.origin"},
+							"productRef": {FromSelection: "offering.productRef"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "fromSelection")
+		assert.Contains(t, err.Error(), "origin")
+		assert.Contains(t, err.Error(), "elementField")
+	})
+
+	t.Run("no elementFields on output skips check", func(t *testing.T) {
+		// catalogOfferingsId is a string output with no elementFields
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferingsId",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.anything"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		// Should fail on "not an array type" but NOT on elementField check
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not an array type")
+		assert.NotContains(t, err.Error(), "elementField")
+	})
+
+	t.Run("fromSelection without dot skips field check", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							// No dot — references the whole selection, field check skipped
+							"offeringId": {FromSelection: "offering"},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+}
+
+// --- Filter field validation for named selections ---
+
+func TestValidate_FilterFieldValidation(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid filter fields", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "match",
+								Filter:   "carrier == 'QF'",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {FromSelection: "offering.productRef"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("invalid filter field", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "match",
+								Filter:   "origin == 'MEL'",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {FromSelection: "offering.productRef"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "filter for selection")
+		assert.Contains(t, err.Error(), "origin")
+		assert.Contains(t, err.Error(), "elementField")
+	})
+
+	t.Run("filter with multiple fields mixed valid and invalid", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "searchFlights.catalogOfferings",
+								Strategy: "match",
+								Filter:   "carrier == 'QF' && nonexistent > 0",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {FromSelection: "offering.productRef"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "nonexistent")
+		// carrier should NOT produce an error since it's a valid elementField
+		assert.NotContains(t, err.Error(), "\"carrier\"")
+	})
+}

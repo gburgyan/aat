@@ -28,10 +28,12 @@ type PlanTrace struct {
 	PlanCall        LLMCallTrace   `json:"planCall"`
 	LLMPlanYAML     string         `json:"llmPlanYaml,omitempty"`
 	MergedPlan      *plan.Plan     `json:"mergedPlan,omitempty"`
-	FinalPlan       *plan.Plan     `json:"finalPlan,omitempty"`
-	ValidationErr   string         `json:"validationErr,omitempty"`
-	TotalDurationMs int64          `json:"totalDurationMs"`
-	Error           string         `json:"error,omitempty"`
+	FinalPlan          *plan.Plan     `json:"finalPlan,omitempty"`
+	ValidationErr      string         `json:"validationErr,omitempty"`
+	RetryCall          *LLMCallTrace  `json:"retryCall,omitempty"`
+	RetryValidationErr string         `json:"retryValidationErr,omitempty"`
+	TotalDurationMs    int64          `json:"totalDurationMs"`
+	Error              string         `json:"error,omitempty"`
 }
 
 // LLMCallTrace captures a single LLM request/response pair.

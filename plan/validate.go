@@ -137,11 +137,36 @@ func Validate(p *Plan, g *graph.Graph) error {
 			// Validate FromSelection
 			if sv.FromSelection != "" {
 				if sv.From != "" || sv.Select != nil {
-					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromSelection but also has from/select — these are mutually exclusive", i, step.Node, name))
+					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromSelection but also has from/select \u2014 these are mutually exclusive", i, step.Node, name))
 				}
-				selName, _ := ParseFromSelection(sv.FromSelection)
+				selName, fieldName := ParseFromSelection(sv.FromSelection)
 				if _, exists := step.Selections[selName]; !exists {
 					errs = append(errs, fmt.Sprintf("step %d (%s): value %q references unknown selection %q", i, step.Node, name, selName))
+				}
+
+				// Validate fieldName against source output's elementFields
+				if fieldName != "" {
+					if sel, selExists := step.Selections[selName]; selExists && sel.From != "" {
+						srcNode, srcField, refErr := splitRef(sel.From)
+						if refErr == nil {
+							if outs, ok := outputsByNode[srcNode]; ok {
+								if out, outExists := outs[srcField]; outExists && len(out.ElementFields) > 0 {
+									found := false
+									for _, ef := range out.ElementFields {
+										if ef.Name == fieldName {
+											found = true
+											break
+										}
+									}
+									if !found {
+										errs = append(errs, fmt.Sprintf(
+											"step %d (%s): fromSelection %q references field %q which is not an elementField of %s.%s",
+											i, step.Node, sv.FromSelection, fieldName, srcNode, srcField))
+									}
+								}
+							}
+						}
+					}
 				}
 			}
 
@@ -260,7 +285,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 
 	// Validate predicate expressions and selection strategies in step selections and values
 	for i, step := range p.Execution.Steps {
-		// Validate named selection strategies
+		// Validate named selection strategies and filter fields
 		for selName, sel := range step.Selections {
 			strategy := sel.Strategy
 			if !validStrategies[strategy] {
@@ -284,6 +309,31 @@ func Validate(p *Plan, g *graph.Graph) error {
 			}
 			if strategy == "llm" && sel.Prompt == "" {
 				errs = append(errs, fmt.Sprintf("step %d (%s): llm strategy requires prompt for selection %q", i, step.Node, selName))
+			}
+
+			// Validate filter field references against source output's elementFields
+			if sel.Filter != "" && sel.From != "" {
+				srcNode, srcField, refErr := splitRef(sel.From)
+				if refErr == nil {
+					if outs, ok := outputsByNode[srcNode]; ok {
+						if out, outExists := outs[srcField]; outExists && len(out.ElementFields) > 0 {
+							for _, field := range PredicateFields(sel.Filter) {
+								found := false
+								for _, ef := range out.ElementFields {
+									if ef.Name == field {
+										found = true
+										break
+									}
+								}
+								if !found {
+									errs = append(errs, fmt.Sprintf(
+										"step %d (%s): filter for selection %q references field %q which is not an elementField of %s.%s",
+										i, step.Node, selName, field, srcNode, srcField))
+								}
+							}
+						}
+					}
+				}
 			}
 		}
 

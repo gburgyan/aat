@@ -3,6 +3,7 @@ package intent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -227,8 +228,31 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	PostProcess(skeleton, req.Graph, chainResult, goalAnalysis, req.Prompt)
 
 	if err := plan.Validate(skeleton, req.Graph); err != nil {
+		var valErr *plan.ValidationError
+		if !errors.As(err, &valErr) {
+			// Not a structured validation error — don't retry.
+			if trace != nil {
+				trace.ValidationErr = err.Error()
+				trace.FinalPlan = skeleton
+			}
+			return traceErr(fmt.Errorf("intent: validating generated plan: %w", err))
+		}
+
 		if trace != nil {
 			trace.ValidationErr = err.Error()
+		}
+
+		// Attempt a single retry: blank broken fromSelection refs, re-run call 2.
+		retryResult := retryPlanGeneration(ctx, req, skeleton, skeletonBytes,
+			unfedInputs, chainContext, domainContext, goalJSON, valErr, trace, pipelineStart)
+		if retryResult != nil {
+			retryResult.GoalAnalysis = goalAnalysis
+			retryResult.ChainResult = chainResult
+			return retryResult, nil
+		}
+
+		// Retry failed or not applicable — return original error.
+		if trace != nil {
 			trace.FinalPlan = skeleton
 		}
 		return traceErr(fmt.Errorf("intent: validating generated plan: %w", err))
@@ -245,6 +269,125 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		ChainResult:  chainResult,
 		Trace:        trace,
 	}, nil
+}
+
+// retryPlanGeneration attempts a single retry of plan generation (call 2)
+// after a validation failure. It blanks broken fromSelection references,
+// rebuilds the skeleton YAML, and re-runs the LLM call with validation
+// errors in the prompt. Returns a successful InterpretResult or nil if
+// retry also fails.
+func retryPlanGeneration(
+	ctx context.Context,
+	req InterpretRequest,
+	skeleton *plan.Plan,
+	skeletonBytes []byte,
+	unfedInputs []string,
+	chainContext, domainContext, goalJSON string,
+	valErr *plan.ValidationError,
+	trace *PlanTrace,
+	pipelineStart time.Time,
+) *InterpretResult {
+	// Make a copy of the skeleton so we don't mutate the original for trace purposes.
+	retrySkeleton := copyPlanShallow(skeleton)
+
+	// Deep-copy the steps slice so mutations don't affect the original.
+	retrySteps := make([]plan.Step, len(skeleton.Execution.Steps))
+	copy(retrySteps, skeleton.Execution.Steps)
+	retrySkeleton.Execution.Steps = retrySteps
+
+	// Deep-copy value maps within steps.
+	for i, step := range retrySkeleton.Execution.Steps {
+		if step.Values != nil {
+			newValues := make(map[string]plan.StepValue, len(step.Values))
+			for k, v := range step.Values {
+				newValues[k] = v
+			}
+			retrySkeleton.Execution.Steps[i].Values = newValues
+		}
+	}
+
+	blanked, hints := blankBrokenFromSelections(retrySkeleton, req.Graph)
+	if len(blanked) == 0 {
+		// Nothing was blanked — retry is unlikely to help.
+		return nil
+	}
+
+	// Rebuild skeleton YAML with blanked values.
+	retrySkeletonBytes, err := plan.Marshal(retrySkeleton)
+	if err != nil {
+		return nil
+	}
+
+	// Add blanked inputs to the unfed list.
+	retryUnfed := append([]string{}, unfedInputs...)
+	for _, b := range blanked {
+		retryUnfed = append(retryUnfed, b+" (was incorrectly wired, needs correct fromSelection)")
+	}
+
+	now := time.Now()
+	system, user := buildRetryPrompt(
+		string(retrySkeletonBytes), retryUnfed, chainContext, domainContext, goalJSON,
+		req.Prompt, now, valErr.Errors, hints,
+	)
+
+	retryCallStart := time.Now()
+	planResp, err := req.Client.Complete(ctx, &llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: system},
+			{Role: llm.RoleUser, Content: user},
+		},
+		Temperature: 0.2,
+	})
+	if err != nil {
+		if trace != nil {
+			ct := toLLMCallTrace(system, user, 0.2, nil, time.Since(retryCallStart), err)
+			trace.RetryCall = &ct
+		}
+		return nil
+	}
+
+	if trace != nil {
+		ct := toLLMCallTrace(system, user, 0.2, planResp, time.Since(retryCallStart), nil)
+		trace.RetryCall = &ct
+	}
+
+	// Parse and merge retry response.
+	yamlBytes, err := ExtractYAML(planResp.Content)
+	if err != nil {
+		return nil
+	}
+
+	llmPlan, err := plan.Parse(yamlBytes)
+	if err != nil {
+		return nil
+	}
+
+	MergeLLMValues(retrySkeleton, llmPlan)
+
+	// MergeLLMValues won't set fromSelection from the LLM (it treats it as
+	// structural). For blanked inputs, explicitly restore fromSelection from
+	// the LLM response so the corrected field names take effect.
+	restoreBlankedFromSelections(retrySkeleton, llmPlan, blanked)
+
+	PostProcess(retrySkeleton, req.Graph, nil, nil, req.Prompt)
+
+	if err := plan.Validate(retrySkeleton, req.Graph); err != nil {
+		if trace != nil {
+			trace.RetryValidationErr = err.Error()
+			trace.FinalPlan = retrySkeleton
+		}
+		return nil
+	}
+
+	if trace != nil {
+		trace.FinalPlan = retrySkeleton
+		trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
+	}
+
+	return &InterpretResult{
+		Plan:  retrySkeleton,
+		Trace: trace,
+	}
 }
 
 // copyPlanShallow creates a shallow copy of a Plan for trace snapshots.

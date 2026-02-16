@@ -100,3 +100,28 @@ Rules:
 	user = ub.String()
 	return system, user
 }
+
+// buildRetryPrompt constructs prompts for retrying plan generation after validation
+// failure. It extends buildPlanPrompt with information about the validation errors
+// and hints about correct elementField names.
+func buildRetryPrompt(skeletonYAML string, unfedInputs []string, chainContext, domainContext, goalAnalysisJSON, userPrompt string, now time.Time, validationErrors []string, hints []string) (system, user string) {
+	system, user = buildPlanPrompt(skeletonYAML, unfedInputs, chainContext, domainContext, goalAnalysisJSON, userPrompt, now)
+
+	// Append validation error context to the system prompt.
+	var sb strings.Builder
+	sb.WriteString(system)
+	sb.WriteString("\n\nIMPORTANT: The previous attempt produced a plan with these validation errors:\n")
+	for _, e := range validationErrors {
+		fmt.Fprintf(&sb, "- %s\n", e)
+	}
+	if len(hints) > 0 {
+		sb.WriteString("\n")
+		for _, h := range hints {
+			fmt.Fprintf(&sb, "%s\n", h)
+		}
+	}
+	sb.WriteString("\nFix these issues. For fromSelection references, use the correct elementField name.")
+	system = sb.String()
+
+	return system, user
+}
