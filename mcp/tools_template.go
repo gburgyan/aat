@@ -109,7 +109,13 @@ func formatTemplate(tmpl *adapter.Template) string {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			fmt.Fprintf(&b, "| %s | %s |\n", k, tmpl.Response.Extract[k])
+			rule := tmpl.Response.Extract[k]
+			fmt.Fprintf(&b, "| %s | %s |\n", k, rule.Path)
+			if len(rule.Fields) > 0 {
+				for fn, fp := range rule.Fields {
+					fmt.Fprintf(&b, "| &nbsp;&nbsp;.%s | %s |\n", fn, fp)
+				}
+			}
 		}
 	}
 

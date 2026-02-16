@@ -86,9 +86,9 @@ func TestHandleInspectTemplate_Valid(t *testing.T) {
 			Body:    `{"query": "{{q}}"}`,
 		},
 		Response: adapter.TemplateResponse{
-			Extract: map[string]string{
-				"results": "$.data.results",
-				"count":   "$.data.count",
+			Extract: map[string]adapter.ExtractRule{
+				"results": {Path: "$.data.results"},
+				"count":   {Path: "$.data.count"},
 			},
 		},
 	})))

@@ -174,16 +174,35 @@ func buildElementSelectionPrompt(arr []any, sel *plan.SelectionConfig, inputName
 	}
 
 	if len(elementFields) > 0 {
-		// Tabular summary using elementField names
+		// Tabular summary using elementField names.
+		// For template-transformed elements (flat maps), use direct key lookup.
+		// For raw elements, fall back to gjson with EffectivePath().
 		ub.WriteString("Elements (key fields):\n")
 		for i := 0; i < maxShow; i++ {
 			fmt.Fprintf(&ub, "[%d]", i)
-			data, err := json.Marshal(arr[i])
-			if err == nil {
+			if m, ok := arr[i].(map[string]any); ok {
 				for _, ef := range elementFields {
-					val := gjsonGet(data, ef.EffectivePath())
-					if val != "" {
-						fmt.Fprintf(&ub, " %s=%s", ef.Name, val)
+					if v, exists := m[ef.Name]; exists {
+						fmt.Fprintf(&ub, " %s=%v", ef.Name, v)
+						continue
+					}
+					// Fall back to gjson for non-flat elements
+					data, err := json.Marshal(arr[i])
+					if err == nil {
+						val := gjsonGet(data, ef.EffectivePath())
+						if val != "" {
+							fmt.Fprintf(&ub, " %s=%s", ef.Name, val)
+						}
+					}
+				}
+			} else {
+				data, err := json.Marshal(arr[i])
+				if err == nil {
+					for _, ef := range elementFields {
+						val := gjsonGet(data, ef.EffectivePath())
+						if val != "" {
+							fmt.Fprintf(&ub, " %s=%s", ef.Name, val)
+						}
 					}
 				}
 			}

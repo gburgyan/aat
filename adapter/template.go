@@ -31,8 +31,52 @@ type TemplateRequest struct {
 
 // TemplateResponse defines output extraction and validation rules.
 type TemplateResponse struct {
-	Extract  map[string]string `yaml:"extract,omitempty"`
-	Validate *TemplateValidate `yaml:"validate,omitempty"`
+	Extract  map[string]ExtractRule `yaml:"extract,omitempty"`
+	Validate *TemplateValidate      `yaml:"validate,omitempty"`
+}
+
+// ExtractRule defines how to extract a single output from the response.
+// For scalar values, only Path is set. For array values with element
+// transformation, both Path and Fields are set.
+type ExtractRule struct {
+	Path   string            `yaml:"path"`
+	Fields map[string]string `yaml:"fields,omitempty"`
+}
+
+// UnmarshalYAML handles both string and object forms of extract rules.
+// A bare string "some.path" becomes ExtractRule{Path: "some.path"}.
+// An object {path: "...", fields: {...}} is decoded fully.
+func (r *ExtractRule) UnmarshalYAML(value *yaml.Node) error {
+	// Try string first
+	var s string
+	if err := value.Decode(&s); err == nil {
+		r.Path = s
+		return nil
+	}
+	// Try object
+	type rawRule ExtractRule
+	var raw rawRule
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*r = ExtractRule(raw)
+	return nil
+}
+
+// HasElementFields reports whether the named output has template-side
+// field mappings that transform array elements into flat maps.
+func (t *Template) HasElementFields(outputName string) bool {
+	rule, ok := t.Extract()[outputName]
+	if !ok {
+		return false
+	}
+	return len(rule.Fields) > 0
+}
+
+// Extract returns the response extract rules. This is a convenience
+// accessor for the Response.Extract map.
+func (t *Template) Extract() map[string]ExtractRule {
+	return t.Response.Extract
 }
 
 // TemplateValidate holds optional validation configuration for responses.
@@ -130,7 +174,9 @@ func (a *TemplateAdapter) BuildRequest(inputs map[string]any, config *Environmen
 }
 
 // ExtractOutputs parses the response body as JSON and extracts values using
-// the template's extract rules (GJSON paths).
+// the template's extract rules (GJSON paths). When an extract rule has Fields
+// and the extracted value is an array, each element is transformed into a flat
+// map using the field mappings (logical name → gjson path within the element).
 func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error) {
 	if len(a.tmpl.Response.Extract) == 0 {
 		return map[string]any{}, nil
@@ -143,16 +189,55 @@ func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error)
 	bodyStr := string(resp.Body)
 	outputs := make(map[string]any, len(a.tmpl.Response.Extract))
 
-	for name, path := range a.tmpl.Response.Extract {
-		gpath := normalizeJSONPath(path)
+	for name, rule := range a.tmpl.Response.Extract {
+		gpath := normalizeJSONPath(rule.Path)
 		result := gjson.Get(bodyStr, gpath)
 		if !result.Exists() {
-			return nil, fmt.Errorf("extract path %q (%s) not found in response", name, path)
+			return nil, fmt.Errorf("extract path %q (%s) not found in response", name, rule.Path)
 		}
-		outputs[name] = result.Value()
+
+		val := result.Value()
+
+		// Transform array elements when Fields is set
+		if len(rule.Fields) > 0 {
+			arr, ok := val.([]any)
+			if !ok {
+				return nil, fmt.Errorf("extract rule %q has fields but extracted value is not an array (got %T)", name, val)
+			}
+			val = transformElements(arr, rule.Fields)
+		}
+
+		outputs[name] = val
 	}
 
 	return outputs, nil
+}
+
+// transformElements applies field mappings to each array element, producing
+// flat maps keyed by logical field name. Each element is marshaled to JSON
+// and then fields are extracted via gjson.
+func transformElements(arr []any, fields map[string]string) []any {
+	result := make([]any, len(arr))
+	for i, elem := range arr {
+		data, err := json.Marshal(elem)
+		if err != nil {
+			// Keep original element if marshal fails
+			result[i] = elem
+			continue
+		}
+
+		flat := make(map[string]any, len(fields))
+		for fieldName, fieldPath := range fields {
+			gpath := normalizeJSONPath(fieldPath)
+			r := gjson.GetBytes(data, gpath)
+			if r.Exists() {
+				flat[fieldName] = r.Value()
+			}
+			// Missing fields are skipped (not an error)
+		}
+		result[i] = flat
+	}
+	return result
 }
 
 // ValidateInputs returns nil — template adapters defer to graph-level type checking.

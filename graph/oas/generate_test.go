@@ -76,7 +76,11 @@ func TestGenerate_ListPets_Template(t *testing.T) {
 	assert.Empty(t, tmpl.Request.Headers)
 	assert.Empty(t, tmpl.Request.Body)
 	assert.Contains(t, tmpl.Response.Extract, "pets")
-	assert.Equal(t, "@this", tmpl.Response.Extract["pets"])
+	rule := tmpl.Response.Extract["pets"]
+	assert.Equal(t, "@this", rule.Path)
+	assert.Contains(t, rule.Fields, "id")
+	assert.Contains(t, rule.Fields, "name")
+	assert.Contains(t, rule.Fields, "tag")
 }
 
 func TestGenerate_CreatePet_Node(t *testing.T) {
@@ -155,9 +159,9 @@ func TestGenerate_GetPet_Template(t *testing.T) {
 	assert.Equal(t, "/pets/{{petId}}", tmpl.Request.Path)
 	assert.Empty(t, tmpl.Request.Body)
 	assert.NotNil(t, tmpl.Response.Extract)
-	assert.Equal(t, "id", tmpl.Response.Extract["id"])
-	assert.Equal(t, "name", tmpl.Response.Extract["name"])
-	assert.Equal(t, "tag", tmpl.Response.Extract["tag"])
+	assert.Equal(t, "id", tmpl.Response.Extract["id"].Path)
+	assert.Equal(t, "name", tmpl.Response.Extract["name"].Path)
+	assert.Equal(t, "tag", tmpl.Response.Extract["tag"].Path)
 }
 
 func TestGenerate_DeletePet_Node(t *testing.T) {

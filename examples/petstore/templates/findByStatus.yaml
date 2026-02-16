@@ -9,4 +9,9 @@ request:
 
 response:
   extract:
-    pets: "$"
+    pets:
+      path: "$"
+      fields:
+        petId: "id"
+        petName: "name"
+        petStatus: "status"

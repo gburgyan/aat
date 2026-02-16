@@ -40,7 +40,7 @@ The scaffold is intentionally rough. It gives you correct HTTP methods, paths, a
 | Input types | Mapped from OAS types (string, integer, number→float, boolean, date, datetime) |
 | Optional/required | From OAS `required` field |
 | Outputs | Properties from the first 2xx `application/json` response |
-| Array outputs | Detected automatically with `elementFields` from item schema |
+| Array outputs | Detected automatically with `elementFields` in graph and `fields` extraction in templates |
 | OAS links | Each node gets `oas.operationId` for validation |
 | Templates | HTTP method, path with `{{params}}`, headers, JSON body with placeholders |
 
@@ -129,14 +129,29 @@ outputs:
     elementFields:
       - name: offeringId
         type: string
-        path: "id"           # gjson extraction path (if different from name)
       - name: price
         type: float
       - name: carrier
         type: string
 ```
 
-The `path` field is only needed when the JSON field name differs from the logical name you want in your plan.
+Element fields declare the **semantic contract** — what named fields are available for selection strategies (`min`, `max`, `match`, `llm`, etc.) in plans. The graph says *what data exists*; the template says *how to extract it*.
+
+The actual extraction paths (mapping JSON field names to logical names) are defined in the template's `fields` section:
+
+```yaml
+# In the template:
+response:
+  extract:
+    offerings:
+      path: "data.offerings"
+      fields:
+        offeringId: "id"        # JSON "id" → logical "offeringId"
+        price: "pricing.total"  # nested JSON path → flat "price"
+        carrier: "carrier"      # same name, no transformation needed
+```
+
+This separation keeps the graph focused on the data model while templates handle the extraction mechanics. See [Templates — Array Extraction](templates.md#array-extraction-with-element-transformation-object-form) for details.
 
 ### Mark cleanup nodes
 
@@ -274,9 +289,10 @@ When `--templates` is provided, validation checks that each node's declared outp
 aat graph validate --graph graph.yaml --templates templates/
 ```
 
-This catches two kinds of mismatch:
+This catches several kinds of mismatch:
 - **Graph output not extracted by template** — the node declares an output but the template has no extract entry for it, so the output will always be nil at runtime
 - **Template extracts undeclared output** — the template extracts a key the graph doesn't declare, which is dead extraction (likely a typo or stale rename)
+- **Element field mismatch** — for array outputs, the template's `fields` keys should match the graph's `elementFields` names. Mismatches between these are flagged as warnings.
 
 Nodes with no outputs (cleanup/void operations) and non-template adapters are skipped. This check also runs automatically at the start of `aat run`.
 
@@ -312,6 +328,18 @@ response:
   extract:
     resourceId: "data.resource.id"
     status: "data.resource.status"
+```
+
+For array outputs with `elementFields` in the graph, add `fields` to the extract rule so the template transforms each element into a flat object:
+
+```yaml
+response:
+  extract:
+    offerings:
+      path: "data.results"
+      fields:
+        offeringId: "id"
+        price: "pricing.total"
 ```
 
 ### Fix request body structure
@@ -370,10 +398,11 @@ nodeName:
     - name: result
       type: object[]
       description: "List of results"
-      elementFields:                # for array outputs
+      elementFields:                # for array outputs: declares selectable fields
         - name: id
           type: string
-          path: "nested.id"         # gjson path, defaults to name
+        - name: status
+          type: string
 ```
 
 ### Edge

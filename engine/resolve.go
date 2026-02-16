@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
@@ -24,11 +25,12 @@ type ResolveContext struct {
 	Mode      config.ExecutionMode
 	Now       time.Time
 	EnvLookup func(string) string
-	KB        *domain.KnowledgeBase // may be nil
-	LLM       llm.Client            // may be nil
+	KB        *domain.KnowledgeBase  // may be nil
+	LLM       llm.Client             // may be nil
 	Node      *graph.Node
-	Plan      *plan.Plan            // for constraint classification (may be nil)
-	Tracker   *RelaxationTracker    // per-step relaxation tracker (may be nil)
+	Plan      *plan.Plan             // for constraint classification (may be nil)
+	Tracker   *RelaxationTracker     // per-step relaxation tracker (may be nil)
+	Registry  *adapter.Registry      // may be nil; enables template-side elementField resolution
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -191,7 +193,7 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		}
 	} else {
 		// Resolve elementField names in SortField
-		resolvedSel := resolveSelectionFields(selCfg, g, fromNode, fromField)
+		resolvedSel := resolveSelectionFields(selCfg, rctx, g, fromNode, fromField)
 
 		// Check dedup cache
 		key := dedupKey(fromNode, fromField, selCfg)
@@ -263,8 +265,8 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 
 		var val any
 		if fieldName != "" {
-			// Resolve elementField name → gjson path
-			resolvedField := resolveElementFieldPath(g, entry.sourceNode, entry.sourceField, fieldName)
+			// Resolve elementField name → extraction key
+			resolvedField := resolveElementFieldPath(rctx, g, entry.sourceNode, entry.sourceField, fieldName)
 			extracted, err := extractField(entry.element, resolvedField)
 			if err != nil {
 				return nil, nil, nil, fmt.Errorf("extracting field %q from selection %q: %w", fieldName, selName, err)
@@ -458,7 +460,7 @@ func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName strin
 				SelectedIndex: cached.index,
 			}
 			if sel.Field != "" {
-				resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
+				resolvedField := resolveElementFieldPath(rctx, g, fromNode, fromField, sel.Field)
 				val, exErr := extractField(cached.element, resolvedField)
 				if exErr != nil {
 					return nil, nil, exErr
@@ -484,7 +486,7 @@ func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName strin
 			LLMCall:       llmRec,
 		}
 		if sel.Field != "" {
-			resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
+			resolvedField := resolveElementFieldPath(rctx, g, fromNode, fromField, sel.Field)
 			val, exErr := extractField(result.element, resolvedField)
 			if exErr != nil {
 				return nil, nil, exErr
@@ -494,8 +496,8 @@ func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName strin
 		return result.element, decision, nil
 	}
 
-	// Resolve elementField names to gjson paths for applySelection (min/max SortField)
-	resolvedSel := resolveSelectionFields(sel, g, fromNode, fromField)
+	// Resolve elementField names to extraction keys for applySelection (min/max SortField)
+	resolvedSel := resolveSelectionFields(sel, rctx, g, fromNode, fromField)
 
 	// Check dedup cache
 	key := dedupKey(fromNode, fromField, sel)
@@ -565,7 +567,7 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 				SelectedIndex: cached.index,
 			}
 			if sel.Field != "" {
-				resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
+				resolvedField := resolveElementFieldPath(rctx, g, fromNode, fromField, sel.Field)
 				val, exErr := extractField(cached.element, resolvedField)
 				if exErr != nil {
 					return nil, nil, exErr
@@ -591,7 +593,7 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 			LLMCall:       llmRec,
 		}
 		if sel.Field != "" {
-			resolvedField := resolveElementFieldPath(g, fromNode, fromField, sel.Field)
+			resolvedField := resolveElementFieldPath(rctx, g, fromNode, fromField, sel.Field)
 			val, exErr := extractField(result.element, resolvedField)
 			if exErr != nil {
 				return nil, nil, exErr
@@ -601,8 +603,8 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 		return result.element, decision, nil
 	}
 
-	// Resolve elementField names to gjson paths for applySelection (min/max SortField)
-	resolvedSel := resolveSelectionFields(sel, g, fromNode, fromField)
+	// Resolve elementField names to extraction keys for applySelection (min/max SortField)
+	resolvedSel := resolveSelectionFields(sel, rctx, g, fromNode, fromField)
 
 	// Check dedup cache
 	key := dedupKey(fromNode, fromField, sel)
@@ -676,50 +678,75 @@ func getArrayFromState(nodeName, outputName string, state *RunState) ([]any, err
 	return arr, nil
 }
 
-// resolveElementFieldPath looks up a field reference against the graph's
-// elementFields for a given source output. If fieldRef matches an elementField
-// name, returns its EffectivePath (the gjson path). Otherwise returns fieldRef
-// unchanged for backward compatibility with raw gjson paths.
-func resolveElementFieldPath(g *graph.Graph, sourceNode, sourceOutput, fieldRef string) string {
-	if g == nil {
-		return fieldRef
-	}
-	node := g.Nodes[sourceNode]
-	if node == nil {
-		return fieldRef
-	}
-	for _, out := range node.Outputs {
-		if out.Name == sourceOutput {
-			for _, ef := range out.ElementFields {
-				if ef.Name == fieldRef {
-					return ef.EffectivePath()
+// resolveElementFieldPath resolves a logical elementField name to the
+// extraction key/path needed at runtime. Resolution order:
+//  1. Template elementFields (via registry) — if the template has fields for
+//     this output, elements are already transformed; return the field name
+//     itself (it is a direct key in the flat map).
+//  2. Graph elementField Path — for backward compat with old templates that
+//     don't have field mappings.
+//  3. Field name unchanged — fallback for raw gjson paths or simple name=path.
+func resolveElementFieldPath(rctx *ResolveContext, g *graph.Graph, sourceNode, sourceOutput, fieldRef string) string {
+	// 1. Template-side field mapping: elements are already flat maps keyed by
+	//    logical name, so the field name IS the lookup key.
+	if rctx != nil && rctx.Registry != nil && g != nil {
+		if node := g.Nodes[sourceNode]; node != nil {
+			if tmpl, ok := rctx.Registry.GetTemplate(node.Adapter); ok {
+				if tmpl.HasElementFields(sourceOutput) {
+					return fieldRef
 				}
 			}
-			break
 		}
 	}
+
+	// 2. Graph elementField Path
+	if g != nil {
+		if node := g.Nodes[sourceNode]; node != nil {
+			for _, out := range node.Outputs {
+				if out.Name == sourceOutput {
+					for _, ef := range out.ElementFields {
+						if ef.Name == fieldRef {
+							return ef.EffectivePath()
+						}
+					}
+					break
+				}
+			}
+		}
+	}
+
+	// 3. Unchanged fallback
 	return fieldRef
 }
 
 // resolveSelectionFields returns a shallow copy of sel with Field and SortField
-// resolved from elementField names to gjson paths using the graph. The original
-// sel is not modified. Returns nil if sel is nil.
-func resolveSelectionFields(sel *plan.SelectionConfig, g *graph.Graph, sourceNode, sourceOutput string) *plan.SelectionConfig {
+// resolved from elementField names to extraction keys using the template (if
+// available) or graph. The original sel is not modified. Returns nil if sel is nil.
+func resolveSelectionFields(sel *plan.SelectionConfig, rctx *ResolveContext, g *graph.Graph, sourceNode, sourceOutput string) *plan.SelectionConfig {
 	if sel == nil {
 		return nil
 	}
 	resolved := *sel
 	if resolved.Field != "" {
-		resolved.Field = resolveElementFieldPath(g, sourceNode, sourceOutput, resolved.Field)
+		resolved.Field = resolveElementFieldPath(rctx, g, sourceNode, sourceOutput, resolved.Field)
 	}
 	if resolved.SortField != "" {
-		resolved.SortField = resolveElementFieldPath(g, sourceNode, sourceOutput, resolved.SortField)
+		resolved.SortField = resolveElementFieldPath(rctx, g, sourceNode, sourceOutput, resolved.SortField)
 	}
 	return &resolved
 }
 
-// extractField marshals an element to JSON and extracts a field using gjson.
+// extractField extracts a named field from an element. It first tries a direct
+// map key lookup (fast path for template-transformed flat elements), then falls
+// back to JSON marshaling + gjson for raw/nested elements.
 func extractField(element any, field string) (any, error) {
+	// Fast path: direct map key lookup (works for template-transformed elements)
+	if m, ok := element.(map[string]any); ok {
+		if val, exists := m[field]; exists {
+			return val, nil
+		}
+	}
+	// Fall back to JSON + gjson for raw/nested elements
 	data, err := json.Marshal(element)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling element for field extraction: %w", err)

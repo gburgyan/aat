@@ -37,7 +37,27 @@ type ScaffoldTemplateRequest struct {
 
 // ScaffoldTemplateResponse defines output extraction for a scaffold template.
 type ScaffoldTemplateResponse struct {
-	Extract map[string]string `yaml:"extract,omitempty"`
+	Extract map[string]ScaffoldExtractRule `yaml:"extract,omitempty"`
+}
+
+// ScaffoldExtractRule mirrors adapter.ExtractRule for scaffold generation.
+type ScaffoldExtractRule struct {
+	Path   string            `yaml:"path"`
+	Fields map[string]string `yaml:"fields,omitempty"`
+}
+
+// MarshalYAML emits a bare string when Fields is empty (backward-compatible
+// scalar format), or a mapping when Fields is set.
+func (r ScaffoldExtractRule) MarshalYAML() (interface{}, error) {
+	if len(r.Fields) == 0 {
+		return r.Path, nil
+	}
+	// Return a struct so YAML renders as {path: ..., fields: {...}}
+	type raw struct {
+		Path   string            `yaml:"path"`
+		Fields map[string]string `yaml:"fields,omitempty"`
+	}
+	return raw{Path: r.Path, Fields: r.Fields}, nil
 }
 
 // Generate produces a graph and template stubs from an OAS spec.
@@ -462,18 +482,27 @@ func buildBodyTemplate(op *v3high.Operation) string {
 	return string(data)
 }
 
-// buildExtractMap creates extract paths from outputs.
-func buildExtractMap(outputs []graph.Output) map[string]string {
+// buildExtractMap creates extract rules from outputs. Array outputs with
+// elementFields get a fields section mapping name → name (since OAS property
+// names match JSON keys directly).
+func buildExtractMap(outputs []graph.Output) map[string]ScaffoldExtractRule {
 	if len(outputs) == 0 {
 		return nil
 	}
 
-	extract := make(map[string]string, len(outputs))
+	extract := make(map[string]ScaffoldExtractRule, len(outputs))
 	for _, out := range outputs {
 		if out.Type == "object[]" || strings.HasSuffix(out.Type, "[]") {
-			extract[out.Name] = "@this"
+			rule := ScaffoldExtractRule{Path: "@this"}
+			if len(out.ElementFields) > 0 {
+				rule.Fields = make(map[string]string, len(out.ElementFields))
+				for _, ef := range out.ElementFields {
+					rule.Fields[ef.Name] = ef.Name
+				}
+			}
+			extract[out.Name] = rule
 		} else {
-			extract[out.Name] = out.Name
+			extract[out.Name] = ScaffoldExtractRule{Path: out.Name}
 		}
 	}
 	return extract

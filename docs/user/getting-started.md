@@ -102,10 +102,8 @@ nodes:
     outputs:
       - name: userId
         type: string
-        path: "id"
       - name: userName
         type: string
-        path: "name"
 
   getUser:
     adapter: getUser
@@ -117,16 +115,13 @@ nodes:
     outputs:
       - name: userId
         type: string
-        path: "id"
       - name: userName
         type: string
-        path: "name"
       - name: userEmail
         type: string
-        path: "email"
 ```
 
-**After (edges added):**
+**After (edges added, descriptions filled in):**
 
 ```yaml
 version: "1.0.0"
@@ -145,10 +140,8 @@ nodes:
     outputs:
       - name: userId
         type: string
-        path: "id"
       - name: userName
         type: string
-        path: "name"
 
   getUser:
     description: "Fetch a user by ID"
@@ -161,13 +154,10 @@ nodes:
     outputs:
       - name: userId
         type: string
-        path: "id"
       - name: userName
         type: string
-        path: "name"
       - name: userEmail
         type: string
-        path: "email"
 
 edges:
   - from: createUser.userId
@@ -204,10 +194,8 @@ nodes:
       - name: userId
         type: string
         description: "Assigned user ID"
-        path: "id"
       - name: userName
         type: string
-        path: "name"
 
   getUser:
     description: "Fetch a user by ID"
@@ -219,20 +207,17 @@ nodes:
     outputs:
       - name: userId
         type: string
-        path: "id"
       - name: userName
         type: string
-        path: "name"
       - name: userEmail
         type: string
-        path: "email"
 
 edges:
   - from: createUser.userId
     to: getUser.userId
 ```
 
-Each **node** represents an API operation. Inputs are what the operation needs (path params, query params, body fields). Outputs are what you extract from the response using [gjson paths](https://github.com/tidwall/gjson) — when the path differs from the output name, specify it with `path`.
+Each **node** represents an API operation. Inputs are what the operation needs (path params, query params, body fields). Outputs are what the node produces — how they're extracted from the response is defined in the template's `extract` section.
 
 Each **edge** connects an output from one node to an input on another.
 
@@ -279,9 +264,9 @@ response:
     userEmail: "email"
 ```
 
-Templates define the HTTP details. The `adapter` field links a template to its graph node. Placeholders like `{{name}}` are replaced at runtime with values from the plan or upstream steps. The `extract` section maps output names to gjson paths in the response body.
+Templates define the HTTP details. The `adapter` field links a template to its graph node. Placeholders like `{{name}}` are replaced at runtime with values from the plan or upstream steps. The `extract` section maps output names to [gjson](https://github.com/tidwall/gjson) paths in the response body — this is where you define how JSON response fields map to the graph's output names.
 
-For the full template format, see [Templates](templates.md). For the complete graph YAML reference, see [Graph Authoring](graph-authoring.md#graph-yaml-reference).
+For the full template format (including array extraction with `fields`), see [Templates](templates.md). For the complete graph YAML reference, see [Graph Authoring](graph-authoring.md#graph-yaml-reference).
 
 ## 5. Create an Environment File
 

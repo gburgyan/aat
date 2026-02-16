@@ -1675,22 +1675,25 @@ func TestResolveElementFieldPath_Unit(t *testing.T) {
 		},
 	}
 
+	// No registry in rctx → falls through to graph paths
+	noReg := (*ResolveContext)(nil)
+
 	// Matches elementField name → returns gjson path
-	assert.Equal(t, "id", resolveElementFieldPath(g, "source", "items", "offeringId"))
+	assert.Equal(t, "id", resolveElementFieldPath(noReg, g, "source", "items", "offeringId"))
 	assert.Equal(t, "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef",
-		resolveElementFieldPath(g, "source", "items", "productRef"))
+		resolveElementFieldPath(noReg, g, "source", "items", "productRef"))
 
 	// No match → returns the fieldRef unchanged
-	assert.Equal(t, "someOtherField", resolveElementFieldPath(g, "source", "items", "someOtherField"))
+	assert.Equal(t, "someOtherField", resolveElementFieldPath(noReg, g, "source", "items", "someOtherField"))
 
 	// Nil graph → returns fieldRef unchanged
-	assert.Equal(t, "offeringId", resolveElementFieldPath(nil, "source", "items", "offeringId"))
+	assert.Equal(t, "offeringId", resolveElementFieldPath(noReg, nil, "source", "items", "offeringId"))
 
 	// Unknown node → returns fieldRef unchanged
-	assert.Equal(t, "offeringId", resolveElementFieldPath(g, "unknown", "items", "offeringId"))
+	assert.Equal(t, "offeringId", resolveElementFieldPath(noReg, g, "unknown", "items", "offeringId"))
 
 	// Unknown output → returns fieldRef unchanged
-	assert.Equal(t, "offeringId", resolveElementFieldPath(g, "source", "unknown", "offeringId"))
+	assert.Equal(t, "offeringId", resolveElementFieldPath(noReg, g, "source", "unknown", "offeringId"))
 }
 
 func TestResolution_LLMFallback(t *testing.T) {

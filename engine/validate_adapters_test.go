@@ -38,9 +38,9 @@ func TestValidateAdapterOutputs(t *testing.T) {
 					Protocol: "http",
 					Request:  adapter.TemplateRequest{Method: "GET", Path: "/pets/{{petId}}"},
 					Response: adapter.TemplateResponse{
-						Extract: map[string]string{
-							"petId": "id",
-							"name":  "name",
+						Extract: map[string]adapter.ExtractRule{
+							"petId": {Path: "id"},
+							"name":  {Path: "name"},
 						},
 					},
 				}
@@ -68,8 +68,8 @@ func TestValidateAdapterOutputs(t *testing.T) {
 					Protocol: "http",
 					Request:  adapter.TemplateRequest{Method: "GET", Path: "/pets/{{petId}}"},
 					Response: adapter.TemplateResponse{
-						Extract: map[string]string{
-							"petId": "id",
+						Extract: map[string]adapter.ExtractRule{
+							"petId": {Path: "id"},
 						},
 					},
 				}
@@ -100,9 +100,9 @@ func TestValidateAdapterOutputs(t *testing.T) {
 					Protocol: "http",
 					Request:  adapter.TemplateRequest{Method: "POST", Path: "/pets"},
 					Response: adapter.TemplateResponse{
-						Extract: map[string]string{
-							"petId":   "id",
-							"unknown": "foo.bar",
+						Extract: map[string]adapter.ExtractRule{
+							"petId":   {Path: "id"},
+							"unknown": {Path: "foo.bar"},
 						},
 					},
 				}
@@ -134,9 +134,9 @@ func TestValidateAdapterOutputs(t *testing.T) {
 					Protocol: "http",
 					Request:  adapter.TemplateRequest{Method: "PUT", Path: "/pets/{{petId}}"},
 					Response: adapter.TemplateResponse{
-						Extract: map[string]string{
-							"petId": "id",
-							"extra": "extra.field",
+						Extract: map[string]adapter.ExtractRule{
+							"petId": {Path: "id"},
+							"extra": {Path: "extra.field"},
 						},
 					},
 				}
@@ -176,7 +176,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 					Protocol: "http",
 					Request:  adapter.TemplateRequest{Method: "GET", Path: "/a"},
 					Response: adapter.TemplateResponse{
-						Extract: map[string]string{"x": "x"},
+						Extract: map[string]adapter.ExtractRule{"x": {Path: "x"}},
 					},
 				}
 				r.Register("alpha", adapter.NewTemplateAdapter(tmplA))
@@ -186,9 +186,9 @@ func TestValidateAdapterOutputs(t *testing.T) {
 					Protocol: "http",
 					Request:  adapter.TemplateRequest{Method: "GET", Path: "/b"},
 					Response: adapter.TemplateResponse{
-						Extract: map[string]string{
-							"y":     "y",
-							"bonus": "bonus",
+						Extract: map[string]adapter.ExtractRule{
+							"y":     {Path: "y"},
+							"bonus": {Path: "bonus"},
 						},
 					},
 				}

@@ -40,7 +40,7 @@ response:
 				assert.Equal(t, "/v2/search", tmpl.Request.Path)
 				assert.Equal(t, "application/json", tmpl.Request.Headers["Content-Type"])
 				assert.Equal(t, `{"q": "test"}`, tmpl.Request.Body)
-				assert.Equal(t, "$.data.id", tmpl.Response.Extract["id"])
+				assert.Equal(t, ExtractRule{Path: "$.data.id"}, tmpl.Response.Extract["id"])
 				require.NotNil(t, tmpl.Response.Validate)
 				assert.Equal(t, "schemas/search.json", tmpl.Response.Validate.Schema)
 			},
@@ -359,8 +359,8 @@ func TestTemplateAdapter_ExtractOutputs(t *testing.T) {
 	t.Run("scalar extraction", func(t *testing.T) {
 		a := NewTemplateAdapter(Template{
 			Response: TemplateResponse{
-				Extract: map[string]string{
-					"searchId": "$.data.searchId",
+				Extract: map[string]ExtractRule{
+					"searchId": {Path: "$.data.searchId"},
 				},
 			},
 		})
@@ -378,8 +378,8 @@ func TestTemplateAdapter_ExtractOutputs(t *testing.T) {
 	t.Run("array extraction", func(t *testing.T) {
 		a := NewTemplateAdapter(Template{
 			Response: TemplateResponse{
-				Extract: map[string]string{
-					"flights": "$.data.flights",
+				Extract: map[string]ExtractRule{
+					"flights": {Path: "$.data.flights"},
 				},
 			},
 		})
@@ -399,9 +399,9 @@ func TestTemplateAdapter_ExtractOutputs(t *testing.T) {
 	t.Run("multiple outputs", func(t *testing.T) {
 		a := NewTemplateAdapter(Template{
 			Response: TemplateResponse{
-				Extract: map[string]string{
-					"id":   "$.data.id",
-					"name": "$.data.name",
+				Extract: map[string]ExtractRule{
+					"id":   {Path: "$.data.id"},
+					"name": {Path: "$.data.name"},
 				},
 			},
 		})
@@ -420,8 +420,8 @@ func TestTemplateAdapter_ExtractOutputs(t *testing.T) {
 	t.Run("missing path error", func(t *testing.T) {
 		a := NewTemplateAdapter(Template{
 			Response: TemplateResponse{
-				Extract: map[string]string{
-					"missing": "$.does.not.exist",
+				Extract: map[string]ExtractRule{
+					"missing": {Path: "$.does.not.exist"},
 				},
 			},
 		})
@@ -439,8 +439,8 @@ func TestTemplateAdapter_ExtractOutputs(t *testing.T) {
 	t.Run("non-JSON response", func(t *testing.T) {
 		a := NewTemplateAdapter(Template{
 			Response: TemplateResponse{
-				Extract: map[string]string{
-					"id": "$.id",
+				Extract: map[string]ExtractRule{
+					"id": {Path: "$.id"},
 				},
 			},
 		})
@@ -473,8 +473,8 @@ func TestTemplateAdapter_ExtractOutputs(t *testing.T) {
 	t.Run("bare path without dollar prefix", func(t *testing.T) {
 		a := NewTemplateAdapter(Template{
 			Response: TemplateResponse{
-				Extract: map[string]string{
-					"id": "data.id",
+				Extract: map[string]ExtractRule{
+					"id": {Path: "data.id"},
 				},
 			},
 		})

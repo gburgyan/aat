@@ -23,6 +23,9 @@ func (e *AdapterValidationError) Error() string {
 // extract keys in the corresponding template for each node. Non-template
 // adapters (custom Adapter implementations) are skipped. Nodes with no
 // outputs (cleanup/void operations) are also skipped.
+//
+// Additionally validates that template extract rule fields match graph
+// elementField names for array outputs.
 func ValidateAdapterOutputs(g *graph.Graph, registry *adapter.Registry) error {
 	var errs []string
 
@@ -78,10 +81,73 @@ func ValidateAdapterOutputs(g *graph.Graph, registry *adapter.Registry) error {
 				errs = append(errs, fmt.Sprintf("node %q: template extracts %q but graph does not declare this output", name, key))
 			}
 		}
+
+		// Cross-validate template extract fields vs graph elementFields.
+		errs = append(errs, validateElementFields(name, node, tmpl)...)
 	}
 
 	if len(errs) > 0 {
 		return &AdapterValidationError{Errors: errs}
 	}
 	return nil
+}
+
+// validateElementFields checks that template extract rule fields match
+// the graph's declared elementFields for array outputs.
+func validateElementFields(nodeName string, node *graph.Node, tmpl *adapter.Template) []string {
+	var errs []string
+
+	for _, out := range node.Outputs {
+		if len(out.ElementFields) == 0 {
+			continue
+		}
+
+		rule, ok := tmpl.Response.Extract[out.Name]
+		if !ok {
+			continue
+		}
+
+		if len(rule.Fields) == 0 {
+			// Template has no fields for this array output — check if graph
+			// elementFields have paths (backward-compat mode, no warning).
+			continue
+		}
+
+		// Build sets for comparison.
+		graphEF := make(map[string]bool, len(out.ElementFields))
+		for _, ef := range out.ElementFields {
+			graphEF[ef.Name] = true
+		}
+
+		templateFields := make(map[string]bool, len(rule.Fields))
+		for fieldName := range rule.Fields {
+			templateFields[fieldName] = true
+		}
+
+		// Template field not declared in graph elementFields.
+		sortedTemplateFields := make([]string, 0, len(templateFields))
+		for f := range templateFields {
+			sortedTemplateFields = append(sortedTemplateFields, f)
+		}
+		sort.Strings(sortedTemplateFields)
+
+		for _, f := range sortedTemplateFields {
+			if !graphEF[f] {
+				errs = append(errs, fmt.Sprintf(
+					"node %q output %q: template field %q has no corresponding graph elementField",
+					nodeName, out.Name, f))
+			}
+		}
+
+		// Graph elementField not extracted by template fields.
+		for _, ef := range out.ElementFields {
+			if !templateFields[ef.Name] {
+				errs = append(errs, fmt.Sprintf(
+					"node %q output %q: graph elementField %q has no corresponding template field",
+					nodeName, out.Name, ef.Name))
+			}
+		}
+	}
+
+	return errs
 }

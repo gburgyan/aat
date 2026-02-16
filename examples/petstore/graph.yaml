@@ -65,13 +65,10 @@ nodes:
         elementFields:
           - name: petId
             type: integer
-            path: "id"
           - name: petName
             type: string
-            path: "name"
           - name: petStatus
             type: string
-            path: "status"
 
   deletePet:
     description: "Delete a pet from the store"

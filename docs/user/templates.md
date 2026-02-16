@@ -46,7 +46,11 @@ request:
 
 response:
   extract:                   # optional — output extraction rules
-    outputName: "jsonPath"
+    outputName: "jsonPath"   #   scalar: bare string path
+    arrayOutput:             #   array with element transformation:
+      path: "jsonPath"       #     path to the array in response
+      fields:                #     element field mappings (optional)
+        fieldName: "jsonPath" #     logical name → gjson path within element
   validate:                  # optional — response validation
     schema: "schemaRef"
 ```
@@ -66,7 +70,7 @@ response:
 | `protocol` | `"http"` | Protocol to use. Only `"http"` is currently supported. |
 | `request.headers` | none | Key-value pairs added to the request. Supports `{{placeholder}}` substitution. |
 | `request.body` | none | Request body string. Supports `{{placeholder}}` substitution. |
-| `response.extract` | none | Map of output names to extraction paths. |
+| `response.extract` | none | Map of output names to extraction rules (string path or object with `path` + `fields`). |
 | `response.validate.schema` | none | Schema reference for response validation. |
 
 ## Placeholder Substitution
@@ -106,7 +110,11 @@ Values are substituted as strings using Go's `%v` formatting. For JSON bodies, s
 
 ## Response Extraction
 
-The `response.extract` section defines how to pull values from a JSON response body. Each entry maps an output name (matching the graph node's output) to a path expression.
+The `response.extract` section defines how to pull values from a JSON response body. Each entry maps an output name (matching the graph node's output) to an extraction rule.
+
+### Scalar Extraction (String Form)
+
+For scalar outputs, use a bare string path:
 
 ```yaml
 response:
@@ -115,12 +123,56 @@ response:
     petName: "name"
     ownerEmail: "owner.email"
     firstTag: "tags.0.name"
-    pets: "$"
 ```
+
+### Array Extraction with Element Transformation (Object Form)
+
+For array outputs where downstream steps need to select individual elements by field name, use the object form with `path` and `fields`:
+
+```yaml
+response:
+  extract:
+    pets:
+      path: "$"
+      fields:
+        petId: "id"
+        petName: "name"
+        petStatus: "status"
+```
+
+The `path` specifies where to find the array in the response. The `fields` map transforms each array element into a flat object with named keys. Each entry maps a logical field name (matching the graph's `elementFields`) to a gjson path within the element.
+
+Before transformation, a raw element might look like:
+
+```json
+{"id": 42, "name": "Buddy", "status": "available", "photoUrls": [...]}
+```
+
+After transformation, the engine sees:
+
+```json
+{"petId": 42, "petName": "Buddy", "petStatus": "available"}
+```
+
+This is especially valuable when the raw JSON uses deeply nested paths. For example, a Travelport offering element:
+
+```yaml
+response:
+  extract:
+    catalogProductOfferings:
+      path: "CatalogProductOfferingsResponse.CatalogProductOfferings.CatalogProductOffering"
+      fields:
+        offeringId: "id"
+        productRef: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
+```
+
+The template flattens the nested `productRef` path so plans and selection strategies reference it simply as `productRef`.
+
+When `fields` is omitted, the array elements are stored as-is (raw JSON objects). Selection strategies still work but must use gjson paths to access nested fields.
 
 ### Path Syntax
 
-Extraction paths use [gjson](https://github.com/tidwall/gjson) syntax with some normalization:
+Extraction paths (both string-form and within `fields`) use [gjson](https://github.com/tidwall/gjson) syntax with some normalization:
 
 | Path | Extracts | Notes |
 |------|----------|-------|
@@ -181,7 +233,7 @@ response:
     petName: "name"
 ```
 
-### GET with Query Parameters
+### GET with Query Parameters (Array Response)
 
 ```yaml
 adapter: findByStatus
@@ -192,10 +244,15 @@ request:
     Accept: application/json
 response:
   extract:
-    pets: "$"
+    pets:
+      path: "$"
+      fields:
+        petId: "id"
+        petName: "name"
+        petStatus: "status"
 ```
 
-Query parameters are part of the path string. Use `{{placeholder}}` substitution for dynamic values.
+Query parameters are part of the path string. Use `{{placeholder}}` substitution for dynamic values. The `fields` section transforms each array element so downstream selection strategies can reference `petId`, `petName`, etc. by name.
 
 ### POST with JSON Body
 
@@ -234,7 +291,9 @@ response: {}
 
 When there's nothing to extract, use an empty response object.
 
-### Extracting the Entire Response (Array Endpoints)
+### Extracting Array Responses
+
+For list endpoints, extract the array and optionally transform each element with `fields`:
 
 ```yaml
 adapter: findByStatus
@@ -245,10 +304,22 @@ request:
     Accept: application/json
 response:
   extract:
-    pets: "$"
+    pets:
+      path: "$"
+      fields:
+        petId: "id"
+        petName: "name"
+        petStatus: "status"
 ```
 
-Use `"$"` to extract the whole response body. This is typical for list endpoints where the graph node's output is an array type. The engine's selection system then picks elements from this array.
+Use `"$"` as the path to extract the entire response body (typical when the response is a top-level array). For nested arrays, use a gjson path like `"data.items"`.
+
+The `fields` section is optional but recommended when:
+- The graph declares `elementFields` on this output (for selection strategies)
+- The raw JSON field names differ from the logical names you want in plans
+- The element structure is deeply nested and you want a flat view
+
+Without `fields`, the raw JSON elements are stored as-is. The engine's selection system picks elements from this array using the strategies defined in the plan.
 
 ## Loading Templates
 

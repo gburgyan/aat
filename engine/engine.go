@@ -354,6 +354,7 @@ func (e *Engine) buildResolveContext(node *graph.Node, tracker *RelaxationTracke
 		Node:      node,
 		Plan:      e.plan,
 		Tracker:   tracker,
+		Registry:  e.registry,
 	}
 }
 
