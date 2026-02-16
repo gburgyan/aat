@@ -10,6 +10,7 @@ import (
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
+	"github.com/gburgyan/aat/intent"
 )
 
 // graphMain dispatches to graph subcommands.
@@ -123,6 +124,28 @@ func graphValidateCommand(args *graphValidateArgs) int {
 			hasError = true
 		} else {
 			fmt.Printf("Adapter outputs: OK (%d templates)\n", n)
+		}
+	}
+
+	// 6. Workflow compatibility validation
+	if len(g.Workflows) > 0 {
+		graphDir := filepath.Dir(args.GraphPath)
+		compatResult := intent.ValidateWorkflowCompat(g, graphDir)
+
+		if len(compatResult.Errors) > 0 {
+			for _, e := range compatResult.Errors {
+				fmt.Fprintf(os.Stderr, "workflow %q: template error: %s\n", e.Workflow, e.Err)
+			}
+		}
+
+		if compatResult.HasWarnings() || compatResult.HasNonProducible() {
+			fmt.Println()
+			fmt.Println(compatResult.Format())
+			if args.Strict && compatResult.HasWarnings() {
+				hasError = true
+			}
+		} else if !compatResult.HasErrors() {
+			fmt.Printf("Workflow compatibility: OK (%d workflows)\n", len(g.Workflows))
 		}
 	}
 
