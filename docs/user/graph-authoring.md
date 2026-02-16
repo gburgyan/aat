@@ -158,10 +158,10 @@ This separation keeps the graph focused on the data model while templates handle
 If an operation creates a resource that should be cleaned up after the test (even on failure), set the `cleanup` field on the creating node:
 
 ```yaml
-createWorkbench:
-  description: "Create a booking session"
-  adapter: createWorkbench
-  cleanup: deleteWorkbench    # runs after plan completes
+createOrder:
+  description: "Create a new order"
+  adapter: createOrder
+  cleanup: cancelOrder        # runs after plan completes
   inputs: [...]
   outputs: [...]
 ```
@@ -194,35 +194,33 @@ For each node's inputs, ask: "Where does this value come from?"
 
 A useful heuristic: if two nodes share an input/output name with the same type, they probably need an edge.
 
-### Example: building a booking flow
+### Example: building a checkout flow
 
-Starting from a scaffold with these nodes: `searchFlights`, `createWorkbench`, `addOffer`, `addTraveler`, `commitBooking`
+Starting from a scaffold with these nodes: `listProducts`, `createCart`, `addItem`, `addShipping`, `checkout`
 
 ```yaml
 edges:
-  # Search results feed into addOffer
-  - from: searchFlights.catalogOfferingsId
-    to: addOffer.catalogOfferingsId
-  - from: searchFlights.catalogOfferings
-    to: addOffer.offeringId
+  # Product listing feeds into addItem
+  - from: listProducts.products
+    to: addItem.productId
     select: true
-  - from: searchFlights.catalogOfferings
-    to: addOffer.productRef
+  - from: listProducts.products
+    to: addItem.price
     select: true
 
-  # Workbench ID flows to all steps that need it
-  - from: createWorkbench.workbenchId
-    to: addOffer.workbenchId
-  - from: createWorkbench.workbenchId
-    to: addTraveler.workbenchId
-  - from: createWorkbench.workbenchId
-    to: commitBooking.workbenchId
+  # Cart ID flows to all steps that need it
+  - from: createCart.cartId
+    to: addItem.cartId
+  - from: createCart.cartId
+    to: addShipping.cartId
+  - from: createCart.cartId
+    to: checkout.cartId
 
-  # Commit needs confirmation from both addOffer and addTraveler
-  - from: addOffer.offerStatus
-    to: commitBooking.offerStatus
-  - from: addTraveler.travelerId
-    to: commitBooking.travelerId
+  # Checkout needs confirmation from addItem and addShipping
+  - from: addItem.lineItemId
+    to: checkout.lineItemId
+  - from: addShipping.shippingMethodId
+    to: checkout.shippingMethodId
 ```
 
 ### AI-assisted edge authoring
@@ -313,7 +311,7 @@ generate scaffold
   └─ validate → clean
 ```
 
-The Travelport booking graph went through several iterations as real API quirks were discovered (see [travelport-example.md](travelport-example.md#travelport-api-notes)).
+Expect several iterations as real API quirks surface — response structures, required fields, and error behavior often differ from what the spec describes.
 
 ## Template Refinement
 
@@ -404,6 +402,25 @@ nodeName:
         - name: status
           type: string
 ```
+
+### Workflow
+
+```yaml
+workflows:
+  - name: Standard Checkout
+    description: "Browse products, add to cart, and complete checkout"
+    template: plans/standard-checkout.yaml
+    steps: [listProducts, createCart, addItem, addShipping, checkout]
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | yes | Human-readable name (matched case-insensitively by `aat prompt`) |
+| `description` | no | What this workflow does |
+| `steps` | no | Node names in this workflow (informational) |
+| `template` | no | Path to plan template YAML, relative to graph file |
+
+When a workflow has a `template`, `aat prompt` uses it as a pre-built plan skeleton instead of generating the plan from scratch. See [Workflow Templates](workflow-templates.md) for the full guide.
 
 ### Edge
 

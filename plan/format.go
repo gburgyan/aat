@@ -72,8 +72,11 @@ func writeSteps(b *strings.Builder, p *Plan, g *graph.Graph) {
 	fmt.Fprintf(b, "Steps (%d):\n", n)
 
 	for i, step := range p.Execution.Steps {
-		// Step header: number, node, optional [GOAL], description
-		label := step.Node
+		// Step header: number, step ID (node if aliased), optional [GOAL], description
+		label := step.StepID()
+		if step.ID != "" && step.ID != step.Node {
+			label += " (node: " + step.Node + ")"
+		}
 		if step.IsGoal {
 			label += " [GOAL]"
 		}

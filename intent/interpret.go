@@ -20,7 +20,8 @@ type InterpretRequest struct {
 	Graph       *graph.Graph
 	KB          *domain.KnowledgeBase // may be nil
 	Client      llm.Client
-	EnableTrace bool // when true, pipeline observability data is captured in the result
+	EnableTrace bool   // when true, pipeline observability data is captured in the result
+	GraphDir    string // directory containing graph file; for resolving template paths
 }
 
 // InterpretResult holds the outputs of prompt-to-plan transformation.
@@ -41,6 +42,8 @@ type GoalAnalysis struct {
 	ConditionContext map[string]any    `json:"conditionContext"`
 	PathPreferences  map[string]string `json:"pathPreferences"`
 	Constraints      ConstraintSet     `json:"constraints"`
+	Workflow         string            `json:"workflow,omitempty"`    // selected workflow name
+	Repetitions      map[string]int    `json:"repetitions,omitempty"` // node → count (e.g. {"addTraveler": 2})
 }
 
 // ConstraintSet classifies constraints by enforcement level.
@@ -136,46 +139,96 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		trace.GoalFallback = gr.Fallback
 	}
 
-	// --- Backward Chaining ---
-	chainStart := time.Now()
-	chainResult, err := graph.BackwardChain(req.Graph, graph.ChainOptions{
-		Goals:            []string{goalAnalysis.Goal},
-		ConditionContext: goalAnalysis.ConditionContext,
-		EvalPredicate:    plan.EvalPredicate,
-	})
-	if err != nil {
-		return traceErr(fmt.Errorf("intent: backward chaining: %w", err))
-	}
+	// --- Workflow Template or Backward Chaining ---
+	var skeleton *plan.Plan
+	var skeletonBytes []byte
+	var unfedInputs []string
+	var chainResult *graph.ChainResult
+	var chainContext string
+	useTemplateIDs := false // when true, use MergeLLMValuesWithIDs instead of MergeLLMValues
 
-	if trace != nil {
-		trace.ChainResult = toChainTrace(chainResult, time.Since(chainStart))
-	}
+	if goalAnalysis.Workflow != "" {
+		templatePath, found := FindWorkflowTemplate(req.Graph, goalAnalysis.Workflow)
+		if found {
+			tpl, loadErr := LoadWorkflowTemplate(templatePath, req.GraphDir, req.Graph)
+			if loadErr == nil {
+				if trace != nil {
+					trace.WorkflowName = goalAnalysis.Workflow
+					trace.TemplatePath = templatePath
+					trace.Repetitions = goalAnalysis.Repetitions
+				}
 
-	// --- Build Skeleton ---
-	skelStart := time.Now()
-	skeleton := BuildSkeleton(req.Graph, chainResult, goalAnalysis, req.Prompt, now)
+				ExpandMultiplicity(tpl, goalAnalysis.Repetitions)
 
-	// Marshal skeleton to YAML for the LLM prompt.
-	skeletonBytes, err := plan.Marshal(skeleton)
-	if err != nil {
-		return traceErr(fmt.Errorf("intent: marshalling skeleton: %w", err))
-	}
+				if trace != nil {
+					trace.TemplateExpanded = copyPlanShallow(tpl)
+				}
 
-	// Compute unfed inputs that need LLM values.
-	unfedInputs := UnfedInputs(req.Graph, chainResult)
+				skeleton = tpl
+				unfedInputs = UnfedInputsFromTemplate(tpl, req.Graph)
+				useTemplateIDs = true
 
-	if trace != nil {
-		trace.Skeleton = &SkeletonTrace{
-			Plan:        skeleton,
-			YAML:        string(skeletonBytes),
-			UnfedInputs: unfedInputs,
-			DurationMs:  time.Since(skelStart).Milliseconds(),
+				// Marshal skeleton to YAML for the LLM prompt.
+				var marshalErr error
+				skeletonBytes, marshalErr = plan.Marshal(skeleton)
+				if marshalErr != nil {
+					return traceErr(fmt.Errorf("intent: marshalling template skeleton: %w", marshalErr))
+				}
+
+				if trace != nil {
+					trace.Skeleton = &SkeletonTrace{
+						Plan:        skeleton,
+						YAML:        string(skeletonBytes),
+						UnfedInputs: unfedInputs,
+					}
+				}
+			}
+			// on load error: fall through to backward chaining
 		}
 	}
 
-	// --- Call 2: Fill Skeleton ---
-	chainContext := FormatChainResult(chainResult, req.Graph)
+	if skeleton == nil {
+		// --- Backward Chaining (default path) ---
+		chainStart := time.Now()
+		var chainErr error
+		chainResult, chainErr = graph.BackwardChain(req.Graph, graph.ChainOptions{
+			Goals:            []string{goalAnalysis.Goal},
+			ConditionContext: goalAnalysis.ConditionContext,
+			EvalPredicate:    plan.EvalPredicate,
+		})
+		if chainErr != nil {
+			return traceErr(fmt.Errorf("intent: backward chaining: %w", chainErr))
+		}
 
+		if trace != nil {
+			trace.ChainResult = toChainTrace(chainResult, time.Since(chainStart))
+		}
+
+		// --- Build Skeleton ---
+		skelStart := time.Now()
+		skeleton = BuildSkeleton(req.Graph, chainResult, goalAnalysis, req.Prompt, now)
+
+		var marshalErr error
+		skeletonBytes, marshalErr = plan.Marshal(skeleton)
+		if marshalErr != nil {
+			return traceErr(fmt.Errorf("intent: marshalling skeleton: %w", marshalErr))
+		}
+
+		unfedInputs = UnfedInputs(req.Graph, chainResult)
+
+		if trace != nil {
+			trace.Skeleton = &SkeletonTrace{
+				Plan:        skeleton,
+				YAML:        string(skeletonBytes),
+				UnfedInputs: unfedInputs,
+				DurationMs:  time.Since(skelStart).Milliseconds(),
+			}
+		}
+
+		chainContext = FormatChainResult(chainResult, req.Graph)
+	}
+
+	// --- Call 2: Fill Skeleton ---
 	var domainContext string
 	if req.KB != nil {
 		domainContext = req.KB.FormatForPrompt()
@@ -217,7 +270,11 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		return traceErr(fmt.Errorf("intent: parsing generated plan: %w", err))
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	if useTemplateIDs {
+		MergeLLMValuesWithIDs(skeleton, llmPlan)
+	} else {
+		MergeLLMValues(skeleton, llmPlan)
+	}
 
 	if trace != nil {
 		// Snapshot the plan after merge but before post-processing.
@@ -402,7 +459,7 @@ func copyPlanShallow(p *plan.Plan) *plan.Plan {
 // classify constraints. Returns a goalResult with the parsed analysis,
 // raw JSON, LLM response metadata, and prompt text.
 func analyzeGoal(ctx context.Context, client llm.Client, graphContext, prompt string, g *graph.Graph, now time.Time) (*goalResult, error) {
-	system, user := buildGoalPrompt(graphContext, prompt, now)
+	system, user := buildGoalPrompt(graphContext, prompt, g, now)
 
 	resp, err := client.Complete(ctx, &llm.Request{
 		Messages: []llm.Message{

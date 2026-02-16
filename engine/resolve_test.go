@@ -110,6 +110,107 @@ func TestResolveInputs_OptionalSkip(t *testing.T) {
 	assert.NotContains(t, inputs, "optional1")
 }
 
+func TestResolveInputs_EmptyStepValue_OptionalSkipsEdge(t *testing.T) {
+	// When a plan sets an optional input to {} (empty StepValue), the engine
+	// should skip it rather than resolving via graph edges.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"source": {
+				Name: "source",
+				Outputs: []graph.Output{
+					{Name: "items", Type: "item[]"},
+				},
+			},
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "carrier", Type: "string"},
+					{Name: "returnCarrier", Type: "string", Optional: true},
+				},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "source.items", To: "target.carrier", Select: true},
+			{From: "source.items", To: "target.returnCarrier", Select: true},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreOutputs("source", map[string]any{
+		"items": []any{
+			map[string]any{"carrier": "UA", "id": "1"},
+			map[string]any{"carrier": "DL", "id": "2"},
+		},
+	})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"returnCarrier": {}, // empty — should be skipped
+		},
+	}
+
+	inputs, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
+	require.NoError(t, err)
+	assert.Contains(t, inputs, "carrier", "non-empty input should resolve via edge")
+	assert.NotContains(t, inputs, "returnCarrier", "empty StepValue should skip the input")
+}
+
+func TestResolveInputs_EmptyStepValue_RequiredErrors(t *testing.T) {
+	// An empty StepValue on a required input with no graph default is an error.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "required1", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"required1": {}, // empty — no resolution source
+		},
+	}
+
+	_, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "empty step value")
+}
+
+func TestResolveInputs_EmptyStepValue_FallsBackToGraphDefault(t *testing.T) {
+	// An empty StepValue on a required input WITH a graph default should use the default.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "contentSource", Type: "string", Default: "GDS"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"contentSource": {}, // empty — should fall back to graph default
+		},
+	}
+
+	inputs, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
+	require.NoError(t, err)
+	assert.Equal(t, "GDS", inputs["contentSource"])
+}
+
 func TestResolveInputs_MissingRequired(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",

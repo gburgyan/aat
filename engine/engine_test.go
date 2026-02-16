@@ -1659,3 +1659,136 @@ func TestEngine_Run_CleanupRunsDespiteCancellation(t *testing.T) {
 	// but the mechanism is verified: context.WithoutCancel is used in ExecuteAll
 }
 
+func TestEngine_Run_StepAliasing(t *testing.T) {
+	// Two steps targeting the same graph node ("search") with different IDs.
+	// Both should execute independently with separate outputs stored under their step IDs.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "test.search",
+				Inputs: []graph.Input{
+					{Name: "query", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "resultId", Type: "string"},
+				},
+			},
+		},
+	}
+
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	// First call returns resultId "r1", second returns "r2"
+	adp := &callCountAdapter{
+		method: "POST",
+		path:   "/search",
+		responses: []map[string]any{
+			{"resultId": "r1"},
+			{"resultId": "r2"},
+		},
+	}
+	require.NoError(t, registry.Register("test.search", adp))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	config := &adapter.EnvironmentConfig{}
+
+	eng := NewEngine(g, registry, executor, config)
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					ID:   "search_leg1",
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"query": {Default: "flight MEL-SYD"},
+					},
+				},
+				{
+					ID:        "search_leg2",
+					Node:      "search",
+					DependsOn: []string{"search_leg1"},
+					Values: map[string]plan.StepValue{
+						"query": {Default: "flight SYD-BNE"},
+					},
+				},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	assert.Nil(t, result.Error)
+	require.Len(t, result.Steps, 2)
+
+	// Both steps target "search" node
+	assert.Equal(t, "search", result.Steps[0].Node)
+	assert.Equal(t, "search", result.Steps[1].Node)
+
+	// Step IDs are preserved
+	assert.Equal(t, "search_leg1", result.Steps[0].StepID)
+	assert.Equal(t, "search_leg2", result.Steps[1].StepID)
+
+	// Both got 200
+	assert.Equal(t, 200, result.Steps[0].StatusCode)
+	assert.Equal(t, 200, result.Steps[1].StatusCode)
+
+	// Each stored separate outputs
+	assert.Equal(t, "r1", result.Steps[0].Outputs["resultId"])
+	assert.Equal(t, "r2", result.Steps[1].Outputs["resultId"])
+}
+
+// callCountAdapter returns different responses for successive calls.
+type callCountAdapter struct {
+	method    string
+	path      string
+	responses []map[string]any
+	callIdx   int
+}
+
+func (a *callCountAdapter) BuildRequest(inputs map[string]any, config *adapter.EnvironmentConfig) (*adapter.Request, error) {
+	body, _ := json.Marshal(inputs)
+	headers := make(map[string]string)
+	if config != nil {
+		for k, v := range config.Headers {
+			headers[k] = v
+		}
+	}
+	headers["Content-Type"] = "application/json"
+	return &adapter.Request{
+		Method:  a.method,
+		Path:    a.path,
+		Headers: headers,
+		Body:    body,
+	}, nil
+}
+
+func (a *callCountAdapter) ExtractOutputs(resp *adapter.Response) (map[string]any, error) {
+	idx := a.callIdx
+	a.callIdx++
+	if idx < len(a.responses) {
+		return a.responses[idx], nil
+	}
+	return a.responses[len(a.responses)-1], nil
+}
+
+func (a *callCountAdapter) ValidateInputs(inputs map[string]any) *adapter.ValidationResult {
+	return nil
+}
+
+func (a *callCountAdapter) ValidateResponse(resp *adapter.Response) *adapter.ValidationResult {
+	return nil
+}
+

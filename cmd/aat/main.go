@@ -21,7 +21,7 @@ import (
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintln(os.Stderr, "usage: aat <command> [options]")
-		fmt.Fprintln(os.Stderr, "commands: run, prompt, graph, generate, docs, mcp")
+		fmt.Fprintln(os.Stderr, "commands: run, prompt, graph, plan, generate, docs, mcp")
 		os.Exit(1)
 	}
 
@@ -35,6 +35,9 @@ func main() {
 	case "graph":
 		code := graphMain(os.Args[2:])
 		os.Exit(code)
+	case "plan":
+		code := planMain(os.Args[2:])
+		os.Exit(code)
 	case "generate":
 		code := generateMain(os.Args[2:])
 		os.Exit(code)
@@ -46,7 +49,7 @@ func main() {
 		os.Exit(code)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "commands: run, prompt, graph, generate, docs, mcp")
+		fmt.Fprintln(os.Stderr, "commands: run, prompt, graph, plan, generate, docs, mcp")
 		os.Exit(1)
 	}
 }

@@ -261,3 +261,76 @@ func TestMarshalRoundTrip_NamedSelections(t *testing.T) {
 	assert.Equal(t, "offering.offeringId", priceStep.Values["offeringId"].FromSelection)
 	assert.Equal(t, "offering.productRef", priceStep.Values["productRef"].FromSelection)
 }
+
+func TestMarshalRoundTrip_StepAliasing(t *testing.T) {
+	original := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					ID:   "search_leg1",
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin":        {Default: "MEL"},
+						"destination":   {Default: "SYD"},
+						"departureDate": {Default: "2026-03-01"},
+					},
+				},
+				{
+					ID:        "search_leg2",
+					Node:      "searchFlights",
+					DependsOn: []string{"search_leg1"},
+					Values: map[string]StepValue{
+						"origin":        {Default: "SYD"},
+						"destination":   {Default: "BNE"},
+						"departureDate": {Default: "2026-03-05"},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(original)
+	require.NoError(t, err)
+
+	yaml := string(data)
+	// ID field should appear in marshalled YAML
+	assert.Contains(t, yaml, "id: search_leg1")
+	assert.Contains(t, yaml, "id: search_leg2")
+
+	// Round-trip parse
+	parsed, err := Parse(data)
+	require.NoError(t, err)
+
+	require.Len(t, parsed.Execution.Steps, 2)
+	assert.Equal(t, "search_leg1", parsed.Execution.Steps[0].ID)
+	assert.Equal(t, "searchFlights", parsed.Execution.Steps[0].Node)
+	assert.Equal(t, "search_leg1", parsed.Execution.Steps[0].StepID())
+
+	assert.Equal(t, "search_leg2", parsed.Execution.Steps[1].ID)
+	assert.Equal(t, "searchFlights", parsed.Execution.Steps[1].Node)
+	assert.Equal(t, "search_leg2", parsed.Execution.Steps[1].StepID())
+	assert.Equal(t, []string{"search_leg1"}, parsed.Execution.Steps[1].DependsOn)
+}
+
+func TestMarshal_StepWithoutID(t *testing.T) {
+	// Verify that steps without ID don't emit the id field
+	original := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(original)
+	require.NoError(t, err)
+
+	yaml := string(data)
+	assert.NotContains(t, yaml, "id:")
+	assert.Contains(t, yaml, "node: searchFlights")
+}

@@ -1,0 +1,19 @@
+version: "1.0.0"
+
+workflows:
+  - name: Good Workflow
+    description: "A workflow with a valid template"
+    template: plans/good-template.yaml
+
+nodes:
+  testNode:
+    description: "A simple test node"
+    adapter: test.adapter
+    inputs:
+      - name: input1
+        type: string
+    outputs:
+      - name: output1
+        type: string
+
+edges: []

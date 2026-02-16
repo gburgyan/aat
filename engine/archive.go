@@ -40,6 +40,7 @@ func convertStepResults(steps []StepResult, baseURL string, secrets map[string]b
 
 func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) archive.StepRecord {
 	rec := archive.StepRecord{
+		StepID:     s.StepID,
 		Node:       s.Node,
 		StartTime:  s.StartTime,
 		DurationMs: s.Duration.Milliseconds(),

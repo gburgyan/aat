@@ -31,6 +31,9 @@ func FormatGraph(g *graph.Graph) string {
 		b.WriteString("## Workflows\n\n")
 		for _, wf := range g.Workflows {
 			fmt.Fprintf(&b, "- **%s**", wf.Name)
+			if wf.Template != "" {
+				b.WriteString(" [template]")
+			}
 			if wf.Description != "" {
 				fmt.Fprintf(&b, ": %s", wf.Description)
 			}

@@ -34,6 +34,12 @@ type PlanTrace struct {
 	RetryValidationErr string         `json:"retryValidationErr,omitempty"`
 	TotalDurationMs    int64          `json:"totalDurationMs"`
 	Error              string         `json:"error,omitempty"`
+
+	// Workflow template fields (populated when a workflow template is used).
+	WorkflowName     string         `json:"workflowName,omitempty"`
+	TemplatePath     string         `json:"templatePath,omitempty"`
+	Repetitions      map[string]int `json:"repetitions,omitempty"`
+	TemplateExpanded *plan.Plan     `json:"templateExpanded,omitempty"`
 }
 
 // LLMCallTrace captures a single LLM request/response pair.

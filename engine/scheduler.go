@@ -10,30 +10,39 @@ import (
 
 // TopologicalSort returns plan steps in a valid execution order using Kahn's
 // algorithm. Dependencies come from two sources:
-//  1. Explicit step.DependsOn
+//  1. Explicit step.DependsOn (references step IDs)
 //  2. Graph edges: if an edge goes from A.output → B.input and both A and B
-//     are plan steps, B depends on A.
+//     have exactly one step in the plan, B depends on A. When a graph node
+//     appears in multiple steps, graph-edge auto-wiring is skipped (the plan
+//     must use explicit dependsOn).
 //
 // Returns an error if a cycle is detected.
 func TopologicalSort(steps []plan.Step, g *graph.Graph) ([]plan.Step, error) {
-	// Build set of step node names
+	// Build set of step IDs
 	stepSet := make(map[string]bool, len(steps))
 	stepIndex := make(map[string]int, len(steps))
 	for i, step := range steps {
-		stepSet[step.Node] = true
-		stepIndex[step.Node] = i
+		sid := step.StepID()
+		stepSet[sid] = true
+		stepIndex[sid] = i
 	}
 
-	// Build adjacency: nodeName → set of nodes it must come after
+	// Build node → step IDs mapping for graph edge resolution
+	nodeToStepIDs := make(map[string][]string, len(steps))
+	for _, step := range steps {
+		nodeToStepIDs[step.Node] = append(nodeToStepIDs[step.Node], step.StepID())
+	}
+
+	// Build adjacency: stepID → set of step IDs it must come after
 	inDegree := make(map[string]int, len(steps))
-	dependents := make(map[string][]string, len(steps)) // node → nodes that depend on it
+	dependents := make(map[string][]string, len(steps))
 
 	for _, step := range steps {
-		inDegree[step.Node] = 0
+		inDegree[step.StepID()] = 0
 	}
 
 	// Track edges we've already counted to avoid double-counting
-	edges := make(map[string]bool) // "from→to"
+	edges := make(map[string]bool)
 
 	addEdge := func(from, to string) {
 		if from == to {
@@ -48,16 +57,18 @@ func TopologicalSort(steps []plan.Step, g *graph.Graph) ([]plan.Step, error) {
 		dependents[from] = append(dependents[from], to)
 	}
 
-	// Source 1: explicit dependsOn
+	// Source 1: explicit dependsOn (step IDs)
 	for _, step := range steps {
+		sid := step.StepID()
 		for _, dep := range step.DependsOn {
 			if stepSet[dep] {
-				addEdge(dep, step.Node)
+				addEdge(dep, sid)
 			}
 		}
 	}
 
-	// Source 2: graph edges between plan steps
+	// Source 2: graph edges between plan steps.
+	// Only auto-wire when both source and target nodes appear exactly once.
 	for _, edge := range g.Edges {
 		fromNode, _, err := splitRef(edge.From)
 		if err != nil {
@@ -67,26 +78,29 @@ func TopologicalSort(steps []plan.Step, g *graph.Graph) ([]plan.Step, error) {
 		if err != nil {
 			continue
 		}
-		if stepSet[fromNode] && stepSet[toNode] {
-			addEdge(fromNode, toNode)
+		fromSteps := nodeToStepIDs[fromNode]
+		toSteps := nodeToStepIDs[toNode]
+		if len(fromSteps) == 1 && len(toSteps) == 1 {
+			addEdge(fromSteps[0], toSteps[0])
 		}
 	}
 
 	// Kahn's BFS
 	var queue []string
 	for _, step := range steps {
-		if inDegree[step.Node] == 0 {
-			queue = append(queue, step.Node)
+		sid := step.StepID()
+		if inDegree[sid] == 0 {
+			queue = append(queue, sid)
 		}
 	}
 
 	var sorted []plan.Step
 	for len(queue) > 0 {
-		node := queue[0]
+		sid := queue[0]
 		queue = queue[1:]
-		sorted = append(sorted, steps[stepIndex[node]])
+		sorted = append(sorted, steps[stepIndex[sid]])
 
-		for _, dep := range dependents[node] {
+		for _, dep := range dependents[sid] {
 			inDegree[dep]--
 			if inDegree[dep] == 0 {
 				queue = append(queue, dep)
@@ -95,11 +109,10 @@ func TopologicalSort(steps []plan.Step, g *graph.Graph) ([]plan.Step, error) {
 	}
 
 	if len(sorted) != len(steps) {
-		// Find the nodes still with non-zero in-degree (cycle participants)
 		var stuck []string
-		for node, deg := range inDegree {
+		for sid, deg := range inDegree {
 			if deg > 0 {
-				stuck = append(stuck, node)
+				stuck = append(stuck, sid)
 			}
 		}
 		return nil, fmt.Errorf("dependency cycle detected among steps: %s", strings.Join(stuck, ", "))

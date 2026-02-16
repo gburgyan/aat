@@ -44,6 +44,10 @@ type Engine struct {
 
 	// plan is set during Run() for constraint-aware resolution.
 	plan *plan.Plan
+
+	// Step aliasing mappings, computed per-run.
+	nodeToStepID   map[string]string // graph node → step ID (unique nodes only)
+	duplicateNodes map[string]bool   // graph nodes appearing in multiple steps
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -99,9 +103,14 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
-	// 4. Execute steps
+	// 4. Build step aliasing mappings
 	e.plan = p
-	defer func() { e.plan = nil }()
+	e.buildStepMappings(sorted)
+	defer func() {
+		e.plan = nil
+		e.nodeToStepID = nil
+		e.duplicateNodes = nil
+	}()
 
 	state := NewRunState()
 	cleanupStack := &CleanupStack{}
@@ -214,9 +223,9 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			}
 		}
 
-		// Store outputs
+		// Store outputs keyed by step ID (supports step aliasing)
 		if result.Outputs != nil {
-			state.StoreOutputs(step.Node, result.Outputs)
+			state.StoreOutputs(step.StepID(), result.Outputs)
 		}
 
 		// Push cleanup if node has one — done before assertion check because
@@ -255,6 +264,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 
 func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, tracker *RelaxationTracker) StepResult {
 	start := time.Now()
+	sid := step.StepID()
 
 	// Construct ResolveContext from engine fields
 	rctx := e.buildResolveContext(node, tracker)
@@ -263,6 +273,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	inputs, selections, resolutions, err := ResolveInputsWithContext(ctx, step, node, e.graph, state, rctx)
 	if err != nil {
 		return StepResult{
+			StepID:    sid,
 			Node:      step.Node,
 			Error:     fmt.Errorf("resolving inputs: %w", err),
 			StartTime: start,
@@ -274,6 +285,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	adp, err := e.registry.Get(node.Adapter)
 	if err != nil {
 		return StepResult{
+			StepID:    sid,
 			Node:      step.Node,
 			Inputs:    inputs,
 			Error:     fmt.Errorf("getting adapter: %w", err),
@@ -286,6 +298,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	req, err := adp.BuildRequest(inputs, e.config)
 	if err != nil {
 		return StepResult{
+			StepID:    sid,
 			Node:      step.Node,
 			Inputs:    inputs,
 			Error:     fmt.Errorf("building request: %w", err),
@@ -298,6 +311,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	resp, err := e.executor.Execute(ctx, req)
 	if err != nil {
 		return StepResult{
+			StepID:    sid,
 			Node:      step.Node,
 			Inputs:    inputs,
 			Request:   req,
@@ -308,6 +322,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	}
 
 	result := StepResult{
+		StepID:      sid,
 		Node:        step.Node,
 		Inputs:      inputs,
 		Selections:  selections,
@@ -346,15 +361,42 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 // checking are active.
 func (e *Engine) buildResolveContext(node *graph.Node, tracker *RelaxationTracker) *ResolveContext {
 	return &ResolveContext{
-		Mode:      e.effectiveMode(),
-		Now:       time.Now(),
-		EnvLookup: os.Getenv,
-		KB:        e.KB,
-		LLM:       e.LLMClient,
-		Node:      node,
-		Plan:      e.plan,
-		Tracker:   tracker,
-		Registry:  e.registry,
+		Mode:           e.effectiveMode(),
+		Now:            time.Now(),
+		EnvLookup:      os.Getenv,
+		KB:             e.KB,
+		LLM:            e.LLMClient,
+		Node:           node,
+		Plan:           e.plan,
+		Tracker:        tracker,
+		Registry:       e.registry,
+		NodeToStepID:   e.nodeToStepID,
+		DuplicateNodes: e.duplicateNodes,
+	}
+}
+
+// buildStepMappings computes the nodeToStepID and duplicateNodes maps from
+// the sorted step list. These are used during resolution to translate graph
+// edge references (node names) to RunState keys (step IDs).
+func (e *Engine) buildStepMappings(steps []plan.Step) {
+	nodeCount := make(map[string]int, len(steps))
+	nodeFirstStepID := make(map[string]string, len(steps))
+	for _, step := range steps {
+		nodeCount[step.Node]++
+		if nodeCount[step.Node] == 1 {
+			nodeFirstStepID[step.Node] = step.StepID()
+		}
+	}
+
+	// Only build mappings if there are aliased steps
+	e.nodeToStepID = make(map[string]string, len(nodeFirstStepID))
+	e.duplicateNodes = make(map[string]bool)
+	for nodeName, count := range nodeCount {
+		if count > 1 {
+			e.duplicateNodes[nodeName] = true
+		} else {
+			e.nodeToStepID[nodeName] = nodeFirstStepID[nodeName]
+		}
 	}
 }
 

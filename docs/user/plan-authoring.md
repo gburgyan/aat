@@ -144,7 +144,8 @@ execution:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `node` | yes | Graph node to execute |
-| `dependsOn` | no | List of step nodes that must complete first |
+| `id` | no | Unique step identifier (defaults to `node` if omitted). Required when the same node appears multiple times. |
+| `dependsOn` | no | List of step IDs that must complete first |
 | `description` | no | Human-readable purpose of this step |
 | `isGoal` | no | Marks this as a goal step (used by plan validation) |
 | `values` | no | Input value specifications |
@@ -158,15 +159,102 @@ execution:
 
 Steps execute in topological order based on `dependsOn` declarations. Steps without dependencies run first. AAT also infers ordering from graph edges -- if step B uses an output from step A (via an edge), step A runs first even without an explicit `dependsOn`.
 
+The `dependsOn` list uses **step IDs**, not node names. When a step has no explicit `id`, its step ID is the same as its `node` name, so simple plans work as expected:
+
 ```yaml
 steps:
   - node: createPet
-    # no dependsOn — runs first
+    # step ID is "createPet" (same as node)
 
   - node: getPet
     dependsOn: [createPet]
     # runs after createPet completes
 ```
+
+When using step aliasing (see below), `dependsOn` must reference the explicit `id`:
+
+```yaml
+steps:
+  - id: add_item_1
+    node: addItem
+    values:
+      productId: "prod-101"
+      quantity: 2
+
+  - id: add_item_2
+    node: addItem
+    dependsOn: [add_item_1]
+    values:
+      productId: "prod-202"
+      quantity: 1
+```
+
+## Step Aliasing
+
+By default, each step's identity is its `node` name, and each node can only appear once. **Step aliasing** lets you execute the same graph node multiple times by giving each step a unique `id`:
+
+```yaml
+steps:
+  - id: add_item_1
+    node: addItem
+    dependsOn: [createCart]
+    values:
+      productId: "prod-101"
+      quantity: 2
+
+  - id: add_item_2
+    node: addItem
+    dependsOn: [add_item_1]
+    values:
+      productId: "prod-202"
+      quantity: 1
+```
+
+### When to Use Step Aliasing
+
+- **Multiple items**: Call `addItem` once per product in a cart
+- **Multi-step searches**: Call `searchProducts` once per category
+- **Repeated operations**: Any scenario where the same API operation runs with different data
+
+### Rules for Aliased Steps
+
+1. **Explicit `id` required**: When a graph node appears in more than one step, every step using that node must have a unique `id`.
+
+2. **All references use step IDs**: `dependsOn`, `from`, and selection `from` references must use the step's `id`, not its `node` name.
+
+3. **Explicit values required**: Graph-edge auto-wiring is disabled for aliased nodes (since the engine can't determine which step instance to wire from). Every input must use an explicit `from`, `fromSelection`, or literal value.
+
+4. **Separate outputs**: Each aliased step stores its outputs under its own step ID. Downstream steps reference them by step ID:
+
+```yaml
+steps:
+  - id: add_item_1
+    node: addItem
+    dependsOn: [createCart]
+    values:
+      cartId: {from: createCart.cartId}
+      productId: "prod-101"
+      quantity: 2
+
+  - id: add_item_2
+    node: addItem
+    dependsOn: [add_item_1]
+    values:
+      cartId: {from: createCart.cartId}
+      productId: "prod-202"
+      quantity: 1
+
+  - node: checkout
+    dependsOn: [add_item_2]
+    values:
+      cartId: {from: createCart.cartId}
+      lineItem1: {from: add_item_1.lineItemId}    # references step ID
+      lineItem2: {from: add_item_2.lineItemId}
+```
+
+### Backward Compatibility
+
+Step aliasing is fully backward compatible. If no step has an explicit `id`, everything works exactly as before -- each step's identity is its `node` name, `dependsOn` references node names, and graph-edge auto-wiring resolves normally.
 
 ## Values
 
@@ -204,7 +292,7 @@ values:
 | Field | Description |
 |-------|-------------|
 | `default` | Literal value to use. For bare scalars (`name: "Buddy"`), this is the only field set. |
-| `from` | Reference to an upstream step's output (e.g., `createPet.petId`). The engine resolves this via graph edges. |
+| `from` | Reference to an upstream step's output (e.g., `createPet.petId`). Uses step IDs (which default to node names). |
 | `fromSelection` | Reference to a named selection (e.g., `offering.offeringId`). See [Named Selections](#named-selections). |
 | `select` | Inline selection config for picking from an array output. See [Selection Strategies](#selection-strategies). |
 | `fallbackPool` | List of alternative values to try if the default fails. |
@@ -235,7 +323,7 @@ The `selections` block picks an element from an array output. Then `fromSelectio
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `from` | yes | Source array: `stepNode.outputName` |
+| `from` | yes | Source array: `stepID.outputName` (step ID defaults to node name when `id` is not set) |
 | `strategy` | no | How to pick an element (default: `first`). See [Selection Strategies](#selection-strategies). |
 | `filter` | no | Predicate to narrow candidates before selection |
 | `index` | no | Specific index for `index` strategy |
@@ -260,33 +348,33 @@ Selections pick one element from an array output. Seven strategies are available
 Examples:
 
 ```yaml
-# Pick the cheapest offering
+# Pick the cheapest product
 selections:
-  offering:
-    from: searchFlights.offerings
+  product:
+    from: listProducts.products
     strategy: min
     sortField: price
 
-# Pick an offering the LLM thinks is best
+# Pick a product the LLM thinks is best
 selections:
-  offering:
-    from: searchFlights.offerings
+  product:
+    from: listProducts.products
     strategy: llm
-    prompt: "Select a non-stop economy flight"
+    prompt: "Select a popular in-stock product under $50"
 
 # Pick a specific index
 selections:
-  offering:
-    from: searchFlights.offerings
+  product:
+    from: listProducts.products
     strategy: index
     index: 2
 
 # Filter then pick first
 selections:
-  offering:
-    from: searchFlights.offerings
+  product:
+    from: listProducts.products
     strategy: first
-    filter: "cabin == 'economy'"
+    filter: "category == 'electronics'"
 ```
 
 ## Assertions
@@ -389,7 +477,7 @@ Plans can also include semantic assertions -- free-text descriptions evaluated b
 ```yaml
 assertions:
   semantic:
-    - "The response should contain a valid booking confirmation"
+    - "The response should contain a valid order confirmation"
     - "All price values should be positive"
 ```
 
@@ -424,7 +512,7 @@ When `expectFailure` is set:
 Configure per-step retry behavior:
 
 ```yaml
-- node: searchFlights
+- node: listProducts
   retry:
     max: 3
     on: [server, timeout]
@@ -444,7 +532,7 @@ Error categories: `server` (5xx), `client` (4xx), `timeout`, `network`.
 Define what happens when a step fails after all retries:
 
 ```yaml
-- node: searchFlights
+- node: listProducts
   fallback:
     action: skip
     maxAttempts: 2
@@ -573,10 +661,75 @@ execution:
             expect: 200
 ```
 
+## Advanced: Multi-Selection from One Array
+
+When an API returns results for multiple logical items in a single array (e.g., a product search returning items from different categories), use multiple named selections with filters to pick different elements:
+
+```yaml
+- node: createBundle
+  dependsOn: [listProducts]
+  selections:
+    mainProduct:
+      from: listProducts.products
+      strategy: match
+      filter: "category == 'electronics'"
+    accessory:
+      from: listProducts.products
+      strategy: match
+      filter: "category == 'accessories'"
+  values:
+    mainProductId: {fromSelection: mainProduct.productId}
+    mainProductName: {fromSelection: mainProduct.name}
+    accessoryId: {fromSelection: accessory.productId}
+    accessoryName: {fromSelection: accessory.name}
+```
+
+Both selections draw from the same array output but use different filters to pick different elements. The `fromSelection` references then extract fields from each independently.
+
+## Advanced: Step Aliasing for Repeated Operations
+
+Step aliasing enables patterns where the same API operation runs multiple times with different data. For example, adding several items to a cart:
+
+```yaml
+execution:
+  steps:
+    - node: createCart
+
+    - id: add_item_electronics
+      node: addItem
+      dependsOn: [createCart]
+      description: "Add a laptop to the cart"
+      values:
+        cartId: {from: createCart.cartId}
+        productId: "prod-101"
+        quantity: 1
+
+    - id: add_item_accessory
+      node: addItem
+      dependsOn: [add_item_electronics]
+      description: "Add a carrying case"
+      values:
+        cartId: {from: createCart.cartId}
+        productId: "prod-202"
+        quantity: 1
+
+    - id: add_item_warranty
+      node: addItem
+      dependsOn: [add_item_accessory]
+      description: "Add extended warranty"
+      values:
+        cartId: {from: createCart.cartId}
+        productId: "prod-303"
+        quantity: 1
+```
+
+Each step executes the same `addItem` graph node with different inputs. Downstream steps reference specific items by step ID (e.g., `add_item_electronics.lineItemId`).
+
 ## See Also
 
 - [Value Flow](value-flow.md) -- expressions, constraint resolution, selection strategies in depth
 - [Running Tests](running.md) -- executing plans with `aat run`
 - [LLM-Assisted Planning](prompt-workflow.md) -- generating plans from prompts with `aat prompt`
-- [Templates](templates.md) -- how templates map to graph nodes
+- [Workflow Templates](workflow-templates.md) -- pre-built plan skeletons attached to graph workflows
+- [Templates](templates.md) -- how HTTP adapter templates map to graph nodes
 - [Petstore Example](../../examples/petstore/README.md) -- runnable example plans

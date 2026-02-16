@@ -1,0 +1,348 @@
+package intent
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/plan"
+)
+
+// FindWorkflowTemplate looks up a workflow by name in the graph and returns
+// the template path if one is configured. Returns ("", false) if no workflow
+// matches or the matching workflow has no template.
+func FindWorkflowTemplate(g *graph.Graph, name string) (templatePath string, found bool) {
+	for _, wf := range g.Workflows {
+		if strings.EqualFold(wf.Name, name) {
+			if wf.Template == "" {
+				return "", false
+			}
+			return wf.Template, true
+		}
+	}
+	return "", false
+}
+
+// LoadWorkflowTemplate loads a plan template from the given path, resolving
+// it relative to graphDir (the directory containing the graph file).
+// It validates that all step and cleanup nodes exist in the graph.
+func LoadWorkflowTemplate(templatePath, graphDir string, g *graph.Graph) (*plan.Plan, error) {
+	resolved := templatePath
+	if !filepath.IsAbs(templatePath) {
+		resolved = filepath.Join(graphDir, templatePath)
+	}
+
+	p, err := plan.ParseFile(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("loading workflow template %s: %w", templatePath, err)
+	}
+
+	// Validate all step nodes exist in the graph.
+	for _, step := range p.Execution.Steps {
+		if g.Nodes[step.Node] == nil {
+			return nil, fmt.Errorf("workflow template references unknown node %q", step.Node)
+		}
+	}
+
+	// Validate cleanup nodes.
+	for _, cs := range p.Execution.Cleanup {
+		if g.Nodes[cs.Node] == nil {
+			return nil, fmt.Errorf("workflow template cleanup references unknown node %q", cs.Node)
+		}
+	}
+
+	return p, nil
+}
+
+// ExpandMultiplicity replicates steps for nodes that have count > 1 in the
+// repetitions map. For each replicated node:
+//   - Copy 1 inherits the original dependsOn
+//   - Copy N depends on copy N-1 (sequential execution)
+//   - Literal Default values are cleared on copies (LLM fills distinct values)
+//   - Downstream dependsOn references to the original step → last copy
+//   - Downstream from references to "originalStep.output" → "lastCopy.output"
+func ExpandMultiplicity(p *plan.Plan, repetitions map[string]int) {
+	if len(repetitions) == 0 {
+		return
+	}
+
+	// Map from original step ID → last expanded step ID (for downstream rewrites).
+	rewriteMap := map[string]string{}
+
+	var newSteps []plan.Step
+	for _, step := range p.Execution.Steps {
+		stepID := step.StepID()
+		count, expand := repetitions[step.Node]
+		if !expand || count <= 1 {
+			newSteps = append(newSteps, step)
+			continue
+		}
+
+		for n := 1; n <= count; n++ {
+			cp := copyStep(step)
+			cp.ID = fmt.Sprintf("%s_%d", stepID, n)
+
+			if n > 1 {
+				// Copy N depends on copy N-1 instead of original deps.
+				prevID := fmt.Sprintf("%s_%d", stepID, n-1)
+				cp.DependsOn = []string{prevID}
+
+				// Clear literal default values so the LLM provides distinct values.
+				clearLiteralDefaults(cp.Values)
+			}
+
+			newSteps = append(newSteps, cp)
+		}
+
+		lastID := fmt.Sprintf("%s_%d", stepID, count)
+		rewriteMap[stepID] = lastID
+	}
+
+	p.Execution.Steps = newSteps
+
+	// Rewrite downstream references.
+	rewriteDependsOn(p, rewriteMap)
+	rewriteFromRefs(p, rewriteMap)
+}
+
+// UnfedInputsFromTemplate walks template steps and returns a list of
+// "stepID.input (type)" strings for inputs that need LLM-provided values.
+// An input is unfed if it has no from, fromSelection, select, or Default value,
+// and is not optional or defaulted in the graph.
+func UnfedInputsFromTemplate(p *plan.Plan, g *graph.Graph) []string {
+	var unfed []string
+	for _, step := range p.Execution.Steps {
+		node := g.Nodes[step.Node]
+		if node == nil {
+			continue
+		}
+		for _, inp := range node.Inputs {
+			// Check if the template provides wiring for this input.
+			if sv, exists := step.Values[inp.Name]; exists {
+				if sv.From != "" || sv.FromSelection != "" || sv.Select != nil || sv.Default != nil {
+					continue // wired
+				}
+			}
+			// Check named selections.
+			if isFromNamedSelection(step, inp.Name) {
+				continue
+			}
+			// Skip optional inputs and graph-defaulted inputs.
+			if inp.Optional || inp.Default != nil {
+				continue
+			}
+			unfed = append(unfed, fmt.Sprintf("%s.%s (%s)", step.StepID(), inp.Name, inp.Type))
+		}
+	}
+	return unfed
+}
+
+// MergeLLMValuesWithIDs is like MergeLLMValues but matches steps by StepID()
+// instead of Node. This is required for multiplicity-expanded plans where
+// multiple steps share the same node name.
+func MergeLLMValuesWithIDs(skeleton, llmPlan *plan.Plan) {
+	// Build index of LLM steps by step ID.
+	llmSteps := map[string]*plan.Step{}
+	for i := range llmPlan.Execution.Steps {
+		s := &llmPlan.Execution.Steps[i]
+		llmSteps[s.StepID()] = s
+	}
+
+	for i := range skeleton.Execution.Steps {
+		skelStep := &skeleton.Execution.Steps[i]
+		llmStep, ok := llmSteps[skelStep.StepID()]
+		if !ok {
+			continue
+		}
+
+		// Accept description from LLM.
+		if llmStep.Description != "" {
+			skelStep.Description = llmStep.Description
+		}
+
+		// Accept assertions from LLM.
+		if llmStep.Assertions != nil {
+			skelStep.Assertions = llmStep.Assertions
+		}
+
+		// Accept retry config from LLM.
+		if llmStep.Retry != nil {
+			skelStep.Retry = llmStep.Retry
+		}
+
+		// Merge named selection strategy overrides.
+		if len(skelStep.Selections) > 0 && len(llmStep.Selections) > 0 {
+			for selName, llmSel := range llmStep.Selections {
+				skelSel, exists := skelStep.Selections[selName]
+				if !exists {
+					continue
+				}
+				if llmSel.Strategy != "" {
+					skelSel.Strategy = llmSel.Strategy
+				}
+				if llmSel.Filter != "" {
+					skelSel.Filter = llmSel.Filter
+				}
+				if llmSel.SortField != "" {
+					skelSel.SortField = llmSel.SortField
+				}
+				if llmSel.Prompt != "" {
+					skelSel.Prompt = llmSel.Prompt
+				}
+				if llmSel.Index != 0 {
+					skelSel.Index = llmSel.Index
+				}
+				skelStep.Selections[selName] = skelSel
+			}
+		}
+
+		// Merge values.
+		if llmStep.Values == nil {
+			continue
+		}
+		if skelStep.Values == nil {
+			skelStep.Values = map[string]plan.StepValue{}
+		}
+
+		for inputName, llmVal := range llmStep.Values {
+			skelVal, exists := skelStep.Values[inputName]
+
+			if !exists {
+				if llmVal.Default != nil {
+					skelStep.Values[inputName] = plan.StepValue{
+						Default: llmVal.Default,
+					}
+				}
+				continue
+			}
+
+			if skelVal.FromSelection != "" {
+				continue
+			} else if skelVal.From != "" && skelVal.Select != nil {
+				if llmVal.Select != nil {
+					if llmVal.Select.Strategy != "" {
+						skelVal.Select.Strategy = llmVal.Select.Strategy
+					}
+					if llmVal.Select.Filter != "" {
+						skelVal.Select.Filter = llmVal.Select.Filter
+					}
+					if llmVal.Select.SortField != "" {
+						skelVal.Select.SortField = llmVal.Select.SortField
+					}
+					if llmVal.Select.Index != 0 {
+						skelVal.Select.Index = llmVal.Select.Index
+					}
+					if llmVal.Select.Prompt != "" {
+						skelVal.Select.Prompt = llmVal.Select.Prompt
+					}
+				}
+				skelStep.Values[inputName] = skelVal
+			} else if skelVal.From != "" {
+				// Scalar from ref: skeleton is authoritative.
+			} else {
+				if llmVal.Default != nil {
+					skelVal.Default = llmVal.Default
+				}
+				skelStep.Values[inputName] = skelVal
+			}
+		}
+	}
+}
+
+// copyStep creates a deep copy of a step suitable for multiplicity expansion.
+func copyStep(s plan.Step) plan.Step {
+	cp := s
+
+	// Deep-copy DependsOn.
+	if len(s.DependsOn) > 0 {
+		cp.DependsOn = make([]string, len(s.DependsOn))
+		copy(cp.DependsOn, s.DependsOn)
+	}
+
+	// Deep-copy Values map.
+	if s.Values != nil {
+		cp.Values = make(map[string]plan.StepValue, len(s.Values))
+		for k, v := range s.Values {
+			cp.Values[k] = v
+		}
+	}
+
+	// Deep-copy Selections map.
+	if s.Selections != nil {
+		cp.Selections = make(map[string]plan.StepSelection, len(s.Selections))
+		for k, v := range s.Selections {
+			cp.Selections[k] = v
+		}
+	}
+
+	return cp
+}
+
+// clearLiteralDefaults removes literal Default values from a values map,
+// leaving structural wiring (from, fromSelection, select) intact.
+func clearLiteralDefaults(values map[string]plan.StepValue) {
+	for name, sv := range values {
+		if sv.Default != nil && sv.From == "" && sv.FromSelection == "" && sv.Select == nil {
+			sv.Default = nil
+			values[name] = sv
+		}
+	}
+}
+
+// rewriteDependsOn replaces dependsOn entries that match rewriteMap keys
+// with their mapped values (the last expanded step ID).
+func rewriteDependsOn(p *plan.Plan, rewriteMap map[string]string) {
+	if len(rewriteMap) == 0 {
+		return
+	}
+	for i, step := range p.Execution.Steps {
+		changed := false
+		for j, dep := range step.DependsOn {
+			if newDep, ok := rewriteMap[dep]; ok {
+				p.Execution.Steps[i].DependsOn[j] = newDep
+				changed = true
+			}
+		}
+		_ = changed
+	}
+}
+
+// rewriteFromRefs replaces from references like "originalStep.output" with
+// "lastCopy.output" in step values.
+func rewriteFromRefs(p *plan.Plan, rewriteMap map[string]string) {
+	if len(rewriteMap) == 0 {
+		return
+	}
+	for i, step := range p.Execution.Steps {
+		for name, sv := range step.Values {
+			if sv.From != "" {
+				fromNode := splitNodeName(sv.From)
+				if newID, ok := rewriteMap[fromNode]; ok {
+					sv.From = newID + sv.From[len(fromNode):]
+					p.Execution.Steps[i].Values[name] = sv
+				}
+			}
+		}
+		// Also rewrite named selection from refs.
+		for selName, sel := range step.Selections {
+			if sel.From != "" {
+				fromNode := splitNodeName(sel.From)
+				if newID, ok := rewriteMap[fromNode]; ok {
+					sel.From = newID + sel.From[len(fromNode):]
+					p.Execution.Steps[i].Selections[selName] = sel
+				}
+			}
+		}
+	}
+}
+
+// isFromNamedSelection checks if an input is wired via a fromSelection
+// reference in the step's values.
+func isFromNamedSelection(step plan.Step, inputName string) bool {
+	sv, exists := step.Values[inputName]
+	if !exists {
+		return false
+	}
+	return sv.FromSelection != ""
+}

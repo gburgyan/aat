@@ -42,6 +42,7 @@ type RunResult struct {
 
 // StepResult captures the outcome of a single step execution.
 type StepResult struct {
+	StepID        string // effective step identifier (ID if set, else Node)
 	Node          string
 	Inputs        map[string]any
 	Request       *adapter.Request

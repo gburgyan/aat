@@ -52,7 +52,11 @@ type Execution struct {
 }
 
 // Step describes a single execution step targeting a graph node.
+// When multiple steps target the same graph node (e.g., multi-leg flights),
+// use the ID field to give each step a unique identifier. DependsOn and
+// from references use step IDs, which default to the node name when ID is empty.
 type Step struct {
+	ID            string                    `yaml:"id,omitempty" json:"id,omitempty"`
 	Node          string                    `yaml:"node" json:"node"`
 	DependsOn     []string                  `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
 	Description   string                    `yaml:"description,omitempty" json:"description,omitempty"`
@@ -63,6 +67,15 @@ type Step struct {
 	Fallback      *FallbackConfig           `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 	Assertions    *Assertions               `yaml:"assertions,omitempty" json:"assertions,omitempty"`
 	ExpectFailure *ExpectFailure            `yaml:"expectFailure,omitempty" json:"expectFailure,omitempty"`
+}
+
+// StepID returns the effective step identifier.
+// If ID is set, returns ID; otherwise returns Node.
+func (s *Step) StepID() string {
+	if s.ID != "" {
+		return s.ID
+	}
+	return s.Node
 }
 
 // StepSelection describes a named element selection from an upstream array.
@@ -88,6 +101,20 @@ type StepValue struct {
 	From             string           `yaml:"from,omitempty" json:"from,omitempty"`
 	Select           *SelectionConfig `yaml:"select,omitempty" json:"select,omitempty"`
 	FromSelection    string           `yaml:"fromSelection,omitempty" json:"fromSelection,omitempty"`
+}
+
+// IsEmpty returns true when the StepValue carries no resolution information.
+// An empty StepValue (e.g., from YAML `returnDate: {}` or `returnDate: null`)
+// should be treated as "explicitly absent" — the engine should skip this input
+// rather than falling through to graph-edge auto-wiring.
+func (sv StepValue) IsEmpty() bool {
+	return sv.Default == nil &&
+		sv.From == "" &&
+		sv.FromSelection == "" &&
+		sv.Select == nil &&
+		sv.Constraint == "" &&
+		len(sv.FallbackPool) == 0 &&
+		sv.FallbackStrategy == nil
 }
 
 // SelectionConfig describes how to select an element from an array output.

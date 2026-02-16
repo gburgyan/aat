@@ -373,6 +373,35 @@ func TestFormatNarrative(t *testing.T) {
 				"id: from selection result.id",
 			},
 		},
+		{
+			name: "step aliasing shows id and node",
+			plan: &Plan{
+				Execution: Execution{
+					Steps: []Step{
+						{
+							ID:   "search_leg1",
+							Node: "searchFlights",
+							Values: map[string]StepValue{
+								"origin": {Default: "MEL"},
+							},
+						},
+						{
+							ID:        "search_leg2",
+							Node:      "searchFlights",
+							DependsOn: []string{"search_leg1"},
+							Values: map[string]StepValue{
+								"origin": {Default: "SYD"},
+							},
+						},
+					},
+				},
+			},
+			contains: []string{
+				"search_leg1 (node: searchFlights)",
+				"search_leg2 (node: searchFlights)",
+				"Depends on: search_leg1",
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -133,6 +133,7 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 		KB:          kb,
 		Client:      llmClient,
 		EnableTrace: args.TracePlan,
+		GraphDir:    filepath.Dir(args.GraphPath),
 	})
 
 	// Write trace if present (even on error — partial traces aid debugging).

@@ -3,6 +3,7 @@ package intent
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -638,6 +639,419 @@ execution:
 		assert.NotEmpty(t, result.Trace.RetryValidationErr)
 		require.NotNil(t, result.Trace.RetryCall)
 	})
+}
+
+// --- Workflow Template Integration Tests ---
+
+// buildTemplateTestGraph creates a minimal graph with a workflow template.
+// The template plan is written to a temp directory, and graphDir is returned.
+func buildTemplateTestGraph(t *testing.T) (*graph.Graph, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	// Write a simple plan template
+	templateContent := `
+execution:
+  steps:
+    - node: search
+      values:
+        query: "placeholder"
+    - node: process
+      dependsOn: [search]
+      values:
+        itemId: {from: search.resultId}
+  cleanup:
+    - node: cleanup
+      runOn: always
+`
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "booking.yaml"), []byte(templateContent), 0o644))
+
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Booking Flow", Template: "plans/booking.yaml"},
+			{Name: "No Template Flow"},
+		},
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:        "search",
+				Description: "Search for items",
+				Adapter:     "searchAdapter",
+				Inputs: []graph.Input{
+					{Name: "query", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "resultId", Type: "string"},
+				},
+			},
+			"process": {
+				Name:        "process",
+				Description: "Process selected item",
+				Adapter:     "processAdapter",
+				Inputs: []graph.Input{
+					{Name: "itemId", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+			"cleanup": {
+				Name:        "cleanup",
+				Description: "Clean up",
+				Adapter:     "cleanupAdapter",
+				Inputs:      []graph.Input{},
+				Outputs:     []graph.Output{},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "search.resultId", To: "process.itemId"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	return g, dir
+}
+
+func TestInterpret_WorkflowTemplate(t *testing.T) {
+	g, graphDir := buildTemplateTestGraph(t)
+
+	// LLM returns goal analysis that selects the workflow
+	goalJSON := `{
+		"goal": "process",
+		"description": "Process an item via workflow",
+		"conditionContext": {},
+		"pathPreferences": {},
+		"constraints": {"hard": [], "soft": [], "free": ["query"]},
+		"workflow": "Booking Flow"
+	}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: search
+      description: "Search for items"
+      values:
+        query: "real search query"
+    - node: process
+      dependsOn: [search]
+      description: "Process the item"
+      values:
+        itemId: {from: search.resultId}
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+  cleanup:
+    - node: cleanup
+      runOn: always
+` + "```\n"
+
+	client := &stubClient{
+		responses: []string{goalJSON, planYAML},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "book an item",
+		Graph:    g,
+		Client:   client,
+		GraphDir: graphDir,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+
+	// Should have used the template — only 2 LLM calls (goal + fill)
+	assert.Len(t, client.calls, 2)
+
+	// The plan should have 2 steps (from template)
+	assert.Len(t, result.Plan.Execution.Steps, 2)
+	assert.Equal(t, "search", result.Plan.Execution.Steps[0].Node)
+	assert.Equal(t, "process", result.Plan.Execution.Steps[1].Node)
+
+	// ChainResult should be nil (no backward chaining)
+	assert.Nil(t, result.ChainResult)
+
+	// GoalAnalysis should have workflow set
+	assert.Equal(t, "Booking Flow", result.GoalAnalysis.Workflow)
+}
+
+func TestInterpret_WorkflowWithRepetitions(t *testing.T) {
+	dir := t.TempDir()
+
+	// Template with a step that can be repeated
+	templateContent := `
+execution:
+  steps:
+    - node: setup
+      values:
+        config: default
+    - node: addItem
+      dependsOn: [setup]
+      values:
+        setupId: {from: setup.setupId}
+        name: "placeholder"
+    - node: commit
+      dependsOn: [addItem]
+      values:
+        setupId: {from: setup.setupId}
+`
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "multi.yaml"), []byte(templateContent), 0o644))
+
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Multi-Item", Template: "plans/multi.yaml"},
+		},
+		Nodes: map[string]*graph.Node{
+			"setup":   {Name: "setup", Description: "Setup", Adapter: "a", Inputs: []graph.Input{{Name: "config", Type: "string"}}, Outputs: []graph.Output{{Name: "setupId", Type: "string"}}},
+			"addItem": {Name: "addItem", Description: "Add item", Adapter: "b", Inputs: []graph.Input{{Name: "setupId", Type: "string"}, {Name: "name", Type: "string"}}, Outputs: []graph.Output{{Name: "itemId", Type: "string"}}},
+			"commit":  {Name: "commit", Description: "Commit", Adapter: "c", Inputs: []graph.Input{{Name: "setupId", Type: "string"}}, Outputs: []graph.Output{{Name: "result", Type: "string"}}},
+		},
+		Edges: []graph.Edge{
+			{From: "setup.setupId", To: "addItem.setupId"},
+			{From: "setup.setupId", To: "commit.setupId"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	goalJSON := `{
+		"goal": "commit",
+		"description": "Add 2 items and commit",
+		"conditionContext": {},
+		"pathPreferences": {},
+		"constraints": {"hard": [], "soft": [], "free": []},
+		"workflow": "Multi-Item",
+		"repetitions": {"addItem": 2}
+	}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: setup
+      values:
+        config: "test"
+    - id: addItem_1
+      node: addItem
+      dependsOn: [setup]
+      values:
+        setupId: {from: setup.setupId}
+        name: "First Item"
+    - id: addItem_2
+      node: addItem
+      dependsOn: [addItem_1]
+      values:
+        setupId: {from: setup.setupId}
+        name: "Second Item"
+    - node: commit
+      dependsOn: [addItem_2]
+      values:
+        setupId: {from: setup.setupId}
+` + "```\n"
+
+	client := &stubClient{
+		responses: []string{goalJSON, planYAML},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "add 2 items and commit",
+		Graph:    g,
+		Client:   client,
+		GraphDir: dir,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+
+	// Should have 4 steps: setup, addItem_1, addItem_2, commit
+	assert.Len(t, result.Plan.Execution.Steps, 4)
+
+	// Check repetition IDs
+	ids := make([]string, len(result.Plan.Execution.Steps))
+	for i, s := range result.Plan.Execution.Steps {
+		ids[i] = s.StepID()
+	}
+	assert.Contains(t, ids, "addItem_1")
+	assert.Contains(t, ids, "addItem_2")
+}
+
+func TestInterpret_WorkflowFallback_BadName(t *testing.T) {
+	// Build a simple graph without the mismatch issue.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search", Adapter: "a",
+				Inputs:  []graph.Input{{Name: "query", Type: "string"}},
+				Outputs: []graph.Output{{Name: "resultId", Type: "string"}},
+			},
+			"process": {
+				Name: "process", Description: "Process", Adapter: "b",
+				Inputs:  []graph.Input{{Name: "id", Type: "string"}},
+				Outputs: []graph.Output{{Name: "result", Type: "string"}},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "search.resultId", To: "process.id"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	goalJSON := `{
+		"goal": "process",
+		"description": "Process an item",
+		"conditionContext": {},
+		"pathPreferences": {},
+		"constraints": {"hard": [], "soft": [], "free": ["query"]},
+		"workflow": "Nonexistent Workflow"
+	}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: search
+      values:
+        query: "test"
+    - node: process
+      dependsOn: [search]
+      values:
+        id: {from: search.resultId}
+` + "```\n"
+
+	client := &stubClient{
+		responses: []string{goalJSON, planYAML},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "process an item",
+		Graph:    g,
+		Client:   client,
+		GraphDir: ".",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+
+	// Should have used backward chaining (workflow not found)
+	assert.NotNil(t, result.ChainResult)
+}
+
+func TestInterpret_NoWorkflow(t *testing.T) {
+	// Build a simple graph without the mismatch issue.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search", Adapter: "a",
+				Inputs:  []graph.Input{{Name: "query", Type: "string"}},
+				Outputs: []graph.Output{{Name: "resultId", Type: "string"}},
+			},
+			"process": {
+				Name: "process", Description: "Process", Adapter: "b",
+				Inputs:  []graph.Input{{Name: "id", Type: "string"}},
+				Outputs: []graph.Output{{Name: "result", Type: "string"}},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "search.resultId", To: "process.id"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	goalJSON := `{
+		"goal": "process",
+		"description": "Process an item",
+		"conditionContext": {},
+		"pathPreferences": {},
+		"constraints": {"hard": [], "soft": [], "free": ["query"]}
+	}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: search
+      values:
+        query: "test"
+    - node: process
+      dependsOn: [search]
+      values:
+        id: {from: search.resultId}
+` + "```\n"
+
+	client := &stubClient{
+		responses: []string{goalJSON, planYAML},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt: "process an item",
+		Graph:  g,
+		Client: client,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+
+	// Should have used backward chaining (no workflow field)
+	assert.NotNil(t, result.ChainResult)
+	assert.Empty(t, result.GoalAnalysis.Workflow)
+}
+
+func TestInterpret_WorkflowTrace(t *testing.T) {
+	g, graphDir := buildTemplateTestGraph(t)
+
+	goalJSON := `{
+		"goal": "process",
+		"description": "Process an item via workflow",
+		"conditionContext": {},
+		"pathPreferences": {},
+		"constraints": {"hard": [], "soft": [], "free": ["query"]},
+		"workflow": "Booking Flow"
+	}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: search
+      values:
+        query: "test"
+    - node: process
+      dependsOn: [search]
+      values:
+        itemId: {from: search.resultId}
+  cleanup:
+    - node: cleanup
+      runOn: always
+` + "```\n"
+
+	client := &stubClient{
+		responses: []string{goalJSON, planYAML},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:      "book an item",
+		Graph:       g,
+		Client:      client,
+		GraphDir:    graphDir,
+		EnableTrace: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Trace)
+
+	// Trace should capture workflow metadata
+	assert.Equal(t, "Booking Flow", result.Trace.WorkflowName)
+	assert.Equal(t, "plans/booking.yaml", result.Trace.TemplatePath)
+
+	// No chain result since template was used
+	assert.Nil(t, result.Trace.ChainResult)
+
+	// Skeleton should be present
+	assert.NotNil(t, result.Trace.Skeleton)
+
+	// Final plan should be present
+	assert.NotNil(t, result.Trace.FinalPlan)
 }
 
 func TestInterpret_Integration_RealLLM(t *testing.T) {

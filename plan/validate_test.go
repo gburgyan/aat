@@ -150,7 +150,7 @@ func TestValidate_DuplicateSteps(t *testing.T) {
 
 	err := Validate(p, g)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "duplicate step node")
+	assert.Contains(t, err.Error(), "duplicate step id")
 }
 
 func TestValidate_DependsOnUnknownStep(t *testing.T) {
@@ -2284,5 +2284,350 @@ func TestValidate_FilterFieldValidation(t *testing.T) {
 		assert.Contains(t, err.Error(), "nonexistent")
 		// carrier should NOT produce an error since it's a valid elementField
 		assert.NotContains(t, err.Error(), "\"carrier\"")
+	})
+}
+
+// --- Step Aliasing ---
+
+func TestValidate_StepAliasing(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("same node with different IDs is valid", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						ID:        "search_leg2",
+						Node:      "searchFlights",
+						DependsOn: []string{"search_leg1"},
+						Values: map[string]StepValue{
+							"origin":        {Default: "SYD"},
+							"destination":   {Default: "BNE"},
+							"departureDate": {Default: "2026-03-05"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("same node same ID is duplicate", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "dup",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						ID:   "dup",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "SYD"},
+							"destination":   {Default: "BNE"},
+							"departureDate": {Default: "2026-03-05"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "duplicate step id \"dup\"")
+	})
+
+	t.Run("dependsOn uses step IDs", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						ID:        "search_leg2",
+						Node:      "searchFlights",
+						DependsOn: []string{"search_leg1"},
+						Values: map[string]StepValue{
+							"origin":        {Default: "SYD"},
+							"destination":   {Default: "BNE"},
+							"departureDate": {Default: "2026-03-05"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("dependsOn with node name fails for aliased steps", func(t *testing.T) {
+		// When steps have IDs, dependsOn must use the step ID, not the node name.
+		// "searchFlights" is not a step ID here; the IDs are search_leg1 and search_leg2.
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						ID:        "search_leg2",
+						Node:      "searchFlights",
+						DependsOn: []string{"searchFlights"}, // wrong: should be "search_leg1"
+						Values: map[string]StepValue{
+							"origin":        {Default: "SYD"},
+							"destination":   {Default: "BNE"},
+							"departureDate": {Default: "2026-03-05"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown step \"searchFlights\"")
+	})
+
+	t.Run("from references use step IDs", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"search_leg1"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From:   "search_leg1.catalogOfferings",
+								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("from with node name fails for aliased steps", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"search_leg1"},
+						Values: map[string]StepValue{
+							"offeringId": {
+								From:   "searchFlights.catalogOfferings", // wrong: should use "search_leg1"
+								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
+							},
+							"productRef": {Default: "p0"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not a step in this plan")
+	})
+
+	t.Run("selections from uses step IDs", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						Node:      "priceOffer",
+						DependsOn: []string{"search_leg1"},
+						Selections: map[string]StepSelection{
+							"offering": {
+								From:     "search_leg1.catalogOfferings",
+								Strategy: "first",
+							},
+						},
+						Values: map[string]StepValue{
+							"offeringId": {FromSelection: "offering.offeringId"},
+							"productRef": {FromSelection: "offering.productRef"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("duplicate node requires explicit values", func(t *testing.T) {
+		// When searchFlights appears twice (with IDs), graph edges don't auto-wire.
+		// Required inputs without plan values or defaults should fail.
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							// Missing departureDate — required, no default, no edge for duplicates
+						},
+					},
+					{
+						ID:        "search_leg2",
+						Node:      "searchFlights",
+						DependsOn: []string{"search_leg1"},
+						Values: map[string]StepValue{
+							"origin":        {Default: "SYD"},
+							"destination":   {Default: "BNE"},
+							"departureDate": {Default: "2026-03-05"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "needs explicit value")
+		assert.Contains(t, err.Error(), "departureDate")
+		assert.Contains(t, err.Error(), "appears in multiple steps")
+	})
+
+	t.Run("goal uses step ID", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{Goal: "search_leg2"},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						ID:        "search_leg2",
+						Node:      "searchFlights",
+						DependsOn: []string{"search_leg1"},
+						IsGoal:    true,
+						Values: map[string]StepValue{
+							"origin":        {Default: "SYD"},
+							"destination":   {Default: "BNE"},
+							"departureDate": {Default: "2026-03-05"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("constraint appliesTo uses step IDs", func(t *testing.T) {
+		p := &Plan{
+			Intent: Intent{
+				Constraints: &Constraints{
+					Hard: []Constraint{
+						{
+							Name:      "carrier",
+							Type:      "preference",
+							AppliesTo: []string{"search_leg1.origin"},
+						},
+					},
+				},
+			},
+			Execution: Execution{
+				Steps: []Step{
+					{
+						ID:   "search_leg1",
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "MEL"},
+							"destination":   {Default: "SYD"},
+							"departureDate": {Default: "2026-03-01"},
+						},
+					},
+					{
+						ID:        "search_leg2",
+						Node:      "searchFlights",
+						DependsOn: []string{"search_leg1"},
+						Values: map[string]StepValue{
+							"origin":        {Default: "SYD"},
+							"destination":   {Default: "BNE"},
+							"departureDate": {Default: "2026-03-05"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("StepID method", func(t *testing.T) {
+		s1 := Step{Node: "searchFlights"}
+		assert.Equal(t, "searchFlights", s1.StepID())
+
+		s2 := Step{ID: "search_leg1", Node: "searchFlights"}
+		assert.Equal(t, "search_leg1", s2.StepID())
+
+		s3 := Step{ID: "", Node: "searchFlights"}
+		assert.Equal(t, "searchFlights", s3.StepID())
 	})
 }

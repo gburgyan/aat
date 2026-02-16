@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/gburgyan/aat/graph"
 )
 
 // buildGoalPrompt constructs the messages for the first LLM call (goal analysis).
 // It provides graph structure and asks the LLM to identify the goal node and
-// classify constraints.
-func buildGoalPrompt(graphContext, userPrompt string, now time.Time) (system, user string) {
+// classify constraints. When the graph has workflows with templates, the prompt
+// instructs the LLM to select a workflow if the intent clearly matches.
+func buildGoalPrompt(graphContext, userPrompt string, g *graph.Graph, now time.Time) (system, user string) {
 	dateStr := now.Format("2006-01-02")
 	system = `You are an API testing assistant. Given an API graph and a user's testing intent, you must identify:
 1. The goal node (the final API operation that achieves the user's intent)
@@ -38,8 +41,32 @@ Rules:
 - pathPreferences indicate when the user's intent suggests a specific path through the graph
 - Today's date is ` + dateStr + `. When generating dates, use dates at least 7 days in the future.`
 
+	// When workflows with templates exist, add workflow selection instructions.
+	if hasWorkflowTemplates(g) {
+		system += `
+
+Additionally, if the user's intent matches a named workflow marked with [template], include these fields in the JSON:
+  "workflow": "Workflow Name"
+  "repetitions": {"nodeName": N}
+The "workflow" field should be the exact name of the matching workflow. The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addTraveler": 2} for two travelers). Omit "repetitions" if no nodes need repeating.
+Select a workflow when the intent clearly aligns with one. When in doubt, omit the "workflow" field.`
+	}
+
 	user = fmt.Sprintf("## API Graph\n\n%s\n## User Intent\n\n%s", graphContext, userPrompt)
 	return system, user
+}
+
+// hasWorkflowTemplates returns true if any workflow in the graph has a template path.
+func hasWorkflowTemplates(g *graph.Graph) bool {
+	if g == nil {
+		return false
+	}
+	for _, wf := range g.Workflows {
+		if wf.Template != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // buildPlanPrompt constructs the messages for the second LLM call (plan generation).
@@ -62,7 +89,15 @@ Rules:
 - For selection strategy overrides, valid strategies are: first, last, random, index, min, max, match
   - match: requires a "filter" predicate expression
   - min/max: requires a "sortField"
-  - index: requires an "index" number`
+  - index: requires an "index" number
+- Use the "id" field on a step when the same graph node appears multiple times in the plan (e.g., multi-leg flights, multiple travelers). The id becomes the step's unique identifier; dependsOn and from references use step IDs (which default to the node name when id is omitted). Example:
+  - id: search_leg1
+    node: searchFlights
+    values: {origin: MEL, destination: SYD, departureDate: "2026-03-01"}
+  - id: search_leg2
+    node: searchFlights
+    dependsOn: [search_leg1]
+    values: {origin: SYD, destination: BNE, departureDate: "2026-03-05"}`
 
 	var ub strings.Builder
 

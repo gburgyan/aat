@@ -100,9 +100,9 @@ This workflow lets you fix values, add assertions, adjust step ordering, or make
 Use `--save` to write the generated plan to a file:
 
 ```bash
-aat prompt "Book a flight from DEN to LAX" \
+aat prompt "Order the cheapest in-stock laptop" \
   --env env.yaml --graph graph.yaml --templates templates/ \
-  --save plans/den-lax-booking.yaml
+  --save plans/laptop-order.yaml
 ```
 
 The plan is saved immediately after generation, before the confirmation prompt. You can save a plan and cancel execution if you just want the plan file for later use with `aat run`.
@@ -131,7 +131,7 @@ aat prompt "Create a pet with a realistic name" \
 
 Domain knowledge helps the LLM:
 - Pick realistic values from defined pools
-- Understand constraints (e.g., "travel dates must be in the future")
+- Understand constraints (e.g., "delivery dates must be in the future")
 - Generate more accurate plans
 
 See [Domain Knowledge](domain-knowledge.md) for the full reference.
@@ -141,7 +141,7 @@ See [Domain Knowledge](domain-knowledge.md) for the full reference.
 When plans don't come out right, use `--trace` to capture the full LLM planning pipeline:
 
 ```bash
-aat prompt "Book a flight" \
+aat prompt "Order a product" \
   --env env.yaml --graph graph.yaml --templates templates/ \
   --trace --trace-dir traces/
 ```
@@ -169,6 +169,12 @@ Add domain knowledge (`--domain`) with value pools and concepts. Check the skele
 
 **Plan fails validation:**
 Check the validation section of the trace. Common issues: referencing nodes not in the graph, incorrect `dependsOn` references, or invalid selection sources.
+
+## Workflow Templates
+
+If your graph defines workflows with `template:` fields, `aat prompt` automatically uses pre-built plan skeletons instead of generating everything from scratch. The LLM identifies which workflow matches your prompt, loads the template, and fills in literal values, selection strategies, and assertions.
+
+This produces more reliable plans for complex multi-step workflows. See [Workflow Templates](workflow-templates.md) for the full guide on authoring and testing templates.
 
 ## Tips for Writing Prompts
 
@@ -244,6 +250,7 @@ Archive: runs/run-20260211-143022-a1b2c3d4/archive.json
 
 ## See Also
 
+- [Workflow Templates](workflow-templates.md) -- pre-built plan skeletons for reliable plan generation
 - [Plan Authoring](plan-authoring.md) -- plan YAML schema for understanding/editing generated plans
 - [Running Tests](running.md) -- executing saved plans with `aat run`
 - [Domain Knowledge](domain-knowledge.md) -- improving plan generation with business context

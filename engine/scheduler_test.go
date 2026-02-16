@@ -134,3 +134,117 @@ func TestTopologicalSort_ExplicitDependsOn(t *testing.T) {
 	assert.Equal(t, "b", sorted[1].Node)
 	assert.Equal(t, "c", sorted[2].Node)
 }
+
+func TestTopologicalSort_StepAliasing(t *testing.T) {
+	t.Run("aliased steps with explicit dependsOn", func(t *testing.T) {
+		g := &graph.Graph{
+			Version: "1.0.0",
+			Nodes: map[string]*graph.Node{
+				"search": {Name: "search"},
+			},
+		}
+
+		steps := []plan.Step{
+			{ID: "search_leg1", Node: "search"},
+			{ID: "search_leg2", Node: "search", DependsOn: []string{"search_leg1"}},
+			{ID: "search_leg3", Node: "search", DependsOn: []string{"search_leg2"}},
+		}
+
+		sorted, err := TopologicalSort(steps, g)
+		require.NoError(t, err)
+		require.Len(t, sorted, 3)
+		assert.Equal(t, "search_leg1", sorted[0].StepID())
+		assert.Equal(t, "search_leg2", sorted[1].StepID())
+		assert.Equal(t, "search_leg3", sorted[2].StepID())
+	})
+
+	t.Run("graph edges skipped for duplicate nodes", func(t *testing.T) {
+		g := &graph.Graph{
+			Version: "1.0.0",
+			Nodes: map[string]*graph.Node{
+				"a": {Name: "a"},
+				"b": {Name: "b"},
+			},
+			Edges: []graph.Edge{
+				{From: "a.out", To: "b.in"},
+			},
+		}
+
+		// Node "a" appears twice → graph edge a→b should NOT be auto-wired.
+		steps := []plan.Step{
+			{ID: "a1", Node: "a"},
+			{ID: "a2", Node: "a"},
+			{Node: "b"},
+		}
+
+		sorted, err := TopologicalSort(steps, g)
+		require.NoError(t, err)
+		require.Len(t, sorted, 3)
+		// Without auto-wiring, "b" could appear anywhere since no explicit deps.
+		// All three should be present.
+		ids := make(map[string]bool)
+		for _, s := range sorted {
+			ids[s.StepID()] = true
+		}
+		assert.True(t, ids["a1"])
+		assert.True(t, ids["a2"])
+		assert.True(t, ids["b"])
+	})
+
+	t.Run("graph edges wired for unique nodes alongside aliased ones", func(t *testing.T) {
+		g := &graph.Graph{
+			Version: "1.0.0",
+			Nodes: map[string]*graph.Node{
+				"search": {Name: "search"},
+				"price":  {Name: "price"},
+			},
+			Edges: []graph.Edge{
+				{From: "search.out", To: "price.in"},
+			},
+		}
+
+		// "search" appears twice (aliased) but "price" appears once.
+		// Edge search→price should NOT auto-wire (source is ambiguous).
+		steps := []plan.Step{
+			{ID: "search_leg1", Node: "search"},
+			{ID: "search_leg2", Node: "search", DependsOn: []string{"search_leg1"}},
+			{Node: "price", DependsOn: []string{"search_leg1"}}, // explicit dep
+		}
+
+		sorted, err := TopologicalSort(steps, g)
+		require.NoError(t, err)
+		require.Len(t, sorted, 3)
+
+		pos := make(map[string]int)
+		for i, s := range sorted {
+			pos[s.StepID()] = i
+		}
+		// search_leg1 before both search_leg2 and price
+		assert.Less(t, pos["search_leg1"], pos["search_leg2"])
+		assert.Less(t, pos["search_leg1"], pos["price"])
+	})
+
+	t.Run("mixed aliased and non-aliased steps", func(t *testing.T) {
+		g := loadTravelportGraph(t)
+
+		steps := []plan.Step{
+			{ID: "search_leg1", Node: "searchFlights", Values: map[string]plan.StepValue{
+				"origin": {Default: "MEL"}, "destination": {Default: "SYD"}, "departureDate": {Default: "2026-03-01"},
+			}},
+			{ID: "search_leg2", Node: "searchFlights", DependsOn: []string{"search_leg1"}, Values: map[string]plan.StepValue{
+				"origin": {Default: "SYD"}, "destination": {Default: "BNE"}, "departureDate": {Default: "2026-03-05"},
+			}},
+			{Node: "createWorkbench"},
+		}
+
+		sorted, err := TopologicalSort(steps, g)
+		require.NoError(t, err)
+		require.Len(t, sorted, 3)
+
+		pos := make(map[string]int)
+		for i, s := range sorted {
+			pos[s.StepID()] = i
+		}
+		assert.Less(t, pos["search_leg1"], pos["search_leg2"])
+	})
+}

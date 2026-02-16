@@ -308,6 +308,47 @@ execution:
 	assert.Equal(t, "result.name", step.Values["name"].FromSelection)
 }
 
+func TestStepValue_IsEmpty(t *testing.T) {
+	tests := []struct {
+		name     string
+		sv       StepValue
+		expected bool
+	}{
+		{"zero value", StepValue{}, true},
+		{"with default", StepValue{Default: "DEN"}, false},
+		{"with from", StepValue{From: "upstream.output"}, false},
+		{"with fromSelection", StepValue{FromSelection: "sel.field"}, false},
+		{"with select", StepValue{Select: &SelectionConfig{Strategy: "first"}}, false},
+		{"with constraint", StepValue{Constraint: "value > 0"}, false},
+		{"with fallback pool", StepValue{FallbackPool: []any{"a", "b"}}, false},
+		{"with fallback strategy", StepValue{FallbackStrategy: strPtr("random")}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.sv.IsEmpty())
+		})
+	}
+}
+
+func TestStepValue_EmptyMapping_Unmarshal(t *testing.T) {
+	// YAML `returnDate: {}` should produce an empty StepValue
+	data := []byte(`
+execution:
+  steps:
+    - node: test
+      values:
+        origin: DEN
+        returnDate: {}
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	sv := p.Execution.Steps[0].Values["returnDate"]
+	assert.True(t, sv.IsEmpty(), "empty YAML mapping should produce an empty StepValue")
+	assert.False(t, p.Execution.Steps[0].Values["origin"].IsEmpty(), "literal value should not be empty")
+}
+
+func strPtr(s string) *string { return &s }
+
 func TestStepValue_FromSelectionNoWholeElement(t *testing.T) {
 	data := []byte(`
 execution:

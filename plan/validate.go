@@ -21,13 +21,21 @@ func (e *ValidationError) Error() string {
 func Validate(p *Plan, g *graph.Graph) error {
 	var errs []string
 
-	// Build a set of step node names for dependsOn validation
-	stepNodes := make(map[string]bool, len(p.Execution.Steps))
+	// Build step ID set for uniqueness and reference validation.
+	// stepIDs: stepID → true (for dependency and reference checks)
+	// stepIDToNode: stepID → graph node name (for output validation)
+	// nodeCount: graph node name → count of steps using it
+	stepIDs := make(map[string]bool, len(p.Execution.Steps))
+	stepIDToNode := make(map[string]string, len(p.Execution.Steps))
+	nodeCount := make(map[string]int, len(p.Execution.Steps))
 	for _, step := range p.Execution.Steps {
-		if stepNodes[step.Node] {
-			errs = append(errs, fmt.Sprintf("duplicate step node %q", step.Node))
+		sid := step.StepID()
+		if stepIDs[sid] {
+			errs = append(errs, fmt.Sprintf("duplicate step id %q", sid))
 		}
-		stepNodes[step.Node] = true
+		stepIDs[sid] = true
+		stepIDToNode[sid] = step.Node
+		nodeCount[step.Node]++
 	}
 
 	// Build edge lookup: targetNode.targetInput → sourceNode.sourceOutput
@@ -60,15 +68,17 @@ func Validate(p *Plan, g *graph.Graph) error {
 			continue
 		}
 
-		// Check dependsOn references valid plan steps
+		sid := step.StepID()
+
+		// Check dependsOn references valid plan steps (by step ID)
 		depsSet := make(map[string]bool, len(step.DependsOn))
 		for _, dep := range step.DependsOn {
 			depsSet[dep] = true
-			if !stepNodes[dep] {
-				errs = append(errs, fmt.Sprintf("step %d (%s): dependsOn references unknown step %q", i, step.Node, dep))
+			if !stepIDs[dep] {
+				errs = append(errs, fmt.Sprintf("step %d (%s): dependsOn references unknown step %q", i, sid, dep))
 			}
-			if dep == step.Node {
-				errs = append(errs, fmt.Sprintf("step %d (%s): dependsOn references itself", i, step.Node))
+			if dep == sid {
+				errs = append(errs, fmt.Sprintf("step %d (%s): dependsOn references itself", i, sid))
 			}
 		}
 
@@ -78,48 +88,65 @@ func Validate(p *Plan, g *graph.Graph) error {
 			inputNames[input.Name] = true
 		}
 
-		// Check that required inputs without edges have plan values or defaults
+		// Check that required inputs without edges have plan values or defaults.
+		// For duplicate nodes (same graph node used by multiple steps), graph-edge
+		// auto-wiring is disabled — all non-default, non-optional inputs must have
+		// explicit plan values (with from/fromSelection).
+		isDuplicate := nodeCount[step.Node] > 1
 		for _, input := range node.Inputs {
 			if input.Optional {
 				continue
 			}
-			edgeKey := step.Node + "." + input.Name
-			hasEdge := edgeTargets[edgeKey]
+
 			_, hasPlanValue := step.Values[input.Name]
 			hasDefault := input.Default != nil
 
-			if !hasEdge && !hasPlanValue && !hasDefault {
-				errs = append(errs, fmt.Sprintf("step %d (%s): required input %q has no edge, plan value, or default", i, step.Node, input.Name))
+			if isDuplicate {
+				// Duplicate node: require explicit plan value or graph default
+				if !hasPlanValue && !hasDefault {
+					errs = append(errs, fmt.Sprintf("step %d (%s): required input %q needs explicit value (node %q appears in multiple steps)", i, sid, input.Name, step.Node))
+				}
+			} else {
+				edgeKey := step.Node + "." + input.Name
+				hasEdge := edgeTargets[edgeKey]
+				if !hasEdge && !hasPlanValue && !hasDefault {
+					errs = append(errs, fmt.Sprintf("step %d (%s): required input %q has no edge, plan value, or default", i, sid, input.Name))
+				}
 			}
 		}
 
-		// Validate step.Selections (named selections)
+		// Validate step.Selections (named selections) — from uses step IDs
 		for selName, sel := range step.Selections {
 			if sel.From == "" {
-				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q has empty 'from'", i, step.Node, selName))
+				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q has empty 'from'", i, sid, selName))
 				continue
 			}
-			srcNode, srcField, err := splitRef(sel.From)
+			srcStepID, srcField, err := splitRef(sel.From)
 			if err != nil {
-				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q has invalid 'from' reference %q: %v", i, step.Node, selName, sel.From, err))
+				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q has invalid 'from' reference %q: %v", i, sid, selName, sel.From, err))
 				continue
 			}
-			if !stepNodes[srcNode] {
-				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references unknown step %q", i, step.Node, selName, srcNode))
+			if !stepIDs[srcStepID] {
+				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references unknown step %q", i, sid, selName, srcStepID))
 			} else {
 				// From implies dependsOn
-				if !depsSet[srcNode] {
-					errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references %q but does not list it in dependsOn", i, step.Node, selName, srcNode))
+				if !depsSet[srcStepID] {
+					errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references %q but does not list it in dependsOn", i, sid, selName, srcStepID))
 				}
 			}
-			if outs, ok := outputsByNode[srcNode]; ok {
+			// Resolve step ID → graph node for output validation
+			srcGraphNode := srcStepID
+			if gn, ok := stepIDToNode[srcStepID]; ok {
+				srcGraphNode = gn
+			}
+			if outs, ok := outputsByNode[srcGraphNode]; ok {
 				if out, outExists := outs[srcField]; !outExists {
-					errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references output %q which does not exist on node %q", i, step.Node, selName, srcField, srcNode))
+					errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references output %q which does not exist on node %q", i, sid, selName, srcField, srcGraphNode))
 				} else {
 					// Must be an array type
 					ft, ftErr := graph.ParseFieldType(out.Type)
 					if ftErr == nil && !ft.IsArray {
-						errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references output %q which is not an array type", i, step.Node, selName, sel.From))
+						errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references output %q which is not an array type", i, sid, selName, sel.From))
 					}
 				}
 			}
@@ -128,7 +155,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 		// Gap 6: Check value names match node inputs
 		for name := range step.Values {
 			if !inputNames[name] {
-				errs = append(errs, fmt.Sprintf("step %d (%s): value %q does not match any input on node %q", i, step.Node, name, step.Node))
+				errs = append(errs, fmt.Sprintf("step %d (%s): value %q does not match any input on node %q", i, sid, name, step.Node))
 			}
 		}
 
@@ -137,19 +164,23 @@ func Validate(p *Plan, g *graph.Graph) error {
 			// Validate FromSelection
 			if sv.FromSelection != "" {
 				if sv.From != "" || sv.Select != nil {
-					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromSelection but also has from/select \u2014 these are mutually exclusive", i, step.Node, name))
+					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromSelection but also has from/select \u2014 these are mutually exclusive", i, sid, name))
 				}
 				selName, fieldName := ParseFromSelection(sv.FromSelection)
 				if _, exists := step.Selections[selName]; !exists {
-					errs = append(errs, fmt.Sprintf("step %d (%s): value %q references unknown selection %q", i, step.Node, name, selName))
+					errs = append(errs, fmt.Sprintf("step %d (%s): value %q references unknown selection %q", i, sid, name, selName))
 				}
 
 				// Validate fieldName against source output's elementFields
 				if fieldName != "" {
 					if sel, selExists := step.Selections[selName]; selExists && sel.From != "" {
-						srcNode, srcField, refErr := splitRef(sel.From)
+						srcStepID, srcField, refErr := splitRef(sel.From)
+						srcGraphNode := srcStepID
+						if gn, ok := stepIDToNode[srcStepID]; ok {
+							srcGraphNode = gn
+						}
 						if refErr == nil {
-							if outs, ok := outputsByNode[srcNode]; ok {
+							if outs, ok := outputsByNode[srcGraphNode]; ok {
 								if out, outExists := outs[srcField]; outExists && len(out.ElementFields) > 0 {
 									found := false
 									for _, ef := range out.ElementFields {
@@ -161,7 +192,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 									if !found {
 										errs = append(errs, fmt.Sprintf(
 											"step %d (%s): fromSelection %q references field %q which is not an elementField of %s.%s",
-											i, step.Node, sv.FromSelection, fieldName, srcNode, srcField))
+											i, sid, sv.FromSelection, fieldName, srcStepID, srcField))
 									}
 								}
 							}
@@ -170,23 +201,27 @@ func Validate(p *Plan, g *graph.Graph) error {
 				}
 			}
 
-			// Gap 1: Validate From field references
+			// Gap 1: Validate From field references (from uses step IDs)
 			if sv.From != "" {
-				srcNode, srcField, err := splitRef(sv.From)
+				srcStepID, srcField, err := splitRef(sv.From)
 				if err != nil {
-					errs = append(errs, fmt.Sprintf("step %d (%s): invalid 'from' reference %q for %q: %v", i, step.Node, sv.From, name, err))
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid 'from' reference %q for %q: %v", i, sid, sv.From, name, err))
 				} else {
-					if !stepNodes[srcNode] {
-						errs = append(errs, fmt.Sprintf("step %d (%s): 'from' reference %q for %q: %q is not a step in this plan", i, step.Node, sv.From, name, srcNode))
-					} else if outs, ok := outputsByNode[srcNode]; ok {
+					srcGraphNode := srcStepID
+					if gn, ok := stepIDToNode[srcStepID]; ok {
+						srcGraphNode = gn
+					}
+					if !stepIDs[srcStepID] {
+						errs = append(errs, fmt.Sprintf("step %d (%s): 'from' reference %q for %q: %q is not a step in this plan", i, sid, sv.From, name, srcStepID))
+					} else if outs, ok := outputsByNode[srcGraphNode]; ok {
 						if _, outExists := outs[srcField]; !outExists {
-							errs = append(errs, fmt.Sprintf("step %d (%s): 'from' reference %q for %q: output %q does not exist on node %q", i, step.Node, sv.From, name, srcField, srcNode))
+							errs = append(errs, fmt.Sprintf("step %d (%s): 'from' reference %q for %q: output %q does not exist on node %q", i, sid, sv.From, name, srcField, srcGraphNode))
 						}
 					}
 
 					// Gap 9: From implies dependsOn
-					if stepNodes[srcNode] && !depsSet[srcNode] {
-						errs = append(errs, fmt.Sprintf("step %d (%s): has 'from' reference to %q but does not list it in dependsOn", i, step.Node, srcNode))
+					if stepIDs[srcStepID] && !depsSet[srcStepID] {
+						errs = append(errs, fmt.Sprintf("step %d (%s): has 'from' reference to %q but does not list it in dependsOn", i, sid, srcStepID))
 					}
 				}
 			}
@@ -196,14 +231,18 @@ func Validate(p *Plan, g *graph.Graph) error {
 				var sourceOutput *graph.Output
 
 				if sv.From != "" {
-					srcNode, srcField, err := splitRef(sv.From)
+					srcStepID, srcField, err := splitRef(sv.From)
+					srcGraphNode := srcStepID
+					if gn, ok := stepIDToNode[srcStepID]; ok {
+						srcGraphNode = gn
+					}
 					if err == nil {
-						if outs, ok := outputsByNode[srcNode]; ok {
+						if outs, ok := outputsByNode[srcGraphNode]; ok {
 							if out, outExists := outs[srcField]; outExists {
 								sourceOutput = &out
 								ft, ftErr := graph.ParseFieldType(out.Type)
 								if ftErr == nil && !ft.IsArray {
-									errs = append(errs, fmt.Sprintf("step %d (%s): selection on %q references 'from' output %q which is not an array type", i, step.Node, name, sv.From))
+									errs = append(errs, fmt.Sprintf("step %d (%s): selection on %q references 'from' output %q which is not an array type", i, sid, name, sv.From))
 								}
 							}
 						}
@@ -228,7 +267,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 						}
 					}
 					if !hasSelectEdge {
-						errs = append(errs, fmt.Sprintf("step %d (%s): selection on %q has no 'from' and no select edge in the graph", i, step.Node, name))
+						errs = append(errs, fmt.Sprintf("step %d (%s): selection on %q has no 'from' and no select edge in the graph", i, sid, name))
 					}
 				}
 
@@ -244,7 +283,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 							}
 						}
 						if !found {
-							errs = append(errs, fmt.Sprintf("step %d (%s): sortField %q for %q not found in elementFields of %q", i, step.Node, sel.SortField, name, sourceOutput.Name))
+							errs = append(errs, fmt.Sprintf("step %d (%s): sortField %q for %q not found in elementFields of %q", i, sid, sel.SortField, name, sourceOutput.Name))
 						}
 					}
 				}
@@ -285,37 +324,43 @@ func Validate(p *Plan, g *graph.Graph) error {
 
 	// Validate predicate expressions and selection strategies in step selections and values
 	for i, step := range p.Execution.Steps {
+		sid := step.StepID()
+
 		// Validate named selection strategies and filter fields
 		for selName, sel := range step.Selections {
 			strategy := sel.Strategy
 			if !validStrategies[strategy] {
-				errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for selection %q", i, step.Node, strategy, selName))
+				errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for selection %q", i, sid, strategy, selName))
 			}
 			if sel.Filter != "" {
 				if err := ValidatePredicate(sel.Filter); err != nil {
-					errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for selection %q: %v", i, step.Node, selName, err))
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for selection %q: %v", i, sid, selName, err))
 				}
 			}
 			if strategy == "min" || strategy == "max" {
 				if sel.SortField == "" {
-					errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires sortField for selection %q", i, step.Node, strategy, selName))
+					errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires sortField for selection %q", i, sid, strategy, selName))
 				}
 			}
 			if strategy == "match" && sel.Filter == "" {
-				errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for selection %q", i, step.Node, selName))
+				errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for selection %q", i, sid, selName))
 			}
 			if strategy == "index" && sel.Index < 0 {
-				errs = append(errs, fmt.Sprintf("step %d (%s): index strategy requires non-negative index for selection %q", i, step.Node, selName))
+				errs = append(errs, fmt.Sprintf("step %d (%s): index strategy requires non-negative index for selection %q", i, sid, selName))
 			}
 			if strategy == "llm" && sel.Prompt == "" {
-				errs = append(errs, fmt.Sprintf("step %d (%s): llm strategy requires prompt for selection %q", i, step.Node, selName))
+				errs = append(errs, fmt.Sprintf("step %d (%s): llm strategy requires prompt for selection %q", i, sid, selName))
 			}
 
 			// Validate filter field references against source output's elementFields
 			if sel.Filter != "" && sel.From != "" {
-				srcNode, srcField, refErr := splitRef(sel.From)
+				srcStepID, srcField, refErr := splitRef(sel.From)
+				srcGraphNode := srcStepID
+				if gn, ok := stepIDToNode[srcStepID]; ok {
+					srcGraphNode = gn
+				}
 				if refErr == nil {
-					if outs, ok := outputsByNode[srcNode]; ok {
+					if outs, ok := outputsByNode[srcGraphNode]; ok {
 						if out, outExists := outs[srcField]; outExists && len(out.ElementFields) > 0 {
 							for _, field := range PredicateFields(sel.Filter) {
 								found := false
@@ -328,7 +373,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 								if !found {
 									errs = append(errs, fmt.Sprintf(
 										"step %d (%s): filter for selection %q references field %q which is not an elementField of %s.%s",
-										i, step.Node, selName, field, srcNode, srcField))
+										i, sid, selName, field, srcStepID, srcField))
 								}
 							}
 						}
@@ -341,31 +386,31 @@ func Validate(p *Plan, g *graph.Graph) error {
 			if sv.Select != nil {
 				sel := sv.Select
 				if !validStrategies[sel.Strategy] {
-					errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for %q", i, step.Node, sel.Strategy, name))
+					errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for %q", i, sid, sel.Strategy, name))
 				}
 				if sel.Filter != "" {
 					if err := ValidatePredicate(sel.Filter); err != nil {
-						errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for %q: %v", i, step.Node, name, err))
+						errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for %q: %v", i, sid, name, err))
 					}
 				}
 				if sel.Strategy == "min" || sel.Strategy == "max" {
 					if sel.Field == "" && sel.SortField == "" {
-						errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires field or sortField for %q", i, step.Node, sel.Strategy, name))
+						errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires field or sortField for %q", i, sid, sel.Strategy, name))
 					}
 				}
 				if sel.Strategy == "match" && sel.Filter == "" {
-					errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for %q", i, step.Node, name))
+					errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for %q", i, sid, name))
 				}
 				if sel.Strategy == "index" && sel.Index < 0 {
-					errs = append(errs, fmt.Sprintf("step %d (%s): index strategy requires non-negative index for %q", i, step.Node, name))
+					errs = append(errs, fmt.Sprintf("step %d (%s): index strategy requires non-negative index for %q", i, sid, name))
 				}
 				if sel.Strategy == "llm" && sel.Prompt == "" {
-					errs = append(errs, fmt.Sprintf("step %d (%s): llm strategy requires prompt for %q", i, step.Node, name))
+					errs = append(errs, fmt.Sprintf("step %d (%s): llm strategy requires prompt for %q", i, sid, name))
 				}
 			}
 			if sv.Constraint != "" {
 				if err := ValidatePredicate(sv.Constraint); err != nil {
-					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, step.Node, name, err))
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, sid, name, err))
 				}
 			}
 		}
@@ -373,7 +418,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 			for j, ma := range step.Assertions.Mechanical {
 				if ma.Type == "predicate" && ma.Expr != "" {
 					if err := ValidatePredicate(ma.Expr); err != nil {
-						errs = append(errs, fmt.Sprintf("step %d (%s): invalid predicate assertion %d: %v", i, step.Node, j, err))
+						errs = append(errs, fmt.Sprintf("step %d (%s): invalid predicate assertion %d: %v", i, sid, j, err))
 					}
 				}
 			}
@@ -382,11 +427,11 @@ func Validate(p *Plan, g *graph.Graph) error {
 		// Validate expectFailure
 		if step.ExpectFailure != nil {
 			if len(step.ExpectFailure.Status) == 0 {
-				errs = append(errs, fmt.Sprintf("step %d (%s): expectFailure must have at least one status code", i, step.Node))
+				errs = append(errs, fmt.Sprintf("step %d (%s): expectFailure must have at least one status code", i, sid))
 			}
 			for _, code := range step.ExpectFailure.Status {
 				if code < 400 {
-					errs = append(errs, fmt.Sprintf("step %d (%s): expectFailure status %d must be >= 400", i, step.Node, code))
+					errs = append(errs, fmt.Sprintf("step %d (%s): expectFailure status %d must be >= 400", i, sid, code))
 				}
 			}
 			// Check for contradicting status assertion
@@ -394,7 +439,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 				for _, ma := range step.Assertions.Mechanical {
 					if ma.Type == "status" {
 						if expectInt, ok := toInt(ma.Expect); ok && expectInt < 400 {
-							errs = append(errs, fmt.Sprintf("step %d (%s): status assertion expecting %d contradicts expectFailure", i, step.Node, expectInt))
+							errs = append(errs, fmt.Sprintf("step %d (%s): status assertion expecting %d contradicts expectFailure", i, sid, expectInt))
 						}
 					}
 				}
@@ -403,26 +448,26 @@ func Validate(p *Plan, g *graph.Graph) error {
 	}
 
 	// Gap 4: Validate constraint AppliesTo references
-	// AppliesTo entries may be "node" or "node.input" — extract the node part.
+	// AppliesTo entries may be "stepID" or "stepID.input" — extract the step ID part.
 	if p.Intent.Constraints != nil {
 		for _, c := range p.Intent.Constraints.Hard {
 			for _, ref := range c.AppliesTo {
-				nodeName := ref
+				stepRef := ref
 				if idx := strings.Index(ref, "."); idx > 0 {
-					nodeName = ref[:idx]
+					stepRef = ref[:idx]
 				}
-				if !stepNodes[nodeName] {
+				if !stepIDs[stepRef] {
 					errs = append(errs, fmt.Sprintf("hard constraint %q: appliesTo references unknown step %q", c.Name, ref))
 				}
 			}
 		}
 		for _, c := range p.Intent.Constraints.Soft {
 			for _, ref := range c.AppliesTo {
-				nodeName := ref
+				stepRef := ref
 				if idx := strings.Index(ref, "."); idx > 0 {
-					nodeName = ref[:idx]
+					stepRef = ref[:idx]
 				}
-				if !stepNodes[nodeName] {
+				if !stepIDs[stepRef] {
 					errs = append(errs, fmt.Sprintf("soft constraint %q: appliesTo references unknown step %q", c.Name, ref))
 				}
 			}
@@ -456,16 +501,16 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 	}
 
-	// Gap 8: Goal consistency validation
+	// Gap 8: Goal consistency validation (uses step IDs)
 	if p.Intent.Goal != "" {
-		if !stepNodes[p.Intent.Goal] {
+		if !stepIDs[p.Intent.Goal] {
 			errs = append(errs, fmt.Sprintf("intent goal references unknown step %q", p.Intent.Goal))
 		}
 	}
 	var goalSteps []string
 	for _, step := range p.Execution.Steps {
 		if step.IsGoal {
-			goalSteps = append(goalSteps, step.Node)
+			goalSteps = append(goalSteps, step.StepID())
 		}
 	}
 	if len(goalSteps) > 1 {
@@ -487,11 +532,12 @@ func Validate(p *Plan, g *graph.Graph) error {
 }
 
 // detectDependsOnCycles checks for cycles in the explicit dependsOn graph.
+// Uses step IDs for cycle detection to support step aliasing.
 func detectDependsOnCycles(p *Plan) []string {
-	// Build adjacency: node → dependsOn nodes
+	// Build adjacency: stepID → dependsOn step IDs
 	adj := make(map[string][]string)
 	for _, step := range p.Execution.Steps {
-		adj[step.Node] = step.DependsOn
+		adj[step.StepID()] = step.DependsOn
 	}
 
 	const (
@@ -522,8 +568,9 @@ func detectDependsOnCycles(p *Plan) []string {
 	}
 
 	for _, step := range p.Execution.Steps {
-		if color[step.Node] == white {
-			dfs(step.Node)
+		sid := step.StepID()
+		if color[sid] == white {
+			dfs(sid)
 		}
 	}
 

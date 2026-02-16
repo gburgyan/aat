@@ -28,6 +28,7 @@ type ArchiveMetadata struct {
 
 // StepRecord captures the execution trace for a single step.
 type StepRecord struct {
+	StepID      string                    `json:"stepId,omitempty"`
 	Node        string                    `json:"node"`
 	StartTime   time.Time                 `json:"startTime,omitempty"`
 	DurationMs  int64                     `json:"duration_ms"`

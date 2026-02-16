@@ -96,6 +96,7 @@ type Workflow struct {
 	Name        string   `yaml:"name"`
 	Description string   `yaml:"description,omitempty"`
 	Steps       []string `yaml:"steps,omitempty"`
+	Template    string   `yaml:"template,omitempty"` // path to plan template YAML (relative to graph file)
 }
 
 // Node represents a single logical API operation in the graph.

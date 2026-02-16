@@ -8,11 +8,11 @@ The simplest case is a literal value written directly in the plan:
 
 ```yaml
 steps:
-  - node: searchFlights
+  - node: createPet
     values:
-      origin: "DEN"
-      destination: "SFO"
-      departureDate: "2026-03-15"
+      name: "Buddy"
+      status: "available"
+      category: "dogs"
 ```
 
 These values are passed directly to the step's template as-is.
@@ -23,21 +23,29 @@ When one step produces an output that another step needs, use a `from` reference
 
 ```yaml
 steps:
-  - node: createWorkbench
-    # produces output: workbenchId
+  - node: createCart
+    # produces output: cartId
 
-  - node: addOffer
-    dependsOn: [createWorkbench]
+  - node: addItem
+    dependsOn: [createCart]
     values:
-      workbenchId:
-        from: createWorkbench.workbenchId
+      cartId:
+        from: createCart.cartId
 ```
 
-The format is `stepName.outputName`. At runtime, AAT looks up the output from the completed step and passes it through. The step must be listed in `dependsOn` so AAT knows to run it first.
+The format is `stepID.outputName`. When a step has no explicit `id`, its step ID is the same as its `node` name, so `createCart.cartId` works in both cases. When using [step aliasing](plan-authoring.md#step-aliasing), use the explicit `id`:
+
+```yaml
+values:
+  productId:
+    from: add_item_1.productId    # references step with id: add_item_1
+```
+
+The referenced step must be listed in `dependsOn` so AAT knows to run it first.
 
 ## Array Selection: Choosing From Multiple Results
 
-Many APIs return arrays — a flight search returns multiple offerings, a hotel search returns multiple rooms. When a downstream step needs a value from one element of an array, you need a **selection strategy**.
+Many APIs return arrays — a product listing returns multiple items, a search endpoint returns multiple results. When a downstream step needs a value from one element of an array, you need a **selection strategy**.
 
 ### Single-Field Selection
 
@@ -45,32 +53,32 @@ When only one input comes from an array, use inline `from` + `select`:
 
 ```yaml
 values:
-  offeringId:
-    from: searchFlights.catalogOfferings
+  productId:
+    from: listProducts.products
     select:
       strategy: first
-      field: offeringId
+      field: productId
 ```
 
-This says: "Take the `catalogOfferings` array from `searchFlights`, pick the first element, and extract its `offeringId` field."
+This says: "Take the `products` array from `listProducts`, pick the first element, and extract its `productId` field."
 
 ### Named Selections: Multiple Fields From the Same Element
 
-Often you need several fields from the **same** array element. For example, booking a flight requires both an `offeringId` and a `productRef` from the same offering. Named selections guarantee they come from the same element:
+Often you need several fields from the **same** array element. For example, adding an item to a cart requires both a `productId` and a `price` from the same product. Named selections guarantee they come from the same element:
 
 ```yaml
 steps:
-  - node: addOffer
-    dependsOn: [searchFlights, createWorkbench]
+  - node: addItem
+    dependsOn: [listProducts, createCart]
     selections:
-      offering:
-        from: searchFlights.catalogOfferings
+      product:
+        from: listProducts.products
         strategy: first
     values:
-      offeringId:
-        fromSelection: offering.offeringId
-      productRef:
-        fromSelection: offering.productRef
+      productId:
+        fromSelection: product.productId
+      price:
+        fromSelection: product.price
 ```
 
 The `selections` block picks one element from the array. Then each `fromSelection` reference extracts a different field from that same element. This avoids repeating the `from`/`select` block for each field and — critically — ensures both values come from the same array element, even when using non-deterministic strategies like `random` or `llm`.
@@ -91,42 +99,42 @@ The `selections` block picks one element from the array. Then each `fromSelectio
 Examples:
 
 ```yaml
-# Cheapest offering
+# Cheapest product
 selections:
-  offering:
-    from: searchFlights.catalogOfferings
+  product:
+    from: listProducts.products
     strategy: min
-    sortField: totalPrice
+    sortField: price
 
-# Non-stop flights only
+# Only in-stock items
 selections:
-  offering:
-    from: searchFlights.catalogOfferings
+  product:
+    from: listProducts.products
     strategy: match
-    filter: "stops == 0"
+    filter: "inStock == true"
 
 # LLM picks the best option
 selections:
-  offering:
-    from: searchFlights.catalogOfferings
+  product:
+    from: listProducts.products
     strategy: llm
-    prompt: "Choose the cheapest direct flight departing in the morning"
+    prompt: "Choose a popular product under $50 with good reviews"
 ```
 
 ### Filtering
 
-The `filter` field uses predicate expressions to narrow the array before selection. This works with any strategy — you can filter to non-stop flights and then pick the cheapest:
+The `filter` field uses predicate expressions to narrow the array before selection. This works with any strategy — you can filter to in-stock items and then pick the cheapest:
 
 ```yaml
 # Inline selection with filter
 values:
-  offeringId:
-    from: searchFlights.catalogOfferings
+  productId:
+    from: listProducts.products
     select:
       strategy: min
-      sortField: totalPrice
-      filter: "stops == 0"
-      field: offeringId
+      sortField: price
+      filter: "inStock == true"
+      field: productId
 ```
 
 ## Dynamic Expressions
@@ -135,9 +143,9 @@ Values can include `{{...}}` expressions that are evaluated at runtime:
 
 ```yaml
 values:
-  departureDate: "{{today + 30 days}}"
-  returnDate: "{{today + 37 days}}"
-  bookingRef: "TEST_{{today}}"
+  deliveryDate: "{{today + 7 days}}"
+  expiresAt: "{{today + 30 days}}"
+  orderRef: "TEST_{{today}}"
 ```
 
 ### Supported Expressions
@@ -155,7 +163,7 @@ Expressions can appear inside larger strings:
 
 ```yaml
 values:
-  label: "Flight_{{origin}}_to_{{destination}}_{{departureDate}}"
+  label: "Order_{{productId}}_qty_{{quantity}}_{{deliveryDate}}"
 ```
 
 When the entire value is a single expression (e.g., `"{{today + 30 days}}"`), it returns a typed value. When mixed with literal text, it returns a concatenated string.
@@ -166,13 +174,13 @@ Constraints validate that a resolved value meets a condition. Fallback pools pro
 
 ```yaml
 values:
-  departureDate:
-    default: "{{today + 30 days}}"
+  deliveryDate:
+    default: "{{today + 7 days}}"
     constraint: "value >= today"
     fallbackPool:
-      - "{{today + 25 days}}"
-      - "{{today + 20 days}}"
-      - "{{today + 15 days}}"
+      - "{{today + 10 days}}"
+      - "{{today + 14 days}}"
+      - "{{today + 21 days}}"
 ```
 
 Resolution works like this:
@@ -191,12 +199,12 @@ Constraints are predicate expressions where `value` is the candidate and other r
 
 ```yaml
 values:
-  returnDate:
-    default: "{{today + 37 days}}"
-    constraint: "value > departureDate"
+  expiresAt:
+    default: "{{today + 30 days}}"
+    constraint: "value > deliveryDate"
 ```
 
-This ensures the return date is after the departure date, regardless of what `departureDate` resolved to.
+This ensures the expiration date is after the delivery date, regardless of what `deliveryDate` resolved to.
 
 ## Execution Modes and LLM Fallback
 
@@ -244,7 +252,7 @@ In the run archive, LLM-selected values have `"source": "llm"` and include the f
 
 ```json
 {
-  "inputName": "departureDate",
+  "inputName": "deliveryDate",
   "source": "llm",
   "finalValue": "2026-04-15",
   "constraint": "value > today",
@@ -265,10 +273,10 @@ In addition to scalar values, the LLM can select from arrays. Use `strategy: llm
 
 ```yaml
 selections:
-  offering:
-    from: searchFlights.catalogOfferings
+  product:
+    from: listProducts.products
     strategy: llm
-    prompt: "Choose the cheapest direct flight departing in the morning"
+    prompt: "Choose a popular in-stock product under $50"
 ```
 
 The LLM sees a tabular summary of the array elements (using the node's `elementFields` for column selection) and returns an index. This works in both `lean` and `adaptive` modes.
@@ -283,20 +291,20 @@ Plans classify constraints by enforcement level:
 
 ```yaml
 intent:
-  goal: commitBooking
+  goal: checkout
   constraints:
     hard:
-      - type: route
-        name: route_constraint
-        description: "Must fly DEN to SFO"
-        applies_to: [searchFlights.origin, searchFlights.destination]
+      - type: category
+        name: category_constraint
+        description: "Must select from electronics"
+        applies_to: [listProducts.category]
     soft:
-      - type: schedule
-        name: date_preference
-        description: "Prefer dates in March"
-        applies_to: [searchFlights.departureDate]
+      - type: pricing
+        name: price_preference
+        description: "Prefer items under $50"
+        applies_to: [addItem.price]
     free:
-      - traveler identity
+      - shipping method
 ```
 
 - **Hard constraints** are never relaxed. If they can't be satisfied, the step fails.
@@ -311,28 +319,28 @@ Relaxation can occur in three scenarios:
 
 ```yaml
 values:
-  departureDate:
-    default: "{{today + 30 days}}"
+  deliveryDate:
+    default: "{{today + 7 days}}"
     constraint: "value > '2026-03-01' && value < '2026-03-31'"
     fallbackPool:
-      - "{{today + 25 days}}"
-      - "{{today + 20 days}}"
+      - "{{today + 10 days}}"
+      - "{{today + 14 days}}"
 ```
 
-If today is January and none of these dates fall in March, but the constraint is classified as soft, AAT relaxes it and uses the first date (today + 30 days) anyway.
+If today is January and none of these dates fall in March, but the constraint is classified as soft, AAT relaxes it and uses the first date (today + 7 days) anyway.
 
 **2. Filter produces no matches.** A selection filter eliminates all array elements. If the filter corresponds to a soft constraint, AAT drops the filter and retries the selection on the full array.
 
 ```yaml
 selections:
-  offering:
-    from: searchFlights.catalogOfferings
+  product:
+    from: listProducts.products
     strategy: min
-    sortField: totalPrice
-    filter: "stops == 0"
+    sortField: price
+    filter: "inStock == true"
 ```
 
-If no offerings are non-stop and the filter is tied to a soft constraint, AAT relaxes the filter and picks the cheapest from all offerings.
+If no products are in stock and the filter is tied to a soft constraint, AAT relaxes the filter and picks the cheapest from all products.
 
 **3. Step-level recovery (adaptive only).** The step executes but gets an HTTP 4xx error. AAT finds an unrelaxed soft constraint for this step, relaxes it, re-resolves inputs, and retries the step. This loop continues until the step succeeds or no more constraints can be relaxed.
 
@@ -350,24 +358,24 @@ Relaxation events appear in the run archive for full auditability:
 
 ```json
 {
-  "node": "searchFlights",
+  "node": "addItem",
   "relaxations": [
     {
-      "constraintName": "date_preference",
-      "inputRef": "searchFlights.departureDate",
+      "constraintName": "price_preference",
+      "inputRef": "addItem.price",
       "reason": "resolution_exhausted",
       "depth": 1
     }
   ],
   "resolutions": [
     {
-      "inputName": "departureDate",
+      "inputName": "price",
       "source": "plan_default",
-      "finalValue": "2026-02-08",
-      "constraint": "value > '2026-03-01'",
+      "finalValue": 79.99,
+      "constraint": "value < 50",
       "constraintOK": false,
       "relaxed": true,
-      "relaxedConstraint": "date_preference"
+      "relaxedConstraint": "price_preference"
     }
   ]
 }
@@ -396,22 +404,22 @@ The graph can define default values for inputs. These are used when the plan doe
 ```yaml
 # In the graph definition
 nodes:
-  searchFlights:
+  listProducts:
     inputs:
-      - name: passengers
+      - name: pageSize
         type: integer
-        default: 1
-      - name: cabinPreference
+        default: 20
+      - name: sortBy
         type: string
-        default: "economy"
+        default: "relevance"
 ```
 
-Plan values override graph defaults. If you want 2 passengers:
+Plan values override graph defaults. If you want a larger page:
 
 ```yaml
 values:
-  passengers: 2
-  # cabinPreference not specified → uses graph default "economy"
+  pageSize: 50
+  # sortBy not specified → uses graph default "relevance"
 ```
 
 ## Resolution Priority
@@ -439,73 +447,73 @@ Here's a complete plan that uses most of these features:
 
 ```yaml
 metadata:
-  prompt: "Book a flight from DEN to SFO"
+  prompt: "Order the cheapest in-stock product"
   graphVersion: "1.0.0"
 
 intent:
-  goal: commitBooking
-  description: "Complete a flight booking from Denver to San Francisco"
+  goal: checkout
+  description: "Browse products, add the cheapest to a cart, and complete checkout"
 
 execution:
   steps:
-    - node: searchFlights
-      description: "Search for flights DEN to SFO"
+    - node: listProducts
+      description: "List available products"
       values:
-        origin: "DEN"
-        destination: "SFO"
-        departureDate: "{{today + 30 days}}"
+        category: "electronics"
+        pageSize: 50
 
-    - node: createWorkbench
-      description: "Create reservation workbench"
+    - node: createCart
+      description: "Create a shopping cart"
 
-    - node: addOffer
-      dependsOn: [searchFlights, createWorkbench]
-      description: "Add the first available offer to the workbench"
+    - node: addItem
+      dependsOn: [listProducts, createCart]
+      description: "Add the cheapest in-stock product to the cart"
       selections:
-        catalogOffering:
-          from: searchFlights.catalogOfferings
-          strategy: first
+        product:
+          from: listProducts.products
+          strategy: min
+          sortField: price
+          filter: "inStock == true"
       values:
-        offeringId:
-          fromSelection: catalogOffering.offeringId
-        productRef:
-          fromSelection: catalogOffering.productRef
-        catalogOfferingsId:
-          from: searchFlights.catalogOfferingsId
+        productId:
+          fromSelection: product.productId
+        price:
+          fromSelection: product.price
+        cartId:
+          from: createCart.cartId
 
-    - node: addTraveler
-      dependsOn: [createWorkbench]
-      description: "Add passenger details"
+    - node: addShipping
+      dependsOn: [createCart]
+      description: "Add standard shipping"
       values:
-        surname: "Smith"
-        givenName: "Jane"
-        birthDate: "1990-01-15"
-        gender: "Female"
+        cartId:
+          from: createCart.cartId
+        method: "standard"
 
-    - node: commitBooking
-      dependsOn: [addOffer, addTraveler]
+    - node: checkout
+      dependsOn: [addItem, addShipping]
       isGoal: true
-      description: "Commit the booking to create PNR"
+      description: "Complete the order"
       assertions:
         mechanical:
           - type: status
             expect: 200
           - type: fieldExists
-            path: "$.ReservationResponse.Reservation.Receipt.0.Confirmation.Locator.value"
+            path: "orderId"
 
   cleanup:
-    - node: ignoreWorkbench
+    - node: cancelOrder
       runOn: always
 ```
 
 In this plan:
 
-- `searchFlights` gets literal values, with `departureDate` computed dynamically
-- `addOffer` uses a **named selection** to extract two fields from the same offering
-- `addOffer` also gets `catalogOfferingsId` via a **scalar reference** from the search
-- `addTraveler` gets literal values for the passenger
-- `commitBooking` receives scalar references from multiple upstream steps (wired by the graph edges, not shown in the plan since the engine resolves them automatically)
-- `ignoreWorkbench` runs as cleanup regardless of success or failure
+- `listProducts` gets literal values for the search criteria
+- `addItem` uses a **named selection** to extract two fields (`productId`, `price`) from the same product
+- `addItem` also gets `cartId` via a **scalar reference** from `createCart`
+- `addShipping` gets literal values for the shipping method
+- `checkout` receives scalar references from multiple upstream steps (wired by the graph edges, not shown in the plan since the engine resolves them automatically)
+- `cancelOrder` runs as cleanup regardless of success or failure
 
 ## Debugging Value Resolution
 
@@ -513,20 +521,20 @@ Every run produces a JSON archive in the output directory. The archive includes 
 
 ```json
 {
-  "node": "addOffer",
+  "node": "addItem",
   "resolutions": [
     {
-      "inputName": "offeringId",
+      "inputName": "productId",
       "source": "named_selection",
-      "finalValue": "o123",
-      "fromStep": "searchFlights",
-      "fromOutput": "catalogOfferings"
+      "finalValue": "prod-101",
+      "fromStep": "listProducts",
+      "fromOutput": "products"
     },
     {
-      "inputName": "departureDate",
+      "inputName": "deliveryDate",
       "source": "expression",
-      "expression": "{{today + 30 days}}",
-      "finalValue": "2026-03-10"
+      "expression": "{{today + 7 days}}",
+      "finalValue": "2026-02-23"
     }
   ]
 }
@@ -554,15 +562,15 @@ When a constraint fails and fallback values are tried, the archive records every
 
 ```json
 {
-  "inputName": "departureDate",
+  "inputName": "deliveryDate",
   "source": "fallback_pool",
-  "rawValue": "{{today + 25 days}}",
+  "rawValue": "{{today + 10 days}}",
   "finalValue": "2026-03-06",
   "constraint": "value > '2026-03-01'",
   "constraintOK": true,
   "poolIndex": 0,
   "poolSize": 3,
-  "tried": ["2026-02-08"]
+  "tried": ["2026-02-23"]
 }
 ```
 
@@ -578,14 +586,14 @@ Array selection decisions are recorded in the `selections` array:
 
 ```json
 {
-  "inputName": "offeringId",
-  "sourceNode": "searchFlights",
-  "sourceField": "catalogOfferings",
-  "sourceSize": 12,
-  "filteredSize": 3,
-  "filterExpr": "stops == 0",
+  "inputName": "productId",
+  "sourceNode": "listProducts",
+  "sourceField": "products",
+  "sourceSize": 50,
+  "filteredSize": 12,
+  "filterExpr": "inStock == true",
   "strategy": "min",
-  "selectedIndex": 1
+  "selectedIndex": 3
 }
 ```
 
