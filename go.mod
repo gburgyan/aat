@@ -7,6 +7,7 @@ require (
 	github.com/pb33f/libopenapi v0.33.7
 	github.com/stretchr/testify v1.11.1
 	github.com/tidwall/gjson v1.18.0
+	github.com/yuin/gopher-lua v1.1.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 

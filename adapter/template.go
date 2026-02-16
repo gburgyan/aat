@@ -31,8 +31,9 @@ type TemplateRequest struct {
 
 // TemplateResponse defines output extraction and validation rules.
 type TemplateResponse struct {
-	Extract  map[string]ExtractRule `yaml:"extract,omitempty"`
-	Validate *TemplateValidate      `yaml:"validate,omitempty"`
+	Extract   map[string]ExtractRule `yaml:"extract,omitempty"`
+	Validate  *TemplateValidate      `yaml:"validate,omitempty"`
+	Transform string                 `yaml:"transform,omitempty"`
 }
 
 // ExtractRule defines how to extract a single output from the response.
@@ -77,6 +78,11 @@ func (t *Template) HasElementFields(outputName string) bool {
 // accessor for the Response.Extract map.
 func (t *Template) Extract() map[string]ExtractRule {
 	return t.Response.Extract
+}
+
+// HasTransform reports whether the template has a Lua transform script.
+func (t *Template) HasTransform() bool {
+	return t.Response.Transform != ""
 }
 
 // TemplateValidate holds optional validation configuration for responses.
@@ -214,6 +220,14 @@ func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error)
 		}
 
 		outputs[name] = val
+	}
+
+	if a.tmpl.Response.Transform != "" {
+		transformed, err := runTransform(a.tmpl.Response.Transform, outputs, bodyStr)
+		if err != nil {
+			return nil, fmt.Errorf("transform: %w", err)
+		}
+		outputs = transformed
 	}
 
 	return outputs, nil

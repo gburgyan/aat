@@ -247,6 +247,140 @@ func TestValidateAdapterOutputs(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "elementField mismatch without transform",
+			graph: &graph.Graph{
+				Nodes: map[string]*graph.Node{
+					"search": {
+						Name:    "search",
+						Adapter: "search",
+						Outputs: []graph.Output{
+							{
+								Name: "items",
+								Type: "array",
+								ElementFields: []graph.Field{
+									{Name: "id"},
+									{Name: "name"},
+									{Name: "extra"}, // not in template
+								},
+							},
+						},
+					},
+				},
+			},
+			setup: func(r *adapter.Registry) {
+				tmpl := adapter.Template{
+					Adapter:  "search",
+					Protocol: "http",
+					Request:  adapter.TemplateRequest{Method: "GET", Path: "/search"},
+					Response: adapter.TemplateResponse{
+						Extract: map[string]adapter.ExtractRule{
+							"items": {
+								Path: "items",
+								Fields: map[string]string{
+									"id":   "id",
+									"name": "name",
+								},
+							},
+						},
+					},
+				}
+				r.Register("search", adapter.NewTemplateAdapter(tmpl))
+			},
+			wantErr:     true,
+			wantErrType: true,
+			wantErrors: []string{
+				`node "search" output "items": graph elementField "extra" has no corresponding template field`,
+			},
+		},
+		{
+			name: "elementField mismatch relaxed with transform",
+			graph: &graph.Graph{
+				Nodes: map[string]*graph.Node{
+					"search": {
+						Name:    "search",
+						Adapter: "search",
+						Outputs: []graph.Output{
+							{
+								Name: "items",
+								Type: "array",
+								ElementFields: []graph.Field{
+									{Name: "id"},
+									{Name: "name"},
+									{Name: "extra"}, // not in template fields, but transform may add it
+								},
+							},
+						},
+					},
+				},
+			},
+			setup: func(r *adapter.Registry) {
+				tmpl := adapter.Template{
+					Adapter:  "search",
+					Protocol: "http",
+					Request:  adapter.TemplateRequest{Method: "GET", Path: "/search"},
+					Response: adapter.TemplateResponse{
+						Extract: map[string]adapter.ExtractRule{
+							"items": {
+								Path: "items",
+								Fields: map[string]string{
+									"id":   "id",
+									"name": "name",
+								},
+							},
+						},
+						Transform: `return outputs`, // has a transform
+					},
+				}
+				r.Register("search", adapter.NewTemplateAdapter(tmpl))
+			},
+			wantErr: false, // no error — transform may populate "extra"
+		},
+		{
+			name: "template field not in graph still errors with transform",
+			graph: &graph.Graph{
+				Nodes: map[string]*graph.Node{
+					"search": {
+						Name:    "search",
+						Adapter: "search",
+						Outputs: []graph.Output{
+							{
+								Name: "items",
+								Type: "array",
+								ElementFields: []graph.Field{
+									{Name: "id"},
+								},
+							},
+						},
+					},
+				},
+			},
+			setup: func(r *adapter.Registry) {
+				tmpl := adapter.Template{
+					Adapter:  "search",
+					Protocol: "http",
+					Request:  adapter.TemplateRequest{Method: "GET", Path: "/search"},
+					Response: adapter.TemplateResponse{
+						Extract: map[string]adapter.ExtractRule{
+							"items": {
+								Path: "items",
+								Fields: map[string]string{
+									"id":      "id",
+									"orphan":  "orphan_path", // not in graph
+								},
+							},
+						},
+						Transform: `return outputs`,
+					},
+				}
+				r.Register("search", adapter.NewTemplateAdapter(tmpl))
+			},
+			wantErr:     true,
+			wantErrType: true,
+			wantErrors: []string{
+				`node "search" output "items": template field "orphan" has no corresponding graph elementField`,
+			},
+		},
+		{
 			name: "adapter not in registry skipped",
 			graph: &graph.Graph{
 				Nodes: map[string]*graph.Node{

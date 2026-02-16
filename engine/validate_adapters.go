@@ -140,11 +140,15 @@ func validateElementFields(nodeName string, node *graph.Node, tmpl *adapter.Temp
 		}
 
 		// Graph elementField not extracted by template fields.
-		for _, ef := range out.ElementFields {
-			if !templateFields[ef.Name] {
-				errs = append(errs, fmt.Sprintf(
-					"node %q output %q: graph elementField %q has no corresponding template field",
-					nodeName, out.Name, ef.Name))
+		// Skip this check when the template has a Lua transform, since the
+		// transform script may populate those fields dynamically.
+		if !tmpl.HasTransform() {
+			for _, ef := range out.ElementFields {
+				if !templateFields[ef.Name] {
+					errs = append(errs, fmt.Sprintf(
+						"node %q output %q: graph elementField %q has no corresponding template field",
+						nodeName, out.Name, ef.Name))
+				}
 			}
 		}
 	}
