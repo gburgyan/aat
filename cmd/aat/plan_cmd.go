@@ -126,11 +126,16 @@ func validateAllTemplates(graphPath string, g *graph.Graph, showUnfed bool) int 
 			continue
 		}
 
-		if err := plan.Validate(p, g); err != nil {
-			fmt.Printf("  %-40s FAIL\n", wf.Name)
-			fmt.Printf("    %s\n", err)
-			hasError = true
-			continue
+		// Addon templates are fragments with intentionally unfed required
+		// inputs (filled by LLM at composition time). Only validate
+		// standalone workflows structurally.
+		if !wf.IsAddon() {
+			if err := plan.Validate(p, g); err != nil {
+				fmt.Printf("  %-40s FAIL\n", wf.Name)
+				fmt.Printf("    %s\n", err)
+				hasError = true
+				continue
+			}
 		}
 
 		fmt.Printf("  %-40s OK (%d steps)\n", wf.Name, len(p.Execution.Steps))

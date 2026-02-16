@@ -30,8 +30,13 @@ func TestTravelportTemplates_AllValidate(t *testing.T) {
 			p, err := LoadWorkflowTemplate(wf.Template, tpGraphDir, g)
 			require.NoError(t, err, "failed to load template for workflow %q", wf.Name)
 
-			err = plan.Validate(p, g)
-			assert.NoError(t, err, "template validation failed for workflow %q", wf.Name)
+			// Addon templates are fragments that can't validate standalone —
+			// they have intentionally unfed required inputs that the LLM fills
+			// at composition time. Only validate standalone workflows.
+			if !wf.IsAddon() {
+				err = plan.Validate(p, g)
+				assert.NoError(t, err, "template validation failed for workflow %q", wf.Name)
+			}
 		})
 	}
 
@@ -81,13 +86,13 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		},
 		{
 			workflow:  "Seat Selection",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"searchSeatMap.offerId", "searchSeatMap.productId"},
+			exact:     2,
 		},
 		{
 			workflow:  "Traveler Modification",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"updateTraveler.updateValue"},
+			exact:     1,
 		},
 		{
 			workflow:  "Round-Trip Full-Payload Booking",
@@ -136,13 +141,13 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		},
 		{
 			workflow:  "Reservation Comments",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"addReservationComment.commentValue"},
+			exact:     1,
 		},
 		{
 			workflow:  "Accounting Remarks",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"addAccountingRemark.accountingValue"},
+			exact:     1,
 		},
 		{
 			workflow:  "Document Overrides",
@@ -151,13 +156,13 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		},
 		{
 			workflow:  "Primary Contact",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"addPrimaryContact.email", "addPrimaryContact.phoneNumber"},
+			exact:     2,
 		},
 		{
 			workflow:  "Travel Agency",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"addTravelAgency.corporateCode", "addTravelAgency.email", "addTravelAgency.phoneNumber"},
+			exact:     3,
 		},
 	}
 
