@@ -407,20 +407,31 @@ nodeName:
 
 ```yaml
 workflows:
+  # Base workflow
   - name: Standard Checkout
     description: "Browse products, add to cart, and complete checkout"
     template: plans/standard-checkout.yaml
-    steps: [listProducts, createCart, addItem, addShipping, checkout]
+
+  # Addon workflow — splices into a base workflow
+  - name: Apply Coupon
+    kind: addon
+    after: addItem
+    description: "Validate and apply a coupon code"
+    template: plans/apply-coupon.yaml
+    wire:
+      cartId: createCart.cartId
 ```
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `name` | yes | Human-readable name (matched case-insensitively by `aat prompt`) |
 | `description` | no | What this workflow does |
-| `steps` | no | Node names in this workflow (informational) |
 | `template` | no | Path to plan template YAML, relative to graph file |
+| `kind` | no | Set to `"addon"` for workflows that splice into a base workflow |
+| `after` | addon only | Node name in the base workflow to splice after |
+| `wire` | no | Explicit PLACEHOLDER overrides for the addon (input name to ref, or `"MANUAL"`) |
 
-When a workflow has a `template`, `aat prompt` uses it as a pre-built plan skeleton instead of generating the plan from scratch. See [Workflow Templates](workflow-templates.md) for the full guide.
+When a workflow has a `template`, `aat prompt` uses it as a pre-built plan skeleton instead of generating the plan from scratch. Addon workflows are composed into base workflows at runtime — the LLM selects both the base workflow and any applicable addons. See [Workflow Templates](workflow-templates.md) for the full guide.
 
 ### Edge
 

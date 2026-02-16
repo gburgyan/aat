@@ -1,5 +1,44 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-16 — Simplify Workflow System
+
+**What:** Removed goals, pre-composed workflows, step lists, and backward chaining from the workflow pipeline. The system now uses direct workflow selection: LLM picks a named workflow + optional addons, templates are loaded/composed, and the LLM fills values. Five phases executed across two sessions.
+
+**Decisions:**
+- `WorkflowSelection` replaces `GoalAnalysis` in the Interpret pipeline — `workflow` (exact name), `description`, `addons`, `repetitions`, `constraints`
+- `GoalAnalysis` retained for `BuildSkeleton` (MCP `scaffold_template` backward compat)
+- Workflow struct slimmed: removed `Steps []string`, `Includes []WorkflowInclude`; addons carry `After` and `Wire` directly
+- Pre-composed workflows removed from travelport graph — dynamic composition via `ComposeWithAddons` is sufficient
+- `ComposeWithAddons(base, addonNames, g, graphDir)` looks up addons by name, uses `addon.After` for insertion point
+- Backward chaining removed from Interpret pipeline (kept in graph package for BuildSkeleton/MCP)
+- `buildWorkflowSelectionPrompt` replaces `buildGoalPrompt` — lists base workflows and addons with descriptions
+- `buildPlanPrompt`/`buildRetryPrompt` — removed `chainContext` parameter and "Execution Chain Context" section
+- `PostProcess` simplified: takes `*WorkflowSelection` instead of `*GoalAnalysis` + `*ChainResult`
+- `populateIntentFromGoal` split out for BuildSkeleton backward compat; `populateConstraints` shared
+- PlanTrace: `GoalCall` → `SelectionCall`, removed `GoalFallback`/`ChainResult`
+- Regression test suite gutted (all used non-workflow graphs); interpret_test.go rewritten for workflow-based pipeline
+- FormatGraph: renders After/Wire for addons instead of Steps/Includes
+- MCP `instantiate_workflow`: uses `ComposeWithAddons` instead of `FindComposedWorkflow`
+- All intent.goal and metadata.prompt removed from travelport template YAML files
+- Graph validation: removed Steps/Includes checks, added After node validation
+
+**Files changed (key):**
+- `graph/types.go` — Workflow struct slimmed, WorkflowInclude removed, After/Wire added
+- `graph/validate.go` — Steps/Includes validation → After validation
+- `travelport/graph.yaml` — pre-composed workflows removed, addon After/Wire added
+- `intent/compose.go` — ComposeWithAddons, removed FindComposedWorkflow/BuildSyntheticWorkflow
+- `intent/interpret.go` — WorkflowSelection replaces GoalAnalysis, selectWorkflow(), no backward chaining
+- `intent/prompt.go` — buildWorkflowSelectionPrompt, updated buildPlanPrompt/buildRetryPrompt
+- `intent/postprocess.go` — PostProcess takes WorkflowSelection, split populateIntent
+- `intent/trace.go` — PlanTrace updated
+- `intent/format.go` — FormatGraph After/Wire rendering
+- `mcp/tools_workflow.go` — list/instantiate updated
+- `graph/docgen.go` — Steps rendering removed
+- `cmd/aat/prompt_cmd.go` — uses WorkflowSelection
+- `travelport/plans/*.yaml` — intent.goal and metadata.prompt removed
+
+**Open questions:** None.
+
 ## 2026-02-16 — Composable Templates & AI Sweet Spot
 
 **What:** Implemented composable workflow templates, allowing addon sub-workflows (seat selection, ancillary booking, traveler modification) to be spliced into main booking workflows. Enhanced `aat prompt` to detect addons in user intent and compose dynamically. Added MCP tools for template authoring lifecycle.

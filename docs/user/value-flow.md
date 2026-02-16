@@ -226,7 +226,7 @@ llm:
   apiKey:
     source: env
     var: OPENAI_API_KEY
-  model: gpt-4
+  model: gpt-5.2
   mode: lean
 ```
 
@@ -259,7 +259,7 @@ In the run archive, LLM-selected values have `"source": "llm"` and include the f
   "constraintOK": true,
   "tried": ["2025-12-01", "2025-11-15"],
   "llmCall": {
-    "model": "gpt-4",
+    "model": "gpt-5.2",
     "durationMs": 842,
     "inputTokens": 156,
     "outputTokens": 8

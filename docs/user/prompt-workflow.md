@@ -12,7 +12,7 @@ llm:
   apiKey:
     source: env
     var: OPENAI_API_KEY
-  model: gpt-4
+  model: gpt-5.2
 ```
 
 Both OpenAI and Anthropic endpoints are supported. AAT auto-detects the provider from the endpoint URL. See [Environments](environments.md#llm-configuration) for details.
@@ -150,9 +150,8 @@ This produces a trace file at `traces/trace-YYYYMMDD-HHMMSS-XXXXXXXX/plan-trace.
 
 | Section | Contents |
 |---------|----------|
-| **Goal analysis** | System/user prompts sent to the LLM, raw response, token counts, timing, whether heuristic fallback was used |
-| **Backward chaining** | Which nodes and edges were included, decisions, timing |
-| **Skeleton** | The deterministic plan scaffold sent to the LLM, unfed inputs list |
+| **Workflow selection** | System/user prompts sent to the LLM, raw response, token counts, timing |
+| **Skeleton** | The deterministic plan scaffold (from template + addon composition), unfed inputs list |
 | **Plan generation** | Full prompts, raw LLM response, token counts, timing |
 | **Merge/post-process** | Plan snapshots after merge and after post-processing |
 | **Validation** | Any validation errors in the generated plan |
@@ -161,8 +160,8 @@ Traces are written even when the pipeline fails partway through -- partial trace
 
 ### Common Debugging Scenarios
 
-**Plan has wrong steps:**
-Check the goal analysis and backward chaining sections. The LLM may have identified the wrong goal nodes, or backward chaining may have included unexpected paths.
+**Wrong workflow selected:**
+Check the workflow selection section. The LLM may have picked the wrong base workflow or missed an addon. The selection prompt lists all available workflows with descriptions.
 
 **Values are unrealistic:**
 Add domain knowledge (`--domain`) with value pools and concepts. Check the skeleton section to see what information the LLM had when generating values.
@@ -170,11 +169,14 @@ Add domain knowledge (`--domain`) with value pools and concepts. Check the skele
 **Plan fails validation:**
 Check the validation section of the trace. Common issues: referencing nodes not in the graph, incorrect `dependsOn` references, or invalid selection sources.
 
+**Addon PLACEHOLDERs not wired:**
+If an addon step still has `PLACEHOLDER` values after composition, the input name doesn't match any output from the base workflow. Add explicit `wire:` overrides to the addon's workflow definition in graph.yaml.
+
 ## Workflow Templates
 
-If your graph defines workflows with `template:` fields, `aat prompt` automatically uses pre-built plan skeletons instead of generating everything from scratch. The LLM identifies which workflow matches your prompt, loads the template, and fills in literal values, selection strategies, and assertions.
+If your graph defines workflows with `template:` fields, `aat prompt` automatically uses pre-built plan skeletons instead of generating everything from scratch. The LLM selects the best-matching workflow, identifies any addon workflows to compose (e.g., seat selection, ancillary services), loads and composes the templates, and fills in literal values, selection strategies, and assertions.
 
-This produces more reliable plans for complex multi-step workflows. See [Workflow Templates](workflow-templates.md) for the full guide on authoring and testing templates.
+This produces more reliable plans for complex multi-step workflows. See [Workflow Templates](workflow-templates.md) for the full guide on authoring base and addon templates.
 
 ## Tips for Writing Prompts
 

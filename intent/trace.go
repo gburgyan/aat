@@ -15,27 +15,25 @@ import (
 
 // PlanTrace captures the full pipeline state of a prompt-to-plan transformation
 // for debugging and observability. It records both LLM calls (prompts/responses),
-// backward chaining decisions, skeleton construction, and merge results.
+// skeleton construction, and merge results.
 type PlanTrace struct {
-	TraceID         string         `json:"traceId"`
-	Timestamp       time.Time      `json:"timestamp"`
-	Prompt          string         `json:"prompt"`
-	GoalCall        LLMCallTrace   `json:"goalCall"`
-	GoalAnalysis    *GoalAnalysis  `json:"goalAnalysis,omitempty"`
-	GoalFallback    bool           `json:"goalFallback"`
-	ChainResult     *ChainTrace    `json:"chainResult,omitempty"`
-	Skeleton        *SkeletonTrace `json:"skeleton,omitempty"`
-	PlanCall        LLMCallTrace   `json:"planCall"`
-	LLMPlanYAML     string         `json:"llmPlanYaml,omitempty"`
-	MergedPlan      *plan.Plan     `json:"mergedPlan,omitempty"`
-	FinalPlan          *plan.Plan     `json:"finalPlan,omitempty"`
-	ValidationErr      string         `json:"validationErr,omitempty"`
-	RetryCall          *LLMCallTrace  `json:"retryCall,omitempty"`
-	RetryValidationErr string         `json:"retryValidationErr,omitempty"`
-	TotalDurationMs    int64          `json:"totalDurationMs"`
-	Error              string         `json:"error,omitempty"`
+	TraceID            string             `json:"traceId"`
+	Timestamp          time.Time          `json:"timestamp"`
+	Prompt             string             `json:"prompt"`
+	SelectionCall      LLMCallTrace       `json:"selectionCall"`
+	WorkflowSelection  *WorkflowSelection `json:"workflowSelection,omitempty"`
+	Skeleton           *SkeletonTrace     `json:"skeleton,omitempty"`
+	PlanCall           LLMCallTrace       `json:"planCall"`
+	LLMPlanYAML        string             `json:"llmPlanYaml,omitempty"`
+	MergedPlan         *plan.Plan         `json:"mergedPlan,omitempty"`
+	FinalPlan          *plan.Plan         `json:"finalPlan,omitempty"`
+	ValidationErr      string             `json:"validationErr,omitempty"`
+	RetryCall          *LLMCallTrace      `json:"retryCall,omitempty"`
+	RetryValidationErr string             `json:"retryValidationErr,omitempty"`
+	TotalDurationMs    int64              `json:"totalDurationMs"`
+	Error              string             `json:"error,omitempty"`
 
-	// Workflow template fields (populated when a workflow template is used).
+	// Workflow template fields.
 	WorkflowName     string         `json:"workflowName,omitempty"`
 	TemplatePath     string         `json:"templatePath,omitempty"`
 	Repetitions      map[string]int `json:"repetitions,omitempty"`

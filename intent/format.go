@@ -41,13 +41,15 @@ func FormatGraph(g *graph.Graph) string {
 				fmt.Fprintf(&b, ": %s", wf.Description)
 			}
 			b.WriteString("\n")
-			if len(wf.Steps) > 0 {
-				fmt.Fprintf(&b, "  Steps: %s\n", strings.Join(wf.Steps, " → "))
+			if wf.After != "" {
+				fmt.Fprintf(&b, "  After: %s\n", wf.After)
 			}
-			if len(wf.Includes) > 0 {
-				for _, inc := range wf.Includes {
-					fmt.Fprintf(&b, "  Includes: %s (after %s)\n", inc.Workflow, inc.After)
+			if len(wf.Wire) > 0 {
+				b.WriteString("  Wire:")
+				for k, v := range wf.Wire {
+					fmt.Fprintf(&b, " %s=%s", k, v)
 				}
+				b.WriteString("\n")
 			}
 		}
 		b.WriteString("\n")

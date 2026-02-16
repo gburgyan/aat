@@ -17,22 +17,14 @@ func workflowTestGraph() *graph.Graph {
 			{
 				Name:     "Full-Payload Booking",
 				Template: "plans/booking.yaml",
-				Steps:    []string{"search", "book", "commit"},
 			},
 			{
 				Name:        "Seat Selection",
 				Kind:        "addon",
 				Description: "Select a seat",
 				Template:    "plans/seat.yaml",
-				Steps:       []string{"searchSeat", "addSeat"},
-			},
-			{
-				Name:     "Booking with Seat",
-				Template: "plans/booking.yaml",
-				Includes: []graph.WorkflowInclude{
-					{Workflow: "Seat Selection", After: "book", Wire: map[string]string{"workbenchId": "book.workbenchId"}},
-				},
-				Steps: []string{"search", "book", "searchSeat", "addSeat", "commit"},
+				After:       "book",
+				Wire:        map[string]string{"workbenchId": "book.workbenchId"},
 			},
 		},
 		Nodes: map[string]*graph.Node{
@@ -78,9 +70,7 @@ func TestHandleListWorkflows_WithWorkflows(t *testing.T) {
 	assert.Contains(t, text, "Full-Payload Booking")
 	assert.Contains(t, text, "Seat Selection")
 	assert.Contains(t, text, "[addon]")
-	assert.Contains(t, text, "Booking with Seat")
-	assert.Contains(t, text, "Includes:")
-	assert.Contains(t, text, "Seat Selection")
+	assert.Contains(t, text, "After: `book`")
 }
 
 // --- scaffold_template ---
@@ -118,7 +108,7 @@ func TestHandleInstantiateWorkflow_UnknownWorkflow(t *testing.T) {
 func TestHandleInstantiateWorkflow_NoTemplate(t *testing.T) {
 	g := &graph.Graph{
 		Workflows: []graph.Workflow{
-			{Name: "NoTemplate", Steps: []string{"a"}},
+			{Name: "NoTemplate"},
 		},
 		Nodes: map[string]*graph.Node{
 			"a": {Name: "a", Adapter: "a"},

@@ -276,37 +276,6 @@ func findSubstring(s, substr string) bool {
 	return false
 }
 
-func TestValidateWarnings_ValidWorkflowSteps(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Workflows: []Workflow{
-			{Name: "test", Steps: []string{"n1", "n2"}},
-		},
-		Nodes: map[string]*Node{
-			"n1": {Name: "n1", Adapter: "a"},
-			"n2": {Name: "n2", Adapter: "a"},
-		},
-	}
-	warnings := ValidateWarnings(g)
-	assert.Empty(t, warnings)
-}
-
-func TestValidateWarnings_UnknownWorkflowStep(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Workflows: []Workflow{
-			{Name: "test", Steps: []string{"n1", "missing"}},
-		},
-		Nodes: map[string]*Node{
-			"n1": {Name: "n1", Adapter: "a"},
-		},
-	}
-	warnings := ValidateWarnings(g)
-	require.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "missing")
-	assert.Contains(t, warnings[0], "unknown node")
-}
-
 func TestValidateWarnings_NoWorkflows(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
@@ -316,16 +285,49 @@ func TestValidateWarnings_NoWorkflows(t *testing.T) {
 	assert.Empty(t, warnings)
 }
 
-func TestValidateWarnings_EmptySteps(t *testing.T) {
+func TestValidateWarnings_AddonWithValidAfter(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Workflows: []Workflow{
-			{Name: "test"},
+			{Name: "Addon", Kind: "addon", After: "n1", Template: "plans/addon.yaml"},
 		},
-		Nodes: map[string]*Node{},
+		Nodes: map[string]*Node{
+			"n1": {Name: "n1", Adapter: "a"},
+		},
 	}
 	warnings := ValidateWarnings(g)
 	assert.Empty(t, warnings)
+}
+
+func TestValidateWarnings_AddonAfterUnknownNode(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{Name: "Addon", Kind: "addon", After: "missing", Template: "plans/addon.yaml"},
+		},
+		Nodes: map[string]*Node{
+			"n1": {Name: "n1", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	require.NotEmpty(t, warnings)
+	assert.Contains(t, warnings[0], "unknown node")
+	assert.Contains(t, warnings[0], "missing")
+}
+
+func TestValidateWarnings_AfterOnNonAddon(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{Name: "Main", After: "n1", Template: "plans/main.yaml"},
+		},
+		Nodes: map[string]*Node{
+			"n1": {Name: "n1", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	require.NotEmpty(t, warnings)
+	assert.Contains(t, warnings[0], "not \"addon\"")
 }
 
 // --- Constraint validation ---
@@ -641,105 +643,7 @@ func TestValidateWarnings_MultipleSatisfiersWithPreferred(t *testing.T) {
 	}
 }
 
-// --- Workflow Include Validation ---
-
-func TestValidateWarnings_WorkflowIncludeValid(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Workflows: []Workflow{
-			{Name: "Main", Template: "plans/main.yaml", Steps: []string{"a", "b"}},
-			{Name: "Addon", Kind: "addon", Template: "plans/addon.yaml", Steps: []string{"c"}},
-			{
-				Name:     "Composed",
-				Template: "plans/main.yaml",
-				Includes: []WorkflowInclude{
-					{Workflow: "Addon", After: "a"},
-				},
-				Steps: []string{"a", "c", "b"},
-			},
-		},
-		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a"},
-			"b": {Name: "b", Adapter: "b"},
-			"c": {Name: "c", Adapter: "c"},
-		},
-	}
-	warnings := ValidateWarnings(g)
-	assert.Empty(t, warnings)
-}
-
-func TestValidateWarnings_WorkflowIncludeUnknownWorkflow(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Workflows: []Workflow{
-			{
-				Name:     "Main",
-				Template: "plans/main.yaml",
-				Includes: []WorkflowInclude{
-					{Workflow: "NonExistent", After: "a"},
-				},
-				Steps: []string{"a"},
-			},
-		},
-		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a"},
-		},
-	}
-	warnings := ValidateWarnings(g)
-	require.NotEmpty(t, warnings)
-	assert.Contains(t, warnings[0], "unknown workflow")
-	assert.Contains(t, warnings[0], "NonExistent")
-}
-
-func TestValidateWarnings_WorkflowIncludeNoTemplate(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Workflows: []Workflow{
-			{Name: "Addon", Kind: "addon", Steps: []string{"c"}}, // no template
-			{
-				Name:     "Main",
-				Template: "plans/main.yaml",
-				Includes: []WorkflowInclude{
-					{Workflow: "Addon", After: "a"},
-				},
-				Steps: []string{"a"},
-			},
-		},
-		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a"},
-			"c": {Name: "c", Adapter: "c"},
-		},
-	}
-	warnings := ValidateWarnings(g)
-	require.NotEmpty(t, warnings)
-	assert.Contains(t, warnings[0], "no template")
-}
-
-func TestValidateWarnings_WorkflowIncludeAfterNotInSteps(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Workflows: []Workflow{
-			{Name: "Addon", Kind: "addon", Template: "plans/addon.yaml", Steps: []string{"c"}},
-			{
-				Name:     "Main",
-				Template: "plans/main.yaml",
-				Includes: []WorkflowInclude{
-					{Workflow: "Addon", After: "missing_step"},
-				},
-				Steps: []string{"a", "b"},
-			},
-		},
-		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a"},
-			"b": {Name: "b", Adapter: "b"},
-			"c": {Name: "c", Adapter: "c"},
-		},
-	}
-	warnings := ValidateWarnings(g)
-	require.NotEmpty(t, warnings)
-	assert.Contains(t, warnings[0], "missing_step")
-	assert.Contains(t, warnings[0], "not found")
-}
+// --- Workflow After/Wire Validation ---
 
 func TestValidateWarnings_WorkflowUnknownKind(t *testing.T) {
 	g := &Graph{
@@ -762,21 +666,17 @@ func TestWorkflow_IsAddon(t *testing.T) {
 	assert.False(t, Workflow{Kind: "other"}.IsAddon())
 }
 
-func TestParse_WorkflowWithIncludes(t *testing.T) {
+func TestParse_WorkflowWithAfterWire(t *testing.T) {
 	g, err := ParseFile("testdata/valid/with_workflow_includes.yaml")
 	require.NoError(t, err)
 
-	// Main workflows exist
-	require.Len(t, g.Workflows, 3)
+	// Workflows exist
+	require.Len(t, g.Workflows, 2)
 
-	// Addon workflow
-	assert.Equal(t, "addon", g.Workflows[1].Kind)
-	assert.True(t, g.Workflows[1].IsAddon())
-
-	// Composed workflow has includes
-	composed := g.Workflows[2]
-	require.Len(t, composed.Includes, 1)
-	assert.Equal(t, "Seat Selection", composed.Includes[0].Workflow)
-	assert.Equal(t, "book", composed.Includes[0].After)
-	assert.Equal(t, "book.workbenchId", composed.Includes[0].Wire["workbenchId"])
+	// Addon workflow has After and Wire
+	addon := g.Workflows[1]
+	assert.Equal(t, "addon", addon.Kind)
+	assert.True(t, addon.IsAddon())
+	assert.Equal(t, "book", addon.After)
+	assert.Equal(t, "book.workbenchId", addon.Wire["workbenchId"])
 }

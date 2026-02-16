@@ -3,21 +3,13 @@ version: "1.0.0"
 workflows:
   - name: Main Booking
     template: plans/booking.yaml
-    steps: [search, book, commit]
 
   - name: Seat Selection
     kind: addon
     template: plans/seat-selection.yaml
-    steps: [searchSeatMap, addSeat]
-
-  - name: Booking with Seat
-    template: plans/booking.yaml
-    includes:
-      - workflow: Seat Selection
-        after: book
-        wire:
-          workbenchId: book.workbenchId
-    steps: [search, book, searchSeatMap, addSeat, commit]
+    after: book
+    wire:
+      workbenchId: book.workbenchId
 
 nodes:
   search:

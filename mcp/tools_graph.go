@@ -147,8 +147,8 @@ func (s *Server) handleFindWorkflows(_ context.Context, req mcp.CallToolRequest)
 				fmt.Fprintf(&b, ": %s", wf.Description)
 			}
 			b.WriteString("\n")
-			if len(wf.Steps) > 0 {
-				fmt.Fprintf(&b, "  Steps: %s\n", strings.Join(wf.Steps, " → "))
+			if wf.After != "" {
+				fmt.Fprintf(&b, "  After: %s\n", wf.After)
 			}
 		}
 		b.WriteString("\n")

@@ -44,7 +44,7 @@ llm:                         # optional — LLM provider config
   apiKey:
     source: env
     var: LLM_API_KEY
-  model: gpt-4
+  model: gpt-5.2
   mode: <strict|lean|adaptive>
 
 settings:                    # optional — all have defaults
@@ -173,7 +173,7 @@ llm:
   apiKey:
     source: env
     var: OPENAI_API_KEY
-  model: gpt-4
+  model: gpt-5.2
   mode: lean
 ```
 

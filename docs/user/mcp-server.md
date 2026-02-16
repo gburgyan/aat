@@ -82,6 +82,14 @@ The MCP server exposes tools organized by category. Each tool returns Markdown-f
 | `get_domain_concept` | `concept` (required) | Detail for a concept: description, applies_to, relationships |
 | `get_value_pool` | `pool` (required) | Show available values for a domain type |
 
+### Workflows
+
+| Tool | Parameters | Description |
+|------|-----------|-------------|
+| `list_workflows` | — | List all workflows with descriptions, template paths, and addon details (after node, wire overrides) |
+| `instantiate_workflow` | `workflow` (required), `addons` (optional) | Compose a base workflow with optional addons, returning the merged plan YAML |
+| `scaffold_template` | `goal` (required) | Generate a new template skeleton by backward-chaining from a goal node |
+
 ### OAS (OpenAPI Spec)
 
 These tools require nodes to have `oas.operationId` references and the spec to be loadable.

@@ -70,22 +70,15 @@ func (s *Server) handleListWorkflows(_ context.Context, _ mcp.CallToolRequest) (
 		if wf.Template != "" {
 			fmt.Fprintf(&b, "- Template: `%s`\n", wf.Template)
 		}
-		if len(wf.Steps) > 0 {
-			fmt.Fprintf(&b, "- Steps: %s\n", strings.Join(wf.Steps, " → "))
+		if wf.After != "" {
+			fmt.Fprintf(&b, "- After: `%s`\n", wf.After)
 		}
-		if len(wf.Includes) > 0 {
-			b.WriteString("- Includes:\n")
-			for _, inc := range wf.Includes {
-				fmt.Fprintf(&b, "  - **%s** after `%s`", inc.Workflow, inc.After)
-				if len(inc.Wire) > 0 {
-					var wires []string
-					for k, v := range inc.Wire {
-						wires = append(wires, k+"="+v)
-					}
-					fmt.Fprintf(&b, " (wire: %s)", strings.Join(wires, ", "))
-				}
-				b.WriteString("\n")
+		if len(wf.Wire) > 0 {
+			b.WriteString("- Wire:")
+			for k, v := range wf.Wire {
+				fmt.Fprintf(&b, " %s=%s", k, v)
 			}
+			b.WriteString("\n")
 		}
 
 		// Show PLACEHOLDER requirements if template exists and is an addon.
@@ -148,58 +141,28 @@ func (s *Server) handleInstantiateWorkflow(_ context.Context, req mcp.CallToolRe
 
 	g := s.ctx.Graph
 
+	wf, found := findWorkflowByName(g, workflowName)
+	if !found {
+		return mcp.NewToolResultError(fmt.Sprintf("unknown workflow %q", workflowName)), nil
+	}
+	if wf.Template == "" {
+		return mcp.NewToolResultError(fmt.Sprintf("workflow %q has no template", workflowName)), nil
+	}
+
 	var tpl *plan.Plan
 
 	if len(addons) > 0 {
-		// Try pre-composed workflow.
-		composedWF, found := intent.FindComposedWorkflow(g, workflowName, addons)
-		if found {
-			composed, composeErr := intent.ComposeWorkflowTemplate(composedWF, s.ctx.GraphDir, g)
-			if composeErr == nil {
-				tpl = composed
-			}
+		composed, composeErr := intent.ComposeWithAddons(wf, addons, g, s.ctx.GraphDir)
+		if composeErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
 		}
-
-		// Dynamic composition fallback.
-		if tpl == nil {
-			baseWF, baseFound := findWorkflowByName(g, workflowName)
-			if !baseFound {
-				return mcp.NewToolResultError(fmt.Sprintf("unknown workflow %q", workflowName)), nil
-			}
-			if baseWF.Template == "" {
-				return mcp.NewToolResultError(fmt.Sprintf("workflow %q has no template", workflowName)), nil
-			}
-			syntheticWF := intent.BuildSyntheticWorkflow(g, baseWF, addons)
-			composed, composeErr := intent.ComposeWorkflowTemplate(syntheticWF, s.ctx.GraphDir, g)
-			if composeErr != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
-			}
-			tpl = composed
-		}
+		tpl = composed
 	} else {
-		// Plain template load.
-		wf, found := findWorkflowByName(g, workflowName)
-		if !found {
-			return mcp.NewToolResultError(fmt.Sprintf("unknown workflow %q", workflowName)), nil
+		loaded, loadErr := intent.LoadWorkflowTemplate(wf.Template, s.ctx.GraphDir, g)
+		if loadErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("loading template: %v", loadErr)), nil
 		}
-		if wf.Template == "" {
-			return mcp.NewToolResultError(fmt.Sprintf("workflow %q has no template", workflowName)), nil
-		}
-
-		// If the workflow has includes, compose.
-		if len(wf.Includes) > 0 {
-			composed, composeErr := intent.ComposeWorkflowTemplate(wf, s.ctx.GraphDir, g)
-			if composeErr != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
-			}
-			tpl = composed
-		} else {
-			loaded, loadErr := intent.LoadWorkflowTemplate(wf.Template, s.ctx.GraphDir, g)
-			if loadErr != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("loading template: %v", loadErr)), nil
-			}
-			tpl = loaded
-		}
+		tpl = loaded
 	}
 
 	yamlBytes, err := plan.Marshal(tpl)

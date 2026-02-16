@@ -1,8 +1,6 @@
 package intent
 
 import (
-	"os"
-	"path/filepath"
 	"sort"
 	"testing"
 
@@ -18,31 +16,6 @@ func loadGraph(t *testing.T, relPath string) *graph.Graph {
 	g, err := graph.ParseFile(relPath)
 	require.NoError(t, err, "failed to load graph %s", relPath)
 	return g
-}
-
-// regressionFixtures holds the canned LLM response pair for a regression scenario.
-type regressionFixtures struct {
-	GoalJSON string
-	PlanYAML string
-}
-
-// loadRegressionFixtures loads goal.json and plan.yaml from a testdata/regression/ subdirectory.
-func loadRegressionFixtures(t *testing.T, dir string) regressionFixtures {
-	t.Helper()
-	base := filepath.Join("testdata", "regression", dir)
-
-	goalPath := filepath.Join(base, "goal.json")
-	goalData, err := os.ReadFile(goalPath)
-	require.NoError(t, err, "failed to read %s", goalPath)
-
-	planPath := filepath.Join(base, "plan.yaml")
-	planData, err := os.ReadFile(planPath)
-	require.NoError(t, err, "failed to read %s", planPath)
-
-	return regressionFixtures{
-		GoalJSON: string(goalData),
-		PlanYAML: string(planData),
-	}
 }
 
 // stepNodes extracts the set of node names from plan steps.
@@ -129,30 +102,9 @@ func assertHasSelection(t *testing.T, p *plan.Plan, node string) {
 	t.Errorf("step %s not found in plan", node)
 }
 
-// assertConstraints checks that the GoalAnalysis constraint classification matches expectations.
-func assertConstraints(t *testing.T, ga *GoalAnalysis, hard, soft int, free int) {
-	t.Helper()
-	assert.Len(t, ga.Constraints.Hard, hard, "hard constraint count mismatch")
-	assert.Len(t, ga.Constraints.Soft, soft, "soft constraint count mismatch")
-	assert.Len(t, ga.Constraints.Free, free, "free constraint count mismatch")
-}
-
 // assertPlanValid verifies plan.Validate() passes.
 func assertPlanValid(t *testing.T, p *plan.Plan, g *graph.Graph) {
 	t.Helper()
 	err := plan.Validate(p, g)
 	assert.NoError(t, err, "plan validation failed")
-}
-
-// assertStepHasValue checks that a step has a value for the given input name.
-func assertStepHasValue(t *testing.T, p *plan.Plan, node, inputName string) {
-	t.Helper()
-	for _, s := range p.Execution.Steps {
-		if s.Node == node {
-			_, ok := s.Values[inputName]
-			assert.True(t, ok, "step %s should have value for %s", node, inputName)
-			return
-		}
-	}
-	t.Errorf("step %s not found in plan", node)
 }

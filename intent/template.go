@@ -118,18 +118,7 @@ func UnfedInputsFromTemplate(p *plan.Plan, g *graph.Graph) []string {
 			continue
 		}
 		for _, inp := range node.Inputs {
-			// Check if the template provides wiring for this input.
-			if sv, exists := step.Values[inp.Name]; exists {
-				if sv.From != "" || sv.FromSelection != "" || sv.Select != nil || sv.Default != nil {
-					continue // wired
-				}
-			}
-			// Check named selections.
-			if isFromNamedSelection(step, inp.Name) {
-				continue
-			}
-			// Skip optional inputs and graph-defaulted inputs.
-			if inp.Optional || inp.Default != nil {
+			if isInputFed(step, inp) {
 				continue
 			}
 			unfed = append(unfed, fmt.Sprintf("%s.%s (%s)", step.StepID(), inp.Name, inp.Type))
@@ -138,10 +127,55 @@ func UnfedInputsFromTemplate(p *plan.Plan, g *graph.Graph) []string {
 	return unfed
 }
 
+// unfedInputSet returns the set of "stepID.inputName" keys for inputs that the
+// template does not wire and that need literal values from the LLM. This is
+// used by MergeLLMValuesWithIDs to reject hallucinated literals for inputs
+// that will be resolved at runtime (e.g., auto-wired graph edges).
+func unfedInputSet(p *plan.Plan, g *graph.Graph) map[string]bool {
+	set := map[string]bool{}
+	for _, step := range p.Execution.Steps {
+		node := g.Nodes[step.Node]
+		if node == nil {
+			continue
+		}
+		for _, inp := range node.Inputs {
+			if isInputFed(step, inp) {
+				continue
+			}
+			set[step.StepID()+"."+inp.Name] = true
+		}
+	}
+	return set
+}
+
+// isInputFed reports whether a step already has wiring for the given input
+// (from ref, fromSelection, select, literal default, named selection, or
+// the input is optional / has a graph default).
+func isInputFed(step plan.Step, inp graph.Input) bool {
+	if sv, exists := step.Values[inp.Name]; exists {
+		if sv.From != "" || sv.FromSelection != "" || sv.Select != nil || sv.Default != nil {
+			return true
+		}
+	}
+	if isFromNamedSelection(step, inp.Name) {
+		return true
+	}
+	if inp.Optional || inp.Default != nil {
+		return true
+	}
+	return false
+}
+
 // MergeLLMValuesWithIDs is like MergeLLMValues but matches steps by StepID()
 // instead of Node. This is required for multiplicity-expanded plans where
 // multiple steps share the same node name.
-func MergeLLMValuesWithIDs(skeleton, llmPlan *plan.Plan) {
+//
+// The unfed parameter is a set of "stepID.inputName" keys for inputs that
+// genuinely need literal values from the LLM. When a value is not in the
+// skeleton and the input is not in the unfed set, the LLM's literal is
+// rejected (it would shadow auto-wired graph edges at runtime).
+// If unfed is nil, all LLM-provided new values are accepted (legacy behavior).
+func MergeLLMValuesWithIDs(skeleton, llmPlan *plan.Plan, unfed map[string]bool) {
 	// Build index of LLM steps by step ID.
 	llmSteps := map[string]*plan.Step{}
 	for i := range llmPlan.Execution.Steps {
@@ -209,7 +243,11 @@ func MergeLLMValuesWithIDs(skeleton, llmPlan *plan.Plan) {
 			skelVal, exists := skelStep.Values[inputName]
 
 			if !exists {
-				if llmVal.Default != nil {
+				// Only accept new literals for inputs that genuinely need values.
+				// Reject hallucinated literals for inputs that will be auto-wired
+				// from graph edges at runtime.
+				key := skelStep.StepID() + "." + inputName
+				if llmVal.Default != nil && (unfed == nil || unfed[key]) {
 					skelStep.Values[inputName] = plan.StepValue{
 						Default: llmVal.Default,
 					}

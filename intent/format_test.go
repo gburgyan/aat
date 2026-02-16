@@ -188,7 +188,7 @@ func TestFormatGraph_WithWorkflows(t *testing.T) {
 			{
 				Name:        "Booking Flow",
 				Description: "Standard booking",
-				Steps:       []string{"search", "price", "commit"},
+				Template:    "plans/booking.yaml",
 			},
 			{
 				Name: "Simple Flow",
@@ -198,8 +198,7 @@ func TestFormatGraph_WithWorkflows(t *testing.T) {
 	}
 	result := FormatGraph(g)
 	assert.Contains(t, result, "## Workflows")
-	assert.Contains(t, result, "**Booking Flow**: Standard booking")
-	assert.Contains(t, result, "search → price → commit")
+	assert.Contains(t, result, "**Booking Flow** [template]: Standard booking")
 	assert.Contains(t, result, "**Simple Flow**")
 }
 
@@ -312,21 +311,12 @@ func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
 			{
 				Name:     "Main Booking",
 				Template: "plans/main.yaml",
-				Steps:    []string{"search", "book", "commit"},
 			},
 			{
 				Name:     "Seat Selection",
 				Kind:     "addon",
 				Template: "plans/seat.yaml",
-				Steps:    []string{"searchSeat", "addSeat"},
-			},
-			{
-				Name:     "Booking with Seat",
-				Template: "plans/main.yaml",
-				Includes: []graph.WorkflowInclude{
-					{Workflow: "Seat Selection", After: "book"},
-				},
-				Steps: []string{"search", "book", "searchSeat", "addSeat", "commit"},
+				After:    "book",
 			},
 		},
 		Nodes: map[string]*graph.Node{},
@@ -336,8 +326,8 @@ func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
 	// Addon marker should appear
 	assert.Contains(t, result, "**Seat Selection** [addon] [template]")
 
-	// Includes should appear
-	assert.Contains(t, result, "Includes: Seat Selection (after book)")
+	// After should appear
+	assert.Contains(t, result, "After: book")
 
 	// Regular workflow should not have [addon]
 	assert.Contains(t, result, "**Main Booking** [template]")

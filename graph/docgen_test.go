@@ -320,7 +320,12 @@ func TestGenerateDocs_WithWorkflows(t *testing.T) {
 			{
 				Name:        "User Flow",
 				Description: "Create and fetch users",
-				Steps:       []string{"createUser", "getUser"},
+			},
+			{
+				Name:        "Addon Flow",
+				Kind:        "addon",
+				After:       "createUser",
+				Description: "Addon that splices after createUser",
 			},
 		},
 		Nodes: map[string]*Node{
@@ -332,7 +337,7 @@ func TestGenerateDocs_WithWorkflows(t *testing.T) {
 	assert.Contains(t, result, "## Workflows")
 	assert.Contains(t, result, "### User Flow")
 	assert.Contains(t, result, "Create and fetch users")
-	assert.Contains(t, result, "createUser → getUser")
+	assert.Contains(t, result, "splices after `createUser`")
 }
 
 func TestGenerateDocs_WithNotes(t *testing.T) {

@@ -8,23 +8,21 @@ import (
 	"github.com/gburgyan/aat/graph"
 )
 
-// buildGoalPrompt constructs the messages for the first LLM call (goal analysis).
-// It provides graph structure and asks the LLM to identify the goal node and
-// classify constraints. When the graph has workflows with templates, the prompt
-// instructs the LLM to select a workflow if the intent clearly matches.
-func buildGoalPrompt(graphContext, userPrompt string, g *graph.Graph, now time.Time) (system, user string) {
+// buildWorkflowSelectionPrompt constructs the messages for the first LLM call
+// (workflow selection). It lists available workflows and addons, and asks the
+// LLM to select one and classify constraints.
+func buildWorkflowSelectionPrompt(graphContext, userPrompt string, g *graph.Graph, now time.Time) (system, user string) {
 	dateStr := now.Format("2006-01-02")
-	system = `You are an API testing assistant. Given an API graph and a user's testing intent, you must identify:
-1. The goal node (the final API operation that achieves the user's intent)
-2. Any conditions that should be active
-3. Classification of constraints from the user's prompt
+
+	var sb strings.Builder
+	sb.WriteString(`You are an API testing assistant. Given an API graph and a user's testing intent, select the appropriate workflow and classify constraints.
 
 Respond with a JSON object (no markdown fencing, just raw JSON):
 {
-  "goal": "nodeName",
+  "workflow": "Exact Workflow Name",
   "description": "brief description of what will be tested",
-  "conditionContext": {"key": "value"},
-  "pathPreferences": {"nodeName": "rationale for preferring a specific upstream path"},
+  "addons": ["Addon Name 1"],
+  "repetitions": {"nodeName": N},
   "constraints": {
     "hard": [{"name": "constraint name", "description": "why this must be met", "appliesTo": ["node.input"]}],
     "soft": [{"name": "preference name", "description": "why this is preferred", "appliesTo": ["node.input"]}],
@@ -33,49 +31,56 @@ Respond with a JSON object (no markdown fencing, just raw JSON):
 }
 
 Rules:
-- The goal should be the terminal node that produces the user's desired outcome
+- Select the workflow whose description best matches the user's intent
+- Use the EXACT workflow name from the list below
 - Hard constraints are explicit requirements that MUST be met (e.g., specific origin/destination)
 - Soft constraints are preferences that SHOULD be met but can be relaxed (e.g., "cheapest", "nonstop")
 - Free parameters are things the user didn't specify that can be filled with reasonable values
-- conditionContext provides values for evaluating graph conditions (e.g., {"isRoundTrip": true})
-- pathPreferences indicate when the user's intent suggests a specific path through the graph
-- Today's date is ` + dateStr + `. When generating dates, use dates at least 7 days in the future.`
+- The "addons" array lists addon workflows to compose into the main workflow. Include addons when the user mentions capabilities matching an addon (e.g., seat selection, ancillary services). Omit "addons" if no addons are needed.
+- The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addTraveler": 2} for two travelers). Omit if no nodes need repeating.
+- Today's date is `)
+	sb.WriteString(dateStr)
+	sb.WriteString(`. When generating dates, use dates at least 7 days in the future.`)
 
-	// When workflows with templates exist, add workflow selection instructions.
-	if hasWorkflowTemplates(g) {
-		system += `
-
-Additionally, if the user's intent matches a named workflow marked with [template], include these fields in the JSON:
-  "workflow": "Workflow Name"
-  "repetitions": {"nodeName": N}
-  "addons": ["Addon Name 1", "Addon Name 2"]
-The "workflow" field should be the exact name of the matching workflow. The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addTraveler": 2} for two travelers). Omit "repetitions" if no nodes need repeating.
-The "addons" array lists [addon] workflows that should be composed into the main workflow. Include addons when the user mentions capabilities matching an addon workflow (e.g., seat selection, ancillary services, traveler modification). Omit "addons" if no addons are needed.
-Select a workflow when the intent clearly aligns with one. When in doubt, omit the "workflow" field.`
-	}
-
-	user = fmt.Sprintf("## API Graph\n\n%s\n## User Intent\n\n%s", graphContext, userPrompt)
-	return system, user
-}
-
-// hasWorkflowTemplates returns true if any workflow in the graph has a template path.
-func hasWorkflowTemplates(g *graph.Graph) bool {
-	if g == nil {
-		return false
-	}
+	// List available base workflows.
+	sb.WriteString("\n\nAvailable Workflows:\n")
 	for _, wf := range g.Workflows {
-		if wf.Template != "" {
-			return true
+		if wf.Template == "" || wf.IsAddon() {
+			continue
+		}
+		desc := wf.Description
+		if desc == "" {
+			desc = "(no description)"
+		}
+		fmt.Fprintf(&sb, "- **%s**: %s\n", wf.Name, desc)
+	}
+
+	// List addon workflows.
+	hasAddons := false
+	for _, wf := range g.Workflows {
+		if wf.IsAddon() && wf.Template != "" {
+			if !hasAddons {
+				sb.WriteString("\nAvailable Addons:\n")
+				hasAddons = true
+			}
+			desc := wf.Description
+			if desc == "" {
+				desc = "(no description)"
+			}
+			fmt.Fprintf(&sb, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After, desc)
 		}
 	}
-	return false
+
+	system = sb.String()
+	user = fmt.Sprintf("## API Graph\n\n%s\n## User Intent\n\n%s", graphContext, userPrompt)
+	return system, user
 }
 
 // buildPlanPrompt constructs the messages for the second LLM call (plan generation).
 // It provides the pre-built skeleton YAML, lists which inputs need values, and asks
 // the LLM to fill in literal values, optionally refine selection strategies, and
 // add assertions.
-func buildPlanPrompt(skeletonYAML string, unfedInputs []string, chainContext, domainContext, goalAnalysisJSON, userPrompt string, now time.Time) (system, user string) {
+func buildPlanPrompt(skeletonYAML string, unfedInputs []string, domainContext, selectionJSON, userPrompt string, now time.Time) (system, user string) {
 	dateStr := now.Format("2006-01-02")
 
 	system = `You are an API testing plan generator. A pre-built plan skeleton with all data flow already wired is provided. Your job is to fill in literal values for inputs that need them, optionally refine selection strategies, and add assertions.
@@ -116,18 +121,14 @@ Rules:
 		ub.WriteString("\n")
 	}
 
-	ub.WriteString("## Execution Chain Context\n\n")
-	ub.WriteString(chainContext)
-	ub.WriteString("\n")
-
 	if domainContext != "" {
 		ub.WriteString("## Domain Knowledge\n\n")
 		ub.WriteString(domainContext)
 		ub.WriteString("\n")
 	}
 
-	ub.WriteString("## Goal Analysis\n\n")
-	ub.WriteString(goalAnalysisJSON)
+	ub.WriteString("## Workflow Selection\n\n")
+	ub.WriteString(selectionJSON)
 	ub.WriteString("\n\n")
 
 	ub.WriteString("## User Intent\n\n")
@@ -141,8 +142,8 @@ Rules:
 // buildRetryPrompt constructs prompts for retrying plan generation after validation
 // failure. It extends buildPlanPrompt with information about the validation errors
 // and hints about correct elementField names.
-func buildRetryPrompt(skeletonYAML string, unfedInputs []string, chainContext, domainContext, goalAnalysisJSON, userPrompt string, now time.Time, validationErrors []string, hints []string) (system, user string) {
-	system, user = buildPlanPrompt(skeletonYAML, unfedInputs, chainContext, domainContext, goalAnalysisJSON, userPrompt, now)
+func buildRetryPrompt(skeletonYAML string, unfedInputs []string, domainContext, selectionJSON, userPrompt string, now time.Time, validationErrors []string, hints []string) (system, user string) {
+	system, user = buildPlanPrompt(skeletonYAML, unfedInputs, domainContext, selectionJSON, userPrompt, now)
 
 	// Append validation error context to the system prompt.
 	var sb strings.Builder

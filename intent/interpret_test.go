@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/llm"
@@ -50,94 +49,8 @@ func loadFixture(t *testing.T, path string) string {
 	return string(data)
 }
 
-func TestInterpret_BookingFlow(t *testing.T) {
-	g := loadTravelportGraph(t)
-	goalJSON := loadFixture(t, "testdata/responses/goal_analysis.json")
-	planYAML := loadFixture(t, "testdata/responses/booking_plan.yaml")
-
-	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
-	}
-
-	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight from DEN to SFO",
-		Graph:  g,
-		Client: client,
-	})
-
-	require.NoError(t, err)
-	require.NotNil(t, result.Plan)
-	require.NotNil(t, result.GoalAnalysis)
-	require.NotNil(t, result.ChainResult)
-
-	// Check goal was identified
-	assert.Equal(t, "commitBooking", result.GoalAnalysis.Goal)
-
-	// Check plan has correct nodes
-	nodeNames := make([]string, len(result.Plan.Execution.Steps))
-	for i, s := range result.Plan.Execution.Steps {
-		nodeNames[i] = s.Node
-	}
-	assert.Contains(t, nodeNames, "searchFlights")
-	assert.Contains(t, nodeNames, "createWorkbench")
-	assert.Contains(t, nodeNames, "addOffer")
-	assert.Contains(t, nodeNames, "addTraveler")
-	assert.Contains(t, nodeNames, "commitBooking")
-
-	// Check cleanup
-	require.NotEmpty(t, result.Plan.Execution.Cleanup)
-	assert.Equal(t, "ignoreWorkbench", result.Plan.Execution.Cleanup[0].Node)
-
-	// Check metadata was set
-	assert.Equal(t, "book a flight from DEN to SFO", result.Plan.Metadata.Prompt)
-	assert.Equal(t, "1.0.0", result.Plan.Metadata.GraphVersion)
-
-	// Verify two LLM calls were made
-	assert.Len(t, client.calls, 2)
-
-	// First call should contain graph context
-	assert.Contains(t, client.calls[0].Messages[1].Content, "searchFlights")
-	assert.Contains(t, client.calls[0].Messages[1].Content, "book a flight from DEN to SFO")
-
-	// Second call should contain the skeleton and chain context
-	assert.Contains(t, client.calls[1].Messages[1].Content, "Plan Skeleton")
-	assert.Contains(t, client.calls[1].Messages[1].Content, "Execution Chain")
-}
-
-func TestInterpret_SearchOnly(t *testing.T) {
-	g := loadTravelportGraph(t)
-	searchGoalJSON := `{
-		"goal": "searchFlights",
-		"description": "Search for flights from DEN to LAX",
-		"conditionContext": {},
-		"pathPreferences": {},
-		"constraints": {
-			"hard": [{"name": "origin", "description": "Must be DEN", "appliesTo": ["searchFlights.origin"]}],
-			"soft": [],
-			"free": ["departureDate"]
-		}
-	}`
-	planYAML := loadFixture(t, "testdata/responses/search_only.yaml")
-
-	client := &stubClient{
-		responses: []string{searchGoalJSON, planYAML},
-	}
-
-	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "search for flights from DEN to LAX",
-		Graph:  g,
-		Client: client,
-	})
-
-	require.NoError(t, err)
-	assert.Equal(t, "searchFlights", result.GoalAnalysis.Goal)
-	// Only one step for a search-only plan
-	assert.Len(t, result.Plan.Execution.Steps, 1)
-	assert.Equal(t, "searchFlights", result.Plan.Execution.Steps[0].Node)
-}
-
 func TestInterpret_EmptyPrompt(t *testing.T) {
-	g := loadTravelportGraph(t)
+	g, _ := buildTemplateTestGraph(t)
 	client := &stubClient{}
 
 	_, err := Interpret(context.Background(), InterpretRequest{
@@ -164,7 +77,7 @@ func TestInterpret_NilGraph(t *testing.T) {
 }
 
 func TestInterpret_NilClient(t *testing.T) {
-	g := loadTravelportGraph(t)
+	g, _ := buildTemplateTestGraph(t)
 
 	_, err := Interpret(context.Background(), InterpretRequest{
 		Prompt: "test",
@@ -177,96 +90,266 @@ func TestInterpret_NilClient(t *testing.T) {
 }
 
 func TestInterpret_LLMReturnsGarbage(t *testing.T) {
-	g := loadTravelportGraph(t)
-	malformed := loadFixture(t, "testdata/responses/malformed.txt")
+	g, _ := buildTemplateTestGraph(t)
 
 	client := &stubClient{
 		responses: []string{
-			// First call: garbage → heuristic fallback kicks in
+			// First call: garbage that cannot be parsed as JSON
 			"not valid json at all {{{",
-			// Second call: also garbage
-			malformed,
 		},
 	}
 
 	_, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight",
+		Prompt: "book an item",
 		Graph:  g,
 		Client: client,
 	})
 
 	require.Error(t, err)
-	// Should fail at YAML extraction or parsing
-	assert.True(t,
-		assert.ObjectsAreEqual(true, contains(err.Error(), "extracting YAML")) ||
-			assert.ObjectsAreEqual(true, contains(err.Error(), "parsing generated plan")),
-		"unexpected error: %v", err)
+	assert.Contains(t, err.Error(), "workflow selection")
 }
 
-func TestInterpret_GoalFallback_MalformedJSON(t *testing.T) {
-	g := loadTravelportGraph(t)
-	planYAML := loadFixture(t, "testdata/responses/booking_plan.yaml")
+func TestInterpret_LLMError(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
 
 	client := &stubClient{
-		responses: []string{
-			// First call: malformed JSON → heuristic goal identification
-			"this is not json",
-			// Second call: valid plan
-			planYAML,
-		},
+		err: assert.AnError,
 	}
 
-	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight from DEN to SFO",
+	_, err := Interpret(context.Background(), InterpretRequest{
+		Prompt: "book an item",
 		Graph:  g,
 		Client: client,
 	})
 
-	require.NoError(t, err)
-	// Heuristic should have picked a goal
-	assert.NotEmpty(t, result.GoalAnalysis.Goal)
-	assert.Contains(t, result.GoalAnalysis.Description, "Heuristic")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "workflow selection")
 }
 
-func TestInterpret_GoalFallback_InvalidNodeName(t *testing.T) {
-	g := loadTravelportGraph(t)
-	planYAML := loadFixture(t, "testdata/responses/booking_plan.yaml")
+func TestInterpret_UnknownWorkflow(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
+
+	wsJSON := `{"workflow": "Nonexistent Workflow", "description": "test", "constraints": {"hard": [], "soft": [], "free": []}}`
 
 	client := &stubClient{
-		responses: []string{
-			// First call: valid JSON but with non-existent node name
-			`{"goal": "nonExistentNode", "description": "bad", "conditionContext": {}, "pathPreferences": {}, "constraints": {"hard": [], "soft": [], "free": []}}`,
-			// Second call: valid plan
-			planYAML,
-		},
+		responses: []string{wsJSON},
+	}
+
+	_, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "book an item",
+		Graph:    g,
+		Client:   client,
+		GraphDir: ".",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown or template-less workflow")
+	assert.Contains(t, err.Error(), "Nonexistent Workflow")
+}
+
+func TestInterpret_NoWorkflowSelected(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
+
+	// LLM returns empty workflow name
+	wsJSON := `{"workflow": "", "description": "confused", "constraints": {"hard": [], "soft": [], "free": []}}`
+
+	client := &stubClient{
+		responses: []string{wsJSON},
+	}
+
+	_, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "book an item",
+		Graph:    g,
+		Client:   client,
+		GraphDir: ".",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no workflow selected")
+}
+
+func TestInterpret_WorkflowTemplate(t *testing.T) {
+	g, graphDir := buildTemplateTestGraph(t)
+
+	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: search
+      description: "Search for items"
+      values:
+        query: "real search query"
+    - node: process
+      dependsOn: [search]
+      description: "Process the item"
+      values:
+        itemId: {from: search.resultId}
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+  cleanup:
+    - node: cleanup
+      runOn: always
+` + "```\n"
+
+	client := &stubClient{
+		responses: []string{wsJSON, planYAML},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight from DEN to SFO",
-		Graph:  g,
-		Client: client,
+		Prompt:   "book an item",
+		Graph:    g,
+		Client:   client,
+		GraphDir: graphDir,
 	})
 
 	require.NoError(t, err)
-	// Should have fallen back to heuristic
-	assert.NotEqual(t, "nonExistentNode", result.GoalAnalysis.Goal)
+	require.NotNil(t, result.Plan)
+
+	// Should have used the template — only 2 LLM calls (selection + fill)
+	assert.Len(t, client.calls, 2)
+
+	// The plan should have 2 steps (from template)
+	assert.Len(t, result.Plan.Execution.Steps, 2)
+	assert.Equal(t, "search", result.Plan.Execution.Steps[0].Node)
+	assert.Equal(t, "process", result.Plan.Execution.Steps[1].Node)
+
+	// WorkflowSelection should be populated
+	require.NotNil(t, result.WorkflowSelection)
+	assert.Equal(t, "Booking Flow", result.WorkflowSelection.Workflow)
+	assert.Equal(t, "Book an item", result.WorkflowSelection.Description)
+}
+
+func TestInterpret_WorkflowWithRepetitions(t *testing.T) {
+	dir := t.TempDir()
+
+	// Template with a step that can be repeated
+	templateContent := `
+execution:
+  steps:
+    - node: setup
+      values:
+        config: default
+    - node: addItem
+      dependsOn: [setup]
+      values:
+        setupId: {from: setup.setupId}
+        name: "placeholder"
+    - node: commit
+      dependsOn: [addItem]
+      values:
+        setupId: {from: setup.setupId}
+`
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "multi.yaml"), []byte(templateContent), 0o644))
+
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Multi-Item", Template: "plans/multi.yaml"},
+		},
+		Nodes: map[string]*graph.Node{
+			"setup":   {Name: "setup", Description: "Setup", Adapter: "a", Inputs: []graph.Input{{Name: "config", Type: "string"}}, Outputs: []graph.Output{{Name: "setupId", Type: "string"}}},
+			"addItem": {Name: "addItem", Description: "Add item", Adapter: "b", Inputs: []graph.Input{{Name: "setupId", Type: "string"}, {Name: "name", Type: "string"}}, Outputs: []graph.Output{{Name: "itemId", Type: "string"}}},
+			"commit":  {Name: "commit", Description: "Commit", Adapter: "c", Inputs: []graph.Input{{Name: "setupId", Type: "string"}}, Outputs: []graph.Output{{Name: "result", Type: "string"}}},
+		},
+		Edges: []graph.Edge{
+			{From: "setup.setupId", To: "addItem.setupId"},
+			{From: "setup.setupId", To: "commit.setupId"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	wsJSON := `{"workflow": "Multi-Item", "description": "Add 2 items and commit", "repetitions": {"addItem": 2}, "constraints": {"hard": [], "soft": [], "free": []}}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: setup
+      values:
+        config: "test"
+    - id: addItem_1
+      node: addItem
+      dependsOn: [setup]
+      values:
+        setupId: {from: setup.setupId}
+        name: "First Item"
+    - id: addItem_2
+      node: addItem
+      dependsOn: [addItem_1]
+      values:
+        setupId: {from: setup.setupId}
+        name: "Second Item"
+    - node: commit
+      dependsOn: [addItem_2]
+      values:
+        setupId: {from: setup.setupId}
+` + "```\n"
+
+	client := &stubClient{
+		responses: []string{wsJSON, planYAML},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "add 2 items and commit",
+		Graph:    g,
+		Client:   client,
+		GraphDir: dir,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+
+	// Should have 4 steps: setup, addItem_1, addItem_2, commit
+	assert.Len(t, result.Plan.Execution.Steps, 4)
+
+	// Check repetition IDs
+	ids := make([]string, len(result.Plan.Execution.Steps))
+	for i, s := range result.Plan.Execution.Steps {
+		ids[i] = s.StepID()
+	}
+	assert.Contains(t, ids, "addItem_1")
+	assert.Contains(t, ids, "addItem_2")
+
+	// WorkflowSelection should have repetitions
+	require.NotNil(t, result.WorkflowSelection)
+	assert.Equal(t, "Multi-Item", result.WorkflowSelection.Workflow)
+	assert.Equal(t, 2, result.WorkflowSelection.Repetitions["addItem"])
 }
 
 func TestInterpret_NilKnowledgeBase(t *testing.T) {
-	g := loadTravelportGraph(t)
-	goalJSON := loadFixture(t, "testdata/responses/goal_analysis.json")
-	planYAML := loadFixture(t, "testdata/responses/booking_plan.yaml")
+	g, graphDir := buildTemplateTestGraph(t)
+
+	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: search
+      values:
+        query: "test"
+    - node: process
+      dependsOn: [search]
+      values:
+        itemId: {from: search.resultId}
+  cleanup:
+    - node: cleanup
+      runOn: always
+` + "```\n"
 
 	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
+		responses: []string{wsJSON, planYAML},
 	}
 
 	// KB is nil — should work fine
 	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight from DEN to SFO",
-		Graph:  g,
-		KB:     nil,
-		Client: client,
+		Prompt:   "book an item",
+		Graph:    g,
+		KB:       nil,
+		Client:   client,
+		GraphDir: graphDir,
 	})
 
 	require.NoError(t, err)
@@ -277,39 +360,54 @@ func TestInterpret_NilKnowledgeBase(t *testing.T) {
 }
 
 func TestInterpret_WithKnowledgeBase(t *testing.T) {
-	g := loadTravelportGraph(t)
+	g, graphDir := buildTemplateTestGraph(t)
 
 	kbYAML := `
 concepts:
-  airportCode:
-    description: "3-letter IATA airport code"
-    applies_to: [origin, destination]
+  itemCode:
+    description: "Item code identifier"
+    applies_to: [query]
 types:
-  airportCode:
-    description: "IATA airport code"
-    format: "3 uppercase letters"
-    pool: usAirports
+  itemCode:
+    description: "Item code"
+    format: "alphanumeric"
+    pool: items
 valuePools:
-  usAirports:
-    description: "US airport codes"
-    type: airportCode
-    values: [DEN, SFO, LAX, JFK, ORD]
+  items:
+    description: "Item codes"
+    type: itemCode
+    values: [ABC, DEF, GHI]
 `
 	kb, err := loadKBFromYAML(t, kbYAML)
 	require.NoError(t, err)
 
-	goalJSON := loadFixture(t, "testdata/responses/goal_analysis.json")
-	planYAML := loadFixture(t, "testdata/responses/booking_plan.yaml")
+	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: search
+      values:
+        query: "test"
+    - node: process
+      dependsOn: [search]
+      values:
+        itemId: {from: search.resultId}
+  cleanup:
+    - node: cleanup
+      runOn: always
+` + "```\n"
 
 	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
+		responses: []string{wsJSON, planYAML},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight from DEN to SFO",
-		Graph:  g,
-		KB:     kb,
-		Client: client,
+		Prompt:   "book an item",
+		Graph:    g,
+		KB:       kb,
+		Client:   client,
+		GraphDir: graphDir,
 	})
 
 	require.NoError(t, err)
@@ -317,22 +415,38 @@ valuePools:
 
 	// Second call should contain domain context
 	assert.Contains(t, client.calls[1].Messages[1].Content, "Domain Knowledge")
-	assert.Contains(t, client.calls[1].Messages[1].Content, "airportCode")
+	assert.Contains(t, client.calls[1].Messages[1].Content, "itemCode")
 }
 
 func TestInterpret_DateInPrompts(t *testing.T) {
-	g := loadTravelportGraph(t)
-	goalJSON := loadFixture(t, "testdata/responses/goal_analysis.json")
-	planYAML := loadFixture(t, "testdata/responses/booking_plan.yaml")
+	g, graphDir := buildTemplateTestGraph(t)
+
+	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
+
+	planYAML := "```yaml\n" + `
+execution:
+  steps:
+    - node: search
+      values:
+        query: "test"
+    - node: process
+      dependsOn: [search]
+      values:
+        itemId: {from: search.resultId}
+  cleanup:
+    - node: cleanup
+      runOn: always
+` + "```\n"
 
 	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
+		responses: []string{wsJSON, planYAML},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight from DEN to SFO",
-		Graph:  g,
-		Client: client,
+		Prompt:   "book an item",
+		Graph:    g,
+		Client:   client,
+		GraphDir: graphDir,
 	})
 
 	require.NoError(t, err)
@@ -342,46 +456,13 @@ func TestInterpret_DateInPrompts(t *testing.T) {
 	// Today's date should appear in both LLM prompts
 	today := time.Now().Format("2006-01-02")
 
-	// First call (goal analysis): date in system message
+	// First call (workflow selection): date in system message
 	assert.Contains(t, client.calls[0].Messages[0].Content, today,
-		"goal analysis system prompt should contain today's date")
+		"workflow selection system prompt should contain today's date")
 
-	// Second call (plan generation): date in system message (the rules section)
+	// Second call (plan generation): date in system message
 	assert.Contains(t, client.calls[1].Messages[0].Content, today,
 		"plan generation system prompt should contain today's date")
-}
-
-func TestInterpret_LLMError(t *testing.T) {
-	g := loadTravelportGraph(t)
-
-	client := &stubClient{
-		err: assert.AnError,
-	}
-
-	_, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "book a flight",
-		Graph:  g,
-		Client: client,
-	})
-
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "goal analysis")
-}
-
-func TestHeuristicGoalAnalysis_BookingKeywords(t *testing.T) {
-	g := loadTravelportGraph(t)
-
-	ga := heuristicGoalAnalysis("book a flight and commit the booking", g)
-	// Should prefer commitBooking (has "book" keyword + is terminal)
-	assert.Equal(t, "commitBooking", ga.Goal)
-}
-
-func TestHeuristicGoalAnalysis_SearchKeywords(t *testing.T) {
-	g := loadTravelportGraph(t)
-
-	ga := heuristicGoalAnalysis("search for available flights", g)
-	// searchFlights should score high on "search" and "flights"
-	assert.Equal(t, "searchFlights", ga.Goal)
 }
 
 func TestStripJSONFencing(t *testing.T) {
@@ -470,179 +551,6 @@ func buildMismatchGraph() *graph.Graph {
 	}
 }
 
-func TestInterpret_RetryOnValidationFailure(t *testing.T) {
-	g := buildMismatchGraph()
-
-	goalJSON := `{
-		"goal": "process",
-		"description": "Process an item",
-		"conditionContext": {},
-		"pathPreferences": {},
-		"constraints": {"hard": [], "soft": [], "free": ["query"]}
-	}`
-
-	// The LLM response for the initial plan call — the skeleton already has
-	// the broken fromSelection so we just need to return the skeleton as-is
-	// (the LLM isn't changing structural fields anyway).
-	initialPlanYAML := "```yaml\n" + `
-metadata:
-  prompt: "process an item"
-  graphVersion: "1.0.0"
-execution:
-  steps:
-    - node: search
-      values:
-        query: "test query"
-    - node: process
-      dependsOn: [search]
-      values:
-        itemId:
-          fromSelection: item.itemId
-        origin:
-          fromSelection: item.origin
-` + "```\n"
-
-	// The retry response with the corrected field name
-	retryPlanYAML := "```yaml\n" + `
-metadata:
-  prompt: "process an item"
-  graphVersion: "1.0.0"
-execution:
-  steps:
-    - node: search
-      values:
-        query: "test query"
-    - node: process
-      dependsOn: [search]
-      values:
-        itemId:
-          fromSelection: item.itemId
-        origin:
-          fromSelection: item.departure
-` + "```\n"
-
-	t.Run("retry succeeds", func(t *testing.T) {
-		client := &stubClient{
-			responses: []string{
-				goalJSON,       // Call 1: goal analysis
-				initialPlanYAML, // Call 2: plan (skeleton has bad fromSelection)
-				retryPlanYAML,   // Call 3: retry with corrected fromSelection
-			},
-		}
-
-		result, err := Interpret(context.Background(), InterpretRequest{
-			Prompt: "process an item",
-			Graph:  g,
-			Client: client,
-		})
-
-		require.NoError(t, err)
-		require.NotNil(t, result.Plan)
-
-		// Should have made 3 LLM calls (goal + bad plan + retry)
-		assert.Len(t, client.calls, 3)
-
-		// The retry prompt should contain validation error context
-		retrySystem := client.calls[2].Messages[0].Content
-		assert.Contains(t, retrySystem, "validation errors")
-		assert.Contains(t, retrySystem, "elementField")
-
-		// The final plan should have the corrected fromSelection
-		for _, step := range result.Plan.Execution.Steps {
-			if step.Node == "process" {
-				originVal := step.Values["origin"]
-				_, field := plan.ParseFromSelection(originVal.FromSelection)
-				assert.Equal(t, "departure", field, "origin input should use 'departure' elementField")
-			}
-		}
-	})
-
-	t.Run("retry succeeds with trace", func(t *testing.T) {
-		client := &stubClient{
-			responses: []string{
-				goalJSON,
-				initialPlanYAML,
-				retryPlanYAML,
-			},
-		}
-
-		result, err := Interpret(context.Background(), InterpretRequest{
-			Prompt:      "process an item",
-			Graph:       g,
-			Client:      client,
-			EnableTrace: true,
-		})
-
-		require.NoError(t, err)
-		require.NotNil(t, result.Plan)
-		require.NotNil(t, result.Trace)
-
-		// Trace should capture the initial validation error
-		assert.NotEmpty(t, result.Trace.ValidationErr)
-		assert.Contains(t, result.Trace.ValidationErr, "origin")
-
-		// Trace should capture the retry call
-		require.NotNil(t, result.Trace.RetryCall)
-		assert.NotEmpty(t, result.Trace.RetryCall.RawResponse)
-		assert.Empty(t, result.Trace.RetryCall.Error)
-
-		// Retry validation should have succeeded (empty error)
-		assert.Empty(t, result.Trace.RetryValidationErr)
-
-		// Final plan should be present
-		assert.NotNil(t, result.Trace.FinalPlan)
-	})
-
-	t.Run("retry fails returns original error", func(t *testing.T) {
-		client := &stubClient{
-			responses: []string{
-				goalJSON,        // Call 1: goal analysis
-				initialPlanYAML, // Call 2: plan with bad fromSelection
-				initialPlanYAML, // Call 3: retry still has bad fromSelection
-			},
-		}
-
-		_, err := Interpret(context.Background(), InterpretRequest{
-			Prompt: "process an item",
-			Graph:  g,
-			Client: client,
-		})
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "validating generated plan")
-		// Should have attempted 3 calls
-		assert.Len(t, client.calls, 3)
-	})
-
-	t.Run("retry fails returns trace with retry info", func(t *testing.T) {
-		client := &stubClient{
-			responses: []string{
-				goalJSON,
-				initialPlanYAML,
-				initialPlanYAML,
-			},
-		}
-
-		result, err := Interpret(context.Background(), InterpretRequest{
-			Prompt:      "process an item",
-			Graph:       g,
-			Client:      client,
-			EnableTrace: true,
-		})
-
-		require.Error(t, err)
-		require.NotNil(t, result)
-		require.NotNil(t, result.Trace)
-
-		// Both validation errors should be captured
-		assert.NotEmpty(t, result.Trace.ValidationErr)
-		assert.NotEmpty(t, result.Trace.RetryValidationErr)
-		require.NotNil(t, result.Trace.RetryCall)
-	})
-}
-
-// --- Workflow Template Integration Tests ---
-
 // buildTemplateTestGraph creates a minimal graph with a workflow template.
 // The template plan is written to a temp directory, and graphDir is returned.
 func buildTemplateTestGraph(t *testing.T) (*graph.Graph, string) {
@@ -714,301 +622,224 @@ execution:
 	return g, dir
 }
 
-func TestInterpret_WorkflowTemplate(t *testing.T) {
-	g, graphDir := buildTemplateTestGraph(t)
+// buildRetryTestGraph creates a graph with a workflow template whose template
+// contains a broken fromSelection reference. This exercises the retry path
+// in Interpret: the first plan generation produces a validation error,
+// and the retry provides the corrected fromSelection.
+func buildRetryTestGraph(t *testing.T) (*graph.Graph, string) {
+	t.Helper()
 
-	// LLM returns goal analysis that selects the workflow
-	goalJSON := `{
-		"goal": "process",
-		"description": "Process an item via workflow",
-		"conditionContext": {},
-		"pathPreferences": {},
-		"constraints": {"hard": [], "soft": [], "free": ["query"]},
-		"workflow": "Booking Flow"
-	}`
-
-	planYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: search
-      description: "Search for items"
-      values:
-        query: "real search query"
-    - node: process
-      dependsOn: [search]
-      description: "Process the item"
-      values:
-        itemId: {from: search.resultId}
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
-  cleanup:
-    - node: cleanup
-      runOn: always
-` + "```\n"
-
-	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
-	}
-
-	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt:   "book an item",
-		Graph:    g,
-		Client:   client,
-		GraphDir: graphDir,
-	})
-
-	require.NoError(t, err)
-	require.NotNil(t, result.Plan)
-
-	// Should have used the template — only 2 LLM calls (goal + fill)
-	assert.Len(t, client.calls, 2)
-
-	// The plan should have 2 steps (from template)
-	assert.Len(t, result.Plan.Execution.Steps, 2)
-	assert.Equal(t, "search", result.Plan.Execution.Steps[0].Node)
-	assert.Equal(t, "process", result.Plan.Execution.Steps[1].Node)
-
-	// ChainResult should be nil (no backward chaining)
-	assert.Nil(t, result.ChainResult)
-
-	// GoalAnalysis should have workflow set
-	assert.Equal(t, "Booking Flow", result.GoalAnalysis.Workflow)
-}
-
-func TestInterpret_WorkflowWithRepetitions(t *testing.T) {
 	dir := t.TempDir()
 
-	// Template with a step that can be repeated
+	// Template with a fromSelection that will be correct after PostProcess
+	// sets up selection configs. The "origin" input is fed by a select edge
+	// from search.items, but "origin" does not match any elementField.
+	// PostProcess/fixSelectionConfigs will create fromSelection with "origin"
+	// as the field name (because lookupElementFieldPath falls back to inputName),
+	// which validation will catch since "origin" is not a valid elementField.
 	templateContent := `
 execution:
   steps:
-    - node: setup
+    - node: search
       values:
-        config: default
-    - node: addItem
-      dependsOn: [setup]
+        query: "placeholder"
+    - node: process
+      dependsOn: [search]
       values:
-        setupId: {from: setup.setupId}
-        name: "placeholder"
-    - node: commit
-      dependsOn: [addItem]
-      values:
-        setupId: {from: setup.setupId}
+        itemId:
+          fromSelection: item.itemId
+        origin:
+          fromSelection: item.origin
+      selections:
+        item:
+          from: search.items
+          strategy: first
 `
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "multi.yaml"), []byte(templateContent), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "retry.yaml"), []byte(templateContent), 0o644))
 
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Workflows: []graph.Workflow{
-			{Name: "Multi-Item", Template: "plans/multi.yaml"},
-		},
-		Nodes: map[string]*graph.Node{
-			"setup":   {Name: "setup", Description: "Setup", Adapter: "a", Inputs: []graph.Input{{Name: "config", Type: "string"}}, Outputs: []graph.Output{{Name: "setupId", Type: "string"}}},
-			"addItem": {Name: "addItem", Description: "Add item", Adapter: "b", Inputs: []graph.Input{{Name: "setupId", Type: "string"}, {Name: "name", Type: "string"}}, Outputs: []graph.Output{{Name: "itemId", Type: "string"}}},
-			"commit":  {Name: "commit", Description: "Commit", Adapter: "c", Inputs: []graph.Input{{Name: "setupId", Type: "string"}}, Outputs: []graph.Output{{Name: "result", Type: "string"}}},
-		},
-		Edges: []graph.Edge{
-			{From: "setup.setupId", To: "addItem.setupId"},
-			{From: "setup.setupId", To: "commit.setupId"},
-		},
-	}
-	g.BuildEdgeIndex()
-
-	goalJSON := `{
-		"goal": "commit",
-		"description": "Add 2 items and commit",
-		"conditionContext": {},
-		"pathPreferences": {},
-		"constraints": {"hard": [], "soft": [], "free": []},
-		"workflow": "Multi-Item",
-		"repetitions": {"addItem": 2}
-	}`
-
-	planYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: setup
-      values:
-        config: "test"
-    - id: addItem_1
-      node: addItem
-      dependsOn: [setup]
-      values:
-        setupId: {from: setup.setupId}
-        name: "First Item"
-    - id: addItem_2
-      node: addItem
-      dependsOn: [addItem_1]
-      values:
-        setupId: {from: setup.setupId}
-        name: "Second Item"
-    - node: commit
-      dependsOn: [addItem_2]
-      values:
-        setupId: {from: setup.setupId}
-` + "```\n"
-
-	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
+	g := buildMismatchGraph()
+	g.Workflows = []graph.Workflow{
+		{Name: "Retry Flow", Template: "plans/retry.yaml"},
 	}
 
-	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt:   "add 2 items and commit",
-		Graph:    g,
-		Client:   client,
-		GraphDir: dir,
-	})
-
-	require.NoError(t, err)
-	require.NotNil(t, result.Plan)
-
-	// Should have 4 steps: setup, addItem_1, addItem_2, commit
-	assert.Len(t, result.Plan.Execution.Steps, 4)
-
-	// Check repetition IDs
-	ids := make([]string, len(result.Plan.Execution.Steps))
-	for i, s := range result.Plan.Execution.Steps {
-		ids[i] = s.StepID()
-	}
-	assert.Contains(t, ids, "addItem_1")
-	assert.Contains(t, ids, "addItem_2")
+	return g, dir
 }
 
-func TestInterpret_WorkflowFallback_BadName(t *testing.T) {
-	// Build a simple graph without the mismatch issue.
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"search": {
-				Name: "search", Description: "Search", Adapter: "a",
-				Inputs:  []graph.Input{{Name: "query", Type: "string"}},
-				Outputs: []graph.Output{{Name: "resultId", Type: "string"}},
-			},
-			"process": {
-				Name: "process", Description: "Process", Adapter: "b",
-				Inputs:  []graph.Input{{Name: "id", Type: "string"}},
-				Outputs: []graph.Output{{Name: "result", Type: "string"}},
-			},
-		},
-		Edges: []graph.Edge{
-			{From: "search.resultId", To: "process.id"},
-		},
-	}
-	g.BuildEdgeIndex()
+func TestInterpret_RetryOnValidationFailure(t *testing.T) {
+	g, graphDir := buildRetryTestGraph(t)
 
-	goalJSON := `{
-		"goal": "process",
-		"description": "Process an item",
-		"conditionContext": {},
-		"pathPreferences": {},
-		"constraints": {"hard": [], "soft": [], "free": ["query"]},
-		"workflow": "Nonexistent Workflow"
-	}`
+	wsJSON := `{"workflow": "Retry Flow", "description": "Process an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
 
-	planYAML := "```yaml\n" + `
+	// The LLM response for the initial plan call — returns the plan as-is
+	// so the broken fromSelection passes through to validation.
+	initialPlanYAML := "```yaml\n" + `
 execution:
   steps:
     - node: search
       values:
-        query: "test"
+        query: "test query"
     - node: process
       dependsOn: [search]
       values:
-        id: {from: search.resultId}
+        itemId:
+          fromSelection: item.itemId
+        origin:
+          fromSelection: item.origin
+      selections:
+        item:
+          from: search.items
+          strategy: first
 ` + "```\n"
 
-	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
-	}
-
-	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt:   "process an item",
-		Graph:    g,
-		Client:   client,
-		GraphDir: ".",
-	})
-
-	require.NoError(t, err)
-	require.NotNil(t, result.Plan)
-
-	// Should have used backward chaining (workflow not found)
-	assert.NotNil(t, result.ChainResult)
-}
-
-func TestInterpret_NoWorkflow(t *testing.T) {
-	// Build a simple graph without the mismatch issue.
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"search": {
-				Name: "search", Description: "Search", Adapter: "a",
-				Inputs:  []graph.Input{{Name: "query", Type: "string"}},
-				Outputs: []graph.Output{{Name: "resultId", Type: "string"}},
-			},
-			"process": {
-				Name: "process", Description: "Process", Adapter: "b",
-				Inputs:  []graph.Input{{Name: "id", Type: "string"}},
-				Outputs: []graph.Output{{Name: "result", Type: "string"}},
-			},
-		},
-		Edges: []graph.Edge{
-			{From: "search.resultId", To: "process.id"},
-		},
-	}
-	g.BuildEdgeIndex()
-
-	goalJSON := `{
-		"goal": "process",
-		"description": "Process an item",
-		"conditionContext": {},
-		"pathPreferences": {},
-		"constraints": {"hard": [], "soft": [], "free": ["query"]}
-	}`
-
-	planYAML := "```yaml\n" + `
+	// The retry response with the corrected field name
+	retryPlanYAML := "```yaml\n" + `
 execution:
   steps:
     - node: search
       values:
-        query: "test"
+        query: "test query"
     - node: process
       dependsOn: [search]
       values:
-        id: {from: search.resultId}
+        itemId:
+          fromSelection: item.itemId
+        origin:
+          fromSelection: item.departure
+      selections:
+        item:
+          from: search.items
+          strategy: first
 ` + "```\n"
 
-	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
-	}
+	t.Run("retry succeeds", func(t *testing.T) {
+		client := &stubClient{
+			responses: []string{
+				wsJSON,          // Call 1: workflow selection
+				initialPlanYAML, // Call 2: plan (template has bad fromSelection)
+				retryPlanYAML,   // Call 3: retry with corrected fromSelection
+			},
+		}
 
-	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt: "process an item",
-		Graph:  g,
-		Client: client,
+		result, err := Interpret(context.Background(), InterpretRequest{
+			Prompt:   "process an item",
+			Graph:    g,
+			Client:   client,
+			GraphDir: graphDir,
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, result.Plan)
+
+		// Should have made 3 LLM calls (selection + bad plan + retry)
+		assert.Len(t, client.calls, 3)
+
+		// The retry prompt should contain validation error context
+		retrySystem := client.calls[2].Messages[0].Content
+		assert.Contains(t, retrySystem, "validation errors")
+		assert.Contains(t, retrySystem, "elementField")
+
+		// The final plan should have the corrected fromSelection
+		for _, step := range result.Plan.Execution.Steps {
+			if step.Node == "process" {
+				originVal := step.Values["origin"]
+				_, field := plan.ParseFromSelection(originVal.FromSelection)
+				assert.Equal(t, "departure", field, "origin input should use 'departure' elementField")
+			}
+		}
 	})
 
-	require.NoError(t, err)
-	require.NotNil(t, result.Plan)
+	t.Run("retry succeeds with trace", func(t *testing.T) {
+		client := &stubClient{
+			responses: []string{
+				wsJSON,
+				initialPlanYAML,
+				retryPlanYAML,
+			},
+		}
 
-	// Should have used backward chaining (no workflow field)
-	assert.NotNil(t, result.ChainResult)
-	assert.Empty(t, result.GoalAnalysis.Workflow)
+		result, err := Interpret(context.Background(), InterpretRequest{
+			Prompt:      "process an item",
+			Graph:       g,
+			Client:      client,
+			GraphDir:    graphDir,
+			EnableTrace: true,
+		})
+
+		require.NoError(t, err)
+		require.NotNil(t, result.Plan)
+		require.NotNil(t, result.Trace)
+
+		// Trace should capture the initial validation error
+		assert.NotEmpty(t, result.Trace.ValidationErr)
+		assert.Contains(t, result.Trace.ValidationErr, "origin")
+
+		// Trace should capture the retry call
+		require.NotNil(t, result.Trace.RetryCall)
+		assert.NotEmpty(t, result.Trace.RetryCall.RawResponse)
+		assert.Empty(t, result.Trace.RetryCall.Error)
+
+		// Retry validation should have succeeded (empty error)
+		assert.Empty(t, result.Trace.RetryValidationErr)
+
+		// Final plan should be present
+		assert.NotNil(t, result.Trace.FinalPlan)
+	})
+
+	t.Run("retry fails returns original error", func(t *testing.T) {
+		client := &stubClient{
+			responses: []string{
+				wsJSON,          // Call 1: workflow selection
+				initialPlanYAML, // Call 2: plan with bad fromSelection
+				initialPlanYAML, // Call 3: retry still has bad fromSelection
+			},
+		}
+
+		_, err := Interpret(context.Background(), InterpretRequest{
+			Prompt:   "process an item",
+			Graph:    g,
+			Client:   client,
+			GraphDir: graphDir,
+		})
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "validating generated plan")
+		// Should have attempted 3 calls
+		assert.Len(t, client.calls, 3)
+	})
+
+	t.Run("retry fails returns trace with retry info", func(t *testing.T) {
+		client := &stubClient{
+			responses: []string{
+				wsJSON,
+				initialPlanYAML,
+				initialPlanYAML,
+			},
+		}
+
+		result, err := Interpret(context.Background(), InterpretRequest{
+			Prompt:      "process an item",
+			Graph:       g,
+			Client:      client,
+			GraphDir:    graphDir,
+			EnableTrace: true,
+		})
+
+		require.Error(t, err)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Trace)
+
+		// Both validation errors should be captured
+		assert.NotEmpty(t, result.Trace.ValidationErr)
+		assert.NotEmpty(t, result.Trace.RetryValidationErr)
+		require.NotNil(t, result.Trace.RetryCall)
+	})
 }
 
 func TestInterpret_WorkflowTrace(t *testing.T) {
 	g, graphDir := buildTemplateTestGraph(t)
 
-	goalJSON := `{
-		"goal": "process",
-		"description": "Process an item via workflow",
-		"conditionContext": {},
-		"pathPreferences": {},
-		"constraints": {"hard": [], "soft": [], "free": ["query"]},
-		"workflow": "Booking Flow"
-	}`
+	wsJSON := `{"workflow": "Booking Flow", "description": "Process an item via workflow", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
 
 	planYAML := "```yaml\n" + `
 execution:
@@ -1026,7 +857,7 @@ execution:
 ` + "```\n"
 
 	client := &stubClient{
-		responses: []string{goalJSON, planYAML},
+		responses: []string{wsJSON, planYAML},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
@@ -1044,78 +875,19 @@ execution:
 	assert.Equal(t, "Booking Flow", result.Trace.WorkflowName)
 	assert.Equal(t, "plans/booking.yaml", result.Trace.TemplatePath)
 
-	// No chain result since template was used
-	assert.Nil(t, result.Trace.ChainResult)
+	// WorkflowSelection should be in the trace
+	require.NotNil(t, result.Trace.WorkflowSelection)
+	assert.Equal(t, "Booking Flow", result.Trace.WorkflowSelection.Workflow)
 
 	// Skeleton should be present
 	assert.NotNil(t, result.Trace.Skeleton)
 
+	// Selection call should be captured
+	assert.NotEmpty(t, result.Trace.SelectionCall.RawResponse)
+
+	// Plan call should be captured
+	assert.NotEmpty(t, result.Trace.PlanCall.RawResponse)
+
 	// Final plan should be present
 	assert.NotNil(t, result.Trace.FinalPlan)
-}
-
-func TestInterpret_Integration_RealLLM(t *testing.T) {
-	apiKey := os.Getenv("OPENAI_API_KEY")
-	if apiKey == "" {
-		t.Skip("skipping: OPENAI_API_KEY not set")
-	}
-
-	// Create real OpenAI client
-	client, err := llm.NewClient(config.LLMConfig{
-		APIKey: config.SecretRef{Source: "literal", Value: apiKey},
-		Model:  "gpt-5.2",
-	})
-	require.NoError(t, err)
-
-	// Load graph + domain KB (existing fixtures)
-	g := loadTravelportGraph(t)
-	kb, err := domain.ParseFile("../domain/testdata/valid/travel.yaml")
-	require.NoError(t, err)
-
-	const maxAttempts = 3
-	var result *InterpretResult
-	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		result, lastErr = Interpret(context.Background(), InterpretRequest{
-			Prompt: "book a flight from DEN to SFO",
-			Graph:  g,
-			KB:     kb,
-			Client: client,
-		})
-		if lastErr == nil {
-			break
-		}
-		if attempt < maxAttempts {
-			t.Logf("attempt %d/%d failed: %v — retrying", attempt, maxAttempts, lastErr)
-		}
-	}
-	require.NoError(t, lastErr, "all %d attempts failed", maxAttempts)
-
-	// Structural assertions (LLM output varies, check shape not exact values)
-	assert.Equal(t, "commitBooking", result.GoalAnalysis.Goal)
-	require.NotNil(t, result.Plan)
-	require.NotEmpty(t, result.Plan.Execution.Steps)
-
-	// Should have the key booking flow nodes
-	nodeSet := map[string]bool{}
-	for _, s := range result.Plan.Execution.Steps {
-		nodeSet[s.Node] = true
-	}
-	assert.True(t, nodeSet["searchFlights"], "plan should include searchFlights")
-	assert.True(t, nodeSet["commitBooking"], "plan should include commitBooking")
-
-	// Cleanup should be present (PostProcess ensures this)
-	assert.NotEmpty(t, result.Plan.Execution.Cleanup)
-
-	// Metadata should be populated
-	assert.Equal(t, "book a flight from DEN to SFO", result.Plan.Metadata.Prompt)
-	assert.Equal(t, "1.0.0", result.Plan.Metadata.GraphVersion)
-
-	// Log the plan for manual inspection
-	t.Logf("Goal: %s", result.GoalAnalysis.Goal)
-	t.Logf("Steps: %d", len(result.Plan.Execution.Steps))
-	for i, s := range result.Plan.Execution.Steps {
-		t.Logf("  %d: %s (dependsOn: %v)", i, s.Node, s.DependsOn)
-	}
-	t.Logf("Cleanup: %d steps", len(result.Plan.Execution.Cleanup))
 }

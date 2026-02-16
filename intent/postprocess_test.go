@@ -209,10 +209,9 @@ func TestFixSelectionConfigs_PreservesExisting(t *testing.T) {
 
 func TestSetMetadata(t *testing.T) {
 	g := &graph.Graph{Version: "1.0.0"}
-	ga := &GoalAnalysis{Goal: "commitBooking"}
 
 	p := &plan.Plan{}
-	setMetadata(p, g, ga, "book a flight")
+	setMetadata(p, g, "book a flight")
 
 	assert.Equal(t, "book a flight", p.Metadata.Prompt)
 	assert.Equal(t, "1.0.0", p.Metadata.GraphVersion)
@@ -220,8 +219,8 @@ func TestSetMetadata(t *testing.T) {
 }
 
 func TestPopulateIntent(t *testing.T) {
-	ga := &GoalAnalysis{
-		Goal:        "commitBooking",
+	ws := &WorkflowSelection{
+		Workflow:    "Booking Flow",
 		Description: "Book a flight from DEN to SFO",
 		Constraints: ConstraintSet{
 			Hard: []ConstraintInfo{{Name: "origin", Description: "Must be DEN"}},
@@ -231,9 +230,8 @@ func TestPopulateIntent(t *testing.T) {
 	}
 
 	p := &plan.Plan{}
-	populateIntent(p, ga)
+	populateIntent(p, ws)
 
-	assert.Equal(t, "commitBooking", p.Intent.Goal)
 	assert.Equal(t, "Book a flight from DEN to SFO", p.Intent.Description)
 	require.NotNil(t, p.Intent.Constraints)
 	assert.Len(t, p.Intent.Constraints.Hard, 1)
@@ -242,8 +240,8 @@ func TestPopulateIntent(t *testing.T) {
 }
 
 func TestPopulateIntent_SkipsWhenAlreadyPopulated(t *testing.T) {
-	ga := &GoalAnalysis{
-		Goal:        "commitBooking",
+	ws := &WorkflowSelection{
+		Workflow:    "Booking Flow",
 		Description: "Book a flight from DEN to SFO",
 		Constraints: ConstraintSet{
 			Hard: []ConstraintInfo{{Name: "origin", Description: "Must be DEN"}},
@@ -263,31 +261,55 @@ func TestPopulateIntent_SkipsWhenAlreadyPopulated(t *testing.T) {
 		},
 	}
 
-	populateIntent(p, ga)
+	populateIntent(p, ws)
 
 	// Should keep existing constraints, not duplicate
 	assert.Len(t, p.Intent.Constraints.Hard, 1)
 	assert.Len(t, p.Intent.Constraints.Soft, 1)
 	assert.Len(t, p.Intent.Constraints.Free, 1)
-	// Verify it's the original LLM-generated constraint, not the GoalAnalysis one
+	// Verify it's the original LLM-generated constraint, not the WorkflowSelection one
 	assert.Equal(t, "Must depart from DEN", p.Intent.Constraints.Hard[0].Description)
 }
 
-func TestPopulateIntent_NilGoalAnalysis(t *testing.T) {
+func TestPopulateIntent_NilWorkflowSelection(t *testing.T) {
 	p := &plan.Plan{}
 	populateIntent(p, nil)
+	assert.Empty(t, p.Intent.Description)
+}
+
+func TestPopulateIntentFromGoal(t *testing.T) {
+	ga := &GoalAnalysis{
+		Goal:        "commitBooking",
+		Description: "Book a flight from DEN to SFO",
+		Constraints: ConstraintSet{
+			Hard: []ConstraintInfo{{Name: "origin", Description: "Must be DEN"}},
+			Soft: []ConstraintInfo{{Name: "nonstop", Description: "Prefer direct flights"}},
+			Free: []string{"departure date"},
+		},
+	}
+
+	p := &plan.Plan{}
+	populateIntentFromGoal(p, ga)
+
+	assert.Equal(t, "commitBooking", p.Intent.Goal)
+	assert.Equal(t, "Book a flight from DEN to SFO", p.Intent.Description)
+	require.NotNil(t, p.Intent.Constraints)
+	assert.Len(t, p.Intent.Constraints.Hard, 1)
+	assert.Len(t, p.Intent.Constraints.Soft, 1)
+	assert.Contains(t, p.Intent.Constraints.Free, "departure date")
+}
+
+func TestPopulateIntentFromGoal_NilGoalAnalysis(t *testing.T) {
+	p := &plan.Plan{}
+	populateIntentFromGoal(p, nil)
 	assert.Empty(t, p.Intent.Goal)
 }
 
 func TestPostProcess_FullPipeline(t *testing.T) {
 	g := loadTravelportGraph(t)
 
-	cr := &graph.ChainResult{
-		Nodes:      []string{"searchFlights", "createWorkbench", "addOffer", "addTraveler", "commitBooking"},
-		EntryNodes: []string{"searchFlights", "createWorkbench"},
-	}
-	ga := &GoalAnalysis{
-		Goal:        "commitBooking",
+	ws := &WorkflowSelection{
+		Workflow:    "Full-Payload Booking",
 		Description: "Book a flight",
 	}
 
@@ -303,7 +325,7 @@ func TestPostProcess_FullPipeline(t *testing.T) {
 		},
 	}
 
-	PostProcess(p, g, cr, ga, "book a flight from DEN to SFO")
+	PostProcess(p, g, ws, "book a flight from DEN to SFO")
 
 	// dependsOn should be fixed
 	assert.Contains(t, p.Execution.Steps[2].DependsOn, "searchFlights")
@@ -318,7 +340,7 @@ func TestPostProcess_FullPipeline(t *testing.T) {
 	assert.Equal(t, "1.0.0", p.Metadata.GraphVersion)
 
 	// intent should be populated
-	assert.Equal(t, "commitBooking", p.Intent.Goal)
+	assert.Equal(t, "Book a flight", p.Intent.Description)
 }
 
 // --- BuildSkeleton Tests ---
@@ -508,7 +530,7 @@ func TestMergeLLMValues_AddsLiterals(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	vals := skeleton.Execution.Steps[0].Values
 	assert.Equal(t, "DEN", vals["origin"].Default)
@@ -555,7 +577,7 @@ func TestMergeLLMValues_OverridesStrategy(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	sel := skeleton.Execution.Steps[0].Values["offeringId"].Select
 	assert.Equal(t, "match", sel.Strategy)
@@ -601,7 +623,7 @@ func TestMergeLLMValues_IgnoresStructural(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	step := skeleton.Execution.Steps[0]
 	// DependsOn should not change.
@@ -640,7 +662,7 @@ func TestMergeLLMValues_AddsAssertions(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	step := skeleton.Execution.Steps[0]
 	assert.Equal(t, "Finalize the booking", step.Description)
@@ -681,7 +703,7 @@ func TestMergeLLMValues_LLMAddsSelectToScalarEdge(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	// Select should NOT be added to a scalar from ref.
 	assert.Nil(t, skeleton.Execution.Steps[0].Values["workbenchId"].Select)
@@ -705,7 +727,7 @@ func TestMergeLLMValues_LLMStepNotInSkeleton(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	// searchFlights should get the value.
 	assert.Equal(t, "DEN", skeleton.Execution.Steps[0].Values["origin"].Default)
@@ -740,7 +762,7 @@ func TestMergeLLMValues_OverridesGraphDefault(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	assert.Equal(t, 2, skeleton.Execution.Steps[0].Values["passengers"].Default)
 }
@@ -1276,7 +1298,7 @@ func TestMergeLLMValues_NamedSelectionStrategyOverride(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	sel := skeleton.Execution.Steps[0].Selections["offering"]
 	assert.Equal(t, "match", sel.Strategy)
@@ -1324,7 +1346,7 @@ func TestMergeLLMValues_IgnoresUnknownNamedSelection(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	// "bogus" should NOT be added
 	_, exists := skeleton.Execution.Steps[0].Selections["bogus"]
@@ -1597,7 +1619,7 @@ func TestMergeLLMValues_SkipsFromSelectionValues(t *testing.T) {
 		},
 	}
 
-	MergeLLMValues(skeleton, llmPlan)
+	MergeLLMValues(skeleton, llmPlan, nil)
 
 	// fromSelection refs should be preserved, LLM changes ignored
 	assert.Equal(t, "offering.offeringId", skeleton.Execution.Steps[0].Values["offeringId"].FromSelection)

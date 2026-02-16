@@ -1,14 +1,14 @@
 # Travelport Booking Example
 
-This walks through the included Travelport booking flow — a real end-to-end API test that searches for flights, creates a reservation workbench, adds an offer and traveler, and commits the booking to produce a PNR.
+This walks through the included Travelport booking flow — a real end-to-end API test that searches for flights, creates a reservation workbench, adds an offer and traveler, and commits the booking to produce a PNR. The Travelport graph also demonstrates addon workflows for seat selection, ancillary services, and traveler modifications.
 
 ## Files
 
 | File | Description |
 |------|-------------|
-| `graph/testdata/valid/travelport_booking.yaml` | API graph: 7 nodes, 11 edges |
-| `adapter/testdata/templates/travelport/` | 7 request/response templates |
-| `plans/travelport_booking.yaml` | Booking plan: 6 steps with assertions |
+| `travelport/graph.yaml` | API graph: nodes, edges, base and addon workflows |
+| `travelport/templates/` | Request/response templates for each operation |
+| `travelport/plans/` | Workflow plan templates (base and addon) |
 | `environments/travelport-pp.yaml` | Pre-production environment config |
 
 ## Running
@@ -16,11 +16,18 @@ This walks through the included Travelport booking flow — a real end-to-end AP
 ```
 go build -o aat ./cmd/aat/
 
+# Run a pre-written plan
 ./aat run \
-  --plan plans/travelport_booking.yaml \
+  --plan travelport/plans/oneway-fullpayload.yaml \
   --env environments/travelport-pp.yaml \
-  --graph graph/testdata/valid/travelport_booking.yaml \
-  --templates adapter/testdata/templates/travelport/
+  --graph travelport/graph.yaml \
+  --templates travelport/templates/
+
+# Or generate a plan from a prompt (requires LLM config in env)
+./aat prompt "Book a one-way flight from Denver to San Francisco" \
+  --env environments/travelport-pp.yaml \
+  --graph travelport/graph.yaml \
+  --templates travelport/templates/
 ```
 
 ## Booking Flow
@@ -162,3 +169,34 @@ The `selections` block picks one element from the array, then each `fromSelectio
 Other strategies: `last`, `random`, `index` (specific position), `min`/`max` (by field value), `match` (by predicate filter), `llm` (LLM-assisted choice).
 
 See [value-flow.md](value-flow.md) for the full guide on how values move between steps.
+
+## Addon Workflows
+
+The Travelport graph includes three addon workflows that can be composed with any base booking workflow:
+
+| Addon | After Node | Description |
+|-------|-----------|-------------|
+| **Seat Selection** | `priceOfferFullPayload` | Searches the seat map and adds a seat offer to the workbench |
+| **Ancillary Booking** | `addTraveler` | Searches for and adds ancillary services (bags, meals, etc.) |
+| **Traveler Modification** | `addTraveler` | Two-step traveler update (modify then verify) |
+
+### Using Addons with `aat prompt`
+
+When you mention addon functionality in your prompt, the LLM automatically selects the appropriate addons:
+
+```bash
+# Base booking only
+./aat prompt "Book a one-way flight from Denver to San Francisco" ...
+
+# Base booking + seat selection addon
+./aat prompt "Book a one-way flight from Denver to San Francisco with seat selection" ...
+
+# Base booking + multiple addons
+./aat prompt "Book a flight from DEN to SFO with seat selection and ancillary services" ...
+```
+
+The composition system:
+1. Loads the base workflow template (e.g., Full-Payload Booking)
+2. For each addon, splices its steps into the base plan at the `after:` insertion point
+3. Auto-wires `PLACEHOLDER` values to matching outputs from the base workflow
+4. The LLM then fills in remaining literal values (dates, traveler info, etc.)

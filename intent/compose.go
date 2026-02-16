@@ -9,68 +9,101 @@ import (
 	"github.com/gburgyan/aat/plan"
 )
 
-// ComposeWorkflowTemplate loads a parent workflow template and splices in
-// sub-workflow templates specified by the workflow's Includes. Each include
-// is loaded, its step IDs are prefixed (inc0_, inc1_, ...) to avoid
+// ComposeWorkflowTemplate loads a base workflow template and splices in
+// addon workflow templates. Each addon uses its own After field to find
+// the insertion point (the step in the base plan whose Node matches
+// addon.After). Addon step IDs are prefixed (inc0_, inc1_, ...) to avoid
 // collisions, and PLACEHOLDERs are resolved via auto-wiring from parent
-// step outputs or explicit Wire overrides.
+// step outputs or explicit Wire overrides from the addon definition.
 //
 // The result is a standard *plan.Plan that requires no engine changes.
-func ComposeWorkflowTemplate(wf graph.Workflow, graphDir string, g *graph.Graph) (*plan.Plan, error) {
-	if wf.Template == "" {
-		return nil, fmt.Errorf("compose: workflow %q has no template", wf.Name)
+func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graphDir string, g *graph.Graph) (*plan.Plan, error) {
+	if base.Template == "" {
+		return nil, fmt.Errorf("compose: workflow %q has no template", base.Name)
 	}
 
-	parent, err := LoadWorkflowTemplate(wf.Template, graphDir, g)
+	parent, err := LoadWorkflowTemplate(base.Template, graphDir, g)
 	if err != nil {
 		return nil, fmt.Errorf("compose: loading parent template: %w", err)
 	}
 
-	if len(wf.Includes) == 0 {
+	if len(addons) == 0 {
 		return parent, nil
 	}
 
-	// Process each include in order.
-	for i, inc := range wf.Includes {
+	// Process each addon in order.
+	for i, addon := range addons {
 		prefix := fmt.Sprintf("inc%d_", i)
 
-		// Look up the sub-workflow.
-		subWF, found := findWorkflowByName(g, inc.Workflow)
-		if !found {
-			return nil, fmt.Errorf("compose: include %d references unknown workflow %q", i, inc.Workflow)
-		}
-		if subWF.Template == "" {
-			return nil, fmt.Errorf("compose: included workflow %q has no template", inc.Workflow)
+		if addon.Template == "" {
+			return nil, fmt.Errorf("compose: addon workflow %q has no template", addon.Name)
 		}
 
-		sub, err := LoadWorkflowTemplate(subWF.Template, graphDir, g)
+		// Find the insertion point: scan parent steps for one whose Node matches addon.After.
+		afterStep := findStepByNode(parent, addon.After)
+		if afterStep == "" {
+			return nil, fmt.Errorf("compose: addon %q: after node %q not found in base plan steps", addon.Name, addon.After)
+		}
+
+		sub, err := LoadWorkflowTemplate(addon.Template, graphDir, g)
 		if err != nil {
-			return nil, fmt.Errorf("compose: loading sub-workflow template %q: %w", inc.Workflow, err)
+			return nil, fmt.Errorf("compose: loading addon template %q: %w", addon.Name, err)
 		}
 
-		// Build output map from parent steps (up to and including insertion point).
-		outputMap := buildOutputMap(parent, g, inc.After)
+		// Build output map from all parent steps.
+		outputMap := buildOutputMap(parent, g)
 
 		// Prefix sub-workflow step IDs and rewrite internal references.
 		prefixStepRefs(sub, prefix)
 
-		// Auto-wire PLACEHOLDERs in sub-workflow steps.
-		autoWirePlaceholders(sub, outputMap, inc.Wire, g)
+		// Auto-wire PLACEHOLDERs in sub-workflow steps using addon's Wire.
+		autoWirePlaceholders(sub, outputMap, addon.Wire, g)
 
 		// Add insertion-point dependency to sub-workflow root steps.
-		addInsertionDeps(sub, inc.After)
+		addInsertionDeps(sub, afterStep)
 
 		// Ensure all from-referenced parent steps are in dependsOn.
 		fixFromDependencies(sub)
 
 		// Splice sub-workflow steps into parent after insertion point.
-		spliceSteps(parent, sub, inc.After)
+		spliceSteps(parent, sub, afterStep)
 
 		// Merge cleanup (dedup by node name).
 		mergeCleanup(parent, sub)
 	}
 
 	return parent, nil
+}
+
+// ComposeWithAddons looks up addon workflows by name, validates them, and
+// delegates to ComposeWorkflowTemplate.
+func ComposeWithAddons(base graph.Workflow, addonNames []string, g *graph.Graph, graphDir string) (*plan.Plan, error) {
+	var addons []graph.Workflow
+	for _, name := range addonNames {
+		addon, found := findWorkflowByName(g, name)
+		if !found {
+			return nil, fmt.Errorf("compose: unknown addon workflow %q", name)
+		}
+		if !addon.IsAddon() {
+			return nil, fmt.Errorf("compose: workflow %q is not an addon", name)
+		}
+		if addon.After == "" {
+			return nil, fmt.Errorf("compose: addon %q has no after field", name)
+		}
+		addons = append(addons, addon)
+	}
+	return ComposeWorkflowTemplate(base, addons, graphDir, g)
+}
+
+// findStepByNode returns the step ID of the first step in the plan whose
+// Node field matches nodeName, or empty string if not found.
+func findStepByNode(p *plan.Plan, nodeName string) string {
+	for _, step := range p.Execution.Steps {
+		if step.Node == nodeName {
+			return step.StepID()
+		}
+	}
+	return ""
 }
 
 // findWorkflowByName looks up a workflow by name (case-insensitive).
@@ -83,10 +116,12 @@ func findWorkflowByName(g *graph.Graph, name string) (graph.Workflow, bool) {
 	return graph.Workflow{}, false
 }
 
-// buildOutputMap scans parent steps up to (and including) the insertion point
-// and builds a map of outputName → "stepID.outputName" for all outputs
-// produced by those steps. Last producer wins.
-func buildOutputMap(p *plan.Plan, g *graph.Graph, afterStep string) map[string]string {
+// buildOutputMap scans all parent steps and builds a map of
+// outputName → "stepID.outputName" for all outputs produced by those steps.
+// Last producer wins. All parent outputs are available for auto-wiring
+// because the engine resolves execution order via dependsOn, not step list
+// position. fixFromDependencies ensures the correct dependencies are added.
+func buildOutputMap(p *plan.Plan, g *graph.Graph) map[string]string {
 	outputMap := make(map[string]string)
 	for _, step := range p.Execution.Steps {
 		stepID := step.StepID()
@@ -95,9 +130,6 @@ func buildOutputMap(p *plan.Plan, g *graph.Graph, afterStep string) map[string]s
 			for _, out := range node.Outputs {
 				outputMap[out.Name] = stepID + "." + out.Name
 			}
-		}
-		if stepID == afterStep {
-			break
 		}
 	}
 	return outputMap
@@ -322,71 +354,6 @@ func fixFromDependencies(sub *plan.Plan) {
 			}
 		}
 	}
-}
-
-// FindComposedWorkflow looks up a pre-declared composed workflow in the graph
-// that matches the given base workflow name plus requested addon names.
-// Returns the workflow and true if an exact match is found.
-func FindComposedWorkflow(g *graph.Graph, baseWorkflow string, addons []string) (graph.Workflow, bool) {
-	if len(addons) == 0 {
-		return graph.Workflow{}, false
-	}
-
-	addonSet := make(map[string]bool)
-	for _, a := range addons {
-		addonSet[strings.ToLower(a)] = true
-	}
-
-	for _, wf := range g.Workflows {
-		if wf.Kind == "addon" || len(wf.Includes) == 0 {
-			continue
-		}
-		// Check if this workflow's includes match the requested addons exactly.
-		if len(wf.Includes) != len(addons) {
-			continue
-		}
-		match := true
-		for _, inc := range wf.Includes {
-			if !addonSet[strings.ToLower(inc.Workflow)] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return wf, true
-		}
-	}
-	return graph.Workflow{}, false
-}
-
-// BuildSyntheticWorkflow creates a Workflow struct for dynamic composition
-// when no pre-declared composed workflow exists. It takes a base workflow
-// and a list of addon names and creates includes with auto-detected
-// insertion points.
-func BuildSyntheticWorkflow(g *graph.Graph, base graph.Workflow, addons []string) graph.Workflow {
-	wf := graph.Workflow{
-		Name:     base.Name + " (composed)",
-		Template: base.Template,
-		Steps:    base.Steps,
-	}
-
-	for _, addonName := range addons {
-		inc := graph.WorkflowInclude{
-			Workflow: addonName,
-		}
-
-		// Auto-detect insertion point: use the last non-cleanup, non-goal
-		// step before the commit step. Heuristic: second-to-last step.
-		if len(base.Steps) >= 2 {
-			inc.After = base.Steps[len(base.Steps)-2]
-		} else if len(base.Steps) > 0 {
-			inc.After = base.Steps[len(base.Steps)-1]
-		}
-
-		wf.Includes = append(wf.Includes, inc)
-	}
-
-	return wf
 }
 
 // ResolveWorkflowDir returns the absolute directory containing the graph file,

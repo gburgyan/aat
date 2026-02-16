@@ -339,7 +339,6 @@ A plan defines a test scenario: which steps to execute, what values to use, and 
 
 ```yaml
 intent:
-  goal: getUser
   description: "Create a user and verify it was stored correctly"
 
 execution:
@@ -492,6 +491,7 @@ Now that you have a working project, explore based on what you need:
 | Refine my graph (types, arrays, cleanup nodes) | [Graph Authoring](graph-authoring.md) |
 | Understand how values flow between steps | [Value Flow](value-flow.md) |
 | Write more sophisticated plans | [Plan Authoring](plan-authoring.md) |
+| Create reusable workflow templates | [Workflow Templates](workflow-templates.md) |
 | Set up CI/CD for automated testing | [Running Tests](running.md) |
 | Use LLM-assisted plan generation | [LLM-Assisted Planning](prompt-workflow.md) |
 | Add domain knowledge for smarter value resolution | [Domain Knowledge](domain-knowledge.md) |

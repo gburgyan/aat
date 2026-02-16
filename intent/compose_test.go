@@ -68,26 +68,40 @@ func TestBuildOutputMap(t *testing.T) {
 		},
 	}
 
-	t.Run("up to book", func(t *testing.T) {
-		m := buildOutputMap(p, g, "book")
-		assert.Equal(t, "search.results", m["results"])
-		assert.Equal(t, "book.workbenchId", m["workbenchId"])
-		assert.Equal(t, "book.offerIdentifierValue", m["offerIdentifierValue"])
-		_, hasLocator := m["locator"]
-		assert.False(t, hasLocator, "commit output should not be included")
-	})
+	m := buildOutputMap(p, g)
 
-	t.Run("all steps", func(t *testing.T) {
-		m := buildOutputMap(p, g, "commit")
-		assert.Equal(t, "commit.locator", m["locator"])
-	})
+	// All outputs from all steps should be included.
+	assert.Equal(t, "search.results", m["results"])
+	assert.Equal(t, "book.workbenchId", m["workbenchId"])
+	assert.Equal(t, "book.offerIdentifierValue", m["offerIdentifierValue"])
+	assert.Equal(t, "commit.locator", m["locator"])
+}
 
-	t.Run("first step only", func(t *testing.T) {
-		m := buildOutputMap(p, g, "search")
-		assert.Equal(t, "search.results", m["results"])
-		_, hasWB := m["workbenchId"]
-		assert.False(t, hasWB)
-	})
+func TestBuildOutputMap_LastProducerWins(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"stepA": {
+				Name:    "stepA",
+				Outputs: []graph.Output{{Name: "sharedOutput", Type: "string"}},
+			},
+			"stepB": {
+				Name:    "stepB",
+				Outputs: []graph.Output{{Name: "sharedOutput", Type: "string"}},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "stepA"},
+				{Node: "stepB"},
+			},
+		},
+	}
+
+	m := buildOutputMap(p, g)
+	assert.Equal(t, "stepB.sharedOutput", m["sharedOutput"])
 }
 
 // --- prefixStepRefs ---
@@ -468,101 +482,61 @@ func TestMergeCleanup_EmptySub(t *testing.T) {
 	require.Len(t, parent.Execution.Cleanup, 1)
 }
 
-// --- FindComposedWorkflow ---
+// --- findStepByNode ---
 
-func TestFindComposedWorkflow(t *testing.T) {
-	g := &graph.Graph{
-		Workflows: []graph.Workflow{
-			{Name: "Full-Payload Booking", Template: "plans/booking.yaml"},
-			{Name: "Seat Selection", Kind: "addon", Template: "plans/seat.yaml"},
-			{
-				Name:     "Booking with Seat",
-				Template: "plans/booking.yaml",
-				Includes: []graph.WorkflowInclude{
-					{Workflow: "Seat Selection", After: "book"},
-				},
+func TestFindStepByNode(t *testing.T) {
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search"},
+				{ID: "myBook", Node: "book"},
+				{Node: "commit"},
 			},
 		},
 	}
 
-	t.Run("exact match", func(t *testing.T) {
-		wf, found := FindComposedWorkflow(g, "Full-Payload Booking", []string{"Seat Selection"})
-		assert.True(t, found)
-		assert.Equal(t, "Booking with Seat", wf.Name)
-	})
-
-	t.Run("no match", func(t *testing.T) {
-		_, found := FindComposedWorkflow(g, "Full-Payload Booking", []string{"Nonexistent"})
-		assert.False(t, found)
-	})
-
-	t.Run("empty addons", func(t *testing.T) {
-		_, found := FindComposedWorkflow(g, "Full-Payload Booking", nil)
-		assert.False(t, found)
-	})
-
-	t.Run("case insensitive", func(t *testing.T) {
-		wf, found := FindComposedWorkflow(g, "Full-Payload Booking", []string{"seat selection"})
-		assert.True(t, found)
-		assert.Equal(t, "Booking with Seat", wf.Name)
-	})
+	assert.Equal(t, "search", findStepByNode(p, "search"))
+	assert.Equal(t, "myBook", findStepByNode(p, "book"))
+	assert.Equal(t, "commit", findStepByNode(p, "commit"))
+	assert.Equal(t, "", findStepByNode(p, "nonexistent"))
 }
 
-// --- BuildSyntheticWorkflow ---
+// --- ComposeWorkflowTemplate integration tests ---
 
-func TestBuildSyntheticWorkflow(t *testing.T) {
-	g := &graph.Graph{
-		Workflows: []graph.Workflow{
-			{Name: "Main", Template: "plans/main.yaml", Steps: []string{"search", "book", "pay", "commit"}},
-		},
-	}
-
-	base := g.Workflows[0]
-	wf := BuildSyntheticWorkflow(g, base, []string{"Seat Selection", "Ancillary"})
-
-	assert.Equal(t, "Main (composed)", wf.Name)
-	assert.Equal(t, "plans/main.yaml", wf.Template)
-	require.Len(t, wf.Includes, 2)
-	assert.Equal(t, "Seat Selection", wf.Includes[0].Workflow)
-	assert.Equal(t, "pay", wf.Includes[0].After) // second-to-last
-	assert.Equal(t, "Ancillary", wf.Includes[1].Workflow)
-	assert.Equal(t, "pay", wf.Includes[1].After)
-}
-
-// --- ComposeWorkflowTemplate integration test ---
-
-func TestComposeWorkflowTemplate_NoIncludes(t *testing.T) {
+func TestComposeWorkflowTemplate_NoAddons(t *testing.T) {
 	g := buildComposeTestGraph()
 
-	wf := graph.Workflow{
+	base := graph.Workflow{
 		Name:     "Simple",
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	p, err := ComposeWorkflowTemplate(wf, ".", g)
+	p, err := ComposeWorkflowTemplate(base, nil, ".", g)
 	require.NoError(t, err)
 	require.Len(t, p.Execution.Steps, 3)
 	assert.Equal(t, "search", p.Execution.Steps[0].Node)
 }
 
-func TestComposeWorkflowTemplate_WithInclude(t *testing.T) {
+func TestComposeWorkflowTemplate_WithAddon(t *testing.T) {
 	g := buildComposeTestGraph()
 
-	wf := graph.Workflow{
-		Name:     "Composed",
+	base := graph.Workflow{
+		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
-		Includes: []graph.WorkflowInclude{
-			{
-				Workflow: "Addon",
-				After:    "book",
-				Wire: map[string]string{
-					"specialInput": "MANUAL",
-				},
+	}
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+			Wire: map[string]string{
+				"specialInput": "MANUAL",
 			},
 		},
 	}
 
-	p, err := ComposeWorkflowTemplate(wf, ".", g)
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
 	require.NoError(t, err)
 
 	// Parent has 3 steps, addon has 2 steps = 5 total.
@@ -600,29 +574,103 @@ func TestComposeWorkflowTemplate_WithInclude(t *testing.T) {
 func TestComposeWorkflowTemplate_NoTemplate(t *testing.T) {
 	g := buildComposeTestGraph()
 
-	wf := graph.Workflow{
+	base := graph.Workflow{
 		Name: "NoTemplate",
 	}
 
-	_, err := ComposeWorkflowTemplate(wf, ".", g)
+	_, err := ComposeWorkflowTemplate(base, nil, ".", g)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no template")
 }
 
-func TestComposeWorkflowTemplate_UnknownInclude(t *testing.T) {
+func TestComposeWorkflowTemplate_AddonAfterNotInBase(t *testing.T) {
 	g := buildComposeTestGraph()
 
-	wf := graph.Workflow{
-		Name:     "Bad",
+	base := graph.Workflow{
+		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
-		Includes: []graph.WorkflowInclude{
-			{Workflow: "NonExistent", After: "book"},
+	}
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "nonexistentNode",
 		},
 	}
 
-	_, err := ComposeWorkflowTemplate(wf, ".", g)
+	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown workflow")
+	assert.Contains(t, err.Error(), "not found in base plan steps")
+}
+
+func TestComposeWorkflowTemplate_AddonNoTemplate(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+	addons := []graph.Workflow{
+		{
+			Name:  "BadAddon",
+			Kind:  "addon",
+			After: "book",
+			// No Template
+		},
+	}
+
+	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no template")
+}
+
+// --- ComposeWithAddons ---
+
+func TestComposeWithAddons_Success(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	p, err := ComposeWithAddons(base, []string{"Addon"}, g, ".")
+	require.NoError(t, err)
+
+	// Parent 3 + addon 2 = 5 steps.
+	require.Len(t, p.Execution.Steps, 5)
+}
+
+func TestComposeWithAddons_UnknownAddon(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	_, err := ComposeWithAddons(base, []string{"NonExistent"}, g, ".")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown addon workflow")
+}
+
+func TestComposeWithAddons_NotAnAddon(t *testing.T) {
+	g := buildComposeTestGraph()
+	// Add a non-addon workflow.
+	g.Workflows = append(g.Workflows, graph.Workflow{
+		Name:     "Regular",
+		Template: "testdata/compose/parent.yaml",
+	})
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	_, err := ComposeWithAddons(base, []string{"Regular"}, g, ".")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not an addon")
 }
 
 // buildComposeTestGraph creates a synthetic graph for composition tests.
@@ -630,7 +678,12 @@ func buildComposeTestGraph() *graph.Graph {
 	return &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Addon", Kind: "addon", Template: "testdata/compose/addon.yaml"},
+			{
+				Name:     "Addon",
+				Kind:     "addon",
+				Template: "testdata/compose/addon.yaml",
+				After:    "book",
+			},
 		},
 		Nodes: map[string]*graph.Node{
 			"search": {

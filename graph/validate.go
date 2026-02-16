@@ -234,53 +234,24 @@ func Validate(g *Graph) error {
 
 // ValidateWarnings returns non-fatal warnings about the graph.
 // These do not prevent the graph from being used, but may indicate
-// configuration issues (e.g., workflow steps referencing unknown nodes,
+// configuration issues (e.g., addon After referencing unknown nodes,
 // auto-wired edges with type mismatches, multiple satisfiers without preferred).
 func ValidateWarnings(g *Graph) []string {
 	var warnings []string
 
-	// Build workflow name index for include validation.
-	wfByName := map[string]int{}
 	for i, wf := range g.Workflows {
-		wfByName[wf.Name] = i
-	}
-
-	for i, wf := range g.Workflows {
-		for _, step := range wf.Steps {
-			if g.Nodes[step] == nil {
-				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): step %q references unknown node", i, wf.Name, step))
-			}
-		}
-
 		// Validate kind value
 		if wf.Kind != "" && wf.Kind != "addon" {
 			warnings = append(warnings, fmt.Sprintf("workflow %d (%q): unknown kind %q (expected \"addon\")", i, wf.Name, wf.Kind))
 		}
 
-		// Validate includes
-		for j, inc := range wf.Includes {
-			// Referenced workflow must exist
-			targetIdx, exists := wfByName[inc.Workflow]
-			if !exists {
-				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): include %d references unknown workflow %q", i, wf.Name, j, inc.Workflow))
-				continue
+		// Validate After field
+		if wf.After != "" {
+			if !wf.IsAddon() {
+				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): after is set but kind is not \"addon\"", i, wf.Name))
 			}
-			// Referenced workflow should have a template
-			if g.Workflows[targetIdx].Template == "" {
-				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): include %d references workflow %q which has no template", i, wf.Name, j, inc.Workflow))
-			}
-			// "after" step must exist in parent workflow steps
-			if inc.After != "" && len(wf.Steps) > 0 {
-				found := false
-				for _, step := range wf.Steps {
-					if step == inc.After {
-						found = true
-						break
-					}
-				}
-				if !found {
-					warnings = append(warnings, fmt.Sprintf("workflow %d (%q): include %d: after %q not found in workflow steps", i, wf.Name, j, inc.After))
-				}
+			if g.Nodes[wf.After] == nil {
+				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): after references unknown node %q", i, wf.Name, wf.After))
 			}
 		}
 	}

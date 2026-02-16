@@ -4,7 +4,7 @@ Workflow templates are pre-built plan skeletons attached to graph workflows. The
 
 ## Why Workflow Templates?
 
-Without templates, `aat prompt` must generate the entire plan from scratch: figure out which nodes to call, wire `from` references between steps, set up selections, configure cleanup. This works but is error-prone for complex multi-step workflows.
+Without templates, the LLM must generate the entire plan from scratch: figure out which nodes to call, wire `from` references between steps, set up selections, configure cleanup. This works but is error-prone for complex multi-step workflows.
 
 Templates flip the approach: the structural skeleton is pre-authored by a human who understands the API, and the LLM fills in only the variable parts. This produces more reliable plans and reduces LLM token usage.
 
@@ -14,15 +14,29 @@ Templates are linked to workflows in the graph's `workflows` section:
 
 ```yaml
 workflows:
+  # Base workflows — standalone test scenarios
   - name: Standard Checkout
     description: "Browse products, add to cart, and complete checkout"
     template: plans/standard-checkout.yaml
-    steps: [listProducts, createCart, addItem, addShipping, checkout]
 
+  - name: Express Checkout
+    description: "Single-step checkout for returning customers"
+    template: plans/express-checkout.yaml
+
+  # Addon workflows — splice into a base workflow
   - name: Apply Coupon
-    description: "Validate and apply a coupon code to a cart"
+    kind: addon
+    after: addItem
+    description: "Validate and apply a coupon code to the cart"
     template: plans/apply-coupon.yaml
-    steps: [validateCoupon, applyCoupon]
+
+  - name: Gift Wrap
+    kind: addon
+    after: addItem
+    description: "Add gift wrapping to the order"
+    template: plans/gift-wrap.yaml
+    wire:
+      cartId: createCart.cartId
 ```
 
 ### Workflow Fields
@@ -31,8 +45,10 @@ workflows:
 |-------|----------|-------------|
 | `name` | yes | Human-readable workflow name (matched case-insensitively by the LLM pipeline) |
 | `description` | no | What this workflow does |
-| `steps` | no | List of node names in this workflow (informational) |
 | `template` | no | Path to plan template YAML, relative to the graph file |
+| `kind` | no | Set to `"addon"` for workflows that splice into a base workflow |
+| `after` | addon only | Node name in the base workflow to splice after |
+| `wire` | no | Explicit PLACEHOLDER overrides for the addon (map of input name to `stepID.outputName` ref, or `"MANUAL"` to leave for the LLM) |
 
 The `template` path is resolved relative to the directory containing the graph file. For example, if the graph is at `myapi/graph.yaml` and the template is `plans/standard-checkout.yaml`, the resolved path is `myapi/plans/standard-checkout.yaml`.
 
@@ -76,7 +92,7 @@ Templates provide the **structural skeleton**:
 - **Selection field extraction** — `fromSelection` references for coordinated field access
 - **Cleanup** — cleanup steps with `runOn` conditions
 - **Goal** — which step is the test objective (`isGoal: true`)
-- **Intent** — the goal node and description
+- **Intent** — description of what the workflow tests
 
 ### What the LLM Fills In
 
@@ -101,41 +117,45 @@ values:
 
 Inputs with `PLACEHOLDER` defaults won't appear in the unfed inputs list, so the LLM knows not to add structural wiring for them -- it just replaces the placeholder with a real value.
 
-### End-to-End Workflows vs Sub-Workflows
+### Base Workflows vs Addon Workflows
 
 Templates fall into two categories:
 
-**End-to-end workflows** create resources and have a clear test objective:
-- Set `intent.goal` to the final step
+**Base workflows** are standalone test scenarios:
 - Mark one step as `isGoal: true`
 - Include cleanup (e.g., `cancelOrder` with `runOn: always`)
-- Example: Standard Checkout, Return & Refund
+- Provide the complete structural skeleton
+- Example: Standard Checkout, Full-Payload Booking
 
-**Sub-workflows** operate within an existing context (e.g., an open cart):
-- No `intent.goal` or `isGoal` steps
-- No cleanup (the calling workflow manages resource lifecycle)
-- All caller-provided inputs use `PLACEHOLDER` defaults
-- Example: Apply Coupon, Add Shipping, Gift Wrap
+**Addon workflows** splice into a base workflow at a specific point:
+- Declared with `kind: addon` in graph.yaml
+- Specify `after:` — the node in the base workflow to insert after
+- All inputs from the base workflow use `PLACEHOLDER` defaults
+- No cleanup of their own (the base workflow manages resource lifecycle)
+- Optionally specify `wire:` for explicit PLACEHOLDER overrides
+- Example: Apply Coupon, Seat Selection, Gift Wrap
+
+When an addon is composed with a base workflow, its steps are prefixed (e.g., `inc0_searchSeatMap`) to avoid ID collisions, and `PLACEHOLDER` values are auto-wired to matching outputs from the base workflow's steps.
 
 ## How the LLM Pipeline Uses Templates
 
 When you run `aat prompt`, the planning pipeline:
 
-1. **Goal analysis** — The LLM reads the prompt and identifies a matching workflow name (e.g., "Standard Checkout") and any repetitions (e.g., 3 items)
+1. **Workflow selection** — The LLM reads the prompt against the list of available workflows and selects the best match (e.g., "Standard Checkout"). It also identifies any addon workflows to compose (e.g., "Apply Coupon") and classifies constraints as hard, soft, or free.
 
-2. **Template lookup** — `FindWorkflowTemplate` searches the graph's workflows for a case-insensitive name match and returns the template path
+2. **Template loading** — `LoadWorkflowTemplate` parses the base workflow's plan YAML and validates that all referenced nodes exist in the graph.
 
-3. **Template loading** — `LoadWorkflowTemplate` parses the plan YAML and validates that all referenced nodes exist in the graph
+3. **Addon composition** — If the LLM selected addons, `ComposeWithAddons` loads each addon template, prefixes its step IDs (e.g., `inc0_`), auto-wires `PLACEHOLDER` values to matching outputs from the base workflow, and splices the addon steps into the base plan at the `after:` insertion point.
 
-4. **Multiplicity expansion** — `ExpandMultiplicity` replicates steps for repeated operations (e.g., `addItem` becomes `addItem_1`, `addItem_2` with step aliasing)
+4. **Multiplicity expansion** — `ExpandMultiplicity` replicates steps for repeated operations (e.g., `addItem` becomes `addItem_1`, `addItem_2` with step aliasing).
 
-5. **Unfed input discovery** — `UnfedInputsFromTemplate` identifies inputs that need LLM-provided values (no `from`, `fromSelection`, `select`, or default)
+5. **Unfed input discovery** — `UnfedInputsFromTemplate` identifies inputs that need LLM-provided values (no `from`, `fromSelection`, `select`, or default).
 
-6. **LLM plan call** — The skeleton YAML and unfed inputs list are sent to the LLM, which returns values, strategies, and assertions
+6. **LLM plan call** — The skeleton YAML and unfed inputs list are sent to the LLM, which returns values, strategies, and assertions.
 
-7. **Merge** — `MergeLLMValuesWithIDs` merges the LLM's creative content into the skeleton, preserving structural wiring
+7. **Merge** — `MergeLLMValuesWithIDs` merges the LLM's creative content into the skeleton, preserving structural wiring. Only inputs that genuinely need values (unfed inputs) accept new LLM literals — this prevents the LLM from hallucinating values that would shadow auto-wired references.
 
-If template lookup or loading fails, the pipeline falls back to the standard approach: backward chaining from goal nodes to build a skeleton from scratch.
+If the LLM fails to select a recognized workflow, the pipeline returns an error listing available workflows.
 
 ## Validation
 
@@ -174,15 +194,13 @@ These tests catch regressions when graph nodes, edges, or outputs change.
 
 ## Writing a New Template
 
-1. **Identify the workflow** — Decide which graph nodes participate and in what order
+### Base Workflow Template
+
+1. **Identify the workflow** — Decide which graph nodes participate and in what order.
 
 2. **Write the plan YAML** — Start with the steps, wire `from`/`fromSelection` references, add selections:
    ```yaml
-   metadata:
-     prompt: "short description for LLM matching"
-
    intent:
-     goal: finalStepNode        # omit for sub-workflows
      description: "What this tests"
 
    execution:
@@ -191,9 +209,13 @@ These tests catch regressions when graph nodes, edges, or outputs change.
          values:
            input1: PLACEHOLDER    # LLM fills
            input2: {from: ...}    # structural wiring
-       # ...
+       - node: lastStep
+         dependsOn: [firstStep]
+         isGoal: true
+         values:
+           id: {from: firstStep.id}
 
-     cleanup:                     # omit for sub-workflows
+     cleanup:
        - node: cleanupNode
          runOn: always
    ```
@@ -213,7 +235,7 @@ These tests catch regressions when graph nodes, edges, or outputs change.
        cartId: {from: createCart.cartId}
    ```
 
-4. **Register in graph.yaml** — Add a `template:` field to the workflow entry
+4. **Register in graph.yaml** — Add a workflow entry with a `template:` field.
 
 5. **Validate** — Run `go test ./intent/...` or validate programmatically:
    ```go
@@ -222,9 +244,64 @@ These tests catch regressions when graph nodes, edges, or outputs change.
    err := plan.Validate(p, g)
    ```
 
+### Addon Workflow Template
+
+Addon templates are self-contained sub-workflows that get composed into a base workflow.
+
+1. **Write the addon template** — Use `PLACEHOLDER` for all inputs that come from the base workflow:
+   ```yaml
+   intent:
+     description: "Apply a coupon code to the cart"
+
+   execution:
+     steps:
+       - node: validateCoupon
+         values:
+           cartId: PLACEHOLDER      # auto-wired from base workflow
+           couponCode: PLACEHOLDER   # LLM fills
+       - node: applyCoupon
+         dependsOn: [validateCoupon]
+         values:
+           cartId: PLACEHOLDER
+           couponId: {from: validateCoupon.couponId}
+   ```
+
+2. **Register in graph.yaml** as an addon:
+   ```yaml
+   - name: Apply Coupon
+     kind: addon
+     after: addItem              # node in the base workflow to splice after
+     description: "Validate and apply a coupon code"
+     template: plans/apply-coupon.yaml
+   ```
+
+3. **Add `wire:` overrides if needed** — When a PLACEHOLDER input name doesn't match any base workflow output name, use explicit wiring:
+   ```yaml
+   - name: Apply Coupon
+     kind: addon
+     after: addItem
+     template: plans/apply-coupon.yaml
+     wire:
+       cartId: createCart.cartId    # explicit: "cartId" output doesn't exist, wire to createCart.cartId
+   ```
+   Use `wire: { inputName: "MANUAL" }` to clear a placeholder entirely, leaving it for the LLM to fill.
+
+### How Auto-Wiring Works
+
+When an addon is composed into a base workflow:
+
+1. Each addon step ID is prefixed (e.g., `validateCoupon` becomes `inc0_validateCoupon`).
+2. For each `PLACEHOLDER` value in the addon:
+   - If there's an explicit `wire:` override, use that reference.
+   - If `wire:` says `"MANUAL"`, clear the value (LLM fills it).
+   - Otherwise, scan all base workflow step outputs for a matching name. Last producer wins.
+3. `dependsOn` entries are automatically added for any cross-workflow references.
+4. Addon steps are spliced into the base plan immediately after the `after:` insertion point.
+
 ## See Also
 
 - [Plan Authoring](plan-authoring.md) -- full plan YAML schema reference
 - [LLM-Assisted Planning](prompt-workflow.md) -- how `aat prompt` uses templates
 - [Graph Authoring](graph-authoring.md) -- graph structure and workflows section
 - [Value Flow](value-flow.md) -- how values resolve at runtime
+- [Travelport Example](travelport-example.md) -- real-world example with base and addon workflows

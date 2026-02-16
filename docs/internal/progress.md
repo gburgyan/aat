@@ -80,6 +80,7 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] H2c. Documentation (petstore README tutorial, project root README)
   - [x] H2d. Housekeeping (progress, worklog)
 - [x] H3. `aat graph validate` (absorbed by Task 23d)
+- [x] WS. Workflow Simplification (remove goals, pre-composed workflows, step lists, backward chaining from pipeline)
 - [x] CT. Composable Templates & AI Sweet Spot
   - [x] CT-A. Graph schema: Workflow.Kind, Workflow.Includes, WorkflowInclude type
   - [x] CT-B. Composition algorithm: ComposeWorkflowTemplate, auto-wire, prefix, splice

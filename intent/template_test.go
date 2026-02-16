@@ -577,7 +577,7 @@ func TestMergeLLMValuesWithIDs_MatchesByStepID(t *testing.T) {
 		},
 	}
 
-	MergeLLMValuesWithIDs(skeleton, llmPlan)
+	MergeLLMValuesWithIDs(skeleton, llmPlan, nil)
 
 	// Both steps should have descriptions
 	assert.Equal(t, "First traveler", skeleton.Execution.Steps[0].Description)
@@ -619,9 +619,131 @@ func TestMergeLLMValuesWithIDs_NoIDFallsBackToNode(t *testing.T) {
 		},
 	}
 
-	MergeLLMValuesWithIDs(skeleton, llmPlan)
+	MergeLLMValuesWithIDs(skeleton, llmPlan, nil)
 
 	assert.Equal(t, "Search for flights", skeleton.Execution.Steps[0].Description)
+	assert.Equal(t, "DEN", skeleton.Execution.Steps[0].Values["origin"].Default)
+}
+
+func TestMergeLLMValuesWithIDs_RejectsHallucinatedLiterals(t *testing.T) {
+	// Skeleton has addPayment with "from" wiring for some fields.
+	// The LLM hallucinates a literal for "fopIdentifierValue" which is NOT
+	// in the skeleton (it will be auto-wired from a graph edge at runtime).
+	// With an unfed set that doesn't include it, the hallucinated value
+	// should be rejected.
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addPayment",
+					Values: map[string]plan.StepValue{
+						"workbenchId": {From: "createWorkbench.workbenchId"},
+						"amount":      {From: "priceOffer.totalPrice"},
+					},
+				},
+			},
+		},
+	}
+
+	llmPlan := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addPayment",
+					Values: map[string]plan.StepValue{
+						"fopIdentifierValue": {Default: "CASH12345"},  // hallucinated
+						"offerId":            {Default: "OFFER67890"}, // hallucinated
+					},
+				},
+			},
+		},
+	}
+
+	// Unfed set does NOT include addPayment.fopIdentifierValue or addPayment.offerId.
+	unfed := map[string]bool{}
+
+	MergeLLMValuesWithIDs(skeleton, llmPlan, unfed)
+
+	// Hallucinated values should NOT be added.
+	_, hasFop := skeleton.Execution.Steps[0].Values["fopIdentifierValue"]
+	_, hasOffer := skeleton.Execution.Steps[0].Values["offerId"]
+	assert.False(t, hasFop, "fopIdentifierValue should not be added")
+	assert.False(t, hasOffer, "offerId should not be added")
+
+	// Existing wiring should be preserved.
+	assert.Equal(t, "createWorkbench.workbenchId", skeleton.Execution.Steps[0].Values["workbenchId"].From)
+}
+
+func TestMergeLLMValuesWithIDs_AcceptsUnfedLiterals(t *testing.T) {
+	// Skeleton has searchFlights with no values. The LLM provides literals
+	// for origin and destination which ARE in the unfed set.
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node:   "searchFlights",
+					Values: map[string]plan.StepValue{},
+				},
+			},
+		},
+	}
+
+	llmPlan := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]plan.StepValue{
+						"origin":      {Default: "DEN"},
+						"destination": {Default: "SFO"},
+						"extraField":  {Default: "hallucinated"}, // not unfed
+					},
+				},
+			},
+		},
+	}
+
+	unfed := map[string]bool{
+		"searchFlights.origin":      true,
+		"searchFlights.destination": true,
+	}
+
+	MergeLLMValuesWithIDs(skeleton, llmPlan, unfed)
+
+	assert.Equal(t, "DEN", skeleton.Execution.Steps[0].Values["origin"].Default)
+	assert.Equal(t, "SFO", skeleton.Execution.Steps[0].Values["destination"].Default)
+	_, hasExtra := skeleton.Execution.Steps[0].Values["extraField"]
+	assert.False(t, hasExtra, "hallucinated extraField should not be added")
+}
+
+func TestMergeLLMValuesWithIDs_NilUnfedAcceptsAll(t *testing.T) {
+	// When unfed is nil (legacy behavior), all new values are accepted.
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node:   "search",
+					Values: map[string]plan.StepValue{},
+				},
+			},
+		},
+	}
+
+	llmPlan := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	MergeLLMValuesWithIDs(skeleton, llmPlan, nil)
+
 	assert.Equal(t, "DEN", skeleton.Execution.Steps[0].Values["origin"].Default)
 }
 
@@ -643,36 +765,38 @@ func TestFormatGraph_WorkflowTemplateMarker(t *testing.T) {
 	assert.NotContains(t, result, "Search Only** [template]")
 }
 
-// --- buildGoalPrompt workflow instructions ---
+// --- buildWorkflowSelectionPrompt tests ---
 
-func TestBuildGoalPrompt_WithWorkflowTemplates(t *testing.T) {
+func TestBuildWorkflowSelectionPrompt_WithWorkflows(t *testing.T) {
 	g := &graph.Graph{
 		Workflows: []graph.Workflow{
-			{Name: "Booking", Template: "plans/booking.yaml"},
+			{Name: "Booking", Template: "plans/booking.yaml", Description: "Full booking flow"},
+			{Name: "Ancillary", Kind: "addon", Template: "plans/ancillary.yaml", After: "addTraveler", Description: "Add ancillary services"},
 		},
 	}
 
-	system, _ := buildGoalPrompt("graph context", "book a flight", g, fixedNow())
+	system, _ := buildWorkflowSelectionPrompt("graph context", "book a flight", g, fixedNow())
 	assert.Contains(t, system, "workflow")
 	assert.Contains(t, system, "repetitions")
-	assert.Contains(t, system, "[template]")
 	assert.Contains(t, system, "addons")
-	assert.Contains(t, system, "[addon]")
+	assert.Contains(t, system, "Booking")
+	assert.Contains(t, system, "Ancillary")
+	assert.Contains(t, system, "splices after: addTraveler")
 }
 
-func TestBuildGoalPrompt_WithoutWorkflowTemplates(t *testing.T) {
+func TestBuildWorkflowSelectionPrompt_NoTemplateWorkflowsSkipped(t *testing.T) {
 	g := &graph.Graph{
 		Workflows: []graph.Workflow{
-			{Name: "Booking"}, // no template
+			{Name: "Booking"}, // no template — should be skipped
 		},
 	}
 
-	system, _ := buildGoalPrompt("graph context", "book a flight", g, fixedNow())
-	assert.NotContains(t, system, "workflow")
-	assert.NotContains(t, system, "repetitions")
+	system, _ := buildWorkflowSelectionPrompt("graph context", "book a flight", g, fixedNow())
+	assert.NotContains(t, system, "Booking")
 }
 
-func TestBuildGoalPrompt_NilGraph(t *testing.T) {
-	system, _ := buildGoalPrompt("graph context", "test", nil, fixedNow())
-	assert.NotContains(t, system, "workflow")
+func TestBuildWorkflowSelectionPrompt_NilGraph(t *testing.T) {
+	assert.Panics(t, func() {
+		buildWorkflowSelectionPrompt("graph context", "test", nil, fixedNow())
+	})
 }
