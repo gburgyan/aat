@@ -363,7 +363,7 @@ func TestBackwardChain_ShortestPathChosen(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"source":   {Name: "source", Adapter: "source", Inputs: nil, Outputs: []Output{{Name: "data", Type: "string"}}},
+			"source":    {Name: "source", Adapter: "source", Inputs: nil, Outputs: []Output{{Name: "data", Type: "string"}}},
 			"transform": {Name: "transform", Adapter: "transform", Inputs: []Input{{Name: "data", Type: "string"}}, Outputs: []Output{{Name: "result", Type: "string"}}},
 			"shortcut":  {Name: "shortcut", Adapter: "shortcut", Inputs: nil, Outputs: []Output{{Name: "result", Type: "string"}}},
 			"consumer":  {Name: "consumer", Adapter: "consumer", Inputs: []Input{{Name: "result", Type: "string"}}, Outputs: []Output{{Name: "output", Type: "string"}}},
@@ -1026,14 +1026,14 @@ func TestBackwardChain_TravelportFullGraph_CommitReservation(t *testing.T) {
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commitReservation"}})
 	require.NoError(t, err)
 
-	// Expected 8-node booking chain:
-	// searchFlights → priceOfferReference → createWorkbench → addOfferReference →
+	// Expected 8-node booking chain (full-payload is preferred):
+	// searchFlights → priceOfferFullPayload → createWorkbench → addOfferFullPayload →
 	// addTraveler → addFormOfPaymentCash → addPayment → commitReservation
 	expectedNodes := []string{
 		"searchFlights",
-		"priceOfferReference",
+		"priceOfferFullPayload",
 		"createWorkbench",
-		"addOfferReference",
+		"addOfferFullPayload",
 		"addTraveler",
 		"addFormOfPaymentCash",
 		"addPayment",
@@ -1052,30 +1052,30 @@ func TestBackwardChain_TravelportFullGraph_CommitReservation(t *testing.T) {
 	for i, n := range result.Nodes {
 		indexOf[n] = i
 	}
-	// searchFlights before priceOfferReference (flightsSearched)
-	assert.Less(t, indexOf["searchFlights"], indexOf["priceOfferReference"])
-	// priceOfferReference before addOfferReference (offerPriced)
-	assert.Less(t, indexOf["priceOfferReference"], indexOf["addOfferReference"])
-	// createWorkbench before addOfferReference (workbenchCreated)
-	assert.Less(t, indexOf["createWorkbench"], indexOf["addOfferReference"])
+	// searchFlights before priceOfferFullPayload (flightsSearched)
+	assert.Less(t, indexOf["searchFlights"], indexOf["priceOfferFullPayload"])
+	// priceOfferFullPayload before addOfferFullPayload (offerPriced)
+	assert.Less(t, indexOf["priceOfferFullPayload"], indexOf["addOfferFullPayload"])
+	// createWorkbench before addOfferFullPayload (workbenchCreated)
+	assert.Less(t, indexOf["createWorkbench"], indexOf["addOfferFullPayload"])
 	// createWorkbench before addTraveler (workbenchCreated)
 	assert.Less(t, indexOf["createWorkbench"], indexOf["addTraveler"])
 	// createWorkbench before addFormOfPaymentCash (workbenchCreated)
 	assert.Less(t, indexOf["createWorkbench"], indexOf["addFormOfPaymentCash"])
 	// addFormOfPaymentCash before addPayment (formOfPaymentAdded)
 	assert.Less(t, indexOf["addFormOfPaymentCash"], indexOf["addPayment"])
-	// addOfferReference before addPayment (data edge: offerIdentifierValue)
-	assert.Less(t, indexOf["addOfferReference"], indexOf["addPayment"])
+	// addOfferFullPayload before addPayment (data edge: offerIdentifierValue)
+	assert.Less(t, indexOf["addOfferFullPayload"], indexOf["addPayment"])
 	// addPayment before commitReservation (paymentApplied)
 	assert.Less(t, indexOf["addPayment"], indexOf["commitReservation"])
-	// addOfferReference before commitReservation (offerAdded)
-	assert.Less(t, indexOf["addOfferReference"], indexOf["commitReservation"])
+	// addOfferFullPayload before commitReservation (offerAdded)
+	assert.Less(t, indexOf["addOfferFullPayload"], indexOf["commitReservation"])
 	// addTraveler before commitReservation (travelerAdded)
 	assert.Less(t, indexOf["addTraveler"], indexOf["commitReservation"])
 
 	// Preferred nodes should have been chosen over alternatives.
-	assert.NotContains(t, result.Nodes, "priceOfferFullPayload")
-	assert.NotContains(t, result.Nodes, "addOfferFullPayload")
+	assert.NotContains(t, result.Nodes, "priceOfferReference")
+	assert.NotContains(t, result.Nodes, "addOfferReference")
 	assert.NotContains(t, result.Nodes, "addFormOfPaymentCard")
 	assert.NotContains(t, result.Nodes, "createWorkbenchFromLocator")
 	assert.NotContains(t, result.Nodes, "createWorkbenchFromIdentifier")

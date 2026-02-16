@@ -92,6 +92,12 @@ type TemplateAdapter struct {
 // placeholderRe matches {{key}} with optional internal whitespace.
 var placeholderRe = regexp.MustCompile(`\{\{\s*([^}]+?)\s*\}\}`)
 
+// iterOpenRe matches {{#key}} iteration block opening tags.
+var iterOpenRe = regexp.MustCompile(`\{\{#(\w+)\}\}`)
+
+// condOpenRe matches {{?key}} conditional block opening tags.
+var condOpenRe = regexp.MustCompile(`\{\{\?(\w+)\}\}`)
+
 // ParseTemplate parses YAML bytes into a Template and validates required fields.
 func ParseTemplate(data []byte) (*Template, error) {
 	var t Template
@@ -251,17 +257,31 @@ func (a *TemplateAdapter) ValidateResponse(resp *Response) *ValidationResult {
 }
 
 // substitutePlaceholders replaces {{key}} tokens in tmpl with values from
-// inputs (checked first) then config.Values. Returns an error listing all
-// unresolved placeholders.
+// inputs (checked first) then config.Values. Iteration blocks {{#key}}...{{/key}}
+// are expanded first, then regular placeholders are substituted. Returns an
+// error listing all unresolved placeholders.
 func substitutePlaceholders(tmpl string, inputs map[string]any, config *EnvironmentConfig) (string, error) {
+	// Phase 1: expand conditional blocks (must run before iteration/placeholders)
+	condExpanded, err := expandConditionalBlocks(tmpl, inputs)
+	if err != nil {
+		return "", err
+	}
+
+	// Phase 2: expand iteration blocks
+	expanded, err := expandIterationBlocks(condExpanded, inputs)
+	if err != nil {
+		return "", err
+	}
+
+	// Phase 3: substitute regular placeholders
 	var missing []string
 
-	result := placeholderRe.ReplaceAllStringFunc(tmpl, func(match string) string {
+	result := placeholderRe.ReplaceAllStringFunc(expanded, func(match string) string {
 		sub := placeholderRe.FindStringSubmatch(match)
 		key := sub[1]
 
 		if v, ok := inputs[key]; ok {
-			return fmt.Sprintf("%v", v)
+			return formatValue(v)
 		}
 		if config != nil {
 			if v, ok := config.GetValue(key); ok {
@@ -276,6 +296,143 @@ func substitutePlaceholders(tmpl string, inputs map[string]any, config *Environm
 		return "", fmt.Errorf("unresolved placeholders: %s", strings.Join(missing, ", "))
 	}
 	return result, nil
+}
+
+// expandConditionalBlocks finds and expands {{?key}}...{{/key}} blocks in the
+// template. If the key exists in inputs and has a non-empty value, the block
+// content is included; otherwise the entire block (including tags) is removed.
+func expandConditionalBlocks(tmpl string, inputs map[string]any) (string, error) {
+	result := tmpl
+	for {
+		loc := condOpenRe.FindStringIndex(result)
+		if loc == nil {
+			break
+		}
+
+		match := condOpenRe.FindStringSubmatch(result[loc[0]:loc[1]])
+		key := match[1]
+
+		closeTag := "{{/" + key + "}}"
+		closeIdx := strings.Index(result[loc[1]:], closeTag)
+		if closeIdx < 0 {
+			return "", fmt.Errorf("unclosed conditional block: {{?%s}}", key)
+		}
+
+		body := result[loc[1] : loc[1]+closeIdx]
+		blockEnd := loc[1] + closeIdx + len(closeTag)
+
+		if condPresent(inputs, key) {
+			result = result[:loc[0]] + body + result[blockEnd:]
+		} else {
+			result = result[:loc[0]] + result[blockEnd:]
+		}
+	}
+	return result, nil
+}
+
+// condPresent returns true if the key exists in inputs and has a non-empty value.
+func condPresent(inputs map[string]any, key string) bool {
+	v, ok := inputs[key]
+	if !ok {
+		return false
+	}
+	if s, isStr := v.(string); isStr {
+		return s != ""
+	}
+	return v != nil
+}
+
+// expandIterationBlocks finds and expands {{#key}}...{{/key}} blocks in the
+// template. Each block is repeated for every element in the named array,
+// with elements comma-separated in the output.
+func expandIterationBlocks(tmpl string, inputs map[string]any) (string, error) {
+	result := tmpl
+	for {
+		loc := iterOpenRe.FindStringIndex(result)
+		if loc == nil {
+			break
+		}
+
+		match := iterOpenRe.FindStringSubmatch(result[loc[0]:loc[1]])
+		key := match[1]
+
+		// Build closing tag pattern for this specific key
+		closeTag := "{{/" + key + "}}"
+		closeIdx := strings.Index(result[loc[1]:], closeTag)
+		if closeIdx < 0 {
+			return "", fmt.Errorf("unclosed iteration block: {{#%s}}", key)
+		}
+
+		body := result[loc[1] : loc[1]+closeIdx]
+		blockEnd := loc[1] + closeIdx + len(closeTag)
+
+		val, ok := inputs[key]
+		if !ok {
+			return "", fmt.Errorf("iteration variable %q not found in inputs", key)
+		}
+
+		arr, ok := val.([]any)
+		if !ok {
+			return "", fmt.Errorf("iteration variable %q is not an array (got %T)", key, val)
+		}
+
+		expanded := expandArray(body, arr)
+		result = result[:loc[0]] + expanded + result[blockEnd:]
+	}
+	return result, nil
+}
+
+// expandArray repeats body for each element in arr, joining results with commas.
+func expandArray(body string, arr []any) string {
+	parts := make([]string, len(arr))
+	for i, elem := range arr {
+		parts[i] = expandElement(body, elem)
+	}
+	return strings.Join(parts, ",")
+}
+
+// expandElement substitutes {{.}} and {{.field}} placeholders within a single
+// iteration element. {{.}} is replaced with the element value itself (for
+// scalars). {{.field}} is replaced with the named field from a map element.
+func expandElement(body string, elem any) string {
+	// Replace {{.fieldName}} first (more specific), then {{.}}
+	dotFieldRe := regexp.MustCompile(`\{\{\s*\.(\w+)\s*\}\}`)
+	result := dotFieldRe.ReplaceAllStringFunc(body, func(match string) string {
+		sub := dotFieldRe.FindStringSubmatch(match)
+		fieldName := sub[1]
+		if m, ok := elem.(map[string]any); ok {
+			if v, exists := m[fieldName]; exists {
+				return formatValue(v)
+			}
+		}
+		return match
+	})
+
+	// Replace {{.}} with the element itself
+	dotRe := regexp.MustCompile(`\{\{\s*\.\s*\}\}`)
+	result = dotRe.ReplaceAllStringFunc(result, func(match string) string {
+		return formatValue(elem)
+	})
+
+	return result
+}
+
+// formatValue converts a value to its string representation for template output.
+// Arrays are marshaled as JSON. Strings are used directly. Other types use
+// fmt.Sprintf.
+func formatValue(v any) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case []any:
+		data, err := json.Marshal(val)
+		if err != nil {
+			return fmt.Sprintf("%v", val)
+		}
+		return string(data)
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
 // normalizeJSONPath converts a JSONPath expression to GJSON syntax.

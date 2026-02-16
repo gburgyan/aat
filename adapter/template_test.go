@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -213,6 +214,12 @@ func TestSubstitutePlaceholders(t *testing.T) {
 			config: nil,
 			want:   "value",
 		},
+		{
+			name:   "array value in regular placeholder",
+			tmpl:   `{"ids": {{ids}}}`,
+			inputs: map[string]any{"ids": []any{"a", "b"}},
+			want:   `{"ids": ["a","b"]}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -226,6 +233,255 @@ func TestSubstitutePlaceholders(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
+	}
+}
+
+func TestExpandIterationBlocks(t *testing.T) {
+	tests := []struct {
+		name    string
+		tmpl    string
+		inputs  map[string]any
+		want    string
+		wantErr string
+	}{
+		{
+			name:   "scalar array",
+			tmpl:   `[{{#items}}"{{.}}"{{/items}}]`,
+			inputs: map[string]any{"items": []any{"a", "b", "c"}},
+			want:   `["a","b","c"]`,
+		},
+		{
+			name:   "map array with field access",
+			tmpl:   `[{{#items}}{"id":"{{.id}}"}{{/items}}]`,
+			inputs: map[string]any{"items": []any{map[string]any{"id": "1"}, map[string]any{"id": "2"}}},
+			want:   `[{"id":"1"},{"id":"2"}]`,
+		},
+		{
+			name:   "single element array",
+			tmpl:   `[{{#items}}"{{.}}"{{/items}}]`,
+			inputs: map[string]any{"items": []any{"only"}},
+			want:   `["only"]`,
+		},
+		{
+			name:   "empty array",
+			tmpl:   `[{{#items}}"{{.}}"{{/items}}]`,
+			inputs: map[string]any{"items": []any{}},
+			want:   `[]`,
+		},
+		{
+			name:    "missing variable",
+			tmpl:    `{{#missing}}x{{/missing}}`,
+			inputs:  map[string]any{},
+			wantErr: "not found in inputs",
+		},
+		{
+			name:    "non-array variable",
+			tmpl:    `{{#val}}x{{/val}}`,
+			inputs:  map[string]any{"val": "string"},
+			wantErr: "not an array",
+		},
+		{
+			name:    "unclosed block",
+			tmpl:    `{{#items}}body without close`,
+			inputs:  map[string]any{"items": []any{"a"}},
+			wantErr: "unclosed iteration block",
+		},
+		{
+			name:   "multiple blocks",
+			tmpl:   `[{{#a}}"{{.}}"{{/a}}] and [{{#b}}"{{.}}"{{/b}}]`,
+			inputs: map[string]any{"a": []any{"x"}, "b": []any{"y", "z"}},
+			want:   `["x"] and ["y","z"]`,
+		},
+		{
+			name:   "no blocks passthrough",
+			tmpl:   `just a regular template`,
+			inputs: map[string]any{},
+			want:   `just a regular template`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandIterationBlocks(tt.tmpl, tt.inputs)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestExpandConditionalBlocks(t *testing.T) {
+	tests := []struct {
+		name    string
+		tmpl    string
+		inputs  map[string]any
+		want    string
+		wantErr string
+	}{
+		{
+			name:   "present key includes block",
+			tmpl:   `before{{?carrier}}, "carrier": "{{carrier}}"{{/carrier}} after`,
+			inputs: map[string]any{"carrier": "QF"},
+			want:   `before, "carrier": "{{carrier}}" after`,
+		},
+		{
+			name:   "absent key omits block",
+			tmpl:   `before{{?carrier}}, "carrier": "{{carrier}}"{{/carrier}} after`,
+			inputs: map[string]any{},
+			want:   `before after`,
+		},
+		{
+			name:   "empty string omits block",
+			tmpl:   `before{{?carrier}}, "extra": true{{/carrier}} after`,
+			inputs: map[string]any{"carrier": ""},
+			want:   `before after`,
+		},
+		{
+			name:   "non-string truthy value includes block",
+			tmpl:   `{{?count}}count is set{{/count}}`,
+			inputs: map[string]any{"count": 42},
+			want:   `count is set`,
+		},
+		{
+			name:   "nil value omits block",
+			tmpl:   `{{?x}}included{{/x}}`,
+			inputs: map[string]any{"x": nil},
+			want:   ``,
+		},
+		{
+			name:   "multiple conditional blocks",
+			tmpl:   `{{?a}}A{{/a}} {{?b}}B{{/b}}`,
+			inputs: map[string]any{"a": "yes"},
+			want:   `A `,
+		},
+		{
+			name:    "unclosed conditional block",
+			tmpl:    `{{?key}}no close`,
+			inputs:  map[string]any{"key": "val"},
+			wantErr: "unclosed conditional block",
+		},
+		{
+			name:   "no conditional blocks passthrough",
+			tmpl:   `just a regular template`,
+			inputs: map[string]any{},
+			want:   `just a regular template`,
+		},
+		{
+			name: "realistic SearchModifiersAir",
+			tmpl: `{
+  "offersPerPage": 15,
+  {{?carrierPreference}}"SearchModifiersAir": {
+    "@type": "SearchModifiersAir",
+    "CarrierPreference": [{"@type": "CarrierPreference", "preferenceType": "Permitted", "carriers": ["{{carrierPreference}}"]}]
+  },
+  {{/carrierPreference}}"PassengerCriteria": []
+}`,
+			inputs: map[string]any{"carrierPreference": "QF"},
+			want: `{
+  "offersPerPage": 15,
+  "SearchModifiersAir": {
+    "@type": "SearchModifiersAir",
+    "CarrierPreference": [{"@type": "CarrierPreference", "preferenceType": "Permitted", "carriers": ["{{carrierPreference}}"]}]
+  },
+  "PassengerCriteria": []
+}`,
+		},
+		{
+			name: "realistic SearchModifiersAir absent",
+			tmpl: `{
+  "offersPerPage": 15,
+  {{?carrierPreference}}"SearchModifiersAir": {
+    "CarrierPreference": [{"carriers": ["{{carrierPreference}}"]}]
+  },
+  {{/carrierPreference}}"PassengerCriteria": []
+}`,
+			inputs: map[string]any{},
+			want: `{
+  "offersPerPage": 15,
+  "PassengerCriteria": []
+}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := expandConditionalBlocks(tt.tmpl, tt.inputs)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestFormatValue(t *testing.T) {
+	tests := []struct {
+		name string
+		val  any
+		want string
+	}{
+		{"string", "hello", "hello"},
+		{"int", 42, "42"},
+		{"bool", true, "true"},
+		{"array", []any{"a", "b"}, `["a","b"]`},
+		{"nil", nil, "<nil>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatValue(tt.val)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestIterationIntegration_PriceOfferReference(t *testing.T) {
+	body := `{
+  "CatalogProductOfferingSelection": [
+    {
+      "CatalogProductOfferingIdentifier": {
+        "id": "{{offeringId}}"
+      },
+      "ProductIdentifier": [
+        {{#productIds}}
+        {"Identifier": {"value": "{{.}}"}}
+        {{/productIds}}
+      ]
+    }
+  ]
+}`
+
+	inputs := map[string]any{
+		"offeringId": "offer-1",
+		"productIds": []any{"p0", "p1", "p2"},
+	}
+
+	result, err := substitutePlaceholders(body, inputs, nil)
+	require.NoError(t, err)
+
+	// Verify valid JSON
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(result), &parsed), "output should be valid JSON: %s", result)
+
+	// Verify 3 ProductIdentifier entries
+	selections := parsed["CatalogProductOfferingSelection"].([]any)
+	require.Len(t, selections, 1)
+	sel := selections[0].(map[string]any)
+	products := sel["ProductIdentifier"].([]any)
+	assert.Len(t, products, 3)
+
+	// Verify each product value
+	for i, pid := range []string{"p0", "p1", "p2"} {
+		prod := products[i].(map[string]any)
+		ident := prod["Identifier"].(map[string]any)
+		assert.Equal(t, pid, ident["value"])
 	}
 }
 
