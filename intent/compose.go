@@ -13,7 +13,7 @@ import (
 // addon workflow templates. Each addon uses its own After field to find
 // the insertion point (the step in the base plan whose Node matches
 // addon.After). Addon step IDs are prefixed (inc0_, inc1_, ...) to avoid
-// collisions, and PLACEHOLDERs are resolved via auto-wiring from parent
+// collisions, and AUTOWIRE values are resolved via auto-wiring from parent
 // step outputs or explicit Wire overrides from the addon definition.
 //
 // The result is a standard *plan.Plan that requires no engine changes.
@@ -56,7 +56,7 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 		// Prefix sub-workflow step IDs and rewrite internal references.
 		prefixStepRefs(sub, prefix)
 
-		// Auto-wire PLACEHOLDERs in sub-workflow steps using addon's Wire.
+		// Auto-wire AUTOWIRE values in sub-workflow steps using addon's Wire.
 		autoWirePlaceholders(sub, outputMap, addon.Wire, g)
 
 		// Add insertion-point dependency to sub-workflow root steps.
@@ -191,12 +191,12 @@ func prefixStepRefs(sub *plan.Plan, prefix string) {
 	// Prefix cleanup nodes are not prefixed — they reference graph node names.
 }
 
-// autoWirePlaceholders resolves PLACEHOLDER values in the sub-workflow.
-// For each step input with Default == "PLACEHOLDER":
+// autoWirePlaceholders resolves AUTOWIRE values in the sub-workflow.
+// For each step input with Default == "AUTOWIRE":
 //  1. Check explicit Wire map — if the input name is in Wire, use that ref.
 //  2. If Wire[name] == "MANUAL", clear the value (LLM fills it).
 //  3. Otherwise, scan outputMap for a matching output name. Last producer wins.
-//  4. If no match found, leave PLACEHOLDER (LLM or user must fill it).
+//  4. If no match found, leave AUTOWIRE (LLM or user must fill it).
 func autoWirePlaceholders(sub *plan.Plan, outputMap map[string]string, wire map[string]string, g *graph.Graph) {
 	for i := range sub.Execution.Steps {
 		step := &sub.Execution.Steps[i]
@@ -231,15 +231,16 @@ func autoWirePlaceholders(sub *plan.Plan, outputMap map[string]string, wire map[
 				continue
 			}
 
-			// No match — leave placeholder. Will show up as unfed input.
+			// No match — leave AUTOWIRE marker. Will show up as unfed input.
 		}
 	}
 }
 
-// isPlaceholder returns true if the StepValue is a bare PLACEHOLDER string.
+// isPlaceholder returns true if the StepValue is an AUTOWIRE marker string.
+// Also accepts legacy "PLACEHOLDER" for backward compatibility.
 func isPlaceholder(sv plan.StepValue) bool {
 	s, ok := sv.Default.(string)
-	return ok && s == "PLACEHOLDER"
+	return ok && (s == "AUTOWIRE" || s == "PLACEHOLDER")
 }
 
 // addInsertionDeps adds the insertion point step as a dependency to all

@@ -98,7 +98,7 @@ type Workflow struct {
 	Kind        string            `yaml:"kind,omitempty"`     // "addon" for sub-workflows that compose into main workflows
 	Template    string            `yaml:"template,omitempty"` // path to plan template YAML (relative to graph file)
 	After       string            `yaml:"after,omitempty"`    // addon: node to splice after in the base workflow
-	Wire        map[string]string `yaml:"wire,omitempty"`     // addon: default PLACEHOLDER overrides
+	Wire        map[string]string `yaml:"wire,omitempty"`     // addon: default AUTOWIRE overrides
 }
 
 // IsAddon returns true if this workflow is a bolt-on sub-workflow.

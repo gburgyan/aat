@@ -169,8 +169,8 @@ Add domain knowledge (`--domain`) with value pools and concepts. Check the skele
 **Plan fails validation:**
 Check the validation section of the trace. Common issues: referencing nodes not in the graph, incorrect `dependsOn` references, or invalid selection sources.
 
-**Addon PLACEHOLDERs not wired:**
-If an addon step still has `PLACEHOLDER` values after composition, the input name doesn't match any output from the base workflow. Add explicit `wire:` overrides to the addon's workflow definition in graph.yaml.
+**Addon AUTOWIRE values not wired:**
+If an addon step still has `AUTOWIRE` values after composition, the input name doesn't match any output from the base workflow. Add explicit `wire:` overrides to the addon's workflow definition in graph.yaml.
 
 ## Workflow Templates
 

@@ -48,7 +48,7 @@ workflows:
 | `template` | no | Path to plan template YAML, relative to the graph file |
 | `kind` | no | Set to `"addon"` for workflows that splice into a base workflow |
 | `after` | addon only | Node name in the base workflow to splice after |
-| `wire` | no | Explicit PLACEHOLDER overrides for the addon (map of input name to `stepID.outputName` ref, or `"MANUAL"` to leave for the LLM) |
+| `wire` | no | Explicit AUTOWIRE overrides for the addon (map of input name to `stepID.outputName` ref, or `"MANUAL"` to leave for the LLM) |
 
 The `template` path is resolved relative to the directory containing the graph file. For example, if the graph is at `myapi/graph.yaml` and the template is `plans/standard-checkout.yaml`, the resolved path is `myapi/plans/standard-checkout.yaml`.
 
@@ -70,14 +70,14 @@ execution:
     - node: validateCoupon
       description: "Check if the coupon code is valid"
       values:
-        cartId: PLACEHOLDER
-        couponCode: PLACEHOLDER
+        cartId: AUTOWIRE
+        couponCode: AUTOWIRE
 
     - node: applyCoupon
       description: "Apply the validated coupon to the cart"
       dependsOn: [validateCoupon]
       values:
-        cartId: PLACEHOLDER
+        cartId: AUTOWIRE
         couponId: {from: validateCoupon.couponId}
         discountAmount: {from: validateCoupon.discountAmount}
 ```
@@ -98,24 +98,24 @@ Templates provide the **structural skeleton**:
 
 The LLM provides the **creative content**:
 
-- **Literal values** — replacing `PLACEHOLDER` defaults with realistic data
+- **Literal values** — replacing `AUTOWIRE` defaults with realistic data
 - **Selection strategy overrides** — changing `first` to `min`, `match`, `llm`, etc.
 - **Selection filters** — adding filter predicates for selection strategies
 - **Assertions** — mechanical and semantic assertions on step responses
 - **Descriptions** — step descriptions (if not already set in the template)
 - **Retry configuration** — per-step retry settings
 
-### PLACEHOLDER Convention
+### AUTOWIRE Convention
 
-Use the literal string `PLACEHOLDER` as a default value for inputs that need LLM-provided values but should still be considered "wired" in the template:
+Use the literal string `AUTOWIRE` as a default value for inputs that should be automatically wired from the parent workflow's outputs during composition:
 
 ```yaml
 values:
-  couponCode: PLACEHOLDER           # LLM replaces with actual value
+  couponCode: AUTOWIRE           # LLM replaces with actual value
   cartId: {from: createCart.cartId} # structural wiring, LLM can't change
 ```
 
-Inputs with `PLACEHOLDER` defaults won't appear in the unfed inputs list, so the LLM knows not to add structural wiring for them -- it just replaces the placeholder with a real value.
+Inputs with `AUTOWIRE` defaults won't appear in the unfed inputs list, so the LLM knows not to add structural wiring for them -- it just replaces the placeholder with a real value.
 
 ### Base Workflows vs Addon Workflows
 
@@ -130,12 +130,12 @@ Templates fall into two categories:
 **Addon workflows** splice into a base workflow at a specific point:
 - Declared with `kind: addon` in graph.yaml
 - Specify `after:` — the node in the base workflow to insert after
-- All inputs from the base workflow use `PLACEHOLDER` defaults
+- All inputs from the base workflow use `AUTOWIRE` defaults
 - No cleanup of their own (the base workflow manages resource lifecycle)
-- Optionally specify `wire:` for explicit PLACEHOLDER overrides
+- Optionally specify `wire:` for explicit AUTOWIRE overrides
 - Example: Apply Coupon, Seat Selection, Gift Wrap
 
-When an addon is composed with a base workflow, its steps are prefixed (e.g., `inc0_searchSeatMap`) to avoid ID collisions, and `PLACEHOLDER` values are auto-wired to matching outputs from the base workflow's steps.
+When an addon is composed with a base workflow, its steps are prefixed (e.g., `inc0_searchSeatMap`) to avoid ID collisions, and `AUTOWIRE` values are auto-wired to matching outputs from the base workflow's steps.
 
 ## How the LLM Pipeline Uses Templates
 
@@ -145,7 +145,7 @@ When you run `aat prompt`, the planning pipeline:
 
 2. **Template loading** — `LoadWorkflowTemplate` parses the base workflow's plan YAML and validates that all referenced nodes exist in the graph.
 
-3. **Addon composition** — If the LLM selected addons, `ComposeWithAddons` loads each addon template, prefixes its step IDs (e.g., `inc0_`), auto-wires `PLACEHOLDER` values to matching outputs from the base workflow, and splices the addon steps into the base plan at the `after:` insertion point.
+3. **Addon composition** — If the LLM selected addons, `ComposeWithAddons` loads each addon template, prefixes its step IDs (e.g., `inc0_`), auto-wires `AUTOWIRE` values to matching outputs from the base workflow, and splices the addon steps into the base plan at the `after:` insertion point.
 
 4. **Multiplicity expansion** — `ExpandMultiplicity` replicates steps for repeated operations (e.g., `addItem` becomes `addItem_1`, `addItem_2` with step aliasing).
 
@@ -207,7 +207,7 @@ These tests catch regressions when graph nodes, edges, or outputs change.
      steps:
        - node: firstStep
          values:
-           input1: PLACEHOLDER    # LLM fills
+           input1: AUTOWIRE    # LLM fills
            input2: {from: ...}    # structural wiring
        - node: lastStep
          dependsOn: [firstStep]
@@ -248,7 +248,7 @@ These tests catch regressions when graph nodes, edges, or outputs change.
 
 Addon templates are self-contained sub-workflows that get composed into a base workflow.
 
-1. **Write the addon template** — Use `PLACEHOLDER` for all inputs that come from the base workflow:
+1. **Write the addon template** — Use `AUTOWIRE` for all inputs that come from the base workflow:
    ```yaml
    intent:
      description: "Apply a coupon code to the cart"
@@ -257,12 +257,12 @@ Addon templates are self-contained sub-workflows that get composed into a base w
      steps:
        - node: validateCoupon
          values:
-           cartId: PLACEHOLDER      # auto-wired from base workflow
-           couponCode: PLACEHOLDER   # LLM fills
+           cartId: AUTOWIRE      # auto-wired from base workflow
+           couponCode: AUTOWIRE   # LLM fills
        - node: applyCoupon
          dependsOn: [validateCoupon]
          values:
-           cartId: PLACEHOLDER
+           cartId: AUTOWIRE
            couponId: {from: validateCoupon.couponId}
    ```
 
@@ -275,7 +275,7 @@ Addon templates are self-contained sub-workflows that get composed into a base w
      template: plans/apply-coupon.yaml
    ```
 
-3. **Add `wire:` overrides if needed** — When a PLACEHOLDER input name doesn't match any base workflow output name, use explicit wiring:
+3. **Add `wire:` overrides if needed** — When a AUTOWIRE input name doesn't match any base workflow output name, use explicit wiring:
    ```yaml
    - name: Apply Coupon
      kind: addon
@@ -291,7 +291,7 @@ Addon templates are self-contained sub-workflows that get composed into a base w
 When an addon is composed into a base workflow:
 
 1. Each addon step ID is prefixed (e.g., `validateCoupon` becomes `inc0_validateCoupon`).
-2. For each `PLACEHOLDER` value in the addon:
+2. For each `AUTOWIRE` value in the addon:
    - If there's an explicit `wire:` override, use that reference.
    - If `wire:` says `"MANUAL"`, clear the value (LLM fills it).
    - Otherwise, scan all base workflow step outputs for a matching name. Last producer wins.

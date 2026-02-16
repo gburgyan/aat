@@ -45,11 +45,11 @@
 
 **Decisions:**
 - Workflow struct gained `Kind` ("addon") and `Includes` (WorkflowInclude slice) fields — addon marker is metadata, doesn't affect engine
-- Composition algorithm: prefix sub-workflow step IDs (inc0_, inc1_), auto-wire PLACEHOLDERs from parent outputs, splice after insertion point, merge cleanup with dedup
+- Composition algorithm: prefix sub-workflow step IDs (inc0_, inc1_), auto-wire AUTOWIRE values from parent outputs, splice after insertion point, merge cleanup with dedup
 - Auto-wire: scan parent step outputs up to insertion point, match by name (last producer wins), explicit `wire` overrides, `wire: {name: MANUAL}` marks input as unfed
 - GoalAnalysis gained `Addons []string` — LLM can request addon composition in goal analysis
 - `aat prompt` pipeline: check for pre-declared composed workflow first, fall back to dynamic BuildSyntheticWorkflow + ComposeWorkflowTemplate
-- MCP tools: `list_workflows` (shows kind/includes/PLACEHOLDERs), `instantiate_workflow` (load+compose, no LLM), `scaffold_template` (backward chain → skeleton YAML)
+- MCP tools: `list_workflows` (shows kind/includes/AUTOWIRE values), `instantiate_workflow` (load+compose, no LLM), `scaffold_template` (backward chain → skeleton YAML)
 - Fixed `handleGeneratePlan` to pass `GraphDir` to intent.Interpret
 - Travelport graph: 3 addon workflows (ancillary, seat, traveler mod), 3 pre-composed shortcuts
 - Include validation in ValidateWarnings (not Validate) — consistent with existing workflow validation; broken includes are warnings, not errors

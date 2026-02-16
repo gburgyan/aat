@@ -429,7 +429,7 @@ workflows:
 | `template` | no | Path to plan template YAML, relative to graph file |
 | `kind` | no | Set to `"addon"` for workflows that splice into a base workflow |
 | `after` | addon only | Node name in the base workflow to splice after |
-| `wire` | no | Explicit PLACEHOLDER overrides for the addon (input name to ref, or `"MANUAL"`) |
+| `wire` | no | Explicit AUTOWIRE overrides for the addon (input name to ref, or `"MANUAL"`) |
 
 When a workflow has a `template`, `aat prompt` uses it as a pre-built plan skeleton instead of generating the plan from scratch. Addon workflows are composed into base workflows at runtime — the LLM selects both the base workflow and any applicable addons. See [Workflow Templates](workflow-templates.md) for the full guide.
 

@@ -9,8 +9,8 @@ execution:
     - node: addon1
       description: "Addon step 1"
       values:
-        workbenchId: PLACEHOLDER
-        specialInput: PLACEHOLDER
+        workbenchId: AUTOWIRE
+        specialInput: AUTOWIRE
 
     - node: addon2
       description: "Addon step 2"

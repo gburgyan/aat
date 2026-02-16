@@ -35,8 +35,8 @@ func TestTravelportTemplates_AllValidate(t *testing.T) {
 		})
 	}
 
-	// Ensure we found all 9 templated workflows.
-	assert.Equal(t, 9, templatedWorkflows, "expected 9 workflows with templates")
+	// Ensure we found all 21 templated workflows (9 original + 6 post-commit + 6 addons).
+	assert.Equal(t, 21, templatedWorkflows, "expected 21 workflows with templates")
 }
 
 // TestTravelportTemplates_UnfedInputs verifies the unfed inputs for each
@@ -99,6 +99,66 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 			contains:  []string{"addPayment.fopIdentifierValue", "addPayment.offerId"},
 			exact:     2,
 		},
+		{
+			workflow:  "Post-Commit Seat Selection",
+			contains:  nil,
+			exact:     -1,
+		},
+		{
+			workflow:  "Post-Commit Ancillary",
+			contains:  nil,
+			exact:     -1,
+		},
+		{
+			workflow:  "Involuntary Schedule Change",
+			contains:  nil,
+			exact:     -1,
+		},
+		{
+			workflow:  "Ticket Void",
+			contains:  nil,
+			exact:     -1,
+		},
+		{
+			workflow:  "Cancel Reservation",
+			contains:  nil,
+			exact:     -1,
+		},
+		{
+			workflow:  "Order Divide",
+			contains:  nil,
+			exact:     -1,
+		},
+		{
+			workflow:  "Special Services",
+			contains:  nil,
+			exact:     0,
+		},
+		{
+			workflow:  "Reservation Comments",
+			contains:  nil,
+			exact:     0,
+		},
+		{
+			workflow:  "Accounting Remarks",
+			contains:  nil,
+			exact:     0,
+		},
+		{
+			workflow:  "Document Overrides",
+			contains:  nil,
+			exact:     0,
+		},
+		{
+			workflow:  "Primary Contact",
+			contains:  nil,
+			exact:     0,
+		},
+		{
+			workflow:  "Travel Agency",
+			contains:  nil,
+			exact:     0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -141,6 +201,12 @@ func TestTravelportTemplates_GoalConsistency(t *testing.T) {
 		"Exchange":                        "commitExchangeTicket",
 		"Round-Trip Full-Payload Booking": "commitReservation",
 		"Round-Trip Leg-Based Booking":    "commitReservation",
+		"Post-Commit Seat Selection":      "commitReservation",
+		"Post-Commit Ancillary":           "commitReservation",
+		"Involuntary Schedule Change":     "commitReservation",
+		"Ticket Void":                     "voidTicket",
+		"Cancel Reservation":              "cancelReservation",
+		"Order Divide":                    "divideReservation",
 	}
 
 	for wfName, expectedGoal := range goalWorkflows {
@@ -175,6 +241,12 @@ func TestTravelportTemplates_GoalConsistency(t *testing.T) {
 		"Ancillary Booking",
 		"Seat Selection",
 		"Traveler Modification",
+		"Special Services",
+		"Reservation Comments",
+		"Accounting Remarks",
+		"Document Overrides",
+		"Primary Contact",
+		"Travel Agency",
 	}
 
 	for _, wfName := range subWorkflows {
@@ -206,6 +278,10 @@ func TestTravelportTemplates_CleanupPresent(t *testing.T) {
 		"Exchange",
 		"Round-Trip Full-Payload Booking",
 		"Round-Trip Leg-Based Booking",
+		"Post-Commit Seat Selection",
+		"Post-Commit Ancillary",
+		"Involuntary Schedule Change",
+		"Order Divide",
 	}
 
 	for _, wfName := range workbenchWorkflows {
@@ -232,6 +308,14 @@ func TestTravelportTemplates_CleanupPresent(t *testing.T) {
 		"Ancillary Booking",
 		"Seat Selection",
 		"Traveler Modification",
+		"Ticket Void",
+		"Cancel Reservation",
+		"Special Services",
+		"Reservation Comments",
+		"Accounting Remarks",
+		"Document Overrides",
+		"Primary Contact",
+		"Travel Agency",
 	}
 
 	for _, wfName := range noCleanupWorkflows {

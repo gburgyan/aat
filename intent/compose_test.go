@@ -17,8 +17,10 @@ func TestIsPlaceholder(t *testing.T) {
 		sv     plan.StepValue
 		expect bool
 	}{
-		{"bare PLACEHOLDER", plan.StepValue{Default: "PLACEHOLDER"}, true},
+		{"bare AUTOWIRE", plan.StepValue{Default: "AUTOWIRE"}, true},
+		{"legacy PLACEHOLDER", plan.StepValue{Default: "PLACEHOLDER"}, true},
 		{"lowercase", plan.StepValue{Default: "placeholder"}, false},
+		{"lowercase autowire", plan.StepValue{Default: "autowire"}, false},
 		{"non-string", plan.StepValue{Default: 123}, false},
 		{"nil default", plan.StepValue{}, false},
 		{"from ref", plan.StepValue{From: "step.output"}, false},
@@ -188,9 +190,9 @@ func TestAutoWirePlaceholders(t *testing.T) {
 					ID:   "inc0_searchSeatMap",
 					Node: "searchSeatMap",
 					Values: map[string]plan.StepValue{
-						"workbenchId":          {Default: "PLACEHOLDER"},
-						"offerIdentifierValue": {Default: "PLACEHOLDER"},
-						"manualInput":          {Default: "PLACEHOLDER"},
+						"workbenchId":          {Default: "AUTOWIRE"},
+						"offerIdentifierValue": {Default: "AUTOWIRE"},
+						"manualInput":          {Default: "AUTOWIRE"},
 					},
 				},
 			},
@@ -236,7 +238,7 @@ func TestAutoWirePlaceholders_ExplicitWireOverride(t *testing.T) {
 					ID:   "inc0_step1",
 					Node: "step1",
 					Values: map[string]plan.StepValue{
-						"workbenchId": {Default: "PLACEHOLDER"},
+						"workbenchId": {Default: "AUTOWIRE"},
 					},
 				},
 			},
@@ -271,7 +273,7 @@ func TestAutoWirePlaceholders_NoMatchLeavesPlaceholder(t *testing.T) {
 					ID:   "inc0_step1",
 					Node: "step1",
 					Values: map[string]plan.StepValue{
-						"unknownInput": {Default: "PLACEHOLDER"},
+						"unknownInput": {Default: "AUTOWIRE"},
 					},
 				},
 			},
@@ -281,7 +283,7 @@ func TestAutoWirePlaceholders_NoMatchLeavesPlaceholder(t *testing.T) {
 	autoWirePlaceholders(sub, map[string]string{}, nil, g)
 
 	step := sub.Execution.Steps[0]
-	assert.Equal(t, "PLACEHOLDER", step.Values["unknownInput"].Default)
+	assert.Equal(t, "AUTOWIRE", step.Values["unknownInput"].Default)
 }
 
 func TestAutoWirePlaceholders_NonPlaceholderUntouched(t *testing.T) {

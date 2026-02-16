@@ -198,5 +198,5 @@ When you mention addon functionality in your prompt, the LLM automatically selec
 The composition system:
 1. Loads the base workflow template (e.g., Full-Payload Booking)
 2. For each addon, splices its steps into the base plan at the `after:` insertion point
-3. Auto-wires `PLACEHOLDER` values to matching outputs from the base workflow
+3. Auto-wires `AUTOWIRE` values to matching outputs from the base workflow
 4. The LLM then fills in remaining literal values (dates, traveler info, etc.)

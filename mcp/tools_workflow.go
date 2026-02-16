@@ -16,14 +16,14 @@ import (
 func (s *Server) registerWorkflowTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("list_workflows",
-			mcp.WithDescription("List all named workflows in the graph, including addons and composed workflows. Shows kind, template, includes, PLACEHOLDER requirements, and step lists."),
+			mcp.WithDescription("List all named workflows in the graph, including addons and composed workflows. Shows kind, template, includes, AUTOWIRE requirements, and step lists."),
 		),
 		s.handleListWorkflows,
 	)
 
 	s.mcp.AddTool(
 		mcp.NewTool("instantiate_workflow",
-			mcp.WithDescription("Load and compose a workflow template. Returns the skeleton plan YAML with unfed inputs marked. For composed workflows, addons are spliced and PLACEHOLDERs auto-wired. No LLM call — deterministic only."),
+			mcp.WithDescription("Load and compose a workflow template. Returns the skeleton plan YAML with unfed inputs marked. For composed workflows, addons are spliced and AUTOWIRE values auto-wired. No LLM call — deterministic only."),
 			mcp.WithString("workflow",
 				mcp.Description("Workflow name (exact or case-insensitive match)"),
 				mcp.Required(),
@@ -37,7 +37,7 @@ func (s *Server) registerWorkflowTools() {
 
 	s.mcp.AddTool(
 		mcp.NewTool("scaffold_template",
-			mcp.WithDescription("Generate a new workflow template skeleton from a backward chain. Input: goal node, optional intermediate nodes. Output: skeleton plan YAML with all wiring from graph edges, PLACEHOLDERs for user-provided values. Use validate_plan and save_plan to refine and persist."),
+			mcp.WithDescription("Generate a new workflow template skeleton from a backward chain. Input: goal node, optional intermediate nodes. Output: skeleton plan YAML with all wiring from graph edges, AUTOWIRE markers for user-provided values. Use validate_plan and save_plan to refine and persist."),
 			mcp.WithString("goal",
 				mcp.Description("Goal node name to build the plan toward"),
 				mcp.Required(),
@@ -81,11 +81,11 @@ func (s *Server) handleListWorkflows(_ context.Context, _ mcp.CallToolRequest) (
 			b.WriteString("\n")
 		}
 
-		// Show PLACEHOLDER requirements if template exists and is an addon.
+		// Show AUTOWIRE requirements if template exists and is an addon.
 		if wf.Template != "" && wf.IsAddon() {
 			placeholders := s.listPlaceholders(wf)
 			if len(placeholders) > 0 {
-				b.WriteString("- PLACEHOLDERs: ")
+				b.WriteString("- AUTOWIRE inputs: ")
 				b.WriteString(strings.Join(placeholders, ", "))
 				b.WriteString("\n")
 			}
@@ -97,7 +97,7 @@ func (s *Server) handleListWorkflows(_ context.Context, _ mcp.CallToolRequest) (
 }
 
 // listPlaceholders loads a workflow template and returns the list of
-// PLACEHOLDER input names.
+// AUTOWIRE input names.
 func (s *Server) listPlaceholders(wf graph.Workflow) []string {
 	if wf.Template == "" {
 		return nil
@@ -112,7 +112,7 @@ func (s *Server) listPlaceholders(wf graph.Workflow) []string {
 	seen := make(map[string]bool)
 	for _, step := range p.Execution.Steps {
 		for inputName, sv := range step.Values {
-			if s, ok := sv.Default.(string); ok && s == "PLACEHOLDER" && !seen[inputName] {
+			if s, ok := sv.Default.(string); ok && (s == "AUTOWIRE" || s == "PLACEHOLDER") && !seen[inputName] {
 				placeholders = append(placeholders, inputName)
 				seen[inputName] = true
 			}
