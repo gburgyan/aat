@@ -1,0 +1,19 @@
+metadata:
+  prompt: "test addon sub-workflow"
+
+intent:
+  description: "Test addon sub-workflow"
+
+execution:
+  steps:
+    - node: addon1
+      description: "Addon step 1"
+      values:
+        workbenchId: PLACEHOLDER
+        specialInput: PLACEHOLDER
+
+    - node: addon2
+      description: "Addon step 2"
+      dependsOn: [addon1]
+      values:
+        data: {from: addon1.result1}

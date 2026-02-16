@@ -14,8 +14,8 @@ import (
 func PostProcess(p *plan.Plan, g *graph.Graph, cr *graph.ChainResult, ga *GoalAnalysis, prompt string) {
 	stepIndex := buildStepIndex(p)
 
-	fixDependsOn(p, g, stepIndex)
 	fixSelectionConfigs(p, g, stepIndex)
+	fixDependsOn(p, g, stepIndex)
 	fixFilterPrefixes(p)
 	fixAssertions(p)
 	addCleanupSteps(p, g, stepIndex)
@@ -23,36 +23,54 @@ func PostProcess(p *plan.Plan, g *graph.Graph, cr *graph.ChainResult, ga *GoalAn
 	populateIntent(p, ga)
 }
 
-// buildStepIndex creates a set of node names present in the plan.
+// buildStepIndex creates a set of identifiers present in the plan.
+// It includes both node names (for graph edge lookups) and step IDs
+// (for validating dependsOn references in composed plans where step IDs
+// differ from node names, e.g., inc0_searchSeatMap vs searchSeatMap).
 func buildStepIndex(p *plan.Plan) map[string]bool {
-	idx := make(map[string]bool, len(p.Execution.Steps))
+	idx := make(map[string]bool, len(p.Execution.Steps)*2)
 	for _, step := range p.Execution.Steps {
 		idx[step.Node] = true
+		idx[step.StepID()] = true
 	}
 	return idx
 }
 
-// fixDependsOn ensures dependsOn reflects actual graph edge dependencies
-// and requires/satisfies relationships. For each step, if a source node
-// (from graph edges or requires edges) is in the plan, it must be in dependsOn.
-// Invalid dependsOn entries are removed.
+// fixDependsOn ensures dependsOn reflects actual data flow and ordering
+// constraints. Dependencies come from three sources:
+//
+//  1. Actual from references in step values and selections (data flow)
+//  2. Graph edges for unwired inputs (potential data flow the engine resolves)
+//  3. Requires/satisfies token relationships (ordering constraints)
+//
+// Graph edge deps are only added for inputs that don't already have a from
+// reference to a different source. This prevents spurious cycles when a
+// sub-workflow input is auto-wired to a parent step but the graph has a
+// reverse edge between the sub-workflow nodes.
 func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
-	// Build edge-based dependencies: targetNode → set of sourceNodes
-	edgeDeps := map[string]map[string]bool{}
-	for _, edge := range g.Edges {
-		fromNode := splitNodeName(edge.From)
-		toNode := splitNodeName(edge.To)
-		if fromNode == "" || toNode == "" {
-			continue
-		}
-		if edgeDeps[toNode] == nil {
-			edgeDeps[toNode] = map[string]bool{}
-		}
-		edgeDeps[toNode][fromNode] = true
+	// Build nodeToStepIDs: maps node name → list of step IDs using that node.
+	// For non-composed plans, step IDs == node names. For composed plans,
+	// step IDs have prefixes (e.g., inc0_searchSeatMap for node searchSeatMap).
+	nodeToStepIDs := map[string][]string{}
+	for _, step := range p.Execution.Steps {
+		nodeToStepIDs[step.Node] = append(nodeToStepIDs[step.Node], step.StepID())
 	}
 
-	// Add requires/satisfies dependencies: for each node that requires a token,
-	// add dependencies on nodes in the plan that satisfy that token.
+	// Build per-input edge map: "targetNode.inputName" → set of sourceNodes.
+	inputEdgeSources := map[string]map[string]bool{}
+	for _, edge := range g.Edges {
+		fromNode := splitNodeName(edge.From)
+		if fromNode == "" {
+			continue
+		}
+		if inputEdgeSources[edge.To] == nil {
+			inputEdgeSources[edge.To] = map[string]bool{}
+		}
+		inputEdgeSources[edge.To][fromNode] = true
+	}
+
+	// Build requires/satisfies deps: targetNode → set of sourceNodes.
+	tokenDeps := map[string]map[string]bool{}
 	if g.SatisfiersByToken != nil {
 		for _, step := range p.Execution.Steps {
 			node := g.Nodes[step.Node]
@@ -62,34 +80,90 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 			for _, token := range node.Requires {
 				for _, satisfier := range g.SatisfiersByToken[token] {
 					if stepIndex[satisfier] && satisfier != step.Node {
-						if edgeDeps[step.Node] == nil {
-							edgeDeps[step.Node] = map[string]bool{}
+						if tokenDeps[step.Node] == nil {
+							tokenDeps[step.Node] = map[string]bool{}
 						}
-						edgeDeps[step.Node][satisfier] = true
+						tokenDeps[step.Node][satisfier] = true
 					}
 				}
 			}
 		}
 	}
 
+	// addStepDeps resolves a dependency reference to actual step IDs and adds
+	// them to required. If dep is a node name, it maps to the step IDs using
+	// that node (e.g., "addSeatOffer" → ["inc0_addSeatOffer"]). If dep is
+	// already a step ID not found in nodeToStepIDs, it's added directly.
+	addStepDeps := func(required map[string]bool, dep, selfStepID string) {
+		if sids, ok := nodeToStepIDs[dep]; ok {
+			for _, sid := range sids {
+				if sid != selfStepID {
+					required[sid] = true
+				}
+			}
+			return
+		}
+		// dep is already a step ID (not a node name).
+		if stepIndex[dep] && dep != selfStepID {
+			required[dep] = true
+		}
+	}
+
 	for i, step := range p.Execution.Steps {
+		stepID := step.StepID()
+		node := g.Nodes[step.Node]
 		required := map[string]bool{}
 
-		// Add dependencies from graph edges
-		for dep := range edgeDeps[step.Node] {
-			if stepIndex[dep] && dep != step.Node {
-				required[dep] = true
+		// 1. Dependencies from actual from references in values.
+		for _, sv := range step.Values {
+			if sv.From != "" {
+				addStepDeps(required, splitNodeName(sv.From), stepID)
 			}
 		}
 
-		// Add existing valid dependsOn entries
+		// 2. Dependencies from actual from references in named selections.
+		for _, sel := range step.Selections {
+			if sel.From != "" {
+				addStepDeps(required, splitNodeName(sel.From), stepID)
+			}
+		}
+
+		// 3. Graph edge deps — only for inputs not already wired via from.
+		if node != nil {
+			for _, inp := range node.Inputs {
+				edgeKey := step.Node + "." + inp.Name
+				sources := inputEdgeSources[edgeKey]
+				if len(sources) == 0 {
+					continue
+				}
+
+				// Check if this input is already wired.
+				sv, hasValue := step.Values[inp.Name]
+				if hasValue && (sv.From != "" || sv.FromSelection != "") {
+					// Input is wired — deps already handled in steps 1/2.
+					continue
+				}
+
+				// Input is unwired — add graph edge deps so the engine can
+				// resolve it at runtime.
+				for sourceNode := range sources {
+					addStepDeps(required, sourceNode, stepID)
+				}
+			}
+		}
+
+		// 4. Requires/satisfies token deps (ordering constraints).
+		for depNode := range tokenDeps[step.Node] {
+			addStepDeps(required, depNode, stepID)
+		}
+
+		// 5. Existing valid dependsOn entries (resolved via addStepDeps
+		// so bare node names get mapped to prefixed step IDs).
 		for _, dep := range step.DependsOn {
-			if stepIndex[dep] && dep != step.Node {
-				required[dep] = true
-			}
+			addStepDeps(required, dep, stepID)
 		}
 
-		// Build sorted list
+		// Build sorted list.
 		deps := make([]string, 0, len(required))
 		for dep := range required {
 			deps = append(deps, dep)
@@ -314,6 +388,61 @@ func populateIntent(p *plan.Plan, ga *GoalAnalysis) {
 			}
 			p.Intent.Constraints.Free = append(p.Intent.Constraints.Free, ga.Constraints.Free...)
 		}
+	}
+
+	// Resolve constraint AppliesTo references: in composed plans the LLM uses
+	// bare node names (e.g., "searchSeatMap.workbenchId") but actual step IDs
+	// have prefixes (e.g., "inc0_searchSeatMap"). Map node names → step IDs.
+	resolveConstraintRefs(p)
+}
+
+// resolveConstraintRefs rewrites constraint AppliesTo entries so that bare
+// node names are replaced with the actual step IDs from the plan. This is
+// needed for composed plans where step IDs are prefixed.
+func resolveConstraintRefs(p *plan.Plan) {
+	if p.Intent.Constraints == nil {
+		return
+	}
+
+	// Build nodeToStepID: node name → first step ID using that node.
+	nodeToStepID := map[string]string{}
+	for _, step := range p.Execution.Steps {
+		sid := step.StepID()
+		if sid != step.Node {
+			// Only populate for steps where the step ID differs from the node
+			// name (i.e., composed/prefixed steps).
+			if _, exists := nodeToStepID[step.Node]; !exists {
+				nodeToStepID[step.Node] = sid
+			}
+		}
+	}
+	if len(nodeToStepID) == 0 {
+		return // No prefixed steps — nothing to resolve.
+	}
+
+	resolveRefs := func(refs []string) []string {
+		resolved := make([]string, len(refs))
+		for i, ref := range refs {
+			stepRef := ref
+			suffix := ""
+			if idx := strings.Index(ref, "."); idx > 0 {
+				stepRef = ref[:idx]
+				suffix = ref[idx:] // includes the dot
+			}
+			if mapped, ok := nodeToStepID[stepRef]; ok {
+				resolved[i] = mapped + suffix
+			} else {
+				resolved[i] = ref
+			}
+		}
+		return resolved
+	}
+
+	for i := range p.Intent.Constraints.Hard {
+		p.Intent.Constraints.Hard[i].AppliesTo = resolveRefs(p.Intent.Constraints.Hard[i].AppliesTo)
+	}
+	for i := range p.Intent.Constraints.Soft {
+		p.Intent.Constraints.Soft[i].AppliesTo = resolveRefs(p.Intent.Constraints.Soft[i].AppliesTo)
 	}
 }
 

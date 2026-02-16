@@ -1,5 +1,32 @@
 # Stage 2: Intelligence — Worklog
 
+## 2026-02-16 — Composable Templates & AI Sweet Spot
+
+**What:** Implemented composable workflow templates, allowing addon sub-workflows (seat selection, ancillary booking, traveler modification) to be spliced into main booking workflows. Enhanced `aat prompt` to detect addons in user intent and compose dynamically. Added MCP tools for template authoring lifecycle.
+
+**Decisions:**
+- Workflow struct gained `Kind` ("addon") and `Includes` (WorkflowInclude slice) fields — addon marker is metadata, doesn't affect engine
+- Composition algorithm: prefix sub-workflow step IDs (inc0_, inc1_), auto-wire PLACEHOLDERs from parent outputs, splice after insertion point, merge cleanup with dedup
+- Auto-wire: scan parent step outputs up to insertion point, match by name (last producer wins), explicit `wire` overrides, `wire: {name: MANUAL}` marks input as unfed
+- GoalAnalysis gained `Addons []string` — LLM can request addon composition in goal analysis
+- `aat prompt` pipeline: check for pre-declared composed workflow first, fall back to dynamic BuildSyntheticWorkflow + ComposeWorkflowTemplate
+- MCP tools: `list_workflows` (shows kind/includes/PLACEHOLDERs), `instantiate_workflow` (load+compose, no LLM), `scaffold_template` (backward chain → skeleton YAML)
+- Fixed `handleGeneratePlan` to pass `GraphDir` to intent.Interpret
+- Travelport graph: 3 addon workflows (ancillary, seat, traveler mod), 3 pre-composed shortcuts
+- Include validation in ValidateWarnings (not Validate) — consistent with existing workflow validation; broken includes are warnings, not errors
+- No changes to engine, plan types, adapter, archive, validate, or config packages
+
+**Files added/modified:**
+- `graph/types.go` — Workflow.Kind, Workflow.Includes, WorkflowInclude type, IsAddon()
+- `graph/validate.go` — include ref validation in ValidateWarnings
+- `intent/compose.go` — ComposeWorkflowTemplate, autoWirePlaceholders, prefixStepRefs, spliceSteps, mergeCleanup, FindComposedWorkflow, BuildSyntheticWorkflow
+- `intent/interpret.go` — GoalAnalysis.Addons, addon composition in Interpret()
+- `intent/format.go` — [addon] marker and includes in FormatGraph
+- `intent/prompt.go` — addon detection instructions in goal analysis prompt
+- `mcp/tools_workflow.go` — list_workflows, instantiate_workflow, scaffold_template
+- `mcp/server.go` — register workflow tools
+- `travelport/graph.yaml` — addon markers, 3 composed workflows
+
 ## 2026-02-11 — Task H2: Quickstart PetStore Example
 
 **What:** Created a complete, runnable example using the public Swagger Petstore v3 API. Added project root README and per-example tutorial. No API keys or setup required — the Petstore API is open.

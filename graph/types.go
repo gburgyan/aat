@@ -93,10 +93,24 @@ type Graph struct {
 
 // Workflow describes a named workflow (sequence of operations) within the graph.
 type Workflow struct {
-	Name        string   `yaml:"name"`
-	Description string   `yaml:"description,omitempty"`
-	Steps       []string `yaml:"steps,omitempty"`
-	Template    string   `yaml:"template,omitempty"` // path to plan template YAML (relative to graph file)
+	Name        string            `yaml:"name"`
+	Description string            `yaml:"description,omitempty"`
+	Kind        string            `yaml:"kind,omitempty"`     // "addon" for sub-workflows that compose into main workflows
+	Steps       []string          `yaml:"steps,omitempty"`
+	Template    string            `yaml:"template,omitempty"` // path to plan template YAML (relative to graph file)
+	Includes    []WorkflowInclude `yaml:"includes,omitempty"` // sub-workflows to compose into this workflow
+}
+
+// IsAddon returns true if this workflow is a bolt-on sub-workflow.
+func (w Workflow) IsAddon() bool {
+	return w.Kind == "addon"
+}
+
+// WorkflowInclude describes a sub-workflow to splice into a parent workflow.
+type WorkflowInclude struct {
+	Workflow string            `yaml:"workflow"`          // name of sub-workflow to include
+	After    string            `yaml:"after"`             // insertion point (step ID in parent)
+	Wire     map[string]string `yaml:"wire,omitempty"`    // explicit PLACEHOLDER overrides ("inputName": "stepID.output")
 }
 
 // Node represents a single logical API operation in the graph.

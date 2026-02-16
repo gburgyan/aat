@@ -44,6 +44,7 @@ type GoalAnalysis struct {
 	Constraints      ConstraintSet     `json:"constraints"`
 	Workflow         string            `json:"workflow,omitempty"`    // selected workflow name
 	Repetitions      map[string]int    `json:"repetitions,omitempty"` // node → count (e.g. {"addTraveler": 2})
+	Addons           []string          `json:"addons,omitempty"`      // addon workflow names to compose
 }
 
 // ConstraintSet classifies constraints by enforcement level.
@@ -148,42 +149,91 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	useTemplateIDs := false // when true, use MergeLLMValuesWithIDs instead of MergeLLMValues
 
 	if goalAnalysis.Workflow != "" {
-		templatePath, found := FindWorkflowTemplate(req.Graph, goalAnalysis.Workflow)
-		if found {
-			tpl, loadErr := LoadWorkflowTemplate(templatePath, req.GraphDir, req.Graph)
-			if loadErr == nil {
-				if trace != nil {
-					trace.WorkflowName = goalAnalysis.Workflow
-					trace.TemplatePath = templatePath
-					trace.Repetitions = goalAnalysis.Repetitions
+		var tpl *plan.Plan
+		var templatePath string
+
+		if len(goalAnalysis.Addons) > 0 {
+			// Try pre-declared composed workflow first.
+			composedWF, composedFound := FindComposedWorkflow(req.Graph, goalAnalysis.Workflow, goalAnalysis.Addons)
+			if composedFound {
+				composed, composeErr := ComposeWorkflowTemplate(composedWF, req.GraphDir, req.Graph)
+				if composeErr == nil {
+					tpl = composed
+					templatePath = composedWF.Template
 				}
+			}
 
-				ExpandMultiplicity(tpl, goalAnalysis.Repetitions)
-
-				if trace != nil {
-					trace.TemplateExpanded = copyPlanShallow(tpl)
-				}
-
-				skeleton = tpl
-				unfedInputs = UnfedInputsFromTemplate(tpl, req.Graph)
-				useTemplateIDs = true
-
-				// Marshal skeleton to YAML for the LLM prompt.
-				var marshalErr error
-				skeletonBytes, marshalErr = plan.Marshal(skeleton)
-				if marshalErr != nil {
-					return traceErr(fmt.Errorf("intent: marshalling template skeleton: %w", marshalErr))
-				}
-
-				if trace != nil {
-					trace.Skeleton = &SkeletonTrace{
-						Plan:        skeleton,
-						YAML:        string(skeletonBytes),
-						UnfedInputs: unfedInputs,
+			// If no pre-declared match, build dynamic composition.
+			if tpl == nil {
+				baseWF, baseFound := findWorkflowByName(req.Graph, goalAnalysis.Workflow)
+				if baseFound && baseWF.Template != "" {
+					syntheticWF := BuildSyntheticWorkflow(req.Graph, baseWF, goalAnalysis.Addons)
+					composed, composeErr := ComposeWorkflowTemplate(syntheticWF, req.GraphDir, req.Graph)
+					if composeErr == nil {
+						tpl = composed
+						templatePath = baseWF.Template
 					}
 				}
 			}
-			// on load error: fall through to backward chaining
+		}
+
+		// Fall back to plain template loading (no addons or addon composition failed).
+		if tpl == nil {
+			wf, found := findWorkflowByName(req.Graph, goalAnalysis.Workflow)
+			if found {
+				// If the matched workflow has includes, compose it even when the
+				// LLM didn't populate the addons field separately (the LLM may
+				// return the composed workflow name directly).
+				if len(wf.Includes) > 0 && wf.Template != "" {
+					composed, composeErr := ComposeWorkflowTemplate(wf, req.GraphDir, req.Graph)
+					if composeErr == nil {
+						tpl = composed
+						templatePath = wf.Template
+					}
+				}
+
+				// If composition wasn't attempted or failed, load the plain template.
+				if tpl == nil && wf.Template != "" {
+					loaded, loadErr := LoadWorkflowTemplate(wf.Template, req.GraphDir, req.Graph)
+					if loadErr == nil {
+						tpl = loaded
+						templatePath = wf.Template
+					}
+				}
+			}
+		}
+
+		if tpl != nil {
+			if trace != nil {
+				trace.WorkflowName = goalAnalysis.Workflow
+				trace.TemplatePath = templatePath
+				trace.Repetitions = goalAnalysis.Repetitions
+			}
+
+			ExpandMultiplicity(tpl, goalAnalysis.Repetitions)
+
+			if trace != nil {
+				trace.TemplateExpanded = copyPlanShallow(tpl)
+			}
+
+			skeleton = tpl
+			unfedInputs = UnfedInputsFromTemplate(tpl, req.Graph)
+			useTemplateIDs = true
+
+			// Marshal skeleton to YAML for the LLM prompt.
+			var marshalErr error
+			skeletonBytes, marshalErr = plan.Marshal(skeleton)
+			if marshalErr != nil {
+				return traceErr(fmt.Errorf("intent: marshalling template skeleton: %w", marshalErr))
+			}
+
+			if trace != nil {
+				trace.Skeleton = &SkeletonTrace{
+					Plan:        skeleton,
+					YAML:        string(skeletonBytes),
+					UnfedInputs: unfedInputs,
+				}
+			}
 		}
 	}
 

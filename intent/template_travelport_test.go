@@ -35,8 +35,8 @@ func TestTravelportTemplates_AllValidate(t *testing.T) {
 		})
 	}
 
-	// Ensure we found all 9 templated workflows.
-	assert.Equal(t, 9, templatedWorkflows, "expected 9 workflows with templates")
+	// Ensure we found all 12 templated workflows (9 original + 3 composed).
+	assert.Equal(t, 12, templatedWorkflows, "expected 12 workflows with templates")
 }
 
 // TestTravelportTemplates_UnfedInputs verifies the unfed inputs for each

@@ -1,0 +1,80 @@
+version: "1.0.0"
+
+workflows:
+  - name: Main Booking
+    template: plans/booking.yaml
+    steps: [search, book, commit]
+
+  - name: Seat Selection
+    kind: addon
+    template: plans/seat-selection.yaml
+    steps: [searchSeatMap, addSeat]
+
+  - name: Booking with Seat
+    template: plans/booking.yaml
+    includes:
+      - workflow: Seat Selection
+        after: book
+        wire:
+          workbenchId: book.workbenchId
+    steps: [search, book, searchSeatMap, addSeat, commit]
+
+nodes:
+  search:
+    description: "Search flights"
+    adapter: search
+    inputs:
+      - name: origin
+        type: string
+    outputs:
+      - name: results
+        type: string[]
+
+  book:
+    description: "Book a flight"
+    adapter: book
+    inputs:
+      - name: flightId
+        type: string
+    outputs:
+      - name: workbenchId
+        type: string
+
+  searchSeatMap:
+    description: "Search for available seats"
+    adapter: searchSeatMap
+    inputs:
+      - name: workbenchId
+        type: string
+    outputs:
+      - name: seats
+        type: string[]
+
+  addSeat:
+    description: "Add seat selection"
+    adapter: addSeat
+    inputs:
+      - name: workbenchId
+        type: string
+      - name: seatId
+        type: string
+    outputs:
+      - name: confirmationId
+        type: string
+
+  commit:
+    description: "Commit the booking"
+    adapter: commit
+    inputs:
+      - name: workbenchId
+        type: string
+    outputs:
+      - name: locator
+        type: string
+
+edges:
+  - from: search.results
+    to: book.flightId
+    select: true
+  - from: book.workbenchId
+    to: commit.workbenchId

@@ -656,6 +656,8 @@ func TestBuildGoalPrompt_WithWorkflowTemplates(t *testing.T) {
 	assert.Contains(t, system, "workflow")
 	assert.Contains(t, system, "repetitions")
 	assert.Contains(t, system, "[template]")
+	assert.Contains(t, system, "addons")
+	assert.Contains(t, system, "[addon]")
 }
 
 func TestBuildGoalPrompt_WithoutWorkflowTemplates(t *testing.T) {

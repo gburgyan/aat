@@ -48,7 +48,9 @@ Rules:
 Additionally, if the user's intent matches a named workflow marked with [template], include these fields in the JSON:
   "workflow": "Workflow Name"
   "repetitions": {"nodeName": N}
+  "addons": ["Addon Name 1", "Addon Name 2"]
 The "workflow" field should be the exact name of the matching workflow. The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addTraveler": 2} for two travelers). Omit "repetitions" if no nodes need repeating.
+The "addons" array lists [addon] workflows that should be composed into the main workflow. Include addons when the user mentions capabilities matching an addon workflow (e.g., seat selection, ancillary services, traveler modification). Omit "addons" if no addons are needed.
 Select a workflow when the intent clearly aligns with one. When in doubt, omit the "workflow" field.`
 	}
 

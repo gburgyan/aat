@@ -153,10 +153,11 @@ func tokenize(input string) ([]token, error) {
 			continue
 		}
 
-		// String literal (single-quoted)
-		if ch == '\'' {
+		// String literal (single-quoted or double-quoted)
+		if ch == '\'' || ch == '"' {
+			quote := ch
 			j := i + 1
-			for j < len(input) && input[j] != '\'' {
+			for j < len(input) && input[j] != quote {
 				j++
 			}
 			if j >= len(input) {

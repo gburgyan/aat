@@ -31,6 +31,9 @@ func FormatGraph(g *graph.Graph) string {
 		b.WriteString("## Workflows\n\n")
 		for _, wf := range g.Workflows {
 			fmt.Fprintf(&b, "- **%s**", wf.Name)
+			if wf.IsAddon() {
+				b.WriteString(" [addon]")
+			}
 			if wf.Template != "" {
 				b.WriteString(" [template]")
 			}
@@ -40,6 +43,11 @@ func FormatGraph(g *graph.Graph) string {
 			b.WriteString("\n")
 			if len(wf.Steps) > 0 {
 				fmt.Fprintf(&b, "  Steps: %s\n", strings.Join(wf.Steps, " → "))
+			}
+			if len(wf.Includes) > 0 {
+				for _, inc := range wf.Includes {
+					fmt.Fprintf(&b, "  Includes: %s (after %s)\n", inc.Workflow, inc.After)
+				}
 			}
 		}
 		b.WriteString("\n")

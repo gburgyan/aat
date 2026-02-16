@@ -302,6 +302,26 @@ func TestEvalPredicate(t *testing.T) {
 			want:    true,
 		},
 
+		// Double-quoted strings
+		{
+			name:    "double quoted string equal",
+			expr:    `carrier == "AA"`,
+			context: map[string]any{"carrier": "AA"},
+			want:    true,
+		},
+		{
+			name:    "double quoted string not equal",
+			expr:    `carrier != "UA"`,
+			context: map[string]any{"carrier": "AA"},
+			want:    true,
+		},
+		{
+			name:    "mixed quotes",
+			expr:    `carrier == "AA" && cabin == 'Economy'`,
+			context: map[string]any{"carrier": "AA", "cabin": "Economy"},
+			want:    true,
+		},
+
 		// Boolean operators with short-circuit
 		{
 			name:    "and true",

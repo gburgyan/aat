@@ -80,6 +80,12 @@ Cross-references task numbers from `vision/implementation-plan.md`.
   - [x] H2c. Documentation (petstore README tutorial, project root README)
   - [x] H2d. Housekeeping (progress, worklog)
 - [x] H3. `aat graph validate` (absorbed by Task 23d)
+- [x] CT. Composable Templates & AI Sweet Spot
+  - [x] CT-A. Graph schema: Workflow.Kind, Workflow.Includes, WorkflowInclude type
+  - [x] CT-B. Composition algorithm: ComposeWorkflowTemplate, auto-wire, prefix, splice
+  - [x] CT-C. aat prompt integration: addon detection, dynamic composition in Interpret()
+  - [x] CT-D. MCP tools: list_workflows, instantiate_workflow, scaffold_template
+  - [x] CT-E. Travelport examples: addon markers, 3 composed workflows
 
 ## Stage 3a: CI/CD, Web UI & Polish
 

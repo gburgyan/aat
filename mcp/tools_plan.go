@@ -95,10 +95,11 @@ func (s *Server) handleGeneratePlan(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	result, err := intent.Interpret(ctx, intent.InterpretRequest{
-		Prompt: prompt,
-		Graph:  s.ctx.Graph,
-		KB:     s.ctx.KB,
-		Client: client,
+		Prompt:   prompt,
+		Graph:    s.ctx.Graph,
+		KB:       s.ctx.KB,
+		Client:   client,
+		GraphDir: s.ctx.GraphDir,
 	})
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("plan generation failed: %v", err)), nil

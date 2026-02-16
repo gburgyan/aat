@@ -1,0 +1,26 @@
+metadata:
+  prompt: "test parent workflow"
+
+intent:
+  goal: commit
+  description: "Test parent workflow"
+
+execution:
+  steps:
+    - node: search
+      description: "Search for items"
+
+    - node: book
+      dependsOn: [search]
+      values:
+        flightId: {from: search.results, select: {strategy: first}}
+
+    - node: commit
+      dependsOn: [book]
+      isGoal: true
+      values:
+        workbenchId: {from: book.workbenchId}
+
+  cleanup:
+    - node: commit
+      runOn: always

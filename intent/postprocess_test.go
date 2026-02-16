@@ -1434,6 +1434,128 @@ func TestFixDependsOn_IncludesRequiresSatisfies(t *testing.T) {
 	assert.Contains(t, p.Execution.Steps[1].DependsOn, "a")
 }
 
+func TestFixDependsOn_ResolvesNodeNameToStepID(t *testing.T) {
+	// When LLM adds bare node names (e.g., "addSeatOffer") to dependsOn
+	// but the actual step ID is prefixed (e.g., "inc0_addSeatOffer"),
+	// fixDependsOn should resolve to the correct step ID.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"createWorkbench": {Name: "createWorkbench", Adapter: "cw", Outputs: []graph.Output{{Name: "workbenchId", Type: "string"}}},
+			"addSeatOffer":    {Name: "addSeatOffer", Adapter: "aso", Inputs: []graph.Input{{Name: "workbenchId", Type: "string"}}},
+			"addPayment":      {Name: "addPayment", Adapter: "ap", Inputs: []graph.Input{{Name: "workbenchId", Type: "string"}}},
+		},
+		Edges: []graph.Edge{
+			{From: "createWorkbench.workbenchId", To: "addSeatOffer.workbenchId"},
+			{From: "createWorkbench.workbenchId", To: "addPayment.workbenchId"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "createWorkbench"},
+				{
+					ID:        "inc0_addSeatOffer",
+					Node:      "addSeatOffer",
+					DependsOn: []string{"createWorkbench"},
+					Values: map[string]plan.StepValue{
+						"workbenchId": {From: "createWorkbench.workbenchId"},
+					},
+				},
+				{
+					Node: "addPayment",
+					// LLM put bare "addSeatOffer" instead of "inc0_addSeatOffer"
+					DependsOn: []string{"createWorkbench", "addSeatOffer"},
+					Values: map[string]plan.StepValue{
+						"workbenchId": {From: "createWorkbench.workbenchId"},
+					},
+				},
+			},
+		},
+	}
+
+	stepIndex := buildStepIndex(p)
+	fixDependsOn(p, g, stepIndex)
+
+	// addPayment should have "inc0_addSeatOffer" (resolved), not "addSeatOffer" (bare)
+	assert.Contains(t, p.Execution.Steps[2].DependsOn, "inc0_addSeatOffer")
+	assert.NotContains(t, p.Execution.Steps[2].DependsOn, "addSeatOffer")
+	assert.Contains(t, p.Execution.Steps[2].DependsOn, "createWorkbench")
+}
+
+func TestResolveConstraintRefs_PrefixedStepIDs(t *testing.T) {
+	// When LLM generates constraints with bare node names (e.g., "searchSeatMap")
+	// but the plan has prefixed step IDs (e.g., "inc0_searchSeatMap"),
+	// resolveConstraintRefs should rewrite the AppliesTo references.
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "searchFlights"},
+				{Node: "createWorkbench"},
+				{ID: "inc0_searchSeatMap", Node: "searchSeatMap"},
+				{ID: "inc0_addSeatOffer", Node: "addSeatOffer"},
+			},
+		},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Hard: []plan.Constraint{
+					{
+						Name:      "origin",
+						AppliesTo: []string{"searchFlights.origin"},
+					},
+				},
+				Soft: []plan.Constraint{
+					{
+						Name:      "seat selection",
+						AppliesTo: []string{"searchSeatMap.workbenchId", "addSeatOffer.seatId"},
+					},
+					{
+						Name:      "bare node ref",
+						AppliesTo: []string{"searchSeatMap"},
+					},
+				},
+			},
+		},
+	}
+
+	resolveConstraintRefs(p)
+
+	// Hard constraint with non-prefixed step should be unchanged.
+	assert.Equal(t, []string{"searchFlights.origin"}, p.Intent.Constraints.Hard[0].AppliesTo)
+
+	// Soft constraints with bare node names should be resolved to prefixed step IDs.
+	assert.Equal(t, []string{"inc0_searchSeatMap.workbenchId", "inc0_addSeatOffer.seatId"}, p.Intent.Constraints.Soft[0].AppliesTo)
+	assert.Equal(t, []string{"inc0_searchSeatMap"}, p.Intent.Constraints.Soft[1].AppliesTo)
+}
+
+func TestResolveConstraintRefs_NoPrefixes(t *testing.T) {
+	// When no steps have prefixed IDs, resolveConstraintRefs should be a no-op.
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "searchFlights"},
+				{Node: "createWorkbench"},
+			},
+		},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Soft: []plan.Constraint{
+					{
+						Name:      "origin",
+						AppliesTo: []string{"searchFlights.origin"},
+					},
+				},
+			},
+		},
+	}
+
+	resolveConstraintRefs(p)
+
+	assert.Equal(t, []string{"searchFlights.origin"}, p.Intent.Constraints.Soft[0].AppliesTo)
+}
+
 func TestMergeLLMValues_SkipsFromSelectionValues(t *testing.T) {
 	skeleton := &plan.Plan{
 		Execution: plan.Execution{

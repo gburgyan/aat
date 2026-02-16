@@ -305,6 +305,44 @@ func TestFormatGraph_AutoWireOmitsEdges(t *testing.T) {
 	assert.NotContains(t, result, "producer.token → consumer.token")
 }
 
+func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{
+				Name:     "Main Booking",
+				Template: "plans/main.yaml",
+				Steps:    []string{"search", "book", "commit"},
+			},
+			{
+				Name:     "Seat Selection",
+				Kind:     "addon",
+				Template: "plans/seat.yaml",
+				Steps:    []string{"searchSeat", "addSeat"},
+			},
+			{
+				Name:     "Booking with Seat",
+				Template: "plans/main.yaml",
+				Includes: []graph.WorkflowInclude{
+					{Workflow: "Seat Selection", After: "book"},
+				},
+				Steps: []string{"search", "book", "searchSeat", "addSeat", "commit"},
+			},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+	result := FormatGraph(g)
+
+	// Addon marker should appear
+	assert.Contains(t, result, "**Seat Selection** [addon] [template]")
+
+	// Includes should appear
+	assert.Contains(t, result, "Includes: Seat Selection (after book)")
+
+	// Regular workflow should not have [addon]
+	assert.Contains(t, result, "**Main Booking** [template]")
+}
+
 func TestFormatGraph_AutoWireWithExplicit(t *testing.T) {
 	g := &graph.Graph{
 		Version:  "1.0.0",
