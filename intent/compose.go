@@ -3,6 +3,7 @@ package intent
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gburgyan/aat/graph"
@@ -31,6 +32,20 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 		return parent, nil
 	}
 
+	// Sort addons by priority (stable sort preserves original order for equal priorities).
+	// Copy slice to avoid mutating the caller's slice.
+	sorted := make([]graph.Workflow, len(addons))
+	copy(sorted, addons)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Priority < sorted[j].Priority
+	})
+	addons = sorted
+
+	// Track last step per after-node for auto-chaining. When multiple addons
+	// share the same insertion point, subsequent addons chain after the last
+	// step of the previous addon to ensure sequential execution.
+	lastStepByAfter := make(map[string]string)
+
 	// Process each addon in order.
 	for i, addon := range addons {
 		prefix := fmt.Sprintf("inc%d_", i)
@@ -39,8 +54,14 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 			return nil, fmt.Errorf("compose: addon workflow %q has no template", addon.Name)
 		}
 
-		// Find the insertion point: scan parent steps for one whose Node matches addon.After.
-		afterStep := findStepByNode(parent, addon.After)
+		// Find the insertion point. If a previous addon used the same after
+		// node, chain after that addon's last step instead.
+		var afterStep string
+		if lastStep, ok := lastStepByAfter[addon.After]; ok {
+			afterStep = lastStep
+		} else {
+			afterStep = findStepByNode(parent, addon.After)
+		}
 		if afterStep == "" {
 			return nil, fmt.Errorf("compose: addon %q: after node %q not found in base plan steps", addon.Name, addon.After)
 		}
@@ -70,6 +91,10 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 
 		// Merge cleanup (dedup by node name).
 		mergeCleanup(parent, sub)
+
+		// Record the last step of this addon for auto-chaining.
+		lastAddonStep := sub.Execution.Steps[len(sub.Execution.Steps)-1].StepID()
+		lastStepByAfter[addon.After] = lastAddonStep
 	}
 
 	return parent, nil

@@ -99,6 +99,7 @@ type Workflow struct {
 	Template    string            `yaml:"template,omitempty"` // path to plan template YAML (relative to graph file)
 	After       string            `yaml:"after,omitempty"`    // addon: node to splice after in the base workflow
 	Wire        map[string]string `yaml:"wire,omitempty"`     // addon: default AUTOWIRE overrides
+	Priority    int               `yaml:"priority,omitempty"` // addon: composition ordering (lower = earlier, default 0)
 }
 
 // IsAddon returns true if this workflow is a bolt-on sub-workflow.

@@ -660,6 +660,37 @@ func TestValidateWarnings_WorkflowUnknownKind(t *testing.T) {
 	assert.Contains(t, warnings[0], "unknown kind")
 }
 
+func TestValidateWarnings_NegativePriority(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{Name: "Bad", Kind: "addon", Priority: -1, After: "a", Template: "plans/bad.yaml"},
+		},
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	require.NotEmpty(t, warnings)
+	assert.Contains(t, warnings[0], "negative priority")
+}
+
+func TestValidateWarnings_ZeroPriorityNoWarning(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{Name: "OK", Kind: "addon", Priority: 0, After: "a", Template: "plans/ok.yaml"},
+		},
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	for _, w := range warnings {
+		assert.NotContains(t, w, "negative priority")
+	}
+}
+
 func TestWorkflow_IsAddon(t *testing.T) {
 	assert.True(t, Workflow{Kind: "addon"}.IsAddon())
 	assert.False(t, Workflow{}.IsAddon())

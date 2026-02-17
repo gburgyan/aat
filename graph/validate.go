@@ -245,6 +245,11 @@ func ValidateWarnings(g *Graph) []string {
 			warnings = append(warnings, fmt.Sprintf("workflow %d (%q): unknown kind %q (expected \"addon\")", i, wf.Name, wf.Kind))
 		}
 
+		// Validate Priority
+		if wf.Priority < 0 {
+			warnings = append(warnings, fmt.Sprintf("workflow %d (%q): negative priority %d", i, wf.Name, wf.Priority))
+		}
+
 		// Validate After field
 		if wf.After != "" {
 			if !wf.IsAddon() {

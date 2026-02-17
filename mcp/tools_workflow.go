@@ -73,6 +73,9 @@ func (s *Server) handleListWorkflows(_ context.Context, _ mcp.CallToolRequest) (
 		if wf.After != "" {
 			fmt.Fprintf(&b, "- After: `%s`\n", wf.After)
 		}
+		if wf.Priority != 0 {
+			fmt.Fprintf(&b, "- Priority: %d\n", wf.Priority)
+		}
 		if len(wf.Wire) > 0 {
 			b.WriteString("- Wire:")
 			for k, v := range wf.Wire {

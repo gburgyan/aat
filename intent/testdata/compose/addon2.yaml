@@ -1,0 +1,18 @@
+metadata:
+  prompt: "test addon2 sub-workflow"
+
+intent:
+  description: "Test addon2 sub-workflow"
+
+execution:
+  steps:
+    - node: addon3
+      description: "Addon2 step 1"
+      values:
+        workbenchId: AUTOWIRE
+
+    - node: addon4
+      description: "Addon2 step 2"
+      dependsOn: [addon3]
+      values:
+        data: {from: addon3.result3}

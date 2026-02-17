@@ -675,6 +675,329 @@ func TestComposeWithAddons_NotAnAddon(t *testing.T) {
 	assert.Contains(t, err.Error(), "is not an addon")
 }
 
+// --- Auto-chaining tests ---
+
+func TestComposeWorkflowTemplate_AutoChainSameAfterNode(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	// Two addons that both target "book" — should be auto-chained.
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+		},
+		{
+			Name:     "Addon2",
+			Kind:     "addon",
+			Template: "testdata/compose/addon2.yaml",
+			After:    "book",
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+
+	// Parent has 3 steps, addon1 has 2, addon2 has 2 = 7 total.
+	require.Len(t, p.Execution.Steps, 7)
+
+	// Find steps by ID.
+	stepsByID := make(map[string]plan.Step)
+	for _, s := range p.Execution.Steps {
+		stepsByID[s.StepID()] = s
+	}
+
+	// First addon root (inc0_addon1) depends on "book".
+	addon1Root := stepsByID["inc0_addon1"]
+	assert.Contains(t, addon1Root.DependsOn, "book")
+
+	// Second addon root (inc1_addon3) should depend on inc0_addon2
+	// (last step of first addon) via auto-chaining. It may also have
+	// additional deps from auto-wired from refs.
+	addon2Root := stepsByID["inc1_addon3"]
+	assert.Contains(t, addon2Root.DependsOn, "inc0_addon2",
+		"auto-chained addon should depend on last step of previous addon")
+}
+
+func TestComposeWorkflowTemplate_DifferentAfterNodesNotChained(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	// Two addons targeting different nodes — should NOT be auto-chained.
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+		},
+		{
+			Name:     "Addon2",
+			Kind:     "addon",
+			Template: "testdata/compose/addon2.yaml",
+			After:    "search",
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+
+	require.Len(t, p.Execution.Steps, 7)
+
+	// Find steps by ID.
+	stepsByID := make(map[string]plan.Step)
+	for _, s := range p.Execution.Steps {
+		stepsByID[s.StepID()] = s
+	}
+
+	// First addon root depends on "book".
+	addon1Root := stepsByID["inc0_addon1"]
+	assert.Contains(t, addon1Root.DependsOn, "book")
+
+	// Second addon root depends on "search" (different insertion point, no chaining).
+	addon2Root := stepsByID["inc1_addon3"]
+	assert.Contains(t, addon2Root.DependsOn, "search")
+	assert.NotContains(t, addon2Root.DependsOn, "inc0_addon2",
+		"addon with different after node should not be chained to first addon")
+}
+
+func TestComposeWorkflowTemplate_ThreeAddonsChained(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	// Three addons sharing "book" — chain all three sequentially.
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+		},
+		{
+			Name:     "Addon2",
+			Kind:     "addon",
+			Template: "testdata/compose/addon2.yaml",
+			After:    "book",
+		},
+		{
+			Name:     "Addon3",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+
+	// Parent 3 + addon1 2 + addon2 2 + addon3 2 = 9 steps.
+	require.Len(t, p.Execution.Steps, 9)
+
+	// Find steps by ID.
+	stepsByID := make(map[string]plan.Step)
+	for _, s := range p.Execution.Steps {
+		stepsByID[s.StepID()] = s
+	}
+
+	// First addon root depends on "book".
+	assert.Contains(t, stepsByID["inc0_addon1"].DependsOn, "book")
+
+	// Second addon root depends on last step of first addon (inc0_addon2).
+	assert.Contains(t, stepsByID["inc1_addon3"].DependsOn, "inc0_addon2")
+
+	// Third addon root depends on last step of second addon (inc1_addon4).
+	assert.Contains(t, stepsByID["inc2_addon1"].DependsOn, "inc1_addon4")
+}
+
+// --- Priority sorting tests ---
+
+func TestComposeWorkflowTemplate_PrioritySortsAddons(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	// Addons given in wrong order: cancel (90) before seat (20).
+	// Priority sort should reorder seat before cancel.
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon2",
+			Kind:     "addon",
+			Template: "testdata/compose/addon2.yaml",
+			After:    "book",
+			Priority: 90,
+		},
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+			Priority: 20,
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+
+	// Parent 3 + addon1 (priority 20) 2 + addon2 (priority 90) 2 = 7.
+	require.Len(t, p.Execution.Steps, 7)
+
+	// After priority sorting, the lower-priority addon (Addon, p=20) should be
+	// processed first (inc0_), and the higher-priority addon (Addon2, p=90) second (inc1_).
+	stepsByID := make(map[string]plan.Step)
+	for _, s := range p.Execution.Steps {
+		stepsByID[s.StepID()] = s
+	}
+
+	// Addon (priority 20) gets inc0_ prefix.
+	_, hasAddon1 := stepsByID["inc0_addon1"]
+	assert.True(t, hasAddon1, "lower priority addon should be processed first (inc0_)")
+
+	// Addon2 (priority 90) gets inc1_ prefix.
+	_, hasAddon3 := stepsByID["inc1_addon3"]
+	assert.True(t, hasAddon3, "higher priority addon should be processed second (inc1_)")
+
+	// Second addon root should be auto-chained to last step of first addon.
+	assert.Contains(t, stepsByID["inc1_addon3"].DependsOn, "inc0_addon2")
+}
+
+func TestComposeWorkflowTemplate_EqualPriorityPreservesOrder(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	// Both addons have same priority — original order should be preserved.
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+			Priority: 10,
+		},
+		{
+			Name:     "Addon2",
+			Kind:     "addon",
+			Template: "testdata/compose/addon2.yaml",
+			After:    "book",
+			Priority: 10,
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+	require.Len(t, p.Execution.Steps, 7)
+
+	stepsByID := make(map[string]plan.Step)
+	for _, s := range p.Execution.Steps {
+		stepsByID[s.StepID()] = s
+	}
+
+	// Original order preserved: Addon first (inc0_), Addon2 second (inc1_).
+	_, hasAddon1 := stepsByID["inc0_addon1"]
+	assert.True(t, hasAddon1, "first addon should keep inc0_ prefix")
+
+	_, hasAddon3 := stepsByID["inc1_addon3"]
+	assert.True(t, hasAddon3, "second addon should keep inc1_ prefix")
+}
+
+func TestComposeWorkflowTemplate_ZeroPriorityDefault(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	// No priority set (default 0) — should work exactly like before.
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+		},
+		{
+			Name:     "Addon2",
+			Kind:     "addon",
+			Template: "testdata/compose/addon2.yaml",
+			After:    "book",
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+	require.Len(t, p.Execution.Steps, 7)
+
+	stepsByID := make(map[string]plan.Step)
+	for _, s := range p.Execution.Steps {
+		stepsByID[s.StepID()] = s
+	}
+
+	// Both have priority 0, so original order is preserved.
+	_, hasAddon1 := stepsByID["inc0_addon1"]
+	assert.True(t, hasAddon1)
+
+	_, hasAddon3 := stepsByID["inc1_addon3"]
+	assert.True(t, hasAddon3)
+}
+
+func TestComposeWorkflowTemplate_DoesNotMutateCallerSlice(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon2",
+			Kind:     "addon",
+			Template: "testdata/compose/addon2.yaml",
+			After:    "book",
+			Priority: 90,
+		},
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    "book",
+			Priority: 20,
+		},
+	}
+
+	// Save original order.
+	originalFirst := addons[0].Name
+	originalSecond := addons[1].Name
+
+	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+
+	// Caller's slice should not be reordered.
+	assert.Equal(t, originalFirst, addons[0].Name)
+	assert.Equal(t, originalSecond, addons[1].Name)
+}
+
 // buildComposeTestGraph creates a synthetic graph for composition tests.
 func buildComposeTestGraph() *graph.Graph {
 	return &graph.Graph{
@@ -684,6 +1007,12 @@ func buildComposeTestGraph() *graph.Graph {
 				Name:     "Addon",
 				Kind:     "addon",
 				Template: "testdata/compose/addon.yaml",
+				After:    "book",
+			},
+			{
+				Name:     "Addon2",
+				Kind:     "addon",
+				Template: "testdata/compose/addon2.yaml",
 				After:    "book",
 			},
 		},
@@ -714,6 +1043,16 @@ func buildComposeTestGraph() *graph.Graph {
 				Name: "addon2", Adapter: "addon2",
 				Inputs:  []graph.Input{{Name: "data", Type: "string"}},
 				Outputs: []graph.Output{{Name: "result2", Type: "string"}},
+			},
+			"addon3": {
+				Name: "addon3", Adapter: "addon3",
+				Inputs:  []graph.Input{{Name: "workbenchId", Type: "string"}},
+				Outputs: []graph.Output{{Name: "result3", Type: "string"}},
+			},
+			"addon4": {
+				Name: "addon4", Adapter: "addon4",
+				Inputs:  []graph.Input{{Name: "data", Type: "string"}},
+				Outputs: []graph.Output{{Name: "result4", Type: "string"}},
 			},
 		},
 	}

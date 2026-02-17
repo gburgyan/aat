@@ -40,8 +40,8 @@ func TestTravelportTemplates_AllValidate(t *testing.T) {
 		})
 	}
 
-	// Ensure we found all 21 templated workflows (9 original + 6 post-commit + 6 addons).
-	assert.Equal(t, 21, templatedWorkflows, "expected 21 workflows with templates")
+	// Ensure we found all 28 templated workflows (9 original + 6 post-commit + 6 pre-commit addons + 7 post-commit addons).
+	assert.Equal(t, 28, templatedWorkflows, "expected 28 workflows with templates")
 }
 
 // TestTravelportTemplates_UnfedInputs verifies the unfed inputs for each
@@ -253,6 +253,13 @@ func TestTravelportTemplates_GoalConsistency(t *testing.T) {
 		"Document Overrides",
 		"Primary Contact",
 		"Travel Agency",
+		"Post-Commit Seat Selection Addon",
+		"Post-Commit Ancillary Addon",
+		"Cancel Booking",
+		"Void Ticket",
+		"Post-Commit Ticketing Addon",
+		"Retrieve Booking",
+		"Fare Rules Check",
 	}
 
 	for _, wfName := range subWorkflows {
@@ -288,6 +295,9 @@ func TestTravelportTemplates_CleanupPresent(t *testing.T) {
 		"Post-Commit Ancillary",
 		"Involuntary Schedule Change",
 		"Order Divide",
+		"Post-Commit Seat Selection Addon",
+		"Post-Commit Ancillary Addon",
+		"Post-Commit Ticketing Addon",
 	}
 
 	for _, wfName := range workbenchWorkflows {
@@ -322,6 +332,10 @@ func TestTravelportTemplates_CleanupPresent(t *testing.T) {
 		"Document Overrides",
 		"Primary Contact",
 		"Travel Agency",
+		"Cancel Booking",
+		"Void Ticket",
+		"Retrieve Booking",
+		"Fare Rules Check",
 	}
 
 	for _, wfName := range noCleanupWorkflows {
