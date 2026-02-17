@@ -1,0 +1,11 @@
+metadata:
+  prompt: "addon with value-only AUTOWIRE inputs"
+
+execution:
+  steps:
+    - node: addonNode
+      description: "Addon with value inputs that no graph node produces"
+      values:
+        workbenchId: AUTOWIRE
+        email: AUTOWIRE
+        phoneNumber: AUTOWIRE

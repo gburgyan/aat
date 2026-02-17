@@ -1,0 +1,9 @@
+metadata:
+  prompt: "addon with all inputs auto-wirable"
+
+execution:
+  steps:
+    - node: addonNode
+      description: "Addon that needs workbenchId"
+      values:
+        workbenchId: AUTOWIRE

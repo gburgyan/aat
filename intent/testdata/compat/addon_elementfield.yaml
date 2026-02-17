@@ -1,0 +1,10 @@
+metadata:
+  prompt: "addon with AUTOWIRE input matching an elementField name"
+
+execution:
+  steps:
+    - node: addonNode
+      description: "Addon that needs itemCode (an elementField in search.results)"
+      values:
+        workbenchId: AUTOWIRE
+        itemCode: AUTOWIRE

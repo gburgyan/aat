@@ -1,0 +1,48 @@
+version: "1.0"
+title: Compat Test Graph
+
+nodes:
+  search:
+    description: Search for items
+    adapter: search
+    outputs:
+      - name: results
+        type: string[]
+      - name: token
+        type: string
+
+  book:
+    description: Book an item
+    adapter: book
+    inputs:
+      - name: itemId
+        type: string
+    outputs:
+      - name: workbenchId
+        type: string
+      - name: confirmationCode
+        type: string
+
+  commit:
+    description: Commit the booking
+    adapter: commit
+    inputs:
+      - name: workbenchId
+        type: string
+    outputs:
+      - name: locator
+        type: string
+
+  addonNode:
+    description: An addon operation
+    adapter: addonNode
+    inputs:
+      - name: workbenchId
+        type: string
+      - name: specialInput
+        type: string
+    outputs:
+      - name: addonResult
+        type: string
+
+edges: []

@@ -1,0 +1,22 @@
+metadata:
+  prompt: "base workflow - full outputs"
+
+execution:
+  steps:
+    - node: search
+      description: Search for items
+
+    - node: book
+      dependsOn: [search]
+      values:
+        itemId: {from: search.results, select: {strategy: first}}
+
+    - node: commit
+      dependsOn: [book]
+      isGoal: true
+      values:
+        workbenchId: {from: book.workbenchId}
+
+  cleanup:
+    - node: commit
+      runOn: always
