@@ -508,7 +508,10 @@ func TestEngine_Run_FieldExistsAssertionOnBody(t *testing.T) {
 				Name:    "step1",
 				Adapter: "test.step1",
 				Inputs:  []graph.Input{},
-				Outputs: []graph.Output{{Name: "name", Type: "string"}},
+				Outputs: []graph.Output{
+					{Name: "name", Type: "string"},
+					{Name: "age", Type: "integer"},
+				},
 			},
 		},
 	}
@@ -523,7 +526,7 @@ func TestEngine_Run_FieldExistsAssertionOnBody(t *testing.T) {
 	registry := adapter.NewRegistry()
 	require.NoError(t, registry.Register("test.step1", &stubAdapter{
 		method: "GET", path: "/step1",
-		response: map[string]any{"name": "Alice"},
+		response: map[string]any{"name": "Alice", "age": 30},
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
@@ -602,7 +605,10 @@ func TestEngine_Run_PredicateAssertion(t *testing.T) {
 				Name:    "step1",
 				Adapter: "test.step1",
 				Inputs:  []graph.Input{},
-				Outputs: []graph.Output{{Name: "count", Type: "integer"}},
+				Outputs: []graph.Output{
+					{Name: "count", Type: "integer"},
+					{Name: "active", Type: "boolean"},
+				},
 			},
 		},
 	}
@@ -617,7 +623,7 @@ func TestEngine_Run_PredicateAssertion(t *testing.T) {
 	registry := adapter.NewRegistry()
 	require.NoError(t, registry.Register("test.step1", &stubAdapter{
 		method: "GET", path: "/step1",
-		response: map[string]any{"count": 5},
+		response: map[string]any{"count": 5, "active": true},
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)

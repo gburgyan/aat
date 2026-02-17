@@ -363,22 +363,44 @@ func TestUnfedInputsFromTemplate_AllWired(t *testing.T) {
 			},
 		},
 	}
-	p := &plan.Plan{
-		Execution: plan.Execution{
-			Steps: []plan.Step{
-				{
-					Node: "search",
-					Values: map[string]plan.StepValue{
-						"origin":      {Default: "DEN"},
-						"destination": {Default: "SFO"},
+
+	t.Run("from refs are wired", func(t *testing.T) {
+		p := &plan.Plan{
+			Execution: plan.Execution{
+				Steps: []plan.Step{
+					{
+						Node: "search",
+						Values: map[string]plan.StepValue{
+							"origin":      {From: "other.output"},
+							"destination": {FromSelection: "sel.field"},
+						},
 					},
 				},
 			},
-		},
-	}
+		}
+		unfed := UnfedInputsFromTemplate(p, g)
+		assert.Empty(t, unfed)
+	})
 
-	unfed := UnfedInputsFromTemplate(p, g)
-	assert.Empty(t, unfed)
+	t.Run("literal defaults are overrideable", func(t *testing.T) {
+		p := &plan.Plan{
+			Execution: plan.Execution{
+				Steps: []plan.Step{
+					{
+						Node: "search",
+						Values: map[string]plan.StepValue{
+							"origin":      {Default: "DEN"},
+							"destination": {Default: "SFO"},
+						},
+					},
+				},
+			},
+		}
+		unfed := UnfedInputsFromTemplate(p, g)
+		assert.Len(t, unfed, 2, "literal defaults should be overrideable")
+		assert.Contains(t, unfed, "search.origin (string)")
+		assert.Contains(t, unfed, "search.destination (string)")
+	})
 }
 
 func TestUnfedInputsFromTemplate_MissingValues(t *testing.T) {
@@ -409,7 +431,9 @@ func TestUnfedInputsFromTemplate_MissingValues(t *testing.T) {
 	}
 
 	unfed := UnfedInputsFromTemplate(p, g)
-	assert.Len(t, unfed, 2)
+	// All three are unfed: origin has a literal default (overrideable), destination and date have nothing.
+	assert.Len(t, unfed, 3)
+	assert.Contains(t, unfed, "search.origin (string)")
 	assert.Contains(t, unfed, "search.destination (string)")
 	assert.Contains(t, unfed, "search.date (date)")
 }
@@ -440,7 +464,9 @@ func TestUnfedInputsFromTemplate_OptionalSkipped(t *testing.T) {
 	}
 
 	unfed := UnfedInputsFromTemplate(p, g)
-	assert.Empty(t, unfed)
+	// origin has a literal default (overrideable), cabin is optional (fed)
+	assert.Len(t, unfed, 1)
+	assert.Contains(t, unfed, "search.origin (string)")
 }
 
 func TestUnfedInputsFromTemplate_GraphDefaultSkipped(t *testing.T) {
@@ -469,7 +495,9 @@ func TestUnfedInputsFromTemplate_GraphDefaultSkipped(t *testing.T) {
 	}
 
 	unfed := UnfedInputsFromTemplate(p, g)
-	assert.Empty(t, unfed)
+	// origin has a literal default (overrideable), passengers has a graph-level default (fed)
+	assert.Len(t, unfed, 1)
+	assert.Contains(t, unfed, "search.origin (string)")
 }
 
 func TestUnfedInputsFromTemplate_FromWired(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -423,6 +424,96 @@ func TestValidateAdapterOutputs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateAdapterOutputsForPlan(t *testing.T) {
+	// Graph has two nodes: "good" (template matches) and "broken" (template mismatch).
+	// The plan only uses "good", so validation should pass.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"good": {
+				Name:    "good",
+				Adapter: "good",
+				Outputs: []graph.Output{
+					{Name: "result", Type: "string"},
+				},
+			},
+			"broken": {
+				Name:    "broken",
+				Adapter: "broken",
+				Outputs: []graph.Output{
+					{Name: "x", Type: "string"},
+					{Name: "missing", Type: "string"},
+				},
+			},
+		},
+	}
+
+	registry := adapter.NewRegistry()
+	registry.Register("good", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "good",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "GET", Path: "/good"},
+		Response: adapter.TemplateResponse{
+			Extract: map[string]adapter.ExtractRule{"result": {Path: "result"}},
+		},
+	}))
+	registry.Register("broken", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "broken",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "GET", Path: "/broken"},
+		Response: adapter.TemplateResponse{
+			Extract: map[string]adapter.ExtractRule{"x": {Path: "x"}},
+			// Missing "missing" — would fail full validation
+		},
+	}))
+
+	t.Run("plan uses only good node", func(t *testing.T) {
+		p := &plan.Plan{
+			Execution: plan.Execution{
+				Steps: []plan.Step{
+					{Node: "good"},
+				},
+			},
+		}
+		err := ValidateAdapterOutputsForPlan(g, registry, p)
+		assert.NoError(t, err)
+	})
+
+	t.Run("plan uses broken node fails", func(t *testing.T) {
+		p := &plan.Plan{
+			Execution: plan.Execution{
+				Steps: []plan.Step{
+					{Node: "broken"},
+				},
+			},
+		}
+		err := ValidateAdapterOutputsForPlan(g, registry, p)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing")
+	})
+
+	t.Run("full validation catches broken", func(t *testing.T) {
+		err := ValidateAdapterOutputs(g, registry)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing")
+	})
+
+	t.Run("cleanup node included", func(t *testing.T) {
+		p := &plan.Plan{
+			Execution: plan.Execution{
+				Steps: []plan.Step{
+					{Node: "good"},
+				},
+				Cleanup: []plan.CleanupStep{
+					{Node: "broken", RunOn: "always"},
+				},
+			},
+		}
+		err := ValidateAdapterOutputsForPlan(g, registry, p)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "missing")
+	})
 }
 
 func TestAdapterValidationError_Error(t *testing.T) {

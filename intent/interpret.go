@@ -193,7 +193,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	unfedInputs := UnfedInputsFromTemplate(tpl, req.Graph)
 	unfedSet := unfedInputSet(tpl, req.Graph)
 
-	// Marshal skeleton to YAML for the LLM prompt.
+	// Marshal skeleton to YAML for trace/debugging (not sent to LLM).
 	skeletonBytes, marshalErr := plan.Marshal(skeleton)
 	if marshalErr != nil {
 		return traceErr(fmt.Errorf("intent: marshalling template skeleton: %w", marshalErr))
@@ -207,13 +207,12 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		}
 	}
 
-	// --- Call 2: Fill Skeleton ---
-	var domainContext string
-	if req.KB != nil {
-		domainContext = req.KB.FormatForPrompt()
-	}
+	// --- Call 2: Targeted Value Fill ---
+	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB, ws)
+	selectionContexts := buildSelectionContexts(skeleton, req.Graph)
+	planFlow := buildCompactPlanFlow(skeleton, req.Graph)
 
-	system, user := buildPlanPrompt(string(skeletonBytes), unfedInputs, domainContext, selJSON, req.Prompt, now)
+	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, planFlow, selJSON, req.Prompt, now)
 
 	planCallStart := time.Now()
 	planResp, err := req.Client.Complete(ctx, &llm.Request{
@@ -234,22 +233,17 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		trace.PlanCall = toLLMCallTrace(system, user, 0.2, planResp, time.Since(planCallStart), nil)
 	}
 
-	// --- Parse and Merge ---
-	yamlBytes, err := ExtractYAML(planResp.Content)
+	// --- Parse and Apply ---
+	targeted, err := parseTargetedResponse(planResp.Content)
 	if err != nil {
-		return traceErr(fmt.Errorf("intent: extracting YAML from LLM response: %w", err))
+		return traceErr(fmt.Errorf("intent: %w", err))
 	}
 
 	if trace != nil {
-		trace.LLMPlanYAML = string(yamlBytes)
+		trace.TargetedResponse = targeted
 	}
 
-	llmPlan, err := plan.Parse(yamlBytes)
-	if err != nil {
-		return traceErr(fmt.Errorf("intent: parsing generated plan: %w", err))
-	}
-
-	MergeLLMValuesWithIDs(skeleton, llmPlan, unfedSet)
+	applyTargetedResponse(skeleton, targeted, unfedSet)
 
 	if trace != nil {
 		merged := copyPlanShallow(skeleton)
@@ -272,8 +266,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 			trace.ValidationErr = err.Error()
 		}
 
-		retryResult := retryPlanGeneration(ctx, req, skeleton, skeletonBytes,
-			unfedInputs, domainContext, selJSON, valErr, trace, pipelineStart)
+		retryResult := retryPlanGeneration(ctx, req, skeleton, ws, selJSON, valErr, trace, pipelineStart)
 		if retryResult != nil {
 			retryResult.WorkflowSelection = ws
 			return retryResult, nil
@@ -299,16 +292,15 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 
 // retryPlanGeneration attempts a single retry of plan generation (call 2)
 // after a validation failure. It blanks broken fromSelection references,
-// rebuilds the skeleton YAML, and re-runs the LLM call with validation
+// rebuilds the context, and re-runs the targeted LLM call with validation
 // errors in the prompt. Returns a successful InterpretResult or nil if
 // retry also fails.
 func retryPlanGeneration(
 	ctx context.Context,
 	req InterpretRequest,
 	skeleton *plan.Plan,
-	skeletonBytes []byte,
-	unfedInputs []string,
-	domainContext, selJSON string,
+	ws *WorkflowSelection,
+	selJSON string,
 	valErr *plan.ValidationError,
 	trace *PlanTrace,
 	pipelineStart time.Time,
@@ -337,19 +329,14 @@ func retryPlanGeneration(
 		return nil
 	}
 
-	retrySkeletonBytes, err := plan.Marshal(retrySkeleton)
-	if err != nil {
-		return nil
-	}
-
-	retryUnfed := append([]string{}, unfedInputs...)
-	for _, b := range blanked {
-		retryUnfed = append(retryUnfed, b+" (was incorrectly wired, needs correct fromSelection)")
-	}
+	// Rebuild contexts for the retry skeleton.
+	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB, ws)
+	selectionContexts := buildSelectionContexts(retrySkeleton, req.Graph)
+	planFlow := buildCompactPlanFlow(retrySkeleton, req.Graph)
 
 	now := time.Now()
-	system, user := buildRetryPrompt(
-		string(retrySkeletonBytes), retryUnfed, domainContext, selJSON,
+	system, user := buildTargetedRetryPrompt(
+		inputContexts, selectionContexts, planFlow, selJSON,
 		req.Prompt, now, valErr.Errors, hints,
 	)
 
@@ -374,19 +361,13 @@ func retryPlanGeneration(
 		trace.RetryCall = &ct
 	}
 
-	yamlBytes, err := ExtractYAML(planResp.Content)
-	if err != nil {
-		return nil
-	}
-
-	llmPlan, err := plan.Parse(yamlBytes)
+	targeted, err := parseTargetedResponse(planResp.Content)
 	if err != nil {
 		return nil
 	}
 
 	retryUnfedSet := unfedInputSet(retrySkeleton, req.Graph)
-	MergeLLMValues(retrySkeleton, llmPlan, retryUnfedSet)
-	restoreBlankedFromSelections(retrySkeleton, llmPlan, blanked)
+	applyTargetedResponse(retrySkeleton, targeted, retryUnfedSet)
 
 	PostProcess(retrySkeleton, req.Graph, nil, req.Prompt)
 

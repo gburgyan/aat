@@ -7,6 +7,7 @@ import (
 
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/plan"
 )
 
 // AdapterValidationError collects all output-vs-extract mismatches found
@@ -19,6 +20,20 @@ func (e *AdapterValidationError) Error() string {
 	return fmt.Sprintf("adapter output validation failed:\n  - %s", strings.Join(e.Errors, "\n  - "))
 }
 
+// ValidateAdapterOutputsForPlan checks only the nodes referenced by the
+// plan's steps and cleanup. This is used during Engine.Run() to avoid
+// failing on unrelated template issues for nodes not used in the plan.
+func ValidateAdapterOutputsForPlan(g *graph.Graph, registry *adapter.Registry, p *plan.Plan) error {
+	nodeSet := make(map[string]bool)
+	for _, step := range p.Execution.Steps {
+		nodeSet[step.Node] = true
+	}
+	for _, cs := range p.Execution.Cleanup {
+		nodeSet[cs.Node] = true
+	}
+	return validateAdapterOutputsForNodes(g, registry, nodeSet)
+}
+
 // ValidateAdapterOutputs checks that graph-declared outputs match the
 // extract keys in the corresponding template for each node. Non-template
 // adapters (custom Adapter implementations) are skipped. Nodes with no
@@ -27,6 +42,12 @@ func (e *AdapterValidationError) Error() string {
 // Additionally validates that template extract rule fields match graph
 // elementField names for array outputs.
 func ValidateAdapterOutputs(g *graph.Graph, registry *adapter.Registry) error {
+	return validateAdapterOutputsForNodes(g, registry, nil)
+}
+
+// validateAdapterOutputsForNodes is the shared implementation. When nodeFilter
+// is non-nil, only nodes in the set are checked.
+func validateAdapterOutputsForNodes(g *graph.Graph, registry *adapter.Registry, nodeFilter map[string]bool) error {
 	var errs []string
 
 	// Sort node names for deterministic error ordering.
@@ -37,6 +58,9 @@ func ValidateAdapterOutputs(g *graph.Graph, registry *adapter.Registry) error {
 	sort.Strings(names)
 
 	for _, name := range names {
+		if nodeFilter != nil && !nodeFilter[name] {
+			continue
+		}
 		node := g.Nodes[name]
 
 		// Skip nodes with no declared outputs (cleanup/void).

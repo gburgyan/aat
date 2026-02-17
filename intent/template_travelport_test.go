@@ -50,10 +50,11 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 	g, err := graph.ParseFile(tpGraphPath)
 	require.NoError(t, err)
 
-	// Unfed inputs are those not wired in the plan template (no from, fromSelection,
-	// select, or default value). Auto-wired graph edges don't count as plan wiring.
-	// Templates provide literal defaults for user-facing inputs, so the only unfed
-	// inputs are auto-wired ones like fopIdentifierValue and offerId on addPayment.
+	// Unfed inputs are those not structurally wired in the plan template (no from,
+	// fromSelection, select ref). Literal template defaults (e.g., origin: DEN)
+	// are considered overrideable and thus "unfed" — the LLM should provide values
+	// that match the user's intent. Optional inputs and graph-level defaults are
+	// excluded (fed). Auto-wired graph edges don't count as plan wiring.
 	tests := []struct {
 		workflow string
 		contains []string // substrings that should appear in unfed list
@@ -61,48 +62,48 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 	}{
 		{
 			workflow:  "Full-Payload Booking",
-			contains:  []string{"addPayment.fopIdentifierValue", "addPayment.offerId"},
-			exact:     2,
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "searchFlights.departureDate", "addTraveler.givenName", "addTraveler.surname", "addPayment.fopIdentifierValue", "addPayment.offerId"},
+			exact:     7,
 		},
 		{
 			workflow:  "Reference-Based Booking",
-			contains:  []string{"addPayment.fopIdentifierValue", "addPayment.offerId"},
-			exact:     2,
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addPayment.fopIdentifierValue", "addPayment.offerId"},
+			exact:     7,
 		},
 		{
 			workflow:  "Post-Commit Ticketing",
-			contains:  []string{"addPayment.fopIdentifierValue", "addPayment.offerId"},
-			exact:     2,
+			contains:  []string{"createWorkbenchFromLocator.locator", "addPayment.fopIdentifierValue", "addPayment.offerId"},
+			exact:     5,
 		},
 		{
 			workflow:  "Exchange",
-			contains:  []string{"addPayment.fopIdentifierValue", "addPayment.offerId"},
-			exact:     2,
+			contains:  []string{"getExchangeEligibility.locator", "searchExchange.origin", "addPayment.fopIdentifierValue"},
+			exact:     7,
 		},
 		{
 			workflow:  "Ancillary Booking",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"searchAncillaries.workbenchId", "addAncillaryOffer.workbenchId"},
+			exact:     4,
 		},
 		{
 			workflow:  "Seat Selection",
 			contains:  []string{"searchSeatMap.offerId", "searchSeatMap.productId"},
-			exact:     2,
+			exact:     -1,
 		},
 		{
 			workflow:  "Traveler Modification",
 			contains:  []string{"updateTraveler.updateValue"},
-			exact:     1,
+			exact:     -1,
 		},
 		{
 			workflow:  "Round-Trip Full-Payload Booking",
-			contains:  []string{"addPayment.fopIdentifierValue", "addPayment.offerId"},
-			exact:     2,
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addPayment.fopIdentifierValue"},
+			exact:     -1,
 		},
 		{
 			workflow:  "Round-Trip Leg-Based Booking",
-			contains:  []string{"addPayment.fopIdentifierValue", "addPayment.offerId"},
-			exact:     2,
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addPayment.fopIdentifierValue"},
+			exact:     -1,
 		},
 		{
 			workflow:  "Post-Commit Seat Selection",
@@ -136,33 +137,33 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		},
 		{
 			workflow:  "Special Services",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"addSpecialService.ssrCode"},
+			exact:     -1,
 		},
 		{
 			workflow:  "Reservation Comments",
-			contains:  []string{"addReservationComment.commentValue"},
-			exact:     1,
+			contains:  []string{"addReservationComment.commentValue", "addReservationComment.commentName"},
+			exact:     -1,
 		},
 		{
 			workflow:  "Accounting Remarks",
-			contains:  []string{"addAccountingRemark.accountingValue"},
-			exact:     1,
+			contains:  []string{"addAccountingRemark.accountingValue", "addAccountingRemark.accountingName"},
+			exact:     -1,
 		},
 		{
 			workflow:  "Document Overrides",
-			contains:  nil,
-			exact:     0,
+			contains:  []string{"addDocumentOverrides.workbenchId"},
+			exact:     -1,
 		},
 		{
 			workflow:  "Primary Contact",
-			contains:  []string{"addPrimaryContact.email", "addPrimaryContact.phoneNumber"},
-			exact:     2,
+			contains:  []string{"addPrimaryContact.email", "addPrimaryContact.phoneNumber", "addPrimaryContact.workbenchId"},
+			exact:     3,
 		},
 		{
 			workflow:  "Travel Agency",
-			contains:  []string{"addTravelAgency.corporateCode", "addTravelAgency.email", "addTravelAgency.phoneNumber"},
-			exact:     3,
+			contains:  []string{"addTravelAgency.corporateCode", "addTravelAgency.email", "addTravelAgency.phoneNumber", "addTravelAgency.workbenchId"},
+			exact:     4,
 		},
 	}
 

@@ -148,12 +148,14 @@ func unfedInputSet(p *plan.Plan, g *graph.Graph) map[string]bool {
 	return set
 }
 
-// isInputFed reports whether a step already has wiring for the given input
-// (from ref, fromSelection, select, literal default, named selection, or
-// the input is optional / has a graph default).
+// isInputFed reports whether a step already has wiring for the given input.
+// An input is "fed" if it has structural wiring (from, fromSelection, select,
+// named selection) or the input is optional / has a graph-level default.
+// Literal template defaults (e.g., origin: DEN) are NOT considered fed —
+// the LLM should be able to override them based on user intent.
 func isInputFed(step plan.Step, inp graph.Input) bool {
 	if sv, exists := step.Values[inp.Name]; exists {
-		if sv.From != "" || sv.FromSelection != "" || sv.Select != nil || sv.Default != nil {
+		if sv.From != "" || sv.FromSelection != "" || sv.Select != nil {
 			return true
 		}
 	}

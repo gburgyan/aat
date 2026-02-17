@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -98,8 +99,8 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
-	// 3. Validate adapter outputs match graph declarations
-	if err := ValidateAdapterOutputs(e.graph, e.registry); err != nil {
+	// 3. Validate adapter outputs match graph declarations (only for plan-used nodes)
+	if err := ValidateAdapterOutputsForPlan(e.graph, e.registry, p); err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
@@ -344,10 +345,19 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		result.Outputs = outputs
 	}
 
-	// Run mechanical assertions if configured
+	// Run mechanical assertions if configured.
+	// When extracted outputs are available, serialize them and use that as
+	// the assertion body so field paths match graph output names. Fall back
+	// to the raw response body when outputs aren't available (e.g., 4xx).
 	if step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
+		assertionBody := resp.Body
+		if result.Outputs != nil {
+			if ob, err := json.Marshal(result.Outputs); err == nil {
+				assertionBody = ob
+			}
+		}
 		result.Validation = validate.RunMechanical(
-			resp.StatusCode, resp.Body,
+			resp.StatusCode, assertionBody,
 			convertAssertions(step.Assertions.Mechanical),
 			plan.EvalPredicate,
 		)

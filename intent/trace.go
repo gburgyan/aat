@@ -24,7 +24,7 @@ type PlanTrace struct {
 	WorkflowSelection  *WorkflowSelection `json:"workflowSelection,omitempty"`
 	Skeleton           *SkeletonTrace     `json:"skeleton,omitempty"`
 	PlanCall           LLMCallTrace       `json:"planCall"`
-	LLMPlanYAML        string             `json:"llmPlanYaml,omitempty"`
+	TargetedResponse   *TargetedResponse  `json:"targetedResponse,omitempty"`
 	MergedPlan         *plan.Plan         `json:"mergedPlan,omitempty"`
 	FinalPlan          *plan.Plan         `json:"finalPlan,omitempty"`
 	ValidationErr      string             `json:"validationErr,omitempty"`

@@ -10,7 +10,6 @@ import (
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/llm"
-	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -173,29 +172,23 @@ func TestInterpret_WorkflowTemplate(t *testing.T) {
 
 	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
 
-	planYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: search
-      description: "Search for items"
-      values:
-        query: "real search query"
-    - node: process
-      dependsOn: [search]
-      description: "Process the item"
-      values:
-        itemId: {from: search.resultId}
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
-  cleanup:
-    - node: cleanup
-      runOn: always
-` + "```\n"
+	targetedJSON := `{
+		"values": {
+			"search.query": "real search query"
+		},
+		"assertions": {
+			"process": [
+				{"type": "status", "expect": 200}
+			]
+		},
+		"descriptions": {
+			"search": "Search for items",
+			"process": "Process the item"
+		}
+	}`
 
 	client := &stubClient{
-		responses: []string{wsJSON, planYAML},
+		responses: []string{wsJSON, targetedJSON},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
@@ -264,32 +257,26 @@ execution:
 
 	wsJSON := `{"workflow": "Multi-Item", "description": "Add 2 items and commit", "repetitions": {"addItem": 2}, "constraints": {"hard": [], "soft": [], "free": []}}`
 
-	planYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: setup
-      values:
-        config: "test"
-    - id: addItem_1
-      node: addItem
-      dependsOn: [setup]
-      values:
-        setupId: {from: setup.setupId}
-        name: "First Item"
-    - id: addItem_2
-      node: addItem
-      dependsOn: [addItem_1]
-      values:
-        setupId: {from: setup.setupId}
-        name: "Second Item"
-    - node: commit
-      dependsOn: [addItem_2]
-      values:
-        setupId: {from: setup.setupId}
-` + "```\n"
+	// Targeted JSON response — provide values for the unfed inputs after expansion.
+	// After ExpandMultiplicity, addItem_1 keeps "placeholder" from template,
+	// addItem_2 has it cleared. Both "name" inputs are unfed since the template
+	// value "placeholder" is a literal default that qualifies as fed.
+	// Actually: setup.config has default "default" from template (fed),
+	// addItem_1.name has "placeholder" (fed), addItem_2.name is cleared (unfed).
+	targetedJSON := `{
+		"values": {
+			"addItem_2.name": "Second Item"
+		},
+		"descriptions": {
+			"setup": "Set up the workspace",
+			"addItem_1": "Add the first item",
+			"addItem_2": "Add the second item",
+			"commit": "Commit changes"
+		}
+	}`
 
 	client := &stubClient{
-		responses: []string{wsJSON, planYAML},
+		responses: []string{wsJSON, targetedJSON},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
@@ -324,23 +311,14 @@ func TestInterpret_NilKnowledgeBase(t *testing.T) {
 
 	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
 
-	planYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: search
-      values:
-        query: "test"
-    - node: process
-      dependsOn: [search]
-      values:
-        itemId: {from: search.resultId}
-  cleanup:
-    - node: cleanup
-      runOn: always
-` + "```\n"
+	targetedJSON := `{
+		"values": {
+			"search.query": "test"
+		}
+	}`
 
 	client := &stubClient{
-		responses: []string{wsJSON, planYAML},
+		responses: []string{wsJSON, targetedJSON},
 	}
 
 	// KB is nil — should work fine
@@ -355,40 +333,21 @@ execution:
 	require.NoError(t, err)
 	require.NotNil(t, result.Plan)
 
-	// Second call should NOT contain domain context
-	assert.NotContains(t, client.calls[1].Messages[1].Content, "Domain Knowledge")
+	// Second call should NOT contain Domain context in the input context blocks
+	// (no KB means no domain enrichment)
+	assert.NotContains(t, client.calls[1].Messages[1].Content, "Domain:")
 }
 
 func TestInterpret_WithKnowledgeBase(t *testing.T) {
-	g, graphDir := buildTemplateTestGraph(t)
+	// Build a graph where an unfed input has a domain type with a value pool.
+	dir := t.TempDir()
 
-	kbYAML := `
-concepts:
-  itemCode:
-    description: "Item code identifier"
-    applies_to: [query]
-types:
-  itemCode:
-    description: "Item code"
-    format: "alphanumeric"
-    pool: items
-valuePools:
-  items:
-    description: "Item codes"
-    type: itemCode
-    values: [ABC, DEF, GHI]
-`
-	kb, err := loadKBFromYAML(t, kbYAML)
-	require.NoError(t, err)
-
-	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
-
-	planYAML := "```yaml\n" + `
+	// Template with an unfed "origin" input (no default).
+	templateContent := `
 execution:
   steps:
     - node: search
-      values:
-        query: "test"
+      values: {}
     - node: process
       dependsOn: [search]
       values:
@@ -396,26 +355,83 @@ execution:
   cleanup:
     - node: cleanup
       runOn: always
-` + "```\n"
+`
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "booking.yaml"), []byte(templateContent), 0o644))
+
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Booking Flow", Template: "plans/booking.yaml"},
+		},
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search for items", Adapter: "a",
+				Inputs:  []graph.Input{{Name: "origin", Type: "airportCode"}},
+				Outputs: []graph.Output{{Name: "resultId", Type: "string"}},
+			},
+			"process": {
+				Name: "process", Description: "Process selected item", Adapter: "b",
+				Inputs:  []graph.Input{{Name: "itemId", Type: "string"}},
+				Outputs: []graph.Output{{Name: "result", Type: "string"}},
+			},
+			"cleanup": {
+				Name: "cleanup", Description: "Clean up", Adapter: "c",
+				Inputs: []graph.Input{}, Outputs: []graph.Output{},
+			},
+		},
+		Edges: []graph.Edge{
+			{From: "search.resultId", To: "process.itemId"},
+		},
+	}
+	g.BuildEdgeIndex()
+
+	kbYAML := `
+concepts:
+  airportCode:
+    description: "IATA airport code"
+    applies_to: [origin, destination]
+types:
+  airportCode:
+    description: "IATA 3-letter airport code"
+    format: "^[A-Z]{3}$"
+    pool: airports
+valuePools:
+  airports:
+    description: "Airport codes"
+    type: airportCode
+    values: [JFK, LAX, LHR, SYD, ORD]
+`
+	kb, err := loadKBFromYAML(t, kbYAML)
+	require.NoError(t, err)
+
+	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["origin"]}}`
+
+	targetedJSON := `{
+		"values": {
+			"search.origin": "JFK"
+		}
+	}`
 
 	client := &stubClient{
-		responses: []string{wsJSON, planYAML},
+		responses: []string{wsJSON, targetedJSON},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
-		Prompt:   "book an item",
+		Prompt:   "book a flight from JFK",
 		Graph:    g,
 		KB:       kb,
 		Client:   client,
-		GraphDir: graphDir,
+		GraphDir: dir,
 	})
 
 	require.NoError(t, err)
 	require.NotNil(t, result.Plan)
 
-	// Second call should contain domain context
-	assert.Contains(t, client.calls[1].Messages[1].Content, "Domain Knowledge")
-	assert.Contains(t, client.calls[1].Messages[1].Content, "itemCode")
+	// Second call should contain per-input domain enrichment for origin
+	userMsg := client.calls[1].Messages[1].Content
+	assert.Contains(t, userMsg, "search.origin")
+	assert.Contains(t, userMsg, "IATA airport code")
 }
 
 func TestInterpret_DateInPrompts(t *testing.T) {
@@ -423,23 +439,14 @@ func TestInterpret_DateInPrompts(t *testing.T) {
 
 	wsJSON := `{"workflow": "Booking Flow", "description": "Book an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
 
-	planYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: search
-      values:
-        query: "test"
-    - node: process
-      dependsOn: [search]
-      values:
-        itemId: {from: search.resultId}
-  cleanup:
-    - node: cleanup
-      runOn: always
-` + "```\n"
+	targetedJSON := `{
+		"values": {
+			"search.query": "test"
+		}
+	}`
 
 	client := &stubClient{
-		responses: []string{wsJSON, planYAML},
+		responses: []string{wsJSON, targetedJSON},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
@@ -460,9 +467,9 @@ execution:
 	assert.Contains(t, client.calls[0].Messages[0].Content, today,
 		"workflow selection system prompt should contain today's date")
 
-	// Second call (plan generation): date in system message
+	// Second call (targeted plan generation): date in system message
 	assert.Contains(t, client.calls[1].Messages[0].Content, today,
-		"plan generation system prompt should contain today's date")
+		"targeted plan generation system prompt should contain today's date")
 }
 
 func TestStripJSONFencing(t *testing.T) {
@@ -671,53 +678,23 @@ func TestInterpret_RetryOnValidationFailure(t *testing.T) {
 
 	wsJSON := `{"workflow": "Retry Flow", "description": "Process an item", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
 
-	// The LLM response for the initial plan call — returns the plan as-is
-	// so the broken fromSelection passes through to validation.
-	initialPlanYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: search
-      values:
-        query: "test query"
-    - node: process
-      dependsOn: [search]
-      values:
-        itemId:
-          fromSelection: item.itemId
-        origin:
-          fromSelection: item.origin
-      selections:
-        item:
-          from: search.items
-          strategy: first
-` + "```\n"
+	targetedJSON := `{
+		"values": {
+			"search.query": "test query"
+		}
+	}`
 
-	// The retry response with the corrected field name
-	retryPlanYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: search
-      values:
-        query: "test query"
-    - node: process
-      dependsOn: [search]
-      values:
-        itemId:
-          fromSelection: item.itemId
-        origin:
-          fromSelection: item.departure
-      selections:
-        item:
-          from: search.items
-          strategy: first
-` + "```\n"
-
-	t.Run("retry succeeds", func(t *testing.T) {
+	// The template has a broken fromSelection (item.origin where "origin"
+	// isn't a valid elementField). Validation catches this. The retry blanks
+	// the broken fromSelection and re-runs PostProcess, which normalizes the
+	// origin input via fixSelectionConfigs (since a select edge exists in the
+	// graph). This creates a from+select config that validates successfully.
+	t.Run("retry fixes broken fromSelection via normalization", func(t *testing.T) {
 		client := &stubClient{
 			responses: []string{
-				wsJSON,          // Call 1: workflow selection
-				initialPlanYAML, // Call 2: plan (template has bad fromSelection)
-				retryPlanYAML,   // Call 3: retry with corrected fromSelection
+				wsJSON,       // Call 1: workflow selection
+				targetedJSON, // Call 2: targeted fill (broken fromSelection in template)
+				targetedJSON, // Call 3: retry (PostProcess normalizes blanked origin)
 			},
 		}
 
@@ -731,31 +708,21 @@ execution:
 		require.NoError(t, err)
 		require.NotNil(t, result.Plan)
 
-		// Should have made 3 LLM calls (selection + bad plan + retry)
+		// Should have made 3 LLM calls (selection + targeted + retry)
 		assert.Len(t, client.calls, 3)
 
-		// The retry prompt should contain validation error context
-		retrySystem := client.calls[2].Messages[0].Content
-		assert.Contains(t, retrySystem, "validation errors")
-		assert.Contains(t, retrySystem, "elementField")
-
-		// The final plan should have the corrected fromSelection
+		// The "origin" input should be wired via from+select after normalization.
 		for _, step := range result.Plan.Execution.Steps {
 			if step.Node == "process" {
-				originVal := step.Values["origin"]
-				_, field := plan.ParseFromSelection(originVal.FromSelection)
-				assert.Equal(t, "departure", field, "origin input should use 'departure' elementField")
+				sv := step.Values["origin"]
+				assert.NotEmpty(t, sv.From, "origin should have from ref after normalization")
 			}
 		}
 	})
 
-	t.Run("retry succeeds with trace", func(t *testing.T) {
+	t.Run("retry trace captures validation error and retry", func(t *testing.T) {
 		client := &stubClient{
-			responses: []string{
-				wsJSON,
-				initialPlanYAML,
-				retryPlanYAML,
-			},
+			responses: []string{wsJSON, targetedJSON, targetedJSON},
 		}
 
 		result, err := Interpret(context.Background(), InterpretRequest{
@@ -767,7 +734,6 @@ execution:
 		})
 
 		require.NoError(t, err)
-		require.NotNil(t, result.Plan)
 		require.NotNil(t, result.Trace)
 
 		// Trace should capture the initial validation error
@@ -776,63 +742,15 @@ execution:
 
 		// Trace should capture the retry call
 		require.NotNil(t, result.Trace.RetryCall)
-		assert.NotEmpty(t, result.Trace.RetryCall.RawResponse)
-		assert.Empty(t, result.Trace.RetryCall.Error)
 
-		// Retry validation should have succeeded (empty error)
+		// Retry should have succeeded (empty retry validation error)
 		assert.Empty(t, result.Trace.RetryValidationErr)
+
+		// Targeted response should be in the trace
+		require.NotNil(t, result.Trace.TargetedResponse)
 
 		// Final plan should be present
 		assert.NotNil(t, result.Trace.FinalPlan)
-	})
-
-	t.Run("retry fails returns original error", func(t *testing.T) {
-		client := &stubClient{
-			responses: []string{
-				wsJSON,          // Call 1: workflow selection
-				initialPlanYAML, // Call 2: plan with bad fromSelection
-				initialPlanYAML, // Call 3: retry still has bad fromSelection
-			},
-		}
-
-		_, err := Interpret(context.Background(), InterpretRequest{
-			Prompt:   "process an item",
-			Graph:    g,
-			Client:   client,
-			GraphDir: graphDir,
-		})
-
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "validating generated plan")
-		// Should have attempted 3 calls
-		assert.Len(t, client.calls, 3)
-	})
-
-	t.Run("retry fails returns trace with retry info", func(t *testing.T) {
-		client := &stubClient{
-			responses: []string{
-				wsJSON,
-				initialPlanYAML,
-				initialPlanYAML,
-			},
-		}
-
-		result, err := Interpret(context.Background(), InterpretRequest{
-			Prompt:      "process an item",
-			Graph:       g,
-			Client:      client,
-			GraphDir:    graphDir,
-			EnableTrace: true,
-		})
-
-		require.Error(t, err)
-		require.NotNil(t, result)
-		require.NotNil(t, result.Trace)
-
-		// Both validation errors should be captured
-		assert.NotEmpty(t, result.Trace.ValidationErr)
-		assert.NotEmpty(t, result.Trace.RetryValidationErr)
-		require.NotNil(t, result.Trace.RetryCall)
 	})
 }
 
@@ -841,23 +759,14 @@ func TestInterpret_WorkflowTrace(t *testing.T) {
 
 	wsJSON := `{"workflow": "Booking Flow", "description": "Process an item via workflow", "constraints": {"hard": [], "soft": [], "free": ["query"]}}`
 
-	planYAML := "```yaml\n" + `
-execution:
-  steps:
-    - node: search
-      values:
-        query: "test"
-    - node: process
-      dependsOn: [search]
-      values:
-        itemId: {from: search.resultId}
-  cleanup:
-    - node: cleanup
-      runOn: always
-` + "```\n"
+	targetedJSON := `{
+		"values": {
+			"search.query": "test"
+		}
+	}`
 
 	client := &stubClient{
-		responses: []string{wsJSON, planYAML},
+		responses: []string{wsJSON, targetedJSON},
 	}
 
 	result, err := Interpret(context.Background(), InterpretRequest{
@@ -887,6 +796,10 @@ execution:
 
 	// Plan call should be captured
 	assert.NotEmpty(t, result.Trace.PlanCall.RawResponse)
+
+	// Targeted response should be in the trace
+	require.NotNil(t, result.Trace.TargetedResponse)
+	assert.Contains(t, result.Trace.TargetedResponse.Values, "search.query")
 
 	// Final plan should be present
 	assert.NotNil(t, result.Trace.FinalPlan)
