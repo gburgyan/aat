@@ -447,7 +447,9 @@ func TestIterationIntegration_PriceOfferReference(t *testing.T) {
   "CatalogProductOfferingSelection": [
     {
       "CatalogProductOfferingIdentifier": {
-        "id": "{{offeringId}}"
+        "Identifier": {
+          "value": "{{offeringId}}"
+        }
       },
       "ProductIdentifier": [
         {{#productIds}}
