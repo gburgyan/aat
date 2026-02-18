@@ -127,7 +127,23 @@ func Validate(g *Graph) error {
 		}
 	}
 
-	// 6. Conditions: validate references
+	// 6. Error detection rules: graph-level
+	for i, rule := range g.ErrorDetection {
+		for _, msg := range validateErrorDetectionRule(rule) {
+			errs = append(errs, fmt.Sprintf("errorDetection[%d]: %s", i, msg))
+		}
+	}
+
+	// 6a. Error detection rules: per-node
+	for name, node := range g.Nodes {
+		for i, rule := range node.ErrorDetection {
+			for _, msg := range validateErrorDetectionRule(rule) {
+				errs = append(errs, fmt.Sprintf("node %q: errorDetection[%d]: %s", name, i, msg))
+			}
+		}
+	}
+
+	// 7. Conditions: validate references
 	for i, cond := range g.Conditions {
 		if cond.When == "" {
 			errs = append(errs, fmt.Sprintf("condition %d: 'when' is required", i))
@@ -228,6 +244,50 @@ func ValidateWarnings(g *Graph) []string {
 	}
 
 	return warnings
+}
+
+// validErrorDetectionRules is the set of supported error detection rule types.
+var validErrorDetectionRules = map[string]bool{
+	"exists":    true,
+	"non-empty": true,
+	"equals":    true,
+}
+
+// validateErrorDetectionRule checks a single ErrorDetectionRule and returns
+// any validation error messages.
+func validateErrorDetectionRule(rule ErrorDetectionRule) []string {
+	var errs []string
+	if rule.Path == "" {
+		errs = append(errs, "path is required")
+	} else if msg := validateGjsonPath(rule.Path); msg != "" {
+		errs = append(errs, fmt.Sprintf("invalid path %q: %s", rule.Path, msg))
+	}
+	if rule.Rule == "" {
+		errs = append(errs, "rule is required")
+	} else if !validErrorDetectionRules[rule.Rule] {
+		errs = append(errs, fmt.Sprintf("unknown rule %q (must be exists, non-empty, or equals)", rule.Rule))
+	}
+	if rule.Rule == "equals" && rule.Value == nil {
+		errs = append(errs, "equals rule requires a value")
+	}
+	if rule.Details != nil {
+		if rule.Details.Message != "" {
+			if msg := validateGjsonPath(rule.Details.Message); msg != "" {
+				errs = append(errs, fmt.Sprintf("invalid details.message path %q: %s", rule.Details.Message, msg))
+			}
+		}
+		if rule.Details.Code != "" {
+			if msg := validateGjsonPath(rule.Details.Code); msg != "" {
+				errs = append(errs, fmt.Sprintf("invalid details.code path %q: %s", rule.Details.Code, msg))
+			}
+		}
+		if rule.Details.Category != "" {
+			if msg := validateGjsonPath(rule.Details.Category); msg != "" {
+				errs = append(errs, fmt.Sprintf("invalid details.category path %q: %s", rule.Details.Category, msg))
+			}
+		}
+	}
+	return errs
 }
 
 // validateGjsonPath performs basic plausibility checks on a gjson path.

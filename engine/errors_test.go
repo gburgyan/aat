@@ -25,6 +25,7 @@ func TestErrorCategoryString(t *testing.T) {
 		{CategoryAdapter, "adapter"},
 		{CategoryNetwork, "network"},
 		{CategoryTimeout, "timeout"},
+		{CategoryResponseError, "response_error"},
 		{ErrorCategory(99), "unknown"},
 	}
 
@@ -258,6 +259,14 @@ func TestClassifyStepResult(t *testing.T) {
 			result:  StepResult{StatusCode: 401},
 			wantCat: CategoryAuth,
 		},
+		{
+			name: "response body error",
+			result: StepResult{
+				StatusCode:        200,
+				ResponseBodyError: &ResponseBodyError{RulePath: "errors", Rule: "non-empty", Message: "bad"},
+			},
+			wantCat: CategoryResponseError,
+		},
 	}
 
 	for _, tt := range tests {
@@ -404,6 +413,7 @@ func TestDefaultRetryable(t *testing.T) {
 	assert.False(t, defaultRetryable(CategoryAuth))
 	assert.False(t, defaultRetryable(CategoryAdapter))
 	assert.False(t, defaultRetryable(CategoryNetwork))
+	assert.False(t, defaultRetryable(CategoryResponseError))
 }
 
 func TestStatusCodeDetail(t *testing.T) {

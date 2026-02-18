@@ -40,10 +40,19 @@ type StepRecord struct {
 	Selections  []SelectionRecord         `json:"selections,omitempty"`
 	Resolutions []ValueResolutionRecord   `json:"resolutions,omitempty"`
 	Relaxations []RelaxationArchiveRecord `json:"relaxations,omitempty"`
-	ErrorClass    *ErrorClassRecord         `json:"errorClassification,omitempty"`
-	ExpectFailure *ExpectFailureRecord      `json:"expectFailure,omitempty"`
-	Error         string                    `json:"error,omitempty"`
-	RetryCount    int                       `json:"retryCount,omitempty"`
+	DisplayOutputs    []DisplayOutputRecord    `json:"displayOutputs,omitempty"`
+	ErrorClass        *ErrorClassRecord         `json:"errorClassification,omitempty"`
+	ExpectFailure     *ExpectFailureRecord      `json:"expectFailure,omitempty"`
+	ResponseBodyError *ResponseBodyErrorRecord  `json:"responseBodyError,omitempty"`
+	Error             string                    `json:"error,omitempty"`
+	RetryCount        int                       `json:"retryCount,omitempty"`
+}
+
+// DisplayOutputRecord captures an output value tagged for display.
+type DisplayOutputRecord struct {
+	Label string `json:"label"`
+	Name  string `json:"name"`
+	Value any    `json:"value,omitempty"`
 }
 
 // ExpectFailureRecord captures the outcome of a negative assertion.
@@ -51,6 +60,15 @@ type ExpectFailureRecord struct {
 	Expected []int `json:"expected"`
 	Actual   int   `json:"actual"`
 	Passed   bool  `json:"passed"`
+}
+
+// ResponseBodyErrorRecord captures an error detected in a 2xx response body.
+type ResponseBodyErrorRecord struct {
+	RulePath string `json:"rulePath"`
+	Rule     string `json:"rule"`
+	Message  string `json:"message,omitempty"`
+	Code     string `json:"code,omitempty"`
+	Category string `json:"category,omitempty"`
 }
 
 // RequestRecord captures the outbound HTTP request.

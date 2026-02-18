@@ -647,3 +647,148 @@ func TestParse_WorkflowWithAfterWire(t *testing.T) {
 	assert.Equal(t, "book", addon.After)
 	assert.Equal(t, "book.workbenchId", addon.Wire["workbenchId"])
 }
+
+// --- Error Detection Validation ---
+
+func TestValidate_ErrorDetection_ValidGraphLevel(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		ErrorDetection: []ErrorDetectionRule{
+			{Path: "ErrorResponse.Result.Error", Rule: "non-empty", Details: &ErrorDetailMapping{
+				Message: "ErrorResponse.Result.Error.0.Message",
+				Code:    "ErrorResponse.Result.Error.0.SourceCode",
+			}},
+		},
+		Nodes: map[string]*Node{
+			"n": {Name: "n", Adapter: "n", Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+	err := Validate(g)
+	assert.NoError(t, err)
+}
+
+func TestValidate_ErrorDetection_ValidNodeLevel(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"gql": {
+				Name: "gql", Adapter: "gql",
+				ErrorDetection: []ErrorDetectionRule{
+					{Path: "errors", Rule: "non-empty"},
+				},
+				Outputs: []Output{{Name: "y", Type: "string"}},
+			},
+		},
+	}
+	err := Validate(g)
+	assert.NoError(t, err)
+}
+
+func TestValidate_ErrorDetection_MissingPath(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		ErrorDetection: []ErrorDetectionRule{
+			{Rule: "exists"},
+		},
+		Nodes: map[string]*Node{
+			"n": {Name: "n", Adapter: "n", Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "path is required")
+}
+
+func TestValidate_ErrorDetection_MissingRule(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		ErrorDetection: []ErrorDetectionRule{
+			{Path: "error"},
+		},
+		Nodes: map[string]*Node{
+			"n": {Name: "n", Adapter: "n", Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "rule is required")
+}
+
+func TestValidate_ErrorDetection_UnknownRule(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		ErrorDetection: []ErrorDetectionRule{
+			{Path: "error", Rule: "banana"},
+		},
+		Nodes: map[string]*Node{
+			"n": {Name: "n", Adapter: "n", Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "unknown rule")
+}
+
+func TestValidate_ErrorDetection_EqualsRequiresValue(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		ErrorDetection: []ErrorDetectionRule{
+			{Path: "success", Rule: "equals"},
+		},
+		Nodes: map[string]*Node{
+			"n": {Name: "n", Adapter: "n", Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "equals rule requires a value")
+}
+
+func TestValidate_ErrorDetection_EqualsWithValue(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		ErrorDetection: []ErrorDetectionRule{
+			{Path: "success", Rule: "equals", Value: false},
+		},
+		Nodes: map[string]*Node{
+			"n": {Name: "n", Adapter: "n", Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+	err := Validate(g)
+	assert.NoError(t, err)
+}
+
+func TestValidate_ErrorDetection_InvalidDetailPath(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		ErrorDetection: []ErrorDetectionRule{
+			{Path: "error", Rule: "exists", Details: &ErrorDetailMapping{
+				Message: "error..message",
+			}},
+		},
+		Nodes: map[string]*Node{
+			"n": {Name: "n", Adapter: "n", Outputs: []Output{{Name: "y", Type: "string"}}},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "invalid details.message path")
+}
+
+func TestValidate_ErrorDetection_NodeLevelInvalid(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"n": {
+				Name: "n", Adapter: "n",
+				ErrorDetection: []ErrorDetectionRule{
+					{Path: "errors", Rule: "bogus"},
+				},
+				Outputs: []Output{{Name: "y", Type: "string"}},
+			},
+		},
+	}
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "node \"n\": errorDetection[0]: unknown rule")
+}

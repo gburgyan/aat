@@ -78,6 +78,25 @@ func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) ar
 			Passed:   s.ExpectFailure.Passed,
 		}
 	}
+	if len(s.DisplayOutputs) > 0 {
+		rec.DisplayOutputs = make([]archive.DisplayOutputRecord, len(s.DisplayOutputs))
+		for i, do := range s.DisplayOutputs {
+			rec.DisplayOutputs[i] = archive.DisplayOutputRecord{
+				Label: do.Label,
+				Name:  do.Name,
+				Value: do.Value,
+			}
+		}
+	}
+	if s.ResponseBodyError != nil {
+		rec.ResponseBodyError = &archive.ResponseBodyErrorRecord{
+			RulePath: s.ResponseBodyError.RulePath,
+			Rule:     s.ResponseBodyError.Rule,
+			Message:  s.ResponseBodyError.Message,
+			Code:     s.ResponseBodyError.Code,
+			Category: s.ResponseBodyError.Category,
+		}
+	}
 
 	return rec
 }

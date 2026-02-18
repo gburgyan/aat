@@ -86,6 +86,22 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 			s.ErrorClass.Category, s.ErrorClass.Detail, s.ErrorClass.Action)
 	}
 
+	// Response body error
+	if s.ResponseBodyError != nil {
+		fmt.Fprintf(&b, "**Response Body Error:** detected at `%s` (rule: %s)\n",
+			s.ResponseBodyError.RulePath, s.ResponseBodyError.Rule)
+		if s.ResponseBodyError.Message != "" {
+			fmt.Fprintf(&b, "  Message: %s\n", s.ResponseBodyError.Message)
+		}
+		if s.ResponseBodyError.Code != "" {
+			fmt.Fprintf(&b, "  Code: %s\n", s.ResponseBodyError.Code)
+		}
+		if s.ResponseBodyError.Category != "" {
+			fmt.Fprintf(&b, "  Category: %s\n", s.ResponseBodyError.Category)
+		}
+		b.WriteString("\n")
+	}
+
 	// ExpectFailure
 	if s.ExpectFailure != nil {
 		result := "PASSED"
@@ -431,6 +447,8 @@ func suggestNextSteps(category string) string {
 		return "Response assertions failed. Review the expected values in the plan."
 	case "network":
 		return "Network error. Check connectivity and the API base URL."
+	case "response_error":
+		return "The API returned 200 OK but the response body contains an error. Check request inputs and API documentation."
 	default:
 		return ""
 	}
@@ -468,6 +486,9 @@ func findFailedSteps(steps []archive.StepRecord) []archive.StepRecord {
 		if s.Validation != nil && !s.Validation.Passed {
 			isFailed = true
 		}
+		if s.ResponseBodyError != nil {
+			isFailed = true
+		}
 		if isFailed {
 			failed = append(failed, s)
 		}
@@ -493,6 +514,9 @@ func collectFailureCategories(steps []archive.StepRecord) []string {
 		}
 		if s.Validation != nil && !s.Validation.Passed {
 			cats = append(cats, "validation")
+		}
+		if s.ResponseBodyError != nil {
+			cats = append(cats, "response_error")
 		}
 		if s.Error != "" && s.ErrorClass == nil && s.Response == nil {
 			cats = append(cats, "network")

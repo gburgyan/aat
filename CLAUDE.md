@@ -102,6 +102,53 @@ When making design decisions or completing stage milestones, add entries to `doc
 **Open questions:** Anything deferred
 ```
 
+## Running AAT (Travelport Example)
+
+Build the binary and use the travelport config files in `travelport/`:
+
+```bash
+# Build
+go build -o aat ./cmd/aat/
+
+# LLM-generated plan from natural language prompt
+./aat prompt \
+  --env travelport/env.yaml \
+  --graph travelport/graph.yaml \
+  --templates travelport/templates/ \
+  --domain travelport/domain.yaml \
+  "book a flight from rome to new york"
+
+# Optional prompt flags:
+#   --yes              skip interactive confirmation (auto-execute)
+#   --save FILE        save generated plan to a YAML file
+#   --trace            capture planning pipeline trace for debugging
+#   --trace-dir DIR    trace output directory (default: traces/)
+#   --output DIR       archive output directory (default: runs/)
+
+# Execute a pre-written plan
+./aat run \
+  --plan travelport/plans/roundtrip-booking.yaml \
+  --env travelport/env.yaml \
+  --graph travelport/graph.yaml \
+  --templates travelport/templates/ \
+  --domain travelport/domain.yaml
+
+# Optional run flags:
+#   --mode MODE        strict (no LLM), lean (LLM fallback), adaptive (lean + relaxation)
+#   --output DIR       archive output directory (default: runs/)
+#   --json             machine-readable JSON summary to stdout
+#   --quiet            suppress progress, show final line only
+```
+
+**Travelport config files:**
+- `travelport/env.yaml` — environment config (auth, LLM endpoint)
+- `travelport/graph.yaml` — API graph (59 nodes)
+- `travelport/templates/` — 56 request templates
+- `travelport/domain.yaml` — domain knowledge (concepts, types, value pools)
+- `travelport/plans/` — 27 pre-written plan files for various scenarios
+
+LLM config (endpoint, API key, model) comes from the `llm:` section in the env YAML. The API key resolves from an OS environment variable via `SecretRef`.
+
 ## Observability & Debugging
 
 AAT has two layers of observability: **run archives** capture execution, **plan traces** capture planning.

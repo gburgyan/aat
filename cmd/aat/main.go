@@ -79,15 +79,23 @@ type RunSummary struct {
 
 // StepSummary is a per-step entry in the JSON summary.
 type StepSummary struct {
-	Name             string `json:"name"`
-	Node             string `json:"node"`
-	Status           int    `json:"status"`
-	DurationMs       int64  `json:"duration_ms"`
-	Passed           bool   `json:"passed"`
-	Error            string `json:"error,omitempty"`
-	Retries          int    `json:"retries"`
-	AssertionsPassed int    `json:"assertions_passed"`
-	AssertionsFailed int    `json:"assertions_failed"`
+	Name             string                `json:"name"`
+	Node             string                `json:"node"`
+	Status           int                   `json:"status"`
+	DurationMs       int64                 `json:"duration_ms"`
+	Passed           bool                  `json:"passed"`
+	Error            string                `json:"error,omitempty"`
+	Retries          int                   `json:"retries"`
+	AssertionsPassed int                   `json:"assertions_passed"`
+	AssertionsFailed int                   `json:"assertions_failed"`
+	DisplayOutputs   []DisplayOutputEntry  `json:"display_outputs,omitempty"`
+}
+
+// DisplayOutputEntry is a display-tagged output in the JSON summary.
+type DisplayOutputEntry struct {
+	Label string `json:"label"`
+	Name  string `json:"name"`
+	Value any    `json:"value,omitempty"`
 }
 
 // SummaryStats is the aggregate counts in the JSON summary.
@@ -396,6 +404,15 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		ss.Passed = true
 	}
 
+	// Display outputs
+	for _, do := range step.DisplayOutputs {
+		ss.DisplayOutputs = append(ss.DisplayOutputs, DisplayOutputEntry{
+			Label: do.Label,
+			Name:  do.Name,
+			Value: do.Value,
+		})
+	}
+
 	// Assertion counts
 	if step.Validation != nil {
 		for _, ar := range step.Validation.Results {
@@ -429,6 +446,9 @@ func printRunSummary(result *engine.RunResult, out io.Writer) {
 				validMark = "  ASSERTIONS FAILED"
 			}
 			fmt.Fprintf(out, "%s %s  %dms%s\n", prefix, status, step.Duration.Milliseconds(), validMark)
+			for _, do := range step.DisplayOutputs {
+				fmt.Fprintf(out, "        %s: %v\n", do.Label, do.Value)
+			}
 		} else {
 			fmt.Fprintf(out, "%s (no response)\n", prefix)
 		}

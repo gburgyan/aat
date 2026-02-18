@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/engine"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -479,6 +480,89 @@ func TestRunMain_JSONOutput(t *testing.T) {
 func TestRunMain_FlagParseError(t *testing.T) {
 	code := runMain([]string{"--unknown-flag"})
 	assert.Equal(t, exitCodeInfra, code)
+}
+
+// --- Display outputs tests ---
+
+func TestPrintRunSummary_DisplayOutputs(t *testing.T) {
+	result := &engine.RunResult{
+		Outcome: engine.OutcomePassed,
+		Steps: []engine.StepResult{
+			{
+				Node:       "commitReservation",
+				StatusCode: 200,
+				Response:   &adapter.Response{StatusCode: 200},
+				DisplayOutputs: []engine.DisplayOutput{
+					{Label: "PNR", Name: "locator", Value: "ABCDEF"},
+					{Label: "Reservation ID", Name: "reservationId", Value: "res-123"},
+				},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printRunSummary(result, &buf)
+	output := buf.String()
+
+	assert.Contains(t, output, "PNR: ABCDEF")
+	assert.Contains(t, output, "Reservation ID: res-123")
+}
+
+func TestPrintRunSummary_NoDisplayOutputs(t *testing.T) {
+	result := &engine.RunResult{
+		Outcome: engine.OutcomePassed,
+		Steps: []engine.StepResult{
+			{
+				Node:       "search",
+				StatusCode: 200,
+				Response:   &adapter.Response{StatusCode: 200},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printRunSummary(result, &buf)
+	output := buf.String()
+
+	// Should not contain any "Label: Value" display lines
+	assert.NotRegexp(t, `(?m)^ {8}\w+:`, output)
+}
+
+func TestToStepSummary_DisplayOutputs(t *testing.T) {
+	step := engine.StepResult{
+		Node:       "commit",
+		StatusCode: 200,
+		DisplayOutputs: []engine.DisplayOutput{
+			{Label: "PNR", Name: "locator", Value: "ABCDEF"},
+		},
+	}
+
+	ss := toStepSummary(step)
+	require.Len(t, ss.DisplayOutputs, 1)
+	assert.Equal(t, "PNR", ss.DisplayOutputs[0].Label)
+	assert.Equal(t, "locator", ss.DisplayOutputs[0].Name)
+	assert.Equal(t, "ABCDEF", ss.DisplayOutputs[0].Value)
+
+	// Verify JSON round-trip
+	data, err := json.Marshal(ss)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"display_outputs"`)
+	assert.Contains(t, string(data), `"PNR"`)
+}
+
+func TestToStepSummary_NoDisplayOutputs(t *testing.T) {
+	step := engine.StepResult{
+		Node:       "search",
+		StatusCode: 200,
+	}
+
+	ss := toStepSummary(step)
+	assert.Nil(t, ss.DisplayOutputs)
+
+	// Verify omitempty
+	data, err := json.Marshal(ss)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "display_outputs")
 }
 
 // --- Helpers ---

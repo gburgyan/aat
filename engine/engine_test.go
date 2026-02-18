@@ -1801,3 +1801,116 @@ func (a *callCountAdapter) ValidateResponse(resp *adapter.Response) *adapter.Val
 	return nil
 }
 
+func TestEngine_Run_DisplayOutputs(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"commit": {
+				Name:    "commit",
+				Adapter: "test.commit",
+				Inputs: []graph.Input{
+					{Name: "id", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "locator", Type: "string", Display: "PNR"},
+					{Name: "reservationId", Type: "string", Display: "Reservation ID"},
+					{Name: "internalRef", Type: "string"}, // no display
+				},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.commit", &stubAdapter{
+		method: "POST",
+		path:   "/commit",
+		response: map[string]any{
+			"locator":       "ABCDEF",
+			"reservationId": "res-123",
+			"internalRef":   "internal-456",
+		},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node:   "commit",
+					Values: map[string]plan.StepValue{"id": {Default: "w-1"}},
+				},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+
+	step := result.Steps[0]
+	require.Len(t, step.DisplayOutputs, 2)
+
+	assert.Equal(t, "PNR", step.DisplayOutputs[0].Label)
+	assert.Equal(t, "locator", step.DisplayOutputs[0].Name)
+	assert.Equal(t, "ABCDEF", step.DisplayOutputs[0].Value)
+
+	assert.Equal(t, "Reservation ID", step.DisplayOutputs[1].Label)
+	assert.Equal(t, "reservationId", step.DisplayOutputs[1].Name)
+	assert.Equal(t, "res-123", step.DisplayOutputs[1].Value)
+}
+
+func TestEngine_Run_NoDisplayOutputs(t *testing.T) {
+	g := buildTestGraph() // no Display set on any output
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.search", &stubAdapter{
+		method:   "POST",
+		path:     "/search",
+		response: map[string]any{"results": []any{}, "sessionId": "s1"},
+	}))
+	require.NoError(t, registry.Register("test.select", &stubAdapter{
+		method:   "POST",
+		path:     "/select",
+		response: map[string]any{"confirmed": true, "price": 100},
+	}))
+	require.NoError(t, registry.Register("test.book", &stubAdapter{
+		method:   "POST",
+		path:     "/book",
+		response: map[string]any{"bookingId": "b1"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{"query": {Default: "test"}}},
+			},
+		},
+	}
+
+	result := eng.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Nil(t, result.Steps[0].DisplayOutputs)
+}
+

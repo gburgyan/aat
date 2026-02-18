@@ -9,14 +9,15 @@ import (
 // It describes the logical operations (nodes), requires/satisfies
 // relationships, and conditional requirements (conditions) for an API workflow.
 type Graph struct {
-	Version     string           `yaml:"version"`
-	Title       string           `yaml:"title,omitempty"`
-	Description string           `yaml:"description,omitempty"`
-	Workflows   []Workflow       `yaml:"workflows,omitempty"`
-	Notes       string           `yaml:"notes,omitempty"`
-	OAS         string           `yaml:"oas,omitempty"`
-	Nodes       map[string]*Node `yaml:"nodes"`
-	Conditions  []Condition      `yaml:"conditions,omitempty"`
+	Version        string               `yaml:"version"`
+	Title          string               `yaml:"title,omitempty"`
+	Description    string               `yaml:"description,omitempty"`
+	Workflows      []Workflow           `yaml:"workflows,omitempty"`
+	Notes          string               `yaml:"notes,omitempty"`
+	OAS            string               `yaml:"oas,omitempty"`
+	ErrorDetection []ErrorDetectionRule `yaml:"errorDetection,omitempty"`
+	Nodes          map[string]*Node     `yaml:"nodes"`
+	Conditions     []Condition          `yaml:"conditions,omitempty"`
 
 	// Computed index (not serialized). Built by BuildSatisfierIndex().
 	SatisfiersByToken map[string][]string `yaml:"-"` // requirement token → node names that satisfy it
@@ -40,18 +41,19 @@ func (w Workflow) IsAddon() bool {
 
 // Node represents a single logical API operation in the graph.
 type Node struct {
-	Name         string   // populated from map key during parsing, not from YAML
-	Description  string   `yaml:"description"`
-	Adapter      string   `yaml:"adapter"`
-	Tags         []string `yaml:"tags,omitempty"`
-	Inputs       []Input  `yaml:"inputs"`
-	Outputs      []Output `yaml:"outputs"`
-	Cleanup      string   `yaml:"cleanup,omitempty"`
-	CycleBreaker bool     `yaml:"cycleBreaker,omitempty"`
-	OAS          *OASRef  `yaml:"oas,omitempty"`
-	Requires     []string `yaml:"requires,omitempty"`
-	Satisfies    []string `yaml:"satisfies,omitempty"`
-	Preferred    bool     `yaml:"preferred,omitempty"`
+	Name           string               // populated from map key during parsing, not from YAML
+	Description    string               `yaml:"description"`
+	Adapter        string               `yaml:"adapter"`
+	Tags           []string             `yaml:"tags,omitempty"`
+	Inputs         []Input              `yaml:"inputs"`
+	Outputs        []Output             `yaml:"outputs"`
+	Cleanup        string               `yaml:"cleanup,omitempty"`
+	CycleBreaker   bool                 `yaml:"cycleBreaker,omitempty"`
+	OAS            *OASRef              `yaml:"oas,omitempty"`
+	Requires       []string             `yaml:"requires,omitempty"`
+	Satisfies      []string             `yaml:"satisfies,omitempty"`
+	Preferred      bool                 `yaml:"preferred,omitempty"`
+	ErrorDetection []ErrorDetectionRule `yaml:"errorDetection,omitempty"`
 }
 
 // OASRef links a graph node to an OAS operation.
@@ -86,6 +88,7 @@ type Output struct {
 	Name          string  `yaml:"name"`
 	Type          string  `yaml:"type"`
 	Description   string  `yaml:"description,omitempty"`
+	Display       string  `yaml:"display,omitempty"`
 	ElementFields []Field `yaml:"elementFields,omitempty"`
 }
 
@@ -110,6 +113,22 @@ type Condition struct {
 	When    string   `yaml:"when"`
 	Require []string `yaml:"require,omitempty"`
 	Before  []string `yaml:"before,omitempty"`
+}
+
+// ErrorDetectionRule defines a rule for detecting errors in response bodies.
+// When a rule triggers on a 2xx response, the step is treated as a failure.
+type ErrorDetectionRule struct {
+	Path    string              `yaml:"path"`
+	Rule    string              `yaml:"rule"`              // "exists", "non-empty", "equals"
+	Value   any                 `yaml:"value,omitempty"`   // required for "equals" rule
+	Details *ErrorDetailMapping `yaml:"details,omitempty"` // optional paths for extracting error details
+}
+
+// ErrorDetailMapping maps gjson paths for extracting error details from a response body.
+type ErrorDetailMapping struct {
+	Message  string `yaml:"message,omitempty"`
+	Code     string `yaml:"code,omitempty"`
+	Category string `yaml:"category,omitempty"`
 }
 
 // BuildSatisfierIndex populates the computed satisfier index for fast lookup.

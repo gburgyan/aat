@@ -66,6 +66,43 @@ func formatNodeDetail(node *graph.Node, g *graph.Graph) string {
 		b.WriteString(formatOutputTable(node.Outputs))
 	}
 
+	// Error detection rules (node-level, or inherited from graph)
+	effectiveRules := node.ErrorDetection
+	inherited := false
+	if len(effectiveRules) == 0 && len(g.ErrorDetection) > 0 {
+		effectiveRules = g.ErrorDetection
+		inherited = true
+	}
+	if len(effectiveRules) > 0 {
+		b.WriteString("\n## Error Detection")
+		if inherited {
+			b.WriteString(" (inherited from graph)")
+		}
+		b.WriteString("\n\n")
+		for _, rule := range effectiveRules {
+			fmt.Fprintf(&b, "- Path: `%s`, Rule: %s", rule.Path, rule.Rule)
+			if rule.Rule == "equals" && rule.Value != nil {
+				fmt.Fprintf(&b, " %v", rule.Value)
+			}
+			if rule.Details != nil {
+				var parts []string
+				if rule.Details.Message != "" {
+					parts = append(parts, "message: `"+rule.Details.Message+"`")
+				}
+				if rule.Details.Code != "" {
+					parts = append(parts, "code: `"+rule.Details.Code+"`")
+				}
+				if rule.Details.Category != "" {
+					parts = append(parts, "category: `"+rule.Details.Category+"`")
+				}
+				if len(parts) > 0 {
+					fmt.Fprintf(&b, " (%s)", strings.Join(parts, ", "))
+				}
+			}
+			b.WriteString("\n")
+		}
+	}
+
 	// Requires (nodes this node depends on)
 	requires := collectRequiredNodeNames(node.Name, g)
 	if len(requires) > 0 {

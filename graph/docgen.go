@@ -301,6 +301,45 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 		b.WriteString("\n")
 	}
 
+	// Error detection rules (node-level, or inherited from graph)
+	effectiveRules := node.ErrorDetection
+	inherited := false
+	if len(effectiveRules) == 0 && len(g.ErrorDetection) > 0 {
+		effectiveRules = g.ErrorDetection
+		inherited = true
+	}
+	if len(effectiveRules) > 0 {
+		b.WriteString("**Error Detection:**")
+		if inherited {
+			b.WriteString(" *(inherited from graph)*")
+		}
+		b.WriteString("\n\n")
+		b.WriteString("| Path | Rule | Details |\n")
+		b.WriteString("|------|------|---------|\n")
+		for _, rule := range effectiveRules {
+			details := ""
+			if rule.Details != nil {
+				var parts []string
+				if rule.Details.Message != "" {
+					parts = append(parts, "message: `"+rule.Details.Message+"`")
+				}
+				if rule.Details.Code != "" {
+					parts = append(parts, "code: `"+rule.Details.Code+"`")
+				}
+				if rule.Details.Category != "" {
+					parts = append(parts, "category: `"+rule.Details.Category+"`")
+				}
+				details = strings.Join(parts, ", ")
+			}
+			ruleStr := rule.Rule
+			if rule.Rule == "equals" && rule.Value != nil {
+				ruleStr = fmt.Sprintf("equals %v", rule.Value)
+			}
+			fmt.Fprintf(b, "| `%s` | %s | %s |\n", rule.Path, ruleStr, details)
+		}
+		b.WriteString("\n")
+	}
+
 	// Connections via requires/satisfies
 	satisfies := collectSatisfiedNodes(name, g)
 	if len(satisfies) > 0 {

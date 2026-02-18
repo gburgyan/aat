@@ -3,6 +3,7 @@ package engine
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -857,6 +858,117 @@ func TestToArchive_SecretRedaction(t *testing.T) {
 	// Tried values should be redacted
 	assert.Equal(t, "[REDACTED]", a.Steps[0].Resolutions[1].Tried[0])
 	assert.Equal(t, "other", a.Steps[0].Resolutions[1].Tried[1])
+}
+
+func TestToArchive_ResponseBodyErrorConversion(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomeFailed,
+		Steps: []StepResult{
+			{
+				Node:       "step1",
+				StatusCode: 200,
+				ResponseBodyError: &ResponseBodyError{
+					RulePath: "ErrorResponse.Result.Error",
+					Rule:     "non-empty",
+					Message:  "Invalid workbench ID",
+					Code:     "INVALID_INPUT",
+					Category: "validation",
+				},
+			},
+		},
+		Error: fmt.Errorf("step failed"),
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-body-err"}
+	a := ToArchive(result, meta, "", nil)
+
+	require.NotNil(t, a.Steps[0].ResponseBodyError)
+	assert.Equal(t, "ErrorResponse.Result.Error", a.Steps[0].ResponseBodyError.RulePath)
+	assert.Equal(t, "non-empty", a.Steps[0].ResponseBodyError.Rule)
+	assert.Equal(t, "Invalid workbench ID", a.Steps[0].ResponseBodyError.Message)
+	assert.Equal(t, "INVALID_INPUT", a.Steps[0].ResponseBodyError.Code)
+	assert.Equal(t, "validation", a.Steps[0].ResponseBodyError.Category)
+
+	// Verify round-trip through JSON
+	data, err := json.MarshalIndent(a, "", "  ")
+	require.NoError(t, err)
+
+	var loaded archive.Archive
+	err = json.Unmarshal(data, &loaded)
+	require.NoError(t, err)
+
+	require.NotNil(t, loaded.Steps[0].ResponseBodyError)
+	assert.Equal(t, "INVALID_INPUT", loaded.Steps[0].ResponseBodyError.Code)
+}
+
+func TestToArchive_NoResponseBodyError(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps:   []StepResult{{Node: "step1"}},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-no-body-err"}
+	a := ToArchive(result, meta, "", nil)
+
+	assert.Nil(t, a.Steps[0].ResponseBodyError)
+
+	// Verify omitempty
+	data, err := json.Marshal(a.Steps[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "responseBodyError")
+}
+
+func TestToArchive_DisplayOutputConversion(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "commit",
+				DisplayOutputs: []DisplayOutput{
+					{Label: "PNR", Name: "locator", Value: "ABCDEF"},
+					{Label: "Reservation ID", Name: "reservationId", Value: "res-123"},
+				},
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-display"}
+	a := ToArchive(result, meta, "", nil)
+
+	require.Len(t, a.Steps[0].DisplayOutputs, 2)
+	assert.Equal(t, "PNR", a.Steps[0].DisplayOutputs[0].Label)
+	assert.Equal(t, "locator", a.Steps[0].DisplayOutputs[0].Name)
+	assert.Equal(t, "ABCDEF", a.Steps[0].DisplayOutputs[0].Value)
+	assert.Equal(t, "Reservation ID", a.Steps[0].DisplayOutputs[1].Label)
+	assert.Equal(t, "res-123", a.Steps[0].DisplayOutputs[1].Value)
+
+	// Verify round-trip
+	data, err := json.MarshalIndent(a, "", "  ")
+	require.NoError(t, err)
+
+	var loaded archive.Archive
+	require.NoError(t, json.Unmarshal(data, &loaded))
+
+	require.Len(t, loaded.Steps[0].DisplayOutputs, 2)
+	assert.Equal(t, "PNR", loaded.Steps[0].DisplayOutputs[0].Label)
+	assert.Equal(t, "ABCDEF", loaded.Steps[0].DisplayOutputs[0].Value)
+}
+
+func TestToArchive_NoDisplayOutputs(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps:   []StepResult{{Node: "step1"}},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-no-display"}
+	a := ToArchive(result, meta, "", nil)
+
+	assert.Nil(t, a.Steps[0].DisplayOutputs)
+
+	// Verify omitempty
+	data, err := json.Marshal(a.Steps[0])
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "displayOutputs")
 }
 
 func TestToArchive_NilSecretsNoRedaction(t *testing.T) {

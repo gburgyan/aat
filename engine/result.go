@@ -57,8 +57,17 @@ type StepResult struct {
 	ErrorClass    *ErrorClassification       // nil on success
 	RetryCount    int                        // number of retries performed (0 = no retries)
 	Validation    *validate.MechanicalResult // nil if no assertions configured
-	Relaxations   []RelaxationRecord         // soft constraints relaxed during this step
-	ExpectFailure *ExpectFailureResult       // non-nil for negative assertion steps
+	DisplayOutputs    []DisplayOutput             // outputs tagged with display labels
+	Relaxations       []RelaxationRecord         // soft constraints relaxed during this step
+	ExpectFailure     *ExpectFailureResult       // non-nil for negative assertion steps
+	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
+}
+
+// DisplayOutput captures an output value tagged for display to the user.
+type DisplayOutput struct {
+	Label string // display label (e.g. "PNR")
+	Name  string // output field name
+	Value any    // extracted value
 }
 
 // ExpectFailureResult captures the outcome of a negative assertion step.

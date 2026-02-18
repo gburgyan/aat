@@ -217,6 +217,20 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			}
 		}
 
+		// Check for response body errors (API returned 2xx but body indicates error)
+		if result.ResponseBodyError != nil {
+			outcome = OutcomeFailed
+			// Do NOT store outputs — error responses produce unreliable data
+			// Do NOT push cleanup — failing node did not create a valid resource
+			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+			return &RunResult{
+				Outcome:        outcome,
+				Steps:          stepResults,
+				CleanupResults: cleanupResults,
+				Error:          fmt.Errorf("step %q: %s", step.Node, result.ResponseBodyError.Summary()),
+			}
+		}
+
 		// Store outputs keyed by step ID (supports step aliasing)
 		if result.Outputs != nil {
 			state.StoreOutputs(step.StepID(), result.Outputs)
@@ -336,6 +350,25 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 			return result
 		}
 		result.Outputs = outputs
+
+		// Collect outputs tagged for display
+		for _, out := range node.Outputs {
+			if out.Display != "" {
+				if v, ok := outputs[out.Name]; ok {
+					result.DisplayOutputs = append(result.DisplayOutputs, DisplayOutput{
+						Label: out.Display,
+						Name:  out.Name,
+						Value: v,
+					})
+				}
+			}
+		}
+
+		// Check for errors buried in the response body
+		rules := effectiveErrorRules(node, e.graph)
+		if rbe := CheckErrorDetection(rules, resp.Body); rbe != nil {
+			result.ResponseBodyError = rbe
+		}
 	}
 
 	// Run mechanical assertions if configured.

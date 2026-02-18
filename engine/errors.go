@@ -28,6 +28,8 @@ const (
 	CategoryNetwork
 	// CategoryTimeout covers context.DeadlineExceeded and net timeouts.
 	CategoryTimeout
+	// CategoryResponseError covers errors detected in 2xx response bodies.
+	CategoryResponseError
 )
 
 // String returns the lowercase category name matching RetryConfig.On/FailOn values.
@@ -47,6 +49,8 @@ func (c ErrorCategory) String() string {
 		return "network"
 	case CategoryTimeout:
 		return "timeout"
+	case CategoryResponseError:
+		return "response_error"
 	default:
 		return "unknown"
 	}
@@ -142,6 +146,13 @@ func classifyStepResult(result *StepResult) *ErrorClassification {
 		return &ErrorClassification{
 			Category: cat,
 			Detail:   statusCodeDetail(result.StatusCode),
+		}
+	}
+
+	if result.ResponseBodyError != nil {
+		return &ErrorClassification{
+			Category: CategoryResponseError,
+			Detail:   result.ResponseBodyError.Summary(),
 		}
 	}
 
