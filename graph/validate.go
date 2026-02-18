@@ -65,6 +65,9 @@ func Validate(g *Graph) error {
 					errs = append(errs, fmt.Sprintf("node %q: input %q: constraint minLength (%d) > maxLength (%d)", name, inp.Name, *c.MinLength, *c.MaxLength))
 				}
 			}
+			if inp.Configurable && !inp.Optional {
+				errs = append(errs, fmt.Sprintf("node %q: input %q: configurable requires optional", name, inp.Name))
+			}
 			if inputNames[inp.Name] {
 				errs = append(errs, fmt.Sprintf("node %q: duplicate input name %q", name, inp.Name))
 			}

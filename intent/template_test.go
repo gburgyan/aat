@@ -556,6 +556,101 @@ func TestUnfedInputsFromTemplate_UsesStepID(t *testing.T) {
 	assert.Contains(t, unfed[0], "addTraveler_1.name")
 }
 
+// --- Configurable input tests ---
+
+func TestIsInputFed_ConfigurableOptional(t *testing.T) {
+	// Configurable optional inputs are NOT fed — they surface to the LLM.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "carrier", Type: "string", Optional: true, Configurable: true},
+				},
+			},
+		},
+	}
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	unfed := UnfedInputsFromTemplate(p, g)
+	assert.Len(t, unfed, 2)
+	assert.Contains(t, unfed, "search.origin (string)")
+	assert.Contains(t, unfed, "search.carrier (string) [configurable]")
+}
+
+func TestIsInputFed_ConfigurableWithDefault(t *testing.T) {
+	// Configurable inputs with graph defaults are NOT fed — surface to LLM.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: 1},
+				},
+			},
+		},
+	}
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	unfed := UnfedInputsFromTemplate(p, g)
+	assert.Len(t, unfed, 2)
+	assert.Contains(t, unfed, "search.origin (string)")
+	assert.Contains(t, unfed, "search.passengers (integer) [configurable]")
+}
+
+func TestIsInputFed_ConfigurableStructurallyWired(t *testing.T) {
+	// Configurable inputs with structural wiring (from ref) ARE fed.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"process": {
+				Name: "process",
+				Inputs: []graph.Input{
+					{Name: "source", Type: "string", Optional: true, Configurable: true},
+				},
+			},
+		},
+	}
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "process",
+					Values: map[string]plan.StepValue{
+						"source": {From: "search.contentSource"},
+					},
+				},
+			},
+		},
+	}
+
+	unfed := UnfedInputsFromTemplate(p, g)
+	assert.Empty(t, unfed)
+}
+
 // --- MergeLLMValuesWithIDs ---
 
 func TestMergeLLMValuesWithIDs_MatchesByStepID(t *testing.T) {

@@ -266,6 +266,49 @@ func TestValidateWarnings_AfterOnNonAddon(t *testing.T) {
 	assert.Contains(t, warnings[0], "not \"addon\"")
 }
 
+// --- Configurable validation ---
+
+func TestValidate_ConfigurableRequiresOptional(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"search": {
+				Name:    "search",
+				Adapter: "search",
+				Inputs: []Input{
+					{Name: "origin", Type: "string"},
+					{Name: "carrier", Type: "string", Configurable: true}, // not optional!
+				},
+				Outputs: []Output{{Name: "out", Type: "string"}},
+			},
+		},
+	}
+
+	err := Validate(g)
+	require.Error(t, err)
+	assertValidationContains(t, err, "configurable requires optional")
+}
+
+func TestValidate_ConfigurableWithOptionalIsValid(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"search": {
+				Name:    "search",
+				Adapter: "search",
+				Inputs: []Input{
+					{Name: "origin", Type: "string"},
+					{Name: "carrier", Type: "string", Optional: true, Configurable: true},
+				},
+				Outputs: []Output{{Name: "out", Type: "string"}},
+			},
+		},
+	}
+
+	err := Validate(g)
+	assert.NoError(t, err)
+}
+
 // --- Constraint validation ---
 
 func TestValidate_ConstraintBadPattern(t *testing.T) {

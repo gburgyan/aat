@@ -94,7 +94,9 @@ func FormatGraph(g *graph.Graph) string {
 			b.WriteString("Inputs:\n")
 			for _, inp := range node.Inputs {
 				opt := ""
-				if inp.Optional {
+				if inp.Configurable {
+					opt = " (configurable)"
+				} else if inp.Optional {
 					opt = " (optional)"
 				}
 				def := ""

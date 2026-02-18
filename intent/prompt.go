@@ -115,6 +115,13 @@ For each input listed below, provide a LITERAL value (string, number, or date ex
 - If "Current value:" is shown, keep it unless the user's intent requires a different value
 - DO NOT use "from", "fromSelection", "select", or any reference/object syntax — only plain scalars
 
+## Optional Configuration
+
+Some inputs have sensible defaults but can be overridden based on user intent.
+- Set a value ONLY if the user explicitly or implicitly requested it
+- Omit the key entirely to use the default
+- When in doubt, omit — the default is designed for the general case
+
 ## Selections — optional overrides
 
 Only add selection overrides when the user's intent explicitly calls for it:
@@ -144,34 +151,29 @@ Add a brief description for each step explaining what it does in context.`
 
 	var ub strings.Builder
 
-	// Per-input context — the core of the prompt.
-	if len(inputContexts) > 0 {
+	// Separate required vs configurable inputs.
+	var requiredInputs, configurableInputs []InputContext
+	for _, ic := range inputContexts {
+		if ic.IsConfigurable {
+			configurableInputs = append(configurableInputs, ic)
+		} else {
+			requiredInputs = append(requiredInputs, ic)
+		}
+	}
+
+	// Per-input context — required inputs.
+	if len(requiredInputs) > 0 {
 		ub.WriteString("## Inputs That Need Values\n\n")
-		for _, ic := range inputContexts {
-			fmt.Fprintf(&ub, "### %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
-			if ic.CurrentDefault != "" {
-				fmt.Fprintf(&ub, "Current value: %s\n", ic.CurrentDefault)
-			}
-			if ic.DomainType != "" {
-				fmt.Fprintf(&ub, "Domain: %s", ic.DomainType)
-				if ic.Format != "" {
-					fmt.Fprintf(&ub, " (%s)", ic.Format)
-				}
-				ub.WriteString("\n")
-			}
-			if len(ic.PoolValues) > 0 {
-				fmt.Fprintf(&ub, "Sample values: %s\n", strings.Join(ic.PoolValues, ", "))
-			}
-			if ic.GraphConstr != "" {
-				fmt.Fprintf(&ub, "Validation: %s\n", ic.GraphConstr)
-			}
-			if ic.IsDate {
-				ub.WriteString("Date field — use {{today + N days}}\n")
-			}
-			for _, c := range ic.Constraints {
-				fmt.Fprintf(&ub, "Constraint: %s\n", c)
-			}
-			ub.WriteString("\n")
+		for _, ic := range requiredInputs {
+			writeInputContext(&ub, ic)
+		}
+	}
+
+	// Configurable inputs — separate section.
+	if len(configurableInputs) > 0 {
+		ub.WriteString("## Optional Configuration\n\n")
+		for _, ic := range configurableInputs {
+			writeInputContext(&ub, ic)
 		}
 	}
 
@@ -202,6 +204,38 @@ Add a brief description for each step explaining what it does in context.`
 
 	user = ub.String()
 	return system, user
+}
+
+// writeInputContext writes the per-input prompt block for a single InputContext.
+func writeInputContext(ub *strings.Builder, ic InputContext) {
+	fmt.Fprintf(ub, "### %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
+	if ic.CurrentDefault != "" {
+		if ic.IsConfigurable {
+			fmt.Fprintf(ub, "Default: %s (used if omitted)\n", ic.CurrentDefault)
+		} else {
+			fmt.Fprintf(ub, "Current value: %s\n", ic.CurrentDefault)
+		}
+	}
+	if ic.DomainType != "" {
+		fmt.Fprintf(ub, "Domain: %s", ic.DomainType)
+		if ic.Format != "" {
+			fmt.Fprintf(ub, " (%s)", ic.Format)
+		}
+		ub.WriteString("\n")
+	}
+	if len(ic.PoolValues) > 0 {
+		fmt.Fprintf(ub, "Sample values: %s\n", strings.Join(ic.PoolValues, ", "))
+	}
+	if ic.GraphConstr != "" {
+		fmt.Fprintf(ub, "Validation: %s\n", ic.GraphConstr)
+	}
+	if ic.IsDate {
+		ub.WriteString("Date field — use {{today + N days}}\n")
+	}
+	for _, c := range ic.Constraints {
+		fmt.Fprintf(ub, "Constraint: %s\n", c)
+	}
+	ub.WriteString("\n")
 }
 
 // buildTargetedRetryPrompt constructs prompts for retrying the targeted plan

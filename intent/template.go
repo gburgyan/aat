@@ -121,7 +121,11 @@ func UnfedInputsFromTemplate(p *plan.Plan, g *graph.Graph) []string {
 			if isInputFed(step, inp) {
 				continue
 			}
-			unfed = append(unfed, fmt.Sprintf("%s.%s (%s)", step.StepID(), inp.Name, inp.Type))
+			label := fmt.Sprintf("%s.%s (%s)", step.StepID(), inp.Name, inp.Type)
+			if inp.Configurable {
+				label += " [configurable]"
+			}
+			unfed = append(unfed, label)
 		}
 	}
 	return unfed
@@ -153,6 +157,8 @@ func unfedInputSet(p *plan.Plan, g *graph.Graph) map[string]bool {
 // named selection) or the input is optional / has a graph-level default.
 // Literal template defaults (e.g., origin: DEN) are NOT considered fed —
 // the LLM should be able to override them based on user intent.
+// Configurable inputs are never auto-fed — they are surfaced to the LLM
+// so it can set/override them based on user intent.
 func isInputFed(step plan.Step, inp graph.Input) bool {
 	if sv, exists := step.Values[inp.Name]; exists {
 		if sv.From != "" || sv.FromSelection != "" || sv.Select != nil {
@@ -161,6 +167,10 @@ func isInputFed(step plan.Step, inp graph.Input) bool {
 	}
 	if isFromNamedSelection(step, inp.Name) {
 		return true
+	}
+	// Configurable inputs are NOT fed — surface them to the LLM.
+	if inp.Configurable {
+		return false
 	}
 	if inp.Optional || inp.Default != nil {
 		return true

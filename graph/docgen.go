@@ -246,7 +246,9 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 		b.WriteString(divider)
 		for _, inp := range node.Inputs {
 			required := "yes"
-			if inp.Optional {
+			if inp.Configurable {
+				required = "configurable"
+			} else if inp.Optional {
 				required = "no"
 			}
 			def := ""

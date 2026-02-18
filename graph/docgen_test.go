@@ -418,3 +418,33 @@ func TestGenerateDocsSplit_WithMetadata(t *testing.T) {
 	assert.Contains(t, index, "## Notes")
 	assert.Contains(t, index, "Split notes.")
 }
+
+func TestGenerateDocs_ConfigurableInput(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"search": {
+				Name:    "search",
+				Adapter: "search",
+				Description: "Search for things",
+				Inputs: []Input{
+					{Name: "query", Type: "string"},
+					{Name: "carrier", Type: "string", Optional: true, Configurable: true},
+					{Name: "cabin", Type: "string", Optional: true},
+				},
+				Outputs: []Output{{Name: "results", Type: "string"}},
+			},
+		},
+	}
+	g.BuildSatisfierIndex()
+	result := GenerateDocs(g, nil)
+
+	// Configurable input shows "configurable" in Required column.
+	assert.Contains(t, result, "| carrier | string | configurable |")
+
+	// Non-configurable optional shows "no" in Required column.
+	assert.Contains(t, result, "| cabin | string | no |")
+
+	// Required input shows "yes".
+	assert.Contains(t, result, "| query | string | yes |")
+}

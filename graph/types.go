@@ -62,12 +62,13 @@ type OASRef struct {
 
 // Input describes a single input parameter for a node.
 type Input struct {
-	Name        string      `yaml:"name"`
-	Type        string      `yaml:"type"`
-	Description string      `yaml:"description,omitempty"`
-	Optional    bool        `yaml:"optional,omitempty"`
-	Default     any         `yaml:"default,omitempty"`
-	Constraints *Constraint `yaml:"constraints,omitempty"`
+	Name         string      `yaml:"name"`
+	Type         string      `yaml:"type"`
+	Description  string      `yaml:"description,omitempty"`
+	Optional     bool        `yaml:"optional,omitempty"`
+	Configurable bool        `yaml:"configurable,omitempty"`
+	Default      any         `yaml:"default,omitempty"`
+	Constraints  *Constraint `yaml:"constraints,omitempty"`
 }
 
 // Constraint captures validation rules for an input value.

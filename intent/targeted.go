@@ -48,6 +48,7 @@ type InputContext struct {
 	Constraints    []string // matched user constraints from phase 1
 	GraphConstr    string   // graph-level constraint annotation
 	IsDate         bool
+	IsConfigurable bool   // true if graph.Input.Configurable
 	CurrentDefault string // template default value, if any (e.g., "DEN")
 }
 
@@ -78,15 +79,21 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 			}
 
 			ic := InputContext{
-				StepID:    step.StepID(),
-				InputName: inp.Name,
-				InputType: inp.Type,
-				NodeDesc:  node.Description,
+				StepID:         step.StepID(),
+				InputName:      inp.Name,
+				InputType:      inp.Type,
+				NodeDesc:       node.Description,
+				IsConfigurable: inp.Configurable,
 			}
 
 			// Check for existing template default value.
 			if sv, exists := step.Values[inp.Name]; exists && sv.Default != nil {
 				ic.CurrentDefault = fmt.Sprintf("%v", sv.Default)
+			}
+
+			// For configurable inputs, also show graph-level default.
+			if ic.CurrentDefault == "" && inp.Default != nil {
+				ic.CurrentDefault = fmt.Sprintf("%v", inp.Default)
 			}
 
 			// Check for date type.
@@ -578,6 +585,9 @@ func validateTargetedResponse(
 		key := ic.StepID + "." + ic.InputName
 		if !unfedSet[key] {
 			continue
+		}
+		if ic.IsConfigurable {
+			continue // configurable inputs are optional in the response
 		}
 		if ic.CurrentDefault != "" {
 			// Has a template default — not strictly required from LLM.

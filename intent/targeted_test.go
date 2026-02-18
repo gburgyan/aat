@@ -2,6 +2,7 @@ package intent
 
 import (
 	"testing"
+	"time"
 
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
@@ -314,6 +315,108 @@ func TestBuildInputContexts_Multiplicity(t *testing.T) {
 	assert.Equal(t, "name", contexts[0].InputName)
 	assert.Equal(t, "addItem_2", contexts[1].StepID)
 	assert.Equal(t, "name", contexts[1].InputName)
+}
+
+// --- Configurable input tests ---
+
+func TestBuildInputContexts_ConfigurableGraphDefault(t *testing.T) {
+	// Configurable inputs should appear in contexts even with graph defaults,
+	// and the graph default should be shown as CurrentDefault.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "a",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: 1},
+					{Name: "carrier", Type: "string", Optional: true, Configurable: true},
+				},
+			},
+		},
+	}
+
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	contexts := buildInputContexts(skeleton, g, nil, nil)
+
+	// origin (required unfed with literal default) + passengers + carrier (both configurable)
+	require.Len(t, contexts, 3)
+
+	// Find the passengers context.
+	var passCtx, carrCtx *InputContext
+	for i, ic := range contexts {
+		if ic.InputName == "passengers" {
+			passCtx = &contexts[i]
+		}
+		if ic.InputName == "carrier" {
+			carrCtx = &contexts[i]
+		}
+	}
+
+	require.NotNil(t, passCtx)
+	assert.True(t, passCtx.IsConfigurable)
+	assert.Equal(t, "1", passCtx.CurrentDefault) // graph-level default
+
+	require.NotNil(t, carrCtx)
+	assert.True(t, carrCtx.IsConfigurable)
+	assert.Equal(t, "", carrCtx.CurrentDefault) // no default
+}
+
+func TestBuildTargetedPlanPrompt_ConfigurableSection(t *testing.T) {
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string"},
+		{StepID: "search", InputName: "passengers", InputType: "integer", IsConfigurable: true, CurrentDefault: "1"},
+		{StepID: "search", InputName: "carrier", InputType: "string", IsConfigurable: true},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", time.Now())
+
+	// Required inputs in main section.
+	assert.Contains(t, user, "## Inputs That Need Values")
+	assert.Contains(t, user, "### search.origin (string)")
+
+	// Configurable inputs in separate section.
+	assert.Contains(t, user, "## Optional Configuration")
+	assert.Contains(t, user, "### search.passengers (integer)")
+	assert.Contains(t, user, "### search.carrier (string)")
+
+	// Configurable defaults show "Default: X (used if omitted)".
+	assert.Contains(t, user, "Default: 1 (used if omitted)")
+}
+
+func TestValidateTargetedResponse_ConfigurableMissing_NoError(t *testing.T) {
+	// Missing value for a configurable input should NOT produce a missing_value issue.
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "JFK"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{
+		"search.origin":    true,
+		"search.passengers": true,
+	}
+
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string"},
+		{StepID: "search", InputName: "passengers", InputType: "integer", IsConfigurable: true, CurrentDefault: "1"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
 }
 
 // --- buildSelectionContexts tests ---

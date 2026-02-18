@@ -62,13 +62,13 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 	}{
 		{
 			workflow:  "Full-Payload Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination", "searchFlights.departureDate", "addTraveler.givenName", "addTraveler.surname"},
-			exact:     5,
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "searchFlights.departureDate", "searchFlights.passengers", "searchFlights.contentSource", "addTraveler.givenName", "addTraveler.surname"},
+			exact:     11, // 3 required + 6 configurable + 2 traveler
 		},
 		{
 			workflow:  "1-Leg Reference Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addTraveler.givenName", "addTraveler.surname"},
-			exact:     5,
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "searchFlights.passengers", "searchFlights.carrierPreference", "addTraveler.givenName", "addTraveler.surname"},
+			exact:     11, // 3 required + 6 configurable + 2 traveler
 		},
 		{
 			workflow:  "Post-Commit Ticketing",
@@ -97,28 +97,28 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		},
 		{
 			workflow:  "3-City Multi-City Booking",
-			contains:  []string{"searchFlights2Leg.leg1Origin", "searchFlights2Leg.leg1Destination", "searchFlights2Leg.leg1DepartureDate", "searchFlights2Leg.leg2Origin", "searchFlights2Leg.leg2Destination", "searchFlights2Leg.leg2DepartureDate", "addTraveler.givenName", "addTraveler.surname"},
-			exact:     8,
+			contains:  []string{"searchFlights2Leg.leg1Origin", "searchFlights2Leg.leg1Destination", "searchFlights2Leg.leg1DepartureDate", "searchFlights2Leg.leg2Origin", "searchFlights2Leg.leg2Destination", "searchFlights2Leg.leg2DepartureDate", "searchFlights2Leg.passengers", "searchFlights2Leg.contentSource", "addTraveler.givenName", "addTraveler.surname"},
+			exact:     13, // 6 legs + 5 configurable + 2 traveler
 		},
 		{
 			workflow:  "4-City Multi-City Booking",
-			contains:  []string{"searchFlights3Leg.leg1Origin", "searchFlights3Leg.leg1Destination", "searchFlights3Leg.leg1DepartureDate", "searchFlights3Leg.leg2Origin", "searchFlights3Leg.leg2Destination", "searchFlights3Leg.leg2DepartureDate", "searchFlights3Leg.leg3Origin", "searchFlights3Leg.leg3Destination", "searchFlights3Leg.leg3DepartureDate", "addTraveler.givenName", "addTraveler.surname"},
-			exact:     11,
+			contains:  []string{"searchFlights3Leg.leg1Origin", "searchFlights3Leg.leg1Destination", "searchFlights3Leg.leg1DepartureDate", "searchFlights3Leg.leg2Origin", "searchFlights3Leg.leg2Destination", "searchFlights3Leg.leg2DepartureDate", "searchFlights3Leg.leg3Origin", "searchFlights3Leg.leg3Destination", "searchFlights3Leg.leg3DepartureDate", "searchFlights3Leg.passengers", "addTraveler.givenName", "addTraveler.surname"},
+			exact:     16, // 9 legs + 5 configurable + 2 traveler
 		},
 		{
 			workflow:  "2-Leg Reference Booking",
-			contains:  []string{"searchFlights2Leg.leg1Origin", "searchFlights2Leg.leg1Destination", "searchFlights2Leg.leg1DepartureDate", "searchFlights2Leg.leg2Origin", "searchFlights2Leg.leg2Destination", "searchFlights2Leg.leg2DepartureDate", "addTraveler.givenName", "addTraveler.surname"},
-			exact:     8,
+			contains:  []string{"searchFlights2Leg.leg1Origin", "searchFlights2Leg.leg1Destination", "searchFlights2Leg.leg1DepartureDate", "searchFlights2Leg.leg2Origin", "searchFlights2Leg.leg2Destination", "searchFlights2Leg.leg2DepartureDate", "searchFlights2Leg.carrierPreference", "addTraveler.givenName", "addTraveler.surname"},
+			exact:     13, // 6 legs + 5 configurable + 2 traveler
 		},
 		{
 			workflow:  "3-Leg Reference Booking",
-			contains:  []string{"searchFlights3Leg.leg1Origin", "searchFlights3Leg.leg1Destination", "searchFlights3Leg.leg1DepartureDate", "searchFlights3Leg.leg2Origin", "searchFlights3Leg.leg2Destination", "searchFlights3Leg.leg2DepartureDate", "searchFlights3Leg.leg3Origin", "searchFlights3Leg.leg3Destination", "searchFlights3Leg.leg3DepartureDate", "addTraveler.givenName", "addTraveler.surname"},
-			exact:     11,
+			contains:  []string{"searchFlights3Leg.leg1Origin", "searchFlights3Leg.leg1Destination", "searchFlights3Leg.leg1DepartureDate", "searchFlights3Leg.leg2Origin", "searchFlights3Leg.leg2Destination", "searchFlights3Leg.leg2DepartureDate", "searchFlights3Leg.leg3Origin", "searchFlights3Leg.leg3Destination", "searchFlights3Leg.leg3DepartureDate", "searchFlights3Leg.cabinPreference", "addTraveler.givenName", "addTraveler.surname"},
+			exact:     16, // 9 legs + 5 configurable + 2 traveler
 		},
 		{
 			workflow:  "4-Leg Reference Booking",
-			contains:  []string{"searchFlights4Leg.leg1Origin", "searchFlights4Leg.leg1Destination", "searchFlights4Leg.leg1DepartureDate", "searchFlights4Leg.leg2Origin", "searchFlights4Leg.leg2Destination", "searchFlights4Leg.leg2DepartureDate", "searchFlights4Leg.leg3Origin", "searchFlights4Leg.leg3Destination", "searchFlights4Leg.leg3DepartureDate", "searchFlights4Leg.leg4Origin", "searchFlights4Leg.leg4Destination", "searchFlights4Leg.leg4DepartureDate", "addTraveler.givenName", "addTraveler.surname"},
-			exact:     14,
+			contains:  []string{"searchFlights4Leg.leg1Origin", "searchFlights4Leg.leg1Destination", "searchFlights4Leg.leg1DepartureDate", "searchFlights4Leg.leg2Origin", "searchFlights4Leg.leg2Destination", "searchFlights4Leg.leg2DepartureDate", "searchFlights4Leg.leg3Origin", "searchFlights4Leg.leg3Destination", "searchFlights4Leg.leg3DepartureDate", "searchFlights4Leg.leg4Origin", "searchFlights4Leg.leg4Destination", "searchFlights4Leg.leg4DepartureDate", "searchFlights4Leg.maxConnections", "addTraveler.givenName", "addTraveler.surname"},
+			exact:     19, // 12 legs + 5 configurable + 2 traveler
 		},
 		{
 			workflow:  "Round-Trip Full-Payload Booking",

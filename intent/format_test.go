@@ -209,6 +209,39 @@ func TestFormatGraph_WithConstraints(t *testing.T) {
 	assert.Contains(t, result, "range: 1..100")
 }
 
+func TestFormatGraph_ConfigurableAnnotation(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "search",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "carrier", Type: "string", Optional: true, Configurable: true},
+					{Name: "cabin", Type: "string", Optional: true},
+					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: 1},
+				},
+				Outputs: []graph.Output{{Name: "results", Type: "string"}},
+			},
+		},
+	}
+	result := FormatGraph(g)
+
+	// Configurable inputs show (configurable), not (optional).
+	assert.Contains(t, result, "carrier: string (configurable)")
+	assert.Contains(t, result, "passengers: integer (configurable)")
+	assert.NotContains(t, result, "carrier: string (optional)")
+
+	// Non-configurable optional inputs still show (optional).
+	assert.Contains(t, result, "cabin: string (optional)")
+
+	// Required inputs show neither.
+	assert.Contains(t, result, "origin: string")
+	assert.NotContains(t, result, "origin: string (optional)")
+	assert.NotContains(t, result, "origin: string (configurable)")
+}
+
 func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
