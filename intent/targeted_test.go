@@ -35,7 +35,7 @@ func TestBuildInputContexts_BasicTypes(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil)
 
 	require.Len(t, contexts, 3)
 	assert.Equal(t, "search", contexts[0].StepID)
@@ -75,7 +75,7 @@ func TestBuildInputContexts_SkipFedInputs(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil)
 
 	// Only "origin" should be unfed
 	require.Len(t, contexts, 1)
@@ -111,7 +111,7 @@ func TestBuildInputContexts_LiteralDefaultsOverrideable(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil)
 
 	// All three inputs have literal defaults — they should be included as overrideable.
 	require.Len(t, contexts, 3)
@@ -165,7 +165,7 @@ func TestBuildInputContexts_DomainKBEnrichment(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, kb, nil)
+	contexts := buildInputContexts(p, g, kb)
 
 	require.Len(t, contexts, 1)
 	assert.Equal(t, "IATA 3-letter airport code", contexts[0].DomainType)
@@ -193,14 +193,17 @@ func TestBuildInputContexts_NilKB(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil)
 
 	require.Len(t, contexts, 1)
 	assert.Empty(t, contexts[0].DomainType)
 	assert.Empty(t, contexts[0].PoolValues)
 }
 
-func TestBuildInputContexts_ConstraintMatching(t *testing.T) {
+func TestBuildInputContexts_NoConstraintMatching(t *testing.T) {
+	// Constraint matching from WorkflowSelection was removed — constraints
+	// are no longer passed from Call 1 to Call 2. The user's prompt is
+	// passed directly to Call 2 instead.
 	g := &graph.Graph{
 		Nodes: map[string]*graph.Node{
 			"search": {
@@ -213,17 +216,6 @@ func TestBuildInputContexts_ConstraintMatching(t *testing.T) {
 		},
 	}
 
-	ws := &WorkflowSelection{
-		Constraints: ConstraintSet{
-			Hard: []ConstraintInfo{
-				{Name: "departure city", Description: "from New York", AppliesTo: []string{"search.origin"}},
-			},
-			Soft: []ConstraintInfo{
-				{Name: "arrival city", Description: "prefer London", AppliesTo: []string{"destination"}},
-			},
-		},
-	}
-
 	p := &plan.Plan{
 		Execution: plan.Execution{
 			Steps: []plan.Step{
@@ -232,19 +224,11 @@ func TestBuildInputContexts_ConstraintMatching(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, ws)
+	contexts := buildInputContexts(p, g, nil)
 
 	require.Len(t, contexts, 2)
-
-	// origin should have the hard constraint
-	assert.Len(t, contexts[0].Constraints, 1)
-	assert.Contains(t, contexts[0].Constraints[0], "[hard]")
-	assert.Contains(t, contexts[0].Constraints[0], "from New York")
-
-	// destination should have the soft constraint (matched by bare input name)
-	assert.Len(t, contexts[1].Constraints, 1)
-	assert.Contains(t, contexts[1].Constraints[0], "[soft]")
-	assert.Contains(t, contexts[1].Constraints[0], "prefer London")
+	assert.Equal(t, "origin", contexts[0].InputName)
+	assert.Equal(t, "destination", contexts[1].InputName)
 }
 
 func TestBuildInputContexts_GraphConstraints(t *testing.T) {
@@ -274,7 +258,7 @@ func TestBuildInputContexts_GraphConstraints(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil)
 
 	require.Len(t, contexts, 1)
 	assert.Contains(t, contexts[0].GraphConstr, "Number of passengers")
@@ -307,7 +291,7 @@ func TestBuildInputContexts_Multiplicity(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil)
 
 	// Both steps should have "name" as unfed
 	require.Len(t, contexts, 2)
@@ -349,7 +333,7 @@ func TestBuildInputContexts_ConfigurableGraphDefault(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(skeleton, g, nil, nil)
+	contexts := buildInputContexts(skeleton, g, nil)
 
 	// origin (required unfed with literal default) + passengers + carrier (both configurable)
 	require.Len(t, contexts, 3)
@@ -535,68 +519,6 @@ func TestBuildSelectionContexts_Empty(t *testing.T) {
 
 	contexts := buildSelectionContexts(p, g)
 	assert.Empty(t, contexts)
-}
-
-// --- buildCompactPlanFlow tests ---
-
-func TestBuildCompactPlanFlow(t *testing.T) {
-	g := &graph.Graph{
-		Nodes: map[string]*graph.Node{
-			"search": {Name: "search", Description: "Search for flights", Outputs: []graph.Output{
-				{Name: "offerings", Type: "array"},
-				{Name: "searchId", Type: "string"},
-			}},
-			"process": {Name: "process", Description: "Process booking", Outputs: []graph.Output{
-				{Name: "locator", Type: "string"},
-			}},
-			"cleanup": {Name: "cleanup", Description: "Clean up"},
-		},
-	}
-
-	p := &plan.Plan{
-		Execution: plan.Execution{
-			Steps: []plan.Step{
-				{Node: "search"},
-				{Node: "process", DependsOn: []string{"search"}, IsGoal: true},
-			},
-			Cleanup: []plan.CleanupStep{
-				{Node: "cleanup", RunOn: "always"},
-			},
-		},
-	}
-
-	flow := buildCompactPlanFlow(p, g)
-
-	assert.Contains(t, flow, "1. search")
-	assert.Contains(t, flow, "Search for flights")
-	assert.Contains(t, flow, "Outputs: offerings, searchId")
-	assert.Contains(t, flow, "2. process")
-	assert.Contains(t, flow, "(depends on: search)")
-	assert.Contains(t, flow, "[GOAL]")
-	assert.Contains(t, flow, "Outputs: locator")
-	assert.Contains(t, flow, "Cleanup: cleanup (always)")
-}
-
-func TestBuildCompactPlanFlow_WithStepID(t *testing.T) {
-	g := &graph.Graph{
-		Nodes: map[string]*graph.Node{
-			"addItem": {Name: "addItem", Description: "Add an item"},
-		},
-	}
-
-	p := &plan.Plan{
-		Execution: plan.Execution{
-			Steps: []plan.Step{
-				{ID: "addItem_1", Node: "addItem"},
-				{ID: "addItem_2", Node: "addItem", DependsOn: []string{"addItem_1"}},
-			},
-		},
-	}
-
-	flow := buildCompactPlanFlow(p, g)
-
-	assert.Contains(t, flow, "addItem_1 [node: addItem]")
-	assert.Contains(t, flow, "addItem_2 [node: addItem]")
 }
 
 // --- parseTargetedResponse tests ---
@@ -1421,4 +1343,192 @@ func TestFormatValidationIssues(t *testing.T) {
 	require.Len(t, msgs, 2)
 	assert.Equal(t, "a.b: missing", msgs[0])
 	assert.Equal(t, "c.d: got object", msgs[1])
+}
+
+// --- Enhanced validation tests (Sub-task D) ---
+
+func TestValidateTargetedResponse_PatternMismatch(t *testing.T) {
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "den"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.origin": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", ConstraintPattern: "^[A-Z]{3}$"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "pattern_mismatch", issues[0].Kind)
+	assert.Contains(t, issues[0].Message, "den")
+	assert.Contains(t, issues[0].Message, "^[A-Z]{3}$")
+}
+
+func TestValidateTargetedResponse_PatternMatch(t *testing.T) {
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "DEN"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.origin": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", ConstraintPattern: "^[A-Z]{3}$"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
+}
+
+func TestValidateTargetedResponse_PatternSkipsExpr(t *testing.T) {
+	// Expression values should NOT be checked against regex patterns.
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.departureDate": "{{today + 7 days}}"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.departureDate": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "departureDate", InputType: "date", ConstraintPattern: "^\\d{4}-\\d{2}-\\d{2}$"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
+}
+
+func TestValidateTargetedResponse_InvalidExpression(t *testing.T) {
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.departureDate": "{{today +}}"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.departureDate": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "departureDate", InputType: "date"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "invalid_expression", issues[0].Kind)
+	assert.Contains(t, issues[0].Message, "{{today +}}")
+}
+
+func TestValidateTargetedResponse_LengthViolation(t *testing.T) {
+	minLen := 3
+
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "AB"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.origin": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", ConstraintMinLength: &minLen},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "length_violation", issues[0].Kind)
+	assert.Contains(t, issues[0].Message, "minimum is 3")
+}
+
+func TestValidateTargetedResponse_MaxLengthViolation(t *testing.T) {
+	maxLen := 3
+
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "ABCD"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.origin": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", ConstraintMaxLength: &maxLen},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	require.Len(t, issues, 1)
+	assert.Equal(t, "length_violation", issues[0].Kind)
+	assert.Contains(t, issues[0].Message, "maximum is 3")
+}
+
+func TestValidateTargetedResponse_LengthSkipsExpr(t *testing.T) {
+	minLen := 10
+
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.date": "{{today + 7 days}}"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.date": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "date", InputType: "date", ConstraintMinLength: &minLen},
+	}
+
+	// Expression values should skip length checks.
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
+}
+
+func TestValidateTargetedResponse_NonStringValuesSkipConstraints(t *testing.T) {
+	// Numeric values should not be checked against string constraints.
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.count": float64(5)},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	minLen := 3
+	unfedSet := map[string]bool{"search.count": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "count", InputType: "integer", ConstraintPattern: "^\\d+$", ConstraintMinLength: &minLen},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
+}
+
+func TestParseTargetedResponse_WrongPlan(t *testing.T) {
+	t.Run("wrong_plan_signal_parsed", func(t *testing.T) {
+		content := `{"wrongPlan": {"reason": "User asked about hotels, not flights", "suggested": "Hotel Booking"}}`
+		resp, err := parseTargetedResponse(content)
+		require.NoError(t, err)
+		require.NotNil(t, resp.WrongPlan)
+		assert.Equal(t, "User asked about hotels, not flights", resp.WrongPlan.Reason)
+		assert.Equal(t, "Hotel Booking", resp.WrongPlan.Suggested)
+		// Values/Selections/etc should be empty.
+		assert.Empty(t, resp.Values)
+		assert.Empty(t, resp.Selections)
+	})
+
+	t.Run("wrong_plan_without_suggestion", func(t *testing.T) {
+		content := `{"wrongPlan": {"reason": "Workflow mismatch"}}`
+		resp, err := parseTargetedResponse(content)
+		require.NoError(t, err)
+		require.NotNil(t, resp.WrongPlan)
+		assert.Equal(t, "Workflow mismatch", resp.WrongPlan.Reason)
+		assert.Empty(t, resp.WrongPlan.Suggested)
+	})
+
+	t.Run("normal_response_has_nil_wrong_plan", func(t *testing.T) {
+		content := `{"values": {"step.input": "value"}}`
+		resp, err := parseTargetedResponse(content)
+		require.NoError(t, err)
+		assert.Nil(t, resp.WrongPlan)
+		assert.Contains(t, resp.Values, "step.input")
+	})
 }

@@ -780,3 +780,358 @@ func TestInterpret_WorkflowTrace(t *testing.T) {
 	// Final plan should be present
 	assert.NotNil(t, result.Trace.FinalPlan)
 }
+
+// --- validateWorkflowSelection tests ---
+
+func TestValidateWorkflowSelection_Valid(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
+
+	ws := &WorkflowSelection{
+		Workflow:    "Booking Flow",
+		Description: "Book an item",
+	}
+
+	errs := validateWorkflowSelection(ws, g)
+	assert.Empty(t, errs)
+}
+
+func TestValidateWorkflowSelection_EmptyWorkflow(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
+
+	ws := &WorkflowSelection{Workflow: ""}
+
+	errs := validateWorkflowSelection(ws, g)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "empty")
+}
+
+func TestValidateWorkflowSelection_UnknownWorkflow(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
+
+	ws := &WorkflowSelection{Workflow: "Nonexistent"}
+
+	errs := validateWorkflowSelection(ws, g)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "not found")
+	assert.Contains(t, errs[0], "Nonexistent")
+}
+
+func TestValidateWorkflowSelection_TemplateLessWorkflow(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
+
+	ws := &WorkflowSelection{Workflow: "No Template Flow"}
+
+	errs := validateWorkflowSelection(ws, g)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "no template")
+}
+
+func TestValidateWorkflowSelection_NonAddonAsAddon(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "plans/main.yaml"},
+			{Name: "Extra", Template: "plans/extra.yaml"}, // not an addon
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	ws := &WorkflowSelection{
+		Workflow: "Main",
+		Addons:  []string{"Extra"},
+	}
+
+	errs := validateWorkflowSelection(ws, g)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "not an addon")
+}
+
+func TestValidateWorkflowSelection_DuplicateAddon(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "plans/main.yaml"},
+			{Name: "Seat", Kind: "addon", Template: "plans/seat.yaml", After: "book"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	ws := &WorkflowSelection{
+		Workflow: "Main",
+		Addons:  []string{"Seat", "Seat"},
+	}
+
+	errs := validateWorkflowSelection(ws, g)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "duplicate")
+}
+
+func TestValidateWorkflowSelection_AddonSelectedAsBase(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "plans/main.yaml"},
+			{Name: "Seat", Kind: "addon", Template: "plans/seat.yaml", After: "book"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	ws := &WorkflowSelection{Workflow: "Seat"}
+
+	errs := validateWorkflowSelection(ws, g)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "addon, not a base workflow")
+}
+
+func TestSelectWorkflow_RetryOnInvalid(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
+
+	// First response: invalid workflow name. Second response: valid.
+	client := &stubClient{
+		responses: []string{
+			`{"workflow": "Nonexistent", "description": "bad pick"}`,
+			`{"workflow": "Booking Flow", "description": "Book an item"}`,
+		},
+	}
+
+	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, fixedNow())
+
+	require.NoError(t, err)
+	assert.Equal(t, "Booking Flow", sr.Selection.Workflow)
+	// Should have retried.
+	assert.NotNil(t, sr.RetriedFrom)
+	assert.Equal(t, "Nonexistent", sr.RetriedFrom.Selection.Workflow)
+
+	// Should have made 2 LLM calls.
+	assert.Len(t, client.calls, 2)
+}
+
+func TestSelectWorkflow_NoRetryWhenValid(t *testing.T) {
+	g, _ := buildTemplateTestGraph(t)
+
+	client := &stubClient{
+		responses: []string{
+			`{"workflow": "Booking Flow", "description": "Book an item"}`,
+		},
+	}
+
+	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, fixedNow())
+
+	require.NoError(t, err)
+	assert.Equal(t, "Booking Flow", sr.Selection.Workflow)
+	assert.Nil(t, sr.RetriedFrom)
+	assert.Len(t, client.calls, 1)
+}
+
+// --- Wrong Plan Escape tests ---
+
+// buildTwoWorkflowTestGraph creates a graph with two workflows (Flight Booking
+// and Hotel Booking) for testing wrong-plan reselection.
+func buildTwoWorkflowTestGraph(t *testing.T) (*graph.Graph, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	flightTemplate := `
+execution:
+  steps:
+    - node: searchFlights
+      values:
+        query: "placeholder"
+    - node: bookFlight
+      dependsOn: [searchFlights]
+      values:
+        flightId: {from: searchFlights.flightId}
+`
+	hotelTemplate := `
+execution:
+  steps:
+    - node: findHotel
+      values:
+        city: "placeholder"
+    - node: bookHotel
+      dependsOn: [findHotel]
+      values:
+        hotelId: {from: findHotel.hotelId}
+`
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "flights.yaml"), []byte(flightTemplate), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "hotels.yaml"), []byte(hotelTemplate), 0o644))
+
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Flight Booking", Template: "plans/flights.yaml"},
+			{Name: "Hotel Booking", Template: "plans/hotels.yaml"},
+		},
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights", Description: "Search flights", Adapter: "a",
+				Inputs:  []graph.Input{{Name: "query", Type: "string"}},
+				Outputs: []graph.Output{{Name: "flightId", Type: "string"}},
+			},
+			"bookFlight": {
+				Name: "bookFlight", Description: "Book a flight", Adapter: "b",
+				Inputs:  []graph.Input{{Name: "flightId", Type: "string"}},
+				Outputs: []graph.Output{{Name: "confirmation", Type: "string"}},
+			},
+			"findHotel": {
+				Name: "findHotel", Description: "Find hotels", Adapter: "c",
+				Inputs:  []graph.Input{{Name: "city", Type: "string"}},
+				Outputs: []graph.Output{{Name: "hotelId", Type: "string"}},
+			},
+			"bookHotel": {
+				Name: "bookHotel", Description: "Book a hotel", Adapter: "d",
+				Inputs:  []graph.Input{{Name: "hotelId", Type: "string"}},
+				Outputs: []graph.Output{{Name: "confirmation", Type: "string"}},
+			},
+		},
+	}
+
+	return g, dir
+}
+
+func TestInterpret_WrongPlan_Reselection(t *testing.T) {
+	g, graphDir := buildTwoWorkflowTestGraph(t)
+
+	// LLM call sequence:
+	// 1. Call 1: selects Flight Booking (wrong)
+	// 2. Call 2: returns wrongPlan signal
+	// 3. Call 1 (reselection): selects Hotel Booking (correct)
+	// 4. Call 2: returns values for hotel workflow
+	client := &stubClient{
+		responses: []string{
+			`{"workflow": "Flight Booking", "description": "Book a flight"}`,
+			`{"wrongPlan": {"reason": "User asked about hotels, not flights", "suggested": "Hotel Booking"}}`,
+			`{"workflow": "Hotel Booking", "description": "Book a hotel"}`,
+			`{"values": {"findHotel.city": "Paris"}, "descriptions": {"findHotel": "Find hotels in Paris", "bookHotel": "Book the hotel"}}`,
+		},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "book a hotel in Paris",
+		Graph:    g,
+		Client:   client,
+		GraphDir: graphDir,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+
+	// Should have made 4 LLM calls.
+	assert.Len(t, client.calls, 4)
+
+	// Plan should use hotel nodes.
+	assert.Len(t, result.Plan.Execution.Steps, 2)
+	assert.Equal(t, "findHotel", result.Plan.Execution.Steps[0].Node)
+	assert.Equal(t, "bookHotel", result.Plan.Execution.Steps[1].Node)
+
+	// WorkflowSelection should reflect the reselected workflow.
+	require.NotNil(t, result.WorkflowSelection)
+	assert.Equal(t, "Hotel Booking", result.WorkflowSelection.Workflow)
+
+	// Reselection call should contain the wrong-plan feedback.
+	reselCall := client.calls[2] // 3rd call = reselection
+	assert.Contains(t, reselCall.Messages[1].Content, "doesn't match the intent")
+	assert.Contains(t, reselCall.Messages[1].Content, "Hotel Booking")
+}
+
+func TestInterpret_WrongPlan_Trace(t *testing.T) {
+	g, graphDir := buildTwoWorkflowTestGraph(t)
+
+	client := &stubClient{
+		responses: []string{
+			`{"workflow": "Flight Booking", "description": "Book a flight"}`,
+			`{"wrongPlan": {"reason": "Wrong workflow", "suggested": "Hotel Booking"}}`,
+			`{"workflow": "Hotel Booking", "description": "Book a hotel"}`,
+			`{"values": {"findHotel.city": "NYC"}}`,
+		},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:      "book a hotel in NYC",
+		Graph:       g,
+		Client:      client,
+		GraphDir:    graphDir,
+		EnableTrace: true,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Trace)
+
+	// Wrong-plan signal should be captured.
+	require.NotNil(t, result.Trace.WrongPlanSignal)
+	assert.Equal(t, "Wrong workflow", result.Trace.WrongPlanSignal.Reason)
+	assert.Equal(t, "Hotel Booking", result.Trace.WrongPlanSignal.Suggested)
+
+	// The original Call 2 (that returned wrongPlan) should be saved.
+	require.NotNil(t, result.Trace.WrongPlanCall)
+	assert.NotEmpty(t, result.Trace.WrongPlanCall.RawResponse)
+
+	// Reselection call should be captured.
+	require.NotNil(t, result.Trace.ReselectionCall)
+	assert.NotEmpty(t, result.Trace.ReselectionCall.RawResponse)
+
+	// Final plan call should be the second Call 2 (with hotel values).
+	assert.NotEmpty(t, result.Trace.PlanCall.RawResponse)
+
+	// Final workflow should be Hotel Booking.
+	assert.Equal(t, "Hotel Booking", result.Trace.WorkflowName)
+}
+
+func TestInterpret_WrongPlan_MaxOneRetry(t *testing.T) {
+	g, graphDir := buildTwoWorkflowTestGraph(t)
+
+	// Both Call 2 responses return wrongPlan — pipeline should not loop.
+	client := &stubClient{
+		responses: []string{
+			`{"workflow": "Flight Booking", "description": "Book a flight"}`,
+			`{"wrongPlan": {"reason": "Wrong workflow"}}`,
+			`{"workflow": "Hotel Booking", "description": "Book a hotel"}`,
+			`{"wrongPlan": {"reason": "Still wrong"}}`,
+		},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "do something exotic",
+		Graph:    g,
+		Client:   client,
+		GraphDir: graphDir,
+	})
+
+	// Should succeed (with template defaults) — no infinite loop.
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+
+	// Exactly 4 calls — no additional reselection loop.
+	assert.Len(t, client.calls, 4)
+
+	// The plan should use the second workflow (Hotel Booking).
+	assert.Equal(t, "findHotel", result.Plan.Execution.Steps[0].Node)
+}
+
+func TestInterpret_WrongPlan_WithoutSuggestion(t *testing.T) {
+	g, graphDir := buildTwoWorkflowTestGraph(t)
+
+	// Wrong plan without a suggestion — reselection should still work.
+	client := &stubClient{
+		responses: []string{
+			`{"workflow": "Flight Booking", "description": "Book a flight"}`,
+			`{"wrongPlan": {"reason": "This is a flight workflow but user wants hotels"}}`,
+			`{"workflow": "Hotel Booking", "description": "Book a hotel"}`,
+			`{"values": {"findHotel.city": "London"}}`,
+		},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "book a hotel in London",
+		Graph:    g,
+		Client:   client,
+		GraphDir: graphDir,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+	assert.Len(t, client.calls, 4)
+	assert.Equal(t, "Hotel Booking", result.WorkflowSelection.Workflow)
+}

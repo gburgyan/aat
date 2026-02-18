@@ -229,59 +229,158 @@ func TestPopulateIntent(t *testing.T) {
 	ws := &WorkflowSelection{
 		Workflow:    "Booking Flow",
 		Description: "Book a flight from DEN to SFO",
-		Constraints: ConstraintSet{
-			Hard: []ConstraintInfo{{Name: "origin", Description: "Must be DEN"}},
-			Soft: []ConstraintInfo{{Name: "nonstop", Description: "Prefer direct flights"}},
-			Free: []string{"departure date"},
-		},
 	}
 
 	p := &plan.Plan{}
 	populateIntent(p, ws)
 
 	assert.Equal(t, "Book a flight from DEN to SFO", p.Intent.Description)
-	require.NotNil(t, p.Intent.Constraints)
-	assert.Len(t, p.Intent.Constraints.Hard, 1)
-	assert.Len(t, p.Intent.Constraints.Soft, 1)
-	assert.Contains(t, p.Intent.Constraints.Free, "departure date")
 }
 
 func TestPopulateIntent_SkipsWhenAlreadyPopulated(t *testing.T) {
 	ws := &WorkflowSelection{
 		Workflow:    "Booking Flow",
 		Description: "Book a flight from DEN to SFO",
-		Constraints: ConstraintSet{
-			Hard: []ConstraintInfo{{Name: "origin", Description: "Must be DEN"}},
-			Soft: []ConstraintInfo{{Name: "nonstop", Description: "Prefer direct flights"}},
-			Free: []string{"departure date"},
-		},
 	}
 
-	// Plan already has constraints from the LLM YAML
+	// Plan already has a description.
 	p := &plan.Plan{
 		Intent: plan.Intent{
-			Constraints: &plan.Constraints{
-				Hard: []plan.Constraint{{Name: "origin", Description: "Must depart from DEN"}},
-				Soft: []plan.Constraint{{Name: "direct", Description: "Prefer nonstop"}},
-				Free: []string{"date"},
-			},
+			Description: "Existing description",
 		},
 	}
 
 	populateIntent(p, ws)
 
-	// Should keep existing constraints, not duplicate
-	assert.Len(t, p.Intent.Constraints.Hard, 1)
-	assert.Len(t, p.Intent.Constraints.Soft, 1)
-	assert.Len(t, p.Intent.Constraints.Free, 1)
-	// Verify it's the original LLM-generated constraint, not the WorkflowSelection one
-	assert.Equal(t, "Must depart from DEN", p.Intent.Constraints.Hard[0].Description)
+	// Should keep existing description.
+	assert.Equal(t, "Existing description", p.Intent.Description)
 }
 
 func TestPopulateIntent_NilWorkflowSelection(t *testing.T) {
 	p := &plan.Plan{}
 	populateIntent(p, nil)
 	assert.Empty(t, p.Intent.Description)
+}
+
+// --- generateSoftConstraints tests ---
+
+func TestGenerateSoftConstraints_FromNamedFilter(t *testing.T) {
+	g := &graph.Graph{Nodes: map[string]*graph.Node{}}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"offering": {From: "search.offerings", Strategy: "match", Filter: "maxConnections == 0"},
+					},
+				},
+			},
+		},
+	}
+
+	generateSoftConstraints(p, g)
+
+	require.NotNil(t, p.Intent.Constraints)
+	require.Len(t, p.Intent.Constraints.Soft, 1)
+	assert.Equal(t, "nonstop preference", p.Intent.Constraints.Soft[0].Name)
+	assert.Contains(t, p.Intent.Constraints.Soft[0].Description, "maxConnections == 0")
+	assert.Equal(t, []string{"addOffer"}, p.Intent.Constraints.Soft[0].AppliesTo)
+}
+
+func TestGenerateSoftConstraints_FromSort(t *testing.T) {
+	g := &graph.Graph{Nodes: map[string]*graph.Node{}}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"offering": {From: "search.offerings", Strategy: "min", SortField: "totalPrice"},
+					},
+				},
+			},
+		},
+	}
+
+	generateSoftConstraints(p, g)
+
+	require.NotNil(t, p.Intent.Constraints)
+	require.Len(t, p.Intent.Constraints.Soft, 1)
+	assert.Equal(t, "min totalPrice preference", p.Intent.Constraints.Soft[0].Name)
+}
+
+func TestGenerateSoftConstraints_FromInlineFilter(t *testing.T) {
+	g := &graph.Graph{Nodes: map[string]*graph.Node{}}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Values: map[string]plan.StepValue{
+						"offerId": {
+							From:   "search.offerings",
+							Select: &plan.SelectionConfig{Strategy: "match", Filter: "carrier == 'UA'"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	generateSoftConstraints(p, g)
+
+	require.NotNil(t, p.Intent.Constraints)
+	require.Len(t, p.Intent.Constraints.Soft, 1)
+	assert.Equal(t, "carrier preference", p.Intent.Constraints.Soft[0].Name)
+}
+
+func TestGenerateSoftConstraints_NoOverrides(t *testing.T) {
+	g := &graph.Graph{Nodes: map[string]*graph.Node{}}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"offering": {From: "search.offerings", Strategy: "first"},
+					},
+				},
+			},
+		},
+	}
+
+	generateSoftConstraints(p, g)
+
+	// No filters or sorts → no soft constraints generated.
+	assert.Nil(t, p.Intent.Constraints)
+}
+
+func TestGenerateSoftConstraints_FilterAndSort(t *testing.T) {
+	g := &graph.Graph{Nodes: map[string]*graph.Node{}}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "addOffer",
+					Selections: map[string]plan.StepSelection{
+						"offering": {From: "search.offerings", Strategy: "min", SortField: "price", Filter: "carrier == 'UA'"},
+					},
+				},
+			},
+		},
+	}
+
+	generateSoftConstraints(p, g)
+
+	require.NotNil(t, p.Intent.Constraints)
+	// Both filter and sort produce separate constraints.
+	assert.Len(t, p.Intent.Constraints.Soft, 2)
 }
 
 func TestPostProcess_FullPipeline(t *testing.T) {
@@ -1132,138 +1231,6 @@ func TestFixDependsOn_ResolvesNodeNameToStepID(t *testing.T) {
 	assert.Contains(t, p.Execution.Steps[2].DependsOn, "inc0_addSeatOffer")
 	assert.NotContains(t, p.Execution.Steps[2].DependsOn, "addSeatOffer")
 	assert.Contains(t, p.Execution.Steps[2].DependsOn, "createWorkbench")
-}
-
-func TestResolveConstraintRefs_PrefixedStepIDs(t *testing.T) {
-	// When LLM generates constraints with bare node names (e.g., "searchSeatMap")
-	// but the plan has prefixed step IDs (e.g., "inc0_searchSeatMap"),
-	// resolveConstraintRefs should rewrite the AppliesTo references.
-	p := &plan.Plan{
-		Execution: plan.Execution{
-			Steps: []plan.Step{
-				{Node: "searchFlights"},
-				{Node: "createWorkbench"},
-				{ID: "inc0_searchSeatMap", Node: "searchSeatMap"},
-				{ID: "inc0_addSeatOffer", Node: "addSeatOffer"},
-			},
-		},
-		Intent: plan.Intent{
-			Constraints: &plan.Constraints{
-				Hard: []plan.Constraint{
-					{
-						Name:      "origin",
-						AppliesTo: []string{"searchFlights.origin"},
-					},
-				},
-				Soft: []plan.Constraint{
-					{
-						Name:      "seat selection",
-						AppliesTo: []string{"searchSeatMap.workbenchId", "addSeatOffer.seatId"},
-					},
-					{
-						Name:      "bare node ref",
-						AppliesTo: []string{"searchSeatMap"},
-					},
-				},
-			},
-		},
-	}
-
-	resolveConstraintRefs(p)
-
-	// Hard constraint with non-prefixed step should be unchanged.
-	assert.Equal(t, []string{"searchFlights.origin"}, p.Intent.Constraints.Hard[0].AppliesTo)
-
-	// Soft constraints with bare node names should be resolved to prefixed step IDs.
-	assert.Equal(t, []string{"inc0_searchSeatMap.workbenchId", "inc0_addSeatOffer.seatId"}, p.Intent.Constraints.Soft[0].AppliesTo)
-	assert.Equal(t, []string{"inc0_searchSeatMap"}, p.Intent.Constraints.Soft[1].AppliesTo)
-}
-
-func TestResolveConstraintRefs_NoPrefixes(t *testing.T) {
-	// When no steps have prefixed IDs, resolveConstraintRefs should be a no-op.
-	p := &plan.Plan{
-		Execution: plan.Execution{
-			Steps: []plan.Step{
-				{Node: "searchFlights"},
-				{Node: "createWorkbench"},
-			},
-		},
-		Intent: plan.Intent{
-			Constraints: &plan.Constraints{
-				Soft: []plan.Constraint{
-					{
-						Name:      "origin",
-						AppliesTo: []string{"searchFlights.origin"},
-					},
-				},
-			},
-		},
-	}
-
-	resolveConstraintRefs(p)
-
-	assert.Equal(t, []string{"searchFlights.origin"}, p.Intent.Constraints.Soft[0].AppliesTo)
-}
-
-func TestResolveConstraintRefs_FuzzyNodeName(t *testing.T) {
-	// When LLM uses a shortened node name in constraints (e.g., "searchFlights")
-	// but the plan only has "searchFlights2Leg", fuzzy prefix matching should resolve it.
-	p := &plan.Plan{
-		Execution: plan.Execution{
-			Steps: []plan.Step{
-				{Node: "searchFlights2Leg"},
-				{ID: "searchNextLeg2", Node: "searchFlightsNextLeg"},
-				{Node: "priceOfferFullPayload"},
-			},
-		},
-		Intent: plan.Intent{
-			Constraints: &plan.Constraints{
-				Hard: []plan.Constraint{
-					{
-						Name:      "route",
-						AppliesTo: []string{"searchFlights.input.origin", "searchFlights.input.destination"},
-					},
-					{
-						Name:      "leg-based",
-						AppliesTo: []string{"searchFlights.input.searchRepresentation"},
-					},
-				},
-			},
-		},
-	}
-
-	resolveConstraintRefs(p)
-
-	// "searchFlights" should resolve to "searchFlights2Leg" via prefix match (unique).
-	assert.Equal(t, []string{"searchFlights2Leg.input.origin", "searchFlights2Leg.input.destination"}, p.Intent.Constraints.Hard[0].AppliesTo)
-	assert.Equal(t, []string{"searchFlights2Leg.input.searchRepresentation"}, p.Intent.Constraints.Hard[1].AppliesTo)
-}
-
-func TestResolveConstraintRefs_FuzzyAmbiguous(t *testing.T) {
-	// When the prefix matches multiple step IDs, it should NOT resolve (ambiguous).
-	p := &plan.Plan{
-		Execution: plan.Execution{
-			Steps: []plan.Step{
-				{Node: "searchFlights2Leg"},
-				{Node: "searchFlights3Leg"},
-			},
-		},
-		Intent: plan.Intent{
-			Constraints: &plan.Constraints{
-				Hard: []plan.Constraint{
-					{
-						Name:      "ambiguous",
-						AppliesTo: []string{"searchFlights.origin"},
-					},
-				},
-			},
-		},
-	}
-
-	resolveConstraintRefs(p)
-
-	// "searchFlights" matches both "searchFlights2Leg" and "searchFlights3Leg" — should be left unchanged.
-	assert.Equal(t, []string{"searchFlights.origin"}, p.Intent.Constraints.Hard[0].AppliesTo)
 }
 
 func TestMergeLLMValues_SkipsFromSelectionValues(t *testing.T) {

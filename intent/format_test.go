@@ -68,19 +68,6 @@ func TestFormatGraph_ElementFields(t *testing.T) {
 	assert.NotContains(t, result, "stops: integer (path:")
 }
 
-func TestFormatPlanSchema_NonEmpty(t *testing.T) {
-	schema := FormatPlanSchema()
-
-	assert.Contains(t, schema, "Fill the Plan Skeleton")
-	assert.Contains(t, schema, "Literal Values")
-	assert.Contains(t, schema, "strategy")
-	assert.Contains(t, schema, "assertions")
-	assert.Contains(t, schema, "match")
-	assert.Contains(t, schema, "filter")
-	assert.Contains(t, schema, "field: id")
-	assert.Contains(t, schema, "named selections")
-}
-
 func TestFormatGraph_EmptyGraph(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
@@ -269,5 +256,114 @@ func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
 
 	// Regular workflow should not have [addon]
 	assert.Contains(t, result, "**Main Booking** [template]")
+}
+
+// --- FormatWorkflowMenu tests ---
+
+func TestFormatWorkflowMenu_Basic(t *testing.T) {
+	g := &graph.Graph{
+		Version:     "1.0.0",
+		Title:       "Travel API",
+		Description: "API for travel booking.",
+		Workflows: []graph.Workflow{
+			{Name: "Booking Flow", Template: "plans/booking.yaml", Description: "Standard booking"},
+			{Name: "Search Only", Template: "plans/search.yaml", Description: "Search without booking"},
+			{Name: "No Template"},
+		},
+		Nodes: map[string]*graph.Node{
+			"search": {Name: "search", Description: "Search flights", Adapter: "a",
+				Inputs:  []graph.Input{{Name: "origin", Type: "string"}},
+				Outputs: []graph.Output{{Name: "results", Type: "array"}},
+			},
+		},
+	}
+
+	result := FormatWorkflowMenu(g)
+
+	// Title and version present.
+	assert.Contains(t, result, "# Travel API (version 1.0.0)")
+
+	// Description present.
+	assert.Contains(t, result, "API for travel booking.")
+
+	// Workflow names and descriptions present.
+	assert.Contains(t, result, "**Booking Flow**: Standard booking")
+	assert.Contains(t, result, "**Search Only**: Search without booking")
+
+	// Template-less workflow excluded.
+	assert.NotContains(t, result, "No Template")
+
+	// Node details absent.
+	assert.NotContains(t, result, "Node:")
+	assert.NotContains(t, result, "Inputs:")
+	assert.NotContains(t, result, "Outputs:")
+	assert.NotContains(t, result, "origin")
+	assert.NotContains(t, result, "Adapter:")
+}
+
+func TestFormatWorkflowMenu_AddonsShowAfter(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "plans/main.yaml", Description: "Main flow"},
+			{Name: "Seat Selection", Kind: "addon", Template: "plans/seat.yaml", After: "commitBooking", Description: "Add seat preferences"},
+			{Name: "Ancillary", Kind: "addon", Template: "plans/anc.yaml", After: "addTraveler", Description: "Add ancillaries"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g)
+
+	// Base workflow in Workflows section.
+	assert.Contains(t, result, "## Workflows")
+	assert.Contains(t, result, "**Main**: Main flow")
+
+	// Addons in separate section with splice points.
+	assert.Contains(t, result, "## Addons")
+	assert.Contains(t, result, "**Seat Selection** (splices after: commitBooking): Add seat preferences")
+	assert.Contains(t, result, "**Ancillary** (splices after: addTraveler): Add ancillaries")
+}
+
+func TestFormatWorkflowMenu_NoInputsOutputs(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	result := FormatWorkflowMenu(g)
+
+	// The full graph format has these; the menu must not.
+	assert.NotContains(t, result, "Inputs:")
+	assert.NotContains(t, result, "Outputs:")
+	assert.NotContains(t, result, "Node:")
+	assert.NotContains(t, result, "elementField")
+	assert.NotContains(t, result, "Adapter:")
+	assert.NotContains(t, result, "Tags:")
+}
+
+func TestFormatWorkflowMenu_WithNotes(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Notes:   "Only use production credentials.",
+		Workflows: []graph.Workflow{
+			{Name: "Test", Template: "plans/test.yaml"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g)
+	assert.Contains(t, result, "## Notes")
+	assert.Contains(t, result, "Only use production credentials.")
+}
+
+func TestFormatWorkflowMenu_EmptyWorkflows(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g)
+
+	// Should have title but no Workflows section.
+	assert.Contains(t, result, "version 1.0.0")
+	assert.NotContains(t, result, "## Workflows")
+	assert.NotContains(t, result, "## Addons")
 }
 

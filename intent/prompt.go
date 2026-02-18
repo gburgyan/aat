@@ -4,75 +4,32 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/gburgyan/aat/graph"
 )
 
 // buildWorkflowSelectionPrompt constructs the messages for the first LLM call
-// (workflow selection). It lists available workflows and addons, and asks the
-// LLM to select one and classify constraints.
-func buildWorkflowSelectionPrompt(graphContext, userPrompt string, g *graph.Graph, now time.Time) (system, user string) {
+// (workflow selection). The user prompt contains the compact workflow menu and
+// the user's intent. The system prompt contains format instructions and rules.
+func buildWorkflowSelectionPrompt(workflowMenu, userPrompt string, now time.Time) (system, user string) {
 	dateStr := now.Format("2006-01-02")
 
-	var sb strings.Builder
-	sb.WriteString(`You are an API testing assistant. Given an API graph and a user's testing intent, select the appropriate workflow and classify constraints.
+	system = `You are an API testing assistant. Given available workflows and a user's testing intent, select the appropriate workflow.
 
 Respond with a JSON object (no markdown fencing, just raw JSON):
 {
   "workflow": "Exact Workflow Name",
   "description": "brief description of what will be tested",
   "addons": ["Addon Name 1"],
-  "repetitions": {"nodeName": N},
-  "constraints": {
-    "hard": [{"name": "constraint name", "description": "why this must be met", "appliesTo": ["node.input"]}],
-    "soft": [{"name": "preference name", "description": "why this is preferred", "appliesTo": ["node.input"]}],
-    "free": ["aspects that can vary freely"]
-  }
+  "repetitions": {"nodeName": N}
 }
 
 Rules:
 - Select the workflow whose description best matches the user's intent
-- Use the EXACT workflow name from the list below
-- Hard constraints are explicit requirements that MUST be met (e.g., specific origin/destination)
-- Soft constraints are preferences that SHOULD be met but can be relaxed (e.g., "cheapest", "nonstop")
-- Free parameters are things the user didn't specify that can be filled with reasonable values
+- Use the EXACT workflow name from the available list
 - The "addons" array lists addon workflows to compose into the main workflow. Include addons when the user mentions capabilities matching an addon (e.g., seat selection, ancillary services). Omit "addons" if no addons are needed.
 - The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addTraveler": 2} for two travelers). Omit if no nodes need repeating.
-- Today's date is `)
-	sb.WriteString(dateStr)
-	sb.WriteString(`. When generating dates, use dates at least 7 days in the future.`)
+- Today's date is ` + dateStr + `. When generating dates, use dates at least 7 days in the future.`
 
-	// List available base workflows.
-	sb.WriteString("\n\nAvailable Workflows:\n")
-	for _, wf := range g.Workflows {
-		if wf.Template == "" || wf.IsAddon() {
-			continue
-		}
-		desc := wf.Description
-		if desc == "" {
-			desc = "(no description)"
-		}
-		fmt.Fprintf(&sb, "- **%s**: %s\n", wf.Name, desc)
-	}
-
-	// List addon workflows.
-	hasAddons := false
-	for _, wf := range g.Workflows {
-		if wf.IsAddon() && wf.Template != "" {
-			if !hasAddons {
-				sb.WriteString("\nAvailable Addons:\n")
-				hasAddons = true
-			}
-			desc := wf.Description
-			if desc == "" {
-				desc = "(no description)"
-			}
-			fmt.Fprintf(&sb, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After, desc)
-		}
-	}
-
-	system = sb.String()
-	user = fmt.Sprintf("## API Graph\n\n%s\n## User Intent\n\n%s", graphContext, userPrompt)
+	user = fmt.Sprintf("## Available Workflows\n\n%s\n## User Intent\n\n%s", workflowMenu, userPrompt)
 	return system, user
 }
 
@@ -147,7 +104,16 @@ Use bare field names (no jsonpath $ prefix).
 
 ## Descriptions
 
-Add a brief description for each step explaining what it does in context.`
+Add a brief description for each step explaining what it does in context.
+
+## Wrong Workflow
+
+If the composed workflow clearly doesn't match the user's intent (e.g., the user asked about hotels but this is a flight booking workflow), respond with ONLY:
+{"wrongPlan": {"reason": "explanation", "suggested": "Workflow Name"}}
+Rules:
+- Only signal this for fundamental domain mismatches (completely wrong workflow type)
+- Do NOT signal wrongPlan because current/default values don't match — replacing those values is YOUR job
+- A workflow with example cities A→B→C can be used for a round trip A→B→A — just set the values accordingly`
 
 	var ub strings.Builder
 
@@ -231,9 +197,6 @@ func writeInputContext(ub *strings.Builder, ic InputContext) {
 	}
 	if ic.IsDate {
 		ub.WriteString("Date field — use {{today + N days}}\n")
-	}
-	for _, c := range ic.Constraints {
-		fmt.Fprintf(ub, "Constraint: %s\n", c)
 	}
 	ub.WriteString("\n")
 }

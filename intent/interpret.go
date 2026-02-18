@@ -35,13 +35,12 @@ type InterpretResult struct {
 }
 
 // WorkflowSelection captures the output of the first LLM call: which workflow
-// template to use, any addons to compose, and constraint classification.
+// template to use and any addons to compose.
 type WorkflowSelection struct {
 	Workflow    string         `json:"workflow"`
 	Description string         `json:"description"`
 	Addons      []string       `json:"addons,omitempty"`
 	Repetitions map[string]int `json:"repetitions,omitempty"`
-	Constraints ConstraintSet  `json:"constraints"`
 }
 
 // GoalAnalysis captures the output of the first LLM call.
@@ -78,6 +77,7 @@ type selectionResult struct {
 	Response      *llm.Response
 	System        string // system prompt sent
 	User          string // user prompt sent
+	RetriedFrom   *selectionResult // non-nil if this is a retry result
 }
 
 // Interpret transforms a natural language prompt into a validated execution plan.
@@ -129,9 +129,9 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	}
 
 	// --- Call 1: Workflow Selection ---
-	graphContext := FormatGraph(req.Graph)
+	workflowMenu := FormatWorkflowMenu(req.Graph)
 	selStart := time.Now()
-	sr, err := selectWorkflow(ctx, req.Client, graphContext, req.Prompt, req.Graph, now)
+	sr, err := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt, req.Graph, now)
 	if err != nil {
 		if trace != nil && sr != nil {
 			trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), err)
@@ -142,18 +142,122 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	ws := sr.Selection
 
 	if trace != nil {
-		trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), nil)
+		if sr.RetriedFrom != nil {
+			// The first attempt was retried. Capture the original as SelectionCall
+			// and the retry as SelectionRetryCall.
+			orig := sr.RetriedFrom
+			trace.SelectionCall = toLLMCallTrace(orig.System, orig.User, 0.1, orig.Response, time.Since(selStart), nil)
+			retryTrace := toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), nil)
+			trace.SelectionRetryCall = &retryTrace
+		} else {
+			trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), nil)
+		}
 		trace.WorkflowSelection = ws
 	}
 
+	// --- Build and Fill Plan ---
+	skeleton, targeted, err := buildAndFillPlan(ctx, req, ws, trace, now)
+	if err != nil {
+		return traceErr(err)
+	}
+
+	// --- Wrong Plan Escape (max 1 round-trip) ---
+	if targeted.WrongPlan != nil {
+		if trace != nil {
+			trace.WrongPlanSignal = targeted.WrongPlan
+			wrongPlanCall := trace.PlanCall
+			trace.WrongPlanCall = &wrongPlanCall
+		}
+
+		// Re-run Call 1 with feedback about the mismatch.
+		feedback := fmt.Sprintf(
+			"\n\nNote: The value generator indicated the selected workflow %q doesn't match the intent: %s",
+			ws.Workflow, targeted.WrongPlan.Reason,
+		)
+		if targeted.WrongPlan.Suggested != "" {
+			feedback += fmt.Sprintf(" Suggested alternative: %s.", targeted.WrongPlan.Suggested)
+		}
+
+		reselStart := time.Now()
+		reselSR, reselErr := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt+feedback, req.Graph, now)
+		if reselErr != nil {
+			return traceErr(fmt.Errorf("intent: reselection after wrong-plan: %w", reselErr))
+		}
+
+		if trace != nil {
+			reselTrace := toLLMCallTrace(reselSR.System, reselSR.User, 0.1, reselSR.Response, time.Since(reselStart), nil)
+			trace.ReselectionCall = &reselTrace
+			trace.WorkflowSelection = reselSR.Selection
+		}
+
+		ws = reselSR.Selection
+
+		skeleton, _, err = buildAndFillPlan(ctx, req, ws, trace, now)
+		if err != nil {
+			return traceErr(err)
+		}
+		// Don't check wrongPlan on the second attempt — proceed with whatever we got.
+	}
+
+	// --- Validate ---
+	if err := plan.Validate(skeleton, req.Graph); err != nil {
+		var valErr *plan.ValidationError
+		if !errors.As(err, &valErr) {
+			if trace != nil {
+				trace.ValidationErr = err.Error()
+				trace.FinalPlan = skeleton
+			}
+			return traceErr(fmt.Errorf("intent: validating generated plan: %w", err))
+		}
+
+		if trace != nil {
+			trace.ValidationErr = err.Error()
+		}
+
+		retryResult := retryPlanGeneration(ctx, req, skeleton, ws, valErr, trace, pipelineStart)
+		if retryResult != nil {
+			retryResult.WorkflowSelection = ws
+			return retryResult, nil
+		}
+
+		if trace != nil {
+			trace.FinalPlan = skeleton
+		}
+		return traceErr(fmt.Errorf("intent: validating generated plan: %w", err))
+	}
+
+	if trace != nil {
+		trace.FinalPlan = skeleton
+		trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
+	}
+
+	return &InterpretResult{
+		Plan:              skeleton,
+		WorkflowSelection: ws,
+		Trace:             trace,
+	}, nil
+}
+
+// buildAndFillPlan loads the workflow template, composes addons, expands
+// multiplicity, runs the targeted value fill (Call 2), validates/applies the
+// response, and post-processes the plan. Returns the filled plan and the
+// targeted response. If the LLM signals wrong-plan, targeted.WrongPlan will
+// be set and the plan will have PostProcess applied but no LLM values.
+func buildAndFillPlan(
+	ctx context.Context,
+	req InterpretRequest,
+	ws *WorkflowSelection,
+	trace *PlanTrace,
+	now time.Time,
+) (*plan.Plan, *TargetedResponse, error) {
 	// --- Load/Compose Workflow Template ---
 	if ws.Workflow == "" {
-		return traceErr(fmt.Errorf("intent: no workflow selected; available workflows: %s", listWorkflowNames(req.Graph)))
+		return nil, nil, fmt.Errorf("intent: no workflow selected; available workflows: %s", listWorkflowNames(req.Graph))
 	}
 
 	wf, found := findWorkflowByName(req.Graph, ws.Workflow)
 	if !found || wf.Template == "" {
-		return traceErr(fmt.Errorf("intent: unknown or template-less workflow %q; available: %s", ws.Workflow, listWorkflowNames(req.Graph)))
+		return nil, nil, fmt.Errorf("intent: unknown or template-less workflow %q; available: %s", ws.Workflow, listWorkflowNames(req.Graph))
 	}
 
 	var tpl *plan.Plan
@@ -170,7 +274,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	if tpl == nil {
 		loaded, loadErr := LoadWorkflowTemplate(wf.Template, req.GraphDir, req.Graph)
 		if loadErr != nil {
-			return traceErr(fmt.Errorf("intent: loading template for %q: %w", ws.Workflow, loadErr))
+			return nil, nil, fmt.Errorf("intent: loading template for %q: %w", ws.Workflow, loadErr)
 		}
 		tpl = loaded
 		templatePath = wf.Template
@@ -195,7 +299,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	// Marshal skeleton to YAML for trace/debugging (not sent to LLM).
 	skeletonBytes, marshalErr := plan.Marshal(skeleton)
 	if marshalErr != nil {
-		return traceErr(fmt.Errorf("intent: marshalling template skeleton: %w", marshalErr))
+		return nil, nil, fmt.Errorf("intent: marshalling template skeleton: %w", marshalErr)
 	}
 
 	if trace != nil {
@@ -207,7 +311,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	}
 
 	// --- Call 2: Targeted Value Fill ---
-	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB, ws)
+	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB)
 	selectionContexts := buildSelectionContexts(skeleton, req.Graph)
 
 	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, now)
@@ -224,7 +328,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		if trace != nil {
 			trace.PlanCall = toLLMCallTrace(system, user, 0.2, nil, time.Since(planCallStart), err)
 		}
-		return traceErr(fmt.Errorf("intent: plan generation LLM call: %w", err))
+		return nil, nil, fmt.Errorf("intent: plan generation LLM call: %w", err)
 	}
 
 	if trace != nil {
@@ -234,11 +338,18 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	// --- Parse, Validate Response, and Apply ---
 	targeted, err := parseTargetedResponse(planResp.Content)
 	if err != nil {
-		return traceErr(fmt.Errorf("intent: %w", err))
+		return nil, nil, fmt.Errorf("intent: %w", err)
 	}
 
 	if trace != nil {
 		trace.TargetedResponse = targeted
+	}
+
+	// If the LLM signaled wrong-plan, skip value application but still run
+	// PostProcess for structural fixes (cleanup, deps).
+	if targeted.WrongPlan != nil {
+		PostProcess(skeleton, req.Graph, ws, req.Prompt)
+		return skeleton, targeted, nil
 	}
 
 	// Validate the LLM response before applying it to the skeleton.
@@ -285,42 +396,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 
 	PostProcess(skeleton, req.Graph, ws, req.Prompt)
 
-	if err := plan.Validate(skeleton, req.Graph); err != nil {
-		var valErr *plan.ValidationError
-		if !errors.As(err, &valErr) {
-			if trace != nil {
-				trace.ValidationErr = err.Error()
-				trace.FinalPlan = skeleton
-			}
-			return traceErr(fmt.Errorf("intent: validating generated plan: %w", err))
-		}
-
-		if trace != nil {
-			trace.ValidationErr = err.Error()
-		}
-
-		retryResult := retryPlanGeneration(ctx, req, skeleton, ws, valErr, trace, pipelineStart)
-		if retryResult != nil {
-			retryResult.WorkflowSelection = ws
-			return retryResult, nil
-		}
-
-		if trace != nil {
-			trace.FinalPlan = skeleton
-		}
-		return traceErr(fmt.Errorf("intent: validating generated plan: %w", err))
-	}
-
-	if trace != nil {
-		trace.FinalPlan = skeleton
-		trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
-	}
-
-	return &InterpretResult{
-		Plan:              skeleton,
-		WorkflowSelection: ws,
-		Trace:             trace,
-	}, nil
+	return skeleton, targeted, nil
 }
 
 // retryPlanGeneration attempts a single retry of plan generation (call 2)
@@ -362,7 +438,7 @@ func retryPlanGeneration(
 	}
 
 	// Rebuild contexts for the retry skeleton.
-	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB, ws)
+	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB)
 	selectionContexts := buildSelectionContexts(retrySkeleton, req.Graph)
 
 	now := time.Now()
@@ -429,11 +505,12 @@ func copyPlanShallow(p *plan.Plan) *plan.Plan {
 	return &cp
 }
 
-// selectWorkflow performs the first LLM call to select a workflow and
-// classify constraints. Returns a selectionResult with the parsed selection,
-// raw JSON, LLM response metadata, and prompt text.
-func selectWorkflow(ctx context.Context, client llm.Client, graphContext, prompt string, g *graph.Graph, now time.Time) (*selectionResult, error) {
-	system, user := buildWorkflowSelectionPrompt(graphContext, prompt, g, now)
+// selectWorkflow performs the first LLM call to select a workflow.
+// It validates the response and retries once if validation fails.
+// Returns a selectionResult with the parsed selection, raw JSON, LLM response
+// metadata, and prompt text.
+func selectWorkflow(ctx context.Context, client llm.Client, workflowMenu, prompt string, g *graph.Graph, now time.Time) (*selectionResult, error) {
+	system, user := buildWorkflowSelectionPrompt(workflowMenu, prompt, now)
 
 	resp, err := client.Complete(ctx, &llm.Request{
 		Messages: []llm.Message{
@@ -460,13 +537,113 @@ func selectWorkflow(ctx context.Context, client llm.Client, graphContext, prompt
 		}, fmt.Errorf("parsing workflow selection response: %w", err)
 	}
 
-	return &selectionResult{
+	sr := &selectionResult{
 		Selection:     &ws,
 		SelectionJSON: content,
 		Response:      resp,
 		System:        system,
 		User:          user,
-	}, nil
+	}
+
+	// Validate the selection.
+	validationErrors := validateWorkflowSelection(&ws, g)
+	if len(validationErrors) == 0 {
+		return sr, nil
+	}
+
+	// Retry once with error feedback.
+	retrySystem := system + "\n\nIMPORTANT: The previous response had these issues:\n"
+	for _, e := range validationErrors {
+		retrySystem += "- " + e + "\n"
+	}
+	retrySystem += "Fix these issues in your JSON response."
+
+	retryResp, retryErr := client.Complete(ctx, &llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: retrySystem},
+			{Role: llm.RoleUser, Content: user},
+		},
+		Temperature: 0.1,
+	})
+	if retryErr != nil {
+		// Retry LLM call failed — return the original (possibly flawed) result.
+		return sr, nil
+	}
+
+	retryContent := strings.TrimSpace(retryResp.Content)
+	retryContent = stripJSONFencing(retryContent)
+
+	var retryWS WorkflowSelection
+	if err := json.Unmarshal([]byte(retryContent), &retryWS); err != nil {
+		// Can't parse retry — use original.
+		return sr, nil
+	}
+
+	retrySR := &selectionResult{
+		Selection:     &retryWS,
+		SelectionJSON: retryContent,
+		Response:      retryResp,
+		System:        retrySystem,
+		User:          user,
+	}
+
+	// Use retry result regardless of whether it passes validation — we only retry once.
+	retryValidationErrors := validateWorkflowSelection(&retryWS, g)
+	if len(retryValidationErrors) == 0 {
+		retrySR.RetriedFrom = sr
+		return retrySR, nil
+	}
+
+	// Retry also failed validation — return original.
+	return sr, nil
+}
+
+// validateWorkflowSelection checks that the LLM's workflow selection is valid
+// against the graph. Returns human-readable error strings (empty = valid).
+func validateWorkflowSelection(ws *WorkflowSelection, g *graph.Graph) []string {
+	var errs []string
+
+	if ws.Workflow == "" {
+		errs = append(errs, "workflow name is empty; select one from the available list")
+		return errs
+	}
+
+	// Check workflow matches an available base workflow.
+	wf, found := findWorkflowByName(g, ws.Workflow)
+	if !found {
+		errs = append(errs, fmt.Sprintf("workflow %q not found; available: %s", ws.Workflow, listWorkflowNames(g)))
+		return errs
+	}
+	if wf.Template == "" {
+		errs = append(errs, fmt.Sprintf("workflow %q has no template", ws.Workflow))
+	}
+	if wf.IsAddon() {
+		errs = append(errs, fmt.Sprintf("workflow %q is an addon, not a base workflow; select a base workflow instead", ws.Workflow))
+	}
+
+	// Check each addon exists and is actually an addon.
+	seen := map[string]bool{}
+	for _, addonName := range ws.Addons {
+		if seen[addonName] {
+			errs = append(errs, fmt.Sprintf("duplicate addon %q", addonName))
+			continue
+		}
+		seen[addonName] = true
+
+		addon, addonFound := findWorkflowByName(g, addonName)
+		if !addonFound {
+			errs = append(errs, fmt.Sprintf("addon %q not found", addonName))
+			continue
+		}
+		if !addon.IsAddon() {
+			errs = append(errs, fmt.Sprintf("%q is not an addon workflow", addonName))
+		}
+		if addon.Template == "" {
+			errs = append(errs, fmt.Sprintf("addon %q has no template", addonName))
+		}
+	}
+
+	return errs
 }
 
 // stripJSONFencing removes ```json ... ``` fencing if present.

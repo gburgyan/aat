@@ -3,6 +3,7 @@ package intent
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gburgyan/aat/domain"
@@ -16,6 +17,15 @@ type TargetedResponse struct {
 	Selections   map[string]TargetedSelection   `json:"selections"`
 	Assertions   map[string][]TargetedAssertion `json:"assertions"`
 	Descriptions map[string]string              `json:"descriptions"`
+	WrongPlan    *WrongPlanSignal               `json:"wrongPlan,omitempty"`
+}
+
+// WrongPlanSignal is returned by the Call 2 LLM when it determines the selected
+// workflow fundamentally doesn't match the user's intent. This triggers a
+// re-selection via Call 1 with feedback.
+type WrongPlanSignal struct {
+	Reason    string `json:"reason"`
+	Suggested string `json:"suggested,omitempty"`
 }
 
 // TargetedSelection represents a selection strategy override from the LLM.
@@ -45,11 +55,15 @@ type InputContext struct {
 	DomainType     string   // from TypeDef.Description
 	Format         string   // from TypeDef.Format
 	PoolValues     []string // sample values from value pool
-	Constraints    []string // matched user constraints from phase 1
 	GraphConstr    string   // graph-level constraint annotation
 	IsDate         bool
 	IsConfigurable bool   // true if graph.Input.Configurable
 	CurrentDefault string // template default value, if any (e.g., "DEN")
+
+	// Validation metadata from graph.Input.Constraints — used by validateTargetedResponse.
+	ConstraintPattern   string // regex pattern (e.g., "^[A-Z]{3}$")
+	ConstraintMinLength *int   // minimum string length
+	ConstraintMaxLength *int   // maximum string length
 }
 
 // SelectionContext provides per-selection context for the LLM prompt.
@@ -64,8 +78,8 @@ type SelectionContext struct {
 }
 
 // buildInputContexts walks unfed inputs in the skeleton and resolves domain
-// type/pool/concepts/constraints per input.
-func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.KnowledgeBase, ws *WorkflowSelection) []InputContext {
+// type/pool/concepts per input.
+func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.KnowledgeBase) []InputContext {
 	var contexts []InputContext
 
 	for _, step := range skeleton.Execution.Steps {
@@ -101,15 +115,20 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 				ic.IsDate = true
 			}
 
-			// Graph-level constraint annotation.
-			if inp.Constraints != nil && inp.Constraints.Description != "" {
-				ic.GraphConstr = inp.Constraints.Description
-			}
-			if inp.Constraints != nil && inp.Constraints.Pattern != "" {
-				if ic.GraphConstr != "" {
-					ic.GraphConstr += " "
+			// Graph-level constraint annotation + validation metadata.
+			if inp.Constraints != nil {
+				if inp.Constraints.Description != "" {
+					ic.GraphConstr = inp.Constraints.Description
 				}
-				ic.GraphConstr += fmt.Sprintf("(pattern: %s)", inp.Constraints.Pattern)
+				if inp.Constraints.Pattern != "" {
+					if ic.GraphConstr != "" {
+						ic.GraphConstr += " "
+					}
+					ic.GraphConstr += fmt.Sprintf("(pattern: %s)", inp.Constraints.Pattern)
+					ic.ConstraintPattern = inp.Constraints.Pattern
+				}
+				ic.ConstraintMinLength = inp.Constraints.MinLength
+				ic.ConstraintMaxLength = inp.Constraints.MaxLength
 			}
 
 			// Domain enrichment from KB.
@@ -156,26 +175,7 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 				}
 			}
 
-			// Match user constraints from workflow selection.
-			if ws != nil {
-				key := step.StepID() + "." + inp.Name
-				for _, h := range ws.Constraints.Hard {
-					for _, a := range h.AppliesTo {
-						if a == key || a == step.Node+"."+inp.Name || a == inp.Name {
-							ic.Constraints = append(ic.Constraints, fmt.Sprintf("[hard] %s — %s", h.Name, h.Description))
-						}
-					}
-				}
-				for _, s := range ws.Constraints.Soft {
-					for _, a := range s.AppliesTo {
-						if a == key || a == step.Node+"."+inp.Name || a == inp.Name {
-							ic.Constraints = append(ic.Constraints, fmt.Sprintf("[soft] %s — %s", s.Name, s.Description))
-						}
-					}
-				}
-			}
-
-			contexts = append(contexts, ic)
+				contexts = append(contexts, ic)
 		}
 	}
 
@@ -255,60 +255,6 @@ func resolveElementFields(g *graph.Graph, source string) []string {
 		}
 	}
 	return nil
-}
-
-// buildCompactPlanFlow formats a numbered step list with deps, goal markers,
-// and cleanup for the LLM prompt.
-func buildCompactPlanFlow(skeleton *plan.Plan, g *graph.Graph) string {
-	var sb strings.Builder
-
-	for i, step := range skeleton.Execution.Steps {
-		node := g.Nodes[step.Node]
-		desc := step.Node
-		if node != nil && node.Description != "" {
-			desc = node.Description
-		}
-
-		fmt.Fprintf(&sb, "%d. %s", i+1, step.StepID())
-		if step.StepID() != step.Node {
-			fmt.Fprintf(&sb, " [node: %s]", step.Node)
-		}
-		sb.WriteString(" — ")
-		sb.WriteString(desc)
-
-		if len(step.DependsOn) > 0 {
-			fmt.Fprintf(&sb, " (depends on: %s)", strings.Join(step.DependsOn, ", "))
-		}
-		if step.IsGoal {
-			sb.WriteString(" [GOAL]")
-		}
-		sb.WriteString("\n")
-
-		// List output fields for assertion context.
-		if node != nil && len(node.Outputs) > 0 {
-			var outNames []string
-			for _, out := range node.Outputs {
-				outNames = append(outNames, out.Name)
-			}
-			fmt.Fprintf(&sb, "   Outputs: %s\n", strings.Join(outNames, ", "))
-		}
-	}
-
-	if len(skeleton.Execution.Cleanup) > 0 {
-		sb.WriteString("Cleanup: ")
-		var cleanupParts []string
-		for _, cs := range skeleton.Execution.Cleanup {
-			part := cs.Node
-			if cs.RunOn != "" {
-				part += " (" + cs.RunOn + ")"
-			}
-			cleanupParts = append(cleanupParts, part)
-		}
-		sb.WriteString(strings.Join(cleanupParts, ", "))
-		sb.WriteString("\n")
-	}
-
-	return sb.String()
 }
 
 // parseTargetedResponse strips JSON fencing and unmarshals the LLM response
@@ -620,6 +566,71 @@ func validateTargetedResponse(
 				Key:     key,
 				Kind:    "non_literal_value",
 				Message: fmt.Sprintf("%s: expected a literal value, got an array", key),
+			})
+		}
+	}
+
+	// Build input context lookup for constraint checks.
+	icByKey := map[string]*InputContext{}
+	for i := range inputContexts {
+		ic := &inputContexts[i]
+		icByKey[ic.StepID+"."+ic.InputName] = ic
+	}
+
+	// Check 2b: Regex pattern, expression syntax, string length.
+	for key, val := range resp.Values {
+		if !unfedSet[key] {
+			continue
+		}
+		strVal, isStr := val.(string)
+		if !isStr {
+			continue
+		}
+
+		ic := icByKey[key]
+		if ic == nil {
+			continue
+		}
+
+		// Skip all constraint checks for expression values.
+		if plan.ContainsExpr(strVal) {
+			// Validate expression syntax.
+			if err := plan.ValidateExpr(strVal); err != nil {
+				issues = append(issues, TargetedValidationIssue{
+					Key:     key,
+					Kind:    "invalid_expression",
+					Message: fmt.Sprintf("%s: invalid expression syntax %q: %v", key, strVal, err),
+				})
+			}
+			continue
+		}
+
+		// Regex pattern check.
+		if ic.ConstraintPattern != "" {
+			if re, err := regexp.Compile(ic.ConstraintPattern); err == nil {
+				if !re.MatchString(strVal) {
+					issues = append(issues, TargetedValidationIssue{
+						Key:     key,
+						Kind:    "pattern_mismatch",
+						Message: fmt.Sprintf("%s: value %q does not match pattern %s", key, strVal, ic.ConstraintPattern),
+					})
+				}
+			}
+		}
+
+		// String length checks.
+		if ic.ConstraintMinLength != nil && len(strVal) < *ic.ConstraintMinLength {
+			issues = append(issues, TargetedValidationIssue{
+				Key:     key,
+				Kind:    "length_violation",
+				Message: fmt.Sprintf("%s: value %q has length %d, minimum is %d", key, strVal, len(strVal), *ic.ConstraintMinLength),
+			})
+		}
+		if ic.ConstraintMaxLength != nil && len(strVal) > *ic.ConstraintMaxLength {
+			issues = append(issues, TargetedValidationIssue{
+				Key:     key,
+				Kind:    "length_violation",
+				Message: fmt.Sprintf("%s: value %q has length %d, maximum is %d", key, strVal, len(strVal), *ic.ConstraintMaxLength),
 			})
 		}
 	}

@@ -19,6 +19,7 @@ func PostProcess(p *plan.Plan, g *graph.Graph, ws *WorkflowSelection, prompt str
 	fixFilterPrefixes(p)
 	fixAssertions(p)
 	addCleanupSteps(p, g)
+	generateSoftConstraints(p, g)
 	setMetadata(p, g, prompt)
 	populateIntent(p, ws)
 }
@@ -266,7 +267,87 @@ func setMetadata(p *plan.Plan, g *graph.Graph, prompt string) {
 	setMetadataWithTime(p, g, prompt, time.Now())
 }
 
-// populateIntent transfers constraint classification from WorkflowSelection into the plan.
+// generateSoftConstraints creates soft constraints from LLM-provided selection
+// overrides (filters and sort fields). The engine's relaxation system uses these
+// to know what can be relaxed when a selection produces no results.
+//
+// Any selection filter or sort field that was set (either by the LLM or from the
+// template) generates a soft constraint with AppliesTo pointing to the step.
+// This is deterministic — no LLM involvement.
+func generateSoftConstraints(p *plan.Plan, g *graph.Graph) {
+	var softConstraints []plan.Constraint
+
+	for _, step := range p.Execution.Steps {
+		stepID := step.StepID()
+
+		// Named selections.
+		for selName, sel := range step.Selections {
+			if sel.Filter != "" {
+				name := deriveSoftConstraintName(selName, sel.Filter)
+				softConstraints = append(softConstraints, plan.Constraint{
+					Name:        name,
+					Description: fmt.Sprintf("selection filter: %s", sel.Filter),
+					AppliesTo:   []string{stepID},
+				})
+			}
+			if sel.SortField != "" && (sel.Strategy == "min" || sel.Strategy == "max") {
+				name := sel.Strategy + " " + sel.SortField + " preference"
+				softConstraints = append(softConstraints, plan.Constraint{
+					Name:        name,
+					Description: fmt.Sprintf("selection sort: %s %s", sel.Strategy, sel.SortField),
+					AppliesTo:   []string{stepID},
+				})
+			}
+		}
+
+		// Inline selections (from+select on values).
+		for _, sv := range step.Values {
+			if sv.Select == nil {
+				continue
+			}
+			if sv.Select.Filter != "" {
+				name := deriveSoftConstraintName("selection", sv.Select.Filter)
+				softConstraints = append(softConstraints, plan.Constraint{
+					Name:        name,
+					Description: fmt.Sprintf("selection filter: %s", sv.Select.Filter),
+					AppliesTo:   []string{stepID},
+				})
+			}
+			if sv.Select.SortField != "" && (sv.Select.Strategy == "min" || sv.Select.Strategy == "max") {
+				name := sv.Select.Strategy + " " + sv.Select.SortField + " preference"
+				softConstraints = append(softConstraints, plan.Constraint{
+					Name:        name,
+					Description: fmt.Sprintf("selection sort: %s %s", sv.Select.Strategy, sv.Select.SortField),
+					AppliesTo:   []string{stepID},
+				})
+			}
+		}
+	}
+
+	if len(softConstraints) == 0 {
+		return
+	}
+
+	if p.Intent.Constraints == nil {
+		p.Intent.Constraints = &plan.Constraints{}
+	}
+	p.Intent.Constraints.Soft = append(p.Intent.Constraints.Soft, softConstraints...)
+}
+
+// deriveSoftConstraintName creates a human-readable name from a filter expression.
+func deriveSoftConstraintName(context, filter string) string {
+	// Common patterns: "maxConnections == 0" → "nonstop preference"
+	lower := strings.ToLower(filter)
+	if strings.Contains(lower, "connection") && strings.Contains(lower, "0") {
+		return "nonstop preference"
+	}
+	if strings.Contains(lower, "carrier") {
+		return "carrier preference"
+	}
+	return context + " filter preference"
+}
+
+// populateIntent sets the plan description from the workflow selection.
 func populateIntent(p *plan.Plan, ws *WorkflowSelection) {
 	if ws == nil {
 		return
@@ -275,122 +356,8 @@ func populateIntent(p *plan.Plan, ws *WorkflowSelection) {
 	if p.Intent.Description == "" {
 		p.Intent.Description = ws.Description
 	}
-
-	// Only backfill constraints from WorkflowSelection if the LLM didn't already
-	// populate them in the YAML. This prevents duplication when the LLM
-	// includes constraints (it has full visibility of the selection in the prompt).
-	populateConstraints(p, ws.Constraints)
 }
 
-
-// populateConstraints backfills constraints from a ConstraintSet into the plan.
-func populateConstraints(p *plan.Plan, cs ConstraintSet) {
-	if p.Intent.Constraints == nil {
-		if len(cs.Hard) > 0 || len(cs.Soft) > 0 || len(cs.Free) > 0 {
-			p.Intent.Constraints = &plan.Constraints{}
-			for _, h := range cs.Hard {
-				p.Intent.Constraints.Hard = append(p.Intent.Constraints.Hard, plan.Constraint{
-					Name:        h.Name,
-					Description: h.Description,
-					AppliesTo:   h.AppliesTo,
-				})
-			}
-			for _, s := range cs.Soft {
-				p.Intent.Constraints.Soft = append(p.Intent.Constraints.Soft, plan.Constraint{
-					Name:        s.Name,
-					Description: s.Description,
-					AppliesTo:   s.AppliesTo,
-				})
-			}
-			p.Intent.Constraints.Free = append(p.Intent.Constraints.Free, cs.Free...)
-		}
-	}
-
-	// Resolve constraint AppliesTo references: in composed plans the LLM uses
-	// bare node names (e.g., "searchSeatMap.workbenchId") but actual step IDs
-	// have prefixes (e.g., "inc0_searchSeatMap"). Map node names → step IDs.
-	resolveConstraintRefs(p)
-}
-
-// resolveConstraintRefs rewrites constraint AppliesTo entries so that bare
-// node names are replaced with the actual step IDs from the plan. This handles
-// two cases:
-//  1. Composed plans where step IDs are prefixed (e.g., "inc0_searchSeatMap").
-//  2. LLM hallucination where it uses a shortened node name (e.g., "searchFlights"
-//     when the actual step is "searchFlights2Leg").
-func resolveConstraintRefs(p *plan.Plan) {
-	if p.Intent.Constraints == nil {
-		return
-	}
-
-	// Build two maps:
-	// 1. nodeToStepID: node name → first step ID using that node (for prefixed steps).
-	// 2. allStepIDs: set of all step IDs in the plan (for existence checks).
-	nodeToStepID := map[string]string{}
-	allStepIDs := map[string]bool{}
-	for _, step := range p.Execution.Steps {
-		sid := step.StepID()
-		allStepIDs[sid] = true
-		if sid != step.Node {
-			if _, exists := nodeToStepID[step.Node]; !exists {
-				nodeToStepID[step.Node] = sid
-			}
-		}
-	}
-
-	resolveRefs := func(refs []string) []string {
-		resolved := make([]string, len(refs))
-		for i, ref := range refs {
-			stepRef := ref
-			suffix := ""
-			if idx := strings.Index(ref, "."); idx > 0 {
-				stepRef = ref[:idx]
-				suffix = ref[idx:] // includes the dot
-			}
-
-			// Direct match on node-to-prefixed-step mapping.
-			if mapped, ok := nodeToStepID[stepRef]; ok {
-				resolved[i] = mapped + suffix
-				continue
-			}
-
-			// Already a valid step ID — keep as-is.
-			if allStepIDs[stepRef] {
-				resolved[i] = ref
-				continue
-			}
-
-			// Fuzzy match: LLM sometimes abbreviates node names. If stepRef
-			// is a prefix of exactly one step ID, use that step ID.
-			// e.g., "searchFlights" → "searchFlights2Leg".
-			var match string
-			ambiguous := false
-			for sid := range allStepIDs {
-				if strings.HasPrefix(sid, stepRef) && sid != stepRef {
-					if match == "" {
-						match = sid
-					} else {
-						ambiguous = true
-						break
-					}
-				}
-			}
-			if match != "" && !ambiguous {
-				resolved[i] = match + suffix
-			} else {
-				resolved[i] = ref
-			}
-		}
-		return resolved
-	}
-
-	for i := range p.Intent.Constraints.Hard {
-		p.Intent.Constraints.Hard[i].AppliesTo = resolveRefs(p.Intent.Constraints.Hard[i].AppliesTo)
-	}
-	for i := range p.Intent.Constraints.Soft {
-		p.Intent.Constraints.Soft[i].AppliesTo = resolveRefs(p.Intent.Constraints.Soft[i].AppliesTo)
-	}
-}
 
 // MergeLLMValues merges LLM-provided creative content into the skeleton plan,
 // matching steps by node name. The skeleton's structural fields are authoritative;

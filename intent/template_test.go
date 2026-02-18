@@ -890,36 +890,33 @@ func TestFormatGraph_WorkflowTemplateMarker(t *testing.T) {
 
 // --- buildWorkflowSelectionPrompt tests ---
 
-func TestBuildWorkflowSelectionPrompt_WithWorkflows(t *testing.T) {
-	g := &graph.Graph{
-		Workflows: []graph.Workflow{
-			{Name: "Booking", Template: "plans/booking.yaml", Description: "Full booking flow"},
-			{Name: "Ancillary", Kind: "addon", Template: "plans/ancillary.yaml", After: "addTraveler", Description: "Add ancillary services"},
-		},
-	}
+func TestBuildWorkflowSelectionPrompt_CompactMenu(t *testing.T) {
+	// Menu is now in the user prompt, not the system prompt.
+	menu := "## Workflows\n\n- **Booking**: Full booking flow\n\n## Addons\n\n- **Ancillary** (splices after: addTraveler): Add ancillary services\n"
 
-	system, _ := buildWorkflowSelectionPrompt("graph context", "book a flight", g, fixedNow())
+	system, user := buildWorkflowSelectionPrompt(menu, "book a flight", fixedNow())
+
+	// System prompt has format instructions, not workflow details.
 	assert.Contains(t, system, "workflow")
 	assert.Contains(t, system, "repetitions")
 	assert.Contains(t, system, "addons")
-	assert.Contains(t, system, "Booking")
-	assert.Contains(t, system, "Ancillary")
-	assert.Contains(t, system, "splices after: addTraveler")
-}
-
-func TestBuildWorkflowSelectionPrompt_NoTemplateWorkflowsSkipped(t *testing.T) {
-	g := &graph.Graph{
-		Workflows: []graph.Workflow{
-			{Name: "Booking"}, // no template — should be skipped
-		},
-	}
-
-	system, _ := buildWorkflowSelectionPrompt("graph context", "book a flight", g, fixedNow())
 	assert.NotContains(t, system, "Booking")
+	assert.NotContains(t, system, "Ancillary")
+
+	// User prompt contains the menu and the user intent.
+	assert.Contains(t, user, "## Available Workflows")
+	assert.Contains(t, user, "Booking")
+	assert.Contains(t, user, "Ancillary")
+	assert.Contains(t, user, "splices after: addTraveler")
+	assert.Contains(t, user, "## User Intent")
+	assert.Contains(t, user, "book a flight")
 }
 
-func TestBuildWorkflowSelectionPrompt_NilGraph(t *testing.T) {
-	assert.Panics(t, func() {
-		buildWorkflowSelectionPrompt("graph context", "test", nil, fixedNow())
-	})
+func TestBuildWorkflowSelectionPrompt_NoConstraints(t *testing.T) {
+	// System prompt should NOT contain constraint classification instructions.
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", fixedNow())
+	assert.NotContains(t, system, "Hard constraints")
+	assert.NotContains(t, system, "Soft constraints")
+	assert.NotContains(t, system, "Free parameters")
+	assert.NotContains(t, system, "appliesTo")
 }

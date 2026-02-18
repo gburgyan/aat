@@ -20,6 +20,7 @@ type PlanTrace struct {
 	Timestamp          time.Time          `json:"timestamp"`
 	Prompt             string             `json:"prompt"`
 	SelectionCall      LLMCallTrace       `json:"selectionCall"`
+	SelectionRetryCall *LLMCallTrace      `json:"selectionRetryCall,omitempty"`
 	WorkflowSelection  *WorkflowSelection `json:"workflowSelection,omitempty"`
 	Skeleton           *SkeletonTrace     `json:"skeleton,omitempty"`
 	PlanCall           LLMCallTrace       `json:"planCall"`
@@ -31,6 +32,11 @@ type PlanTrace struct {
 	RetryValidationErr string             `json:"retryValidationErr,omitempty"`
 	TotalDurationMs    int64              `json:"totalDurationMs"`
 	Error              string             `json:"error,omitempty"`
+
+	// Wrong-plan escape fields.
+	WrongPlanSignal *WrongPlanSignal `json:"wrongPlanSignal,omitempty"`
+	WrongPlanCall   *LLMCallTrace    `json:"wrongPlanCall,omitempty"`
+	ReselectionCall *LLMCallTrace    `json:"reselectionCall,omitempty"`
 
 	// Workflow template fields.
 	WorkflowName     string         `json:"workflowName,omitempty"`
