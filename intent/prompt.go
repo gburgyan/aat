@@ -115,16 +115,22 @@ For each input listed below, provide a LITERAL value (string, number, or date ex
 - If "Current value:" is shown, keep it unless the user's intent requires a different value
 - DO NOT use "from", "fromSelection", "select", or any reference/object syntax — only plain scalars
 
-## Selections — optional
+## Selections — optional overrides
 
-Only override if the user's intent specifically suggests a preference (e.g., "cheapest", "nonstop").
+Only add selection overrides when the user's intent explicitly calls for it:
+- "cheapest" → strategy: min, sortField: totalPrice
+- "nonstop" → filter: "maxConnections == 0"
+- "on United" → filter: "carrier == 'UA'"
+
+If the user doesn't mention preferences for how results should be selected, do NOT add any selection overrides. The template defaults are correct.
+
 Valid strategies: first, last, random, index, min, max, match
   - match: requires a "filter" using ONLY the listed element fields
   - min/max: requires a "sortField" from element fields
   - index: requires an "index" number
 
 DO NOT filter on fields not in the element fields list.
-DO NOT re-filter on values already constrained by search inputs (dates, prices — redundant and brittle).
+DO NOT re-filter on values already constrained by search inputs (dates, cities — redundant and brittle).
 
 ## Assertions — only when explicitly requested
 
