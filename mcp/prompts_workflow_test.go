@@ -46,18 +46,20 @@ func TestIntegrationGuide_WithTemplate(t *testing.T) {
 	g := &graph.Graph{
 		Nodes: map[string]*graph.Node{
 			"search": {
-				Name:    "search",
-				Adapter: "searchTpl",
-				Inputs:  []graph.Input{{Name: "q", Type: "string"}},
-				Outputs: []graph.Output{{Name: "results", Type: "result[]"}},
+				Name:      "search",
+				Adapter:   "searchTpl",
+				Satisfies: []string{"searchResults"},
+				Inputs:    []graph.Input{{Name: "q", Type: "string"}},
+				Outputs:   []graph.Output{{Name: "results", Type: "result[]"}},
 			},
 			"book": {
-				Name:   "book",
-				Inputs: []graph.Input{{Name: "resultId", Type: "string"}},
+				Name:     "book",
+				Requires: []string{"searchResults"},
+				Inputs:   []graph.Input{{Name: "resultId", Type: "string"}},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "search.results", To: "book.resultId", Select: true},
+		SatisfiersByToken: map[string][]string{
+			"searchResults": {"search"},
 		},
 	}
 	ctx := &ServerContext{

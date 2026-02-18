@@ -28,15 +28,18 @@ func TestResolveInputs_UpstreamOutputViaEdge(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.value", To: "target.input1"},
-		},
 	}
 
 	state := NewRunState()
 	state.StoreOutputs("source", map[string]any{"value": "hello"})
 
-	step := plan.Step{Node: "target"}
+	step := plan.Step{
+		Node:      "target",
+		DependsOn: []string{"source"},
+		Values: map[string]plan.StepValue{
+			"input1": {From: "source.value"},
+		},
+	}
 	inputs, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
 	require.NoError(t, err)
 	assert.Equal(t, "hello", inputs["input1"])
@@ -112,7 +115,7 @@ func TestResolveInputs_OptionalSkip(t *testing.T) {
 
 func TestResolveInputs_EmptyStepValue_OptionalSkipsEdge(t *testing.T) {
 	// When a plan sets an optional input to {} (empty StepValue), the engine
-	// should skip it rather than resolving via graph edges.
+	// should skip it rather than resolving via From references.
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
@@ -130,10 +133,6 @@ func TestResolveInputs_EmptyStepValue_OptionalSkipsEdge(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.carrier", Select: true},
-			{From: "source.items", To: "target.returnCarrier", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -147,13 +146,20 @@ func TestResolveInputs_EmptyStepValue_OptionalSkipsEdge(t *testing.T) {
 	step := plan.Step{
 		Node: "target",
 		Values: map[string]plan.StepValue{
+			"carrier": {
+				From: "source.items",
+				Select: &plan.SelectionConfig{
+					Strategy: "first",
+					Field:    "carrier",
+				},
+			},
 			"returnCarrier": {}, // empty — should be skipped
 		},
 	}
 
 	inputs, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
 	require.NoError(t, err)
-	assert.Contains(t, inputs, "carrier", "non-empty input should resolve via edge")
+	assert.Contains(t, inputs, "carrier", "non-empty input should resolve via From")
 	assert.NotContains(t, inputs, "returnCarrier", "empty StepValue should skip the input")
 }
 
@@ -249,9 +255,6 @@ func TestResolveInputs_SelectEdge_FirstElement(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -267,6 +270,7 @@ func TestResolveInputs_SelectEdge_FirstElement(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"itemId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "first",
 					Field:    "id",
@@ -302,9 +306,6 @@ func TestResolveInputs_SelectEdge_NoFieldExtraction(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.item", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -312,7 +313,17 @@ func TestResolveInputs_SelectEdge_NoFieldExtraction(t *testing.T) {
 		"items": []any{"alpha", "beta", "gamma"},
 	})
 
-	step := plan.Step{Node: "target"}
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"item": {
+				From: "source.items",
+				Select: &plan.SelectionConfig{
+					Strategy: "first",
+				},
+			},
+		},
+	}
 
 	inputs, decisions, err := ResolveInputs(step, g.Nodes["target"], g, state)
 	require.NoError(t, err)
@@ -338,9 +349,6 @@ func TestResolveInputs_SelectEdge_EmptyArray(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -348,7 +356,17 @@ func TestResolveInputs_SelectEdge_EmptyArray(t *testing.T) {
 		"items": []any{},
 	})
 
-	step := plan.Step{Node: "target"}
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"itemId": {
+				From: "source.items",
+				Select: &plan.SelectionConfig{
+					Strategy: "first",
+				},
+			},
+		},
+	}
 	_, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "array is empty")
@@ -400,44 +418,6 @@ func TestResolveInputs_PlanFromSelect(t *testing.T) {
 	require.Len(t, decisions, 1)
 	assert.Equal(t, "source", decisions[0].SourceNode)
 	assert.Equal(t, "offerings", decisions[0].SourceField)
-}
-
-func TestResolveInputs_PriorityOrder(t *testing.T) {
-	// Edge should take priority over plan default
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"source": {
-				Name: "source",
-				Outputs: []graph.Output{
-					{Name: "val", Type: "string"},
-				},
-			},
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "input1", Type: "string", Default: "graph-default"},
-				},
-			},
-		},
-		Edges: []graph.Edge{
-			{From: "source.val", To: "target.input1"},
-		},
-	}
-
-	state := NewRunState()
-	state.StoreOutputs("source", map[string]any{"val": "from-edge"})
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"input1": {Default: "from-plan"},
-		},
-	}
-
-	inputs, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
-	require.NoError(t, err)
-	assert.Equal(t, "from-edge", inputs["input1"])
 }
 
 func TestResolveInputs_NestedFieldExtraction(t *testing.T) {
@@ -509,9 +489,6 @@ func TestResolveInputs_SelectEdge_LastStrategy(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -527,6 +504,7 @@ func TestResolveInputs_SelectEdge_LastStrategy(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"itemId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "last",
 					Field:    "id",
@@ -560,9 +538,6 @@ func TestResolveInputs_SelectEdge_MinStrategy(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -578,6 +553,7 @@ func TestResolveInputs_SelectEdge_MinStrategy(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"itemId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy:  "min",
 					Field:     "id",
@@ -611,9 +587,6 @@ func TestResolveInputs_SelectEdge_MatchStrategy(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -629,6 +602,7 @@ func TestResolveInputs_SelectEdge_MatchStrategy(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"itemId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "match",
 					Field:    "id",
@@ -713,10 +687,6 @@ func TestResolveInputs_Dedup_SameSource_SameStrategy(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-			{From: "source.items", To: "target.itemName", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -733,12 +703,14 @@ func TestResolveInputs_Dedup_SameSource_SameStrategy(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"itemId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "random",
 					Field:    "id",
 				},
 			},
 			"itemName": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "random",
 					Field:    "name",
@@ -1126,17 +1098,16 @@ func TestResolveInputsWithContext_MixedInputs(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.sessionId", To: "target.sessionId"},
-		},
 	}
 
 	state := NewRunState()
 	state.StoreOutputs("source", map[string]any{"sessionId": "sess-123"})
 
 	step := plan.Step{
-		Node: "target",
+		Node:      "target",
+		DependsOn: []string{"source"},
 		Values: map[string]plan.StepValue{
+			"sessionId":     {From: "source.sessionId"},
 			"departureDate": {Default: "{{today + 5 days}}"},
 			"origin":        {Default: "DEN"},
 			"passengers": {
@@ -1150,7 +1121,7 @@ func TestResolveInputsWithContext_MixedInputs(t *testing.T) {
 	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
-	assert.Equal(t, "sess-123", inputs["sessionId"])    // from edge
+	assert.Equal(t, "sess-123", inputs["sessionId"])       // from plan From ref
 	assert.Equal(t, "2026-02-13", inputs["departureDate"]) // from expression
 	assert.Equal(t, "DEN", inputs["origin"])                // plain default
 	assert.Equal(t, 1, inputs["passengers"])                // from pool (default failed constraint)
@@ -1338,20 +1309,22 @@ func TestResolution_EdgeSource(t *testing.T) {
 				Inputs: []graph.Input{{Name: "input1", Type: "string"}},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.val", To: "target.input1"},
-		},
 	}
 
 	state := NewRunState()
 	state.StoreOutputs("source", map[string]any{"val": "hello"})
-	step := plan.Step{Node: "target"}
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"input1": {From: "source.val"},
+		},
+	}
 
 	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, nil)
 	require.NoError(t, err)
 	require.Len(t, resolutions, 1)
 	assert.Equal(t, "input1", resolutions[0].InputName)
-	assert.Equal(t, "edge", resolutions[0].Source)
+	assert.Equal(t, "plan_from", resolutions[0].Source)
 	assert.Equal(t, "source", resolutions[0].FromStep)
 	assert.Equal(t, "val", resolutions[0].FromOutput)
 	assert.Equal(t, "hello", resolutions[0].FinalValue)
@@ -1502,9 +1475,6 @@ func TestResolution_SelectEdge(t *testing.T) {
 				Inputs: []graph.Input{{Name: "itemId", Type: "string"}},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -1518,7 +1488,7 @@ func TestResolution_SelectEdge(t *testing.T) {
 	step := plan.Step{
 		Node: "target",
 		Values: map[string]plan.StepValue{
-			"itemId": {Select: &plan.SelectionConfig{Strategy: "first", Field: "id"}},
+			"itemId": {From: "source.items", Select: &plan.SelectionConfig{Strategy: "first", Field: "id"}},
 		},
 	}
 
@@ -1559,9 +1529,6 @@ func TestResolveInputs_SelectEdge_ElementFieldName(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.selectedId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -1576,6 +1543,7 @@ func TestResolveInputs_SelectEdge_ElementFieldName(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"selectedId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "first",
 					Field:    "offeringId", // elementField name, not raw "id"
@@ -1615,9 +1583,6 @@ func TestResolveInputs_SelectEdge_ElementFieldName_BackwardCompat(t *testing.T) 
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.selectedId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -1632,6 +1597,7 @@ func TestResolveInputs_SelectEdge_ElementFieldName_BackwardCompat(t *testing.T) 
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"selectedId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "first",
 					Field:    "id", // raw gjson path — not an elementField name
@@ -1723,9 +1689,6 @@ func TestResolveInputs_MinSortField_ElementFieldName(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.selectedId", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -1741,6 +1704,7 @@ func TestResolveInputs_MinSortField_ElementFieldName(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"selectedId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy:  "min",
 					Field:     "itemId", // elementField → "id"

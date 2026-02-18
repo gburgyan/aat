@@ -47,7 +47,7 @@ func TestDocsGenerateCommand_SingleFile(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Contains(t, string(content), "# API Workflow")
-	assert.Contains(t, string(content), "7 nodes, 11 edges")
+	assert.Contains(t, string(content), "7 nodes")
 	assert.Contains(t, string(content), "```mermaid")
 	assert.Contains(t, string(content), "### searchFlights")
 }

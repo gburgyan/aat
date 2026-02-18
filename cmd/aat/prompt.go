@@ -107,7 +107,7 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 	if err != nil {
 		return fmt.Errorf("loading graph: %w", err)
 	}
-	fmt.Printf("aat: loaded graph (%d nodes, %d edges)\n", len(g.Nodes), len(g.Edges))
+	fmt.Printf("aat: loaded graph (%d nodes)\n", len(g.Nodes))
 
 	// 5. Load domain knowledge (optional)
 	var kb *domain.KnowledgeBase

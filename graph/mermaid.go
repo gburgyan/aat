@@ -8,7 +8,7 @@ import (
 // GenerateMermaid renders a Graph as a Mermaid flowchart diagram.
 // The output uses top-down layout (graph TD) with:
 //   - Node labels showing name and truncated description
-//   - Solid arrows for data flow edges
+//   - Solid arrows for requires/satisfies relationships
 //   - Dashed arrows for cleanup edges
 //   - Distinct styling for cleanup nodes
 func GenerateMermaid(g *Graph) string {
@@ -21,15 +21,6 @@ func GenerateMermaid(g *Graph) string {
 	for _, node := range g.Nodes {
 		if node.Cleanup != "" {
 			cleanupNodes[node.Cleanup] = true
-		}
-	}
-
-	// Build node-to-node edge set to determine cleanup edges
-	// A cleanup edge is from a node to its cleanup target
-	cleanupEdges := make(map[string]string) // cleanupNode → parentNode
-	for name, node := range g.Nodes {
-		if node.Cleanup != "" {
-			cleanupEdges[node.Cleanup] = name
 		}
 	}
 
@@ -51,27 +42,33 @@ func GenerateMermaid(g *Graph) string {
 
 	b.WriteString("\n")
 
-	// Collect unique node-to-node edges from data flow edges
+	// Draw arrows from requires/satisfies relationships
 	type edgeKey struct{ from, to string }
 	seen := make(map[edgeKey]bool)
 
-	for _, edge := range g.Edges {
-		fromNode, _, err1 := splitRef(edge.From)
-		toNode, _, err2 := splitRef(edge.To)
-		if err1 != nil || err2 != nil {
-			continue
+	for _, name := range names {
+		node := g.Nodes[name]
+		for _, token := range node.Requires {
+			for _, satisfier := range g.SatisfiersByToken[token] {
+				key := edgeKey{satisfier, name}
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				fmt.Fprintf(&b, "    %s --> %s\n", satisfier, name)
+			}
 		}
-		key := edgeKey{fromNode, toNode}
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
+	}
 
-		// Check if this is an edge to a cleanup node from its parent
-		if cleanupNodes[toNode] && cleanupEdges[toNode] == fromNode {
-			fmt.Fprintf(&b, "    %s -.-> %s\n", fromNode, toNode)
-		} else {
-			fmt.Fprintf(&b, "    %s --> %s\n", fromNode, toNode)
+	// Draw cleanup dashed arrows
+	for _, name := range names {
+		node := g.Nodes[name]
+		if node.Cleanup != "" {
+			key := edgeKey{name, node.Cleanup}
+			if !seen[key] {
+				seen[key] = true
+				fmt.Fprintf(&b, "    %s -.-> %s\n", name, node.Cleanup)
+			}
 		}
 	}
 

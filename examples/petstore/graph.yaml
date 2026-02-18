@@ -80,22 +80,3 @@ nodes:
         type: integer
         description: "Pet ID to delete"
     outputs: []
-
-edges:
-  # createPet → getPet (verify the pet exists)
-  - from: createPet.petId
-    to: getPet.petId
-
-  # createPet → deletePet (cleanup)
-  - from: createPet.petId
-    to: deletePet.petId
-
-  # findByStatus → getPet (select a pet from the list)
-  - from: findByStatus.pets
-    to: getPet.petId
-    select: true
-
-  # findByStatus → deletePet (select a pet to delete)
-  - from: findByStatus.pets
-    to: deletePet.petId
-    select: true

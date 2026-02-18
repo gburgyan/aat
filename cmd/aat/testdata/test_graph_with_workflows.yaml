@@ -15,5 +15,3 @@ nodes:
     outputs:
       - name: output1
         type: string
-
-edges: []

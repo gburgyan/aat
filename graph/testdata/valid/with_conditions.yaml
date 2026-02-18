@@ -31,12 +31,6 @@ nodes:
       - name: output1
         type: string
 
-edges:
-  - from: stepA.output1
-    to: stepB.input1
-  - from: stepB.output1
-    to: stepC.input1
-
 conditions:
   - when: "flag.premium == true"
     require: [stepB]

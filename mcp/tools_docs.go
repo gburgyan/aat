@@ -230,35 +230,28 @@ func (s *Server) handleEnrichDocumentation(_ context.Context, req mcp.GetPromptR
 	}
 
 	// Connected nodes for context
-	inbound := collectInboundEdges(nodeName, g)
-	outbound := collectOutboundEdges(nodeName, g)
-	if len(inbound) > 0 || len(outbound) > 0 {
+	requires := collectRequiredNodeNames(nodeName, g)
+	satisfies := collectSatisfiedNodeNames(nodeName, g)
+	if len(requires) > 0 || len(satisfies) > 0 {
 		ctxBuf.WriteString("\n---\n\n## Connected Nodes\n\n")
-		if len(inbound) > 0 {
-			ctxBuf.WriteString("**Receives data from:**\n")
-			for _, edge := range inbound {
-				fromNode := edgeRefNode(edge.From)
-				if n := g.Nodes[fromNode]; n != nil && n.Description != "" {
-					fmt.Fprintf(&ctxBuf, "- %s — %s\n", fromNode, n.Description)
+		if len(requires) > 0 {
+			ctxBuf.WriteString("**Depends on:**\n")
+			for _, name := range requires {
+				if n := g.Nodes[name]; n != nil && n.Description != "" {
+					fmt.Fprintf(&ctxBuf, "- %s — %s\n", name, n.Description)
 				} else {
-					fmt.Fprintf(&ctxBuf, "- %s\n", fromNode)
+					fmt.Fprintf(&ctxBuf, "- %s\n", name)
 				}
 			}
 			ctxBuf.WriteString("\n")
 		}
-		if len(outbound) > 0 {
-			ctxBuf.WriteString("**Sends data to:**\n")
-			seen := make(map[string]bool)
-			for _, edge := range outbound {
-				toNode := edgeRefNode(edge.To)
-				if seen[toNode] {
-					continue
-				}
-				seen[toNode] = true
-				if n := g.Nodes[toNode]; n != nil && n.Description != "" {
-					fmt.Fprintf(&ctxBuf, "- %s — %s\n", toNode, n.Description)
+		if len(satisfies) > 0 {
+			ctxBuf.WriteString("**Depended on by:**\n")
+			for _, name := range satisfies {
+				if n := g.Nodes[name]; n != nil && n.Description != "" {
+					fmt.Fprintf(&ctxBuf, "- %s — %s\n", name, n.Description)
 				} else {
-					fmt.Fprintf(&ctxBuf, "- %s\n", toNode)
+					fmt.Fprintf(&ctxBuf, "- %s\n", name)
 				}
 			}
 		}

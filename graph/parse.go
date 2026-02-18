@@ -24,14 +24,11 @@ func Parse(data []byte) (*Graph, error) {
 		node.Name = name
 	}
 
-	// Auto-wire edges before validation so generated edges get validated too
-	ComputeAutoWireEdges(&g)
-
 	if err := Validate(&g); err != nil {
 		return nil, err
 	}
 
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	return &g, nil
 }

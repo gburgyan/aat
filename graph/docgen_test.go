@@ -14,7 +14,7 @@ func TestGenerateDocs_MinimalGraph(t *testing.T) {
 	result := GenerateDocs(g, nil)
 
 	assert.Contains(t, result, "# API Workflow")
-	assert.Contains(t, result, "1 nodes, 0 edges")
+	assert.Contains(t, result, "1 nodes")
 	assert.Contains(t, result, "```mermaid")
 	assert.Contains(t, result, "### getUser")
 	assert.Contains(t, result, "Retrieve user details")
@@ -27,7 +27,7 @@ func TestGenerateDocs_TravelportBooking(t *testing.T) {
 
 	// Header
 	assert.Contains(t, result, "# API Workflow")
-	assert.Contains(t, result, "7 nodes, 11 edges")
+	assert.Contains(t, result, "7 nodes")
 	assert.Contains(t, result, "Version 1.0.0")
 
 	// Mermaid diagram
@@ -51,10 +51,6 @@ func TestGenerateDocs_TravelportBooking(t *testing.T) {
 	// Output tables with elementFields
 	assert.Contains(t, result, "| catalogOfferings |")
 	assert.Contains(t, result, "\u00a0\u00a0\u2514 offeringId")
-
-	// Data flow table
-	assert.Contains(t, result, "## Data Flow")
-	assert.Contains(t, result, "| searchFlights.catalogOfferingsId | priceOffer.catalogOfferingsId |")
 
 	// Cleanup table
 	assert.Contains(t, result, "## Cleanup")
@@ -145,15 +141,6 @@ func TestGenerateDocs_DependencyOrdering(t *testing.T) {
 	assert.Less(t, createIdx, commitIdx, "createWorkbench should come before commitBooking")
 }
 
-func TestGenerateDocs_SelectMarker(t *testing.T) {
-	g := mustParseFile(t, "testdata/valid/travelport_booking.yaml")
-
-	result := GenerateDocs(g, nil)
-
-	// Select edges should have checkmark in data flow table
-	assert.Contains(t, result, "\u2713")
-}
-
 func TestGenerateDocsSplit_TravelportBooking(t *testing.T) {
 	g := mustParseFile(t, "testdata/valid/travelport_booking.yaml")
 
@@ -166,7 +153,6 @@ func TestGenerateDocsSplit_TravelportBooking(t *testing.T) {
 	// Index should have summary table with links
 	assert.Contains(t, index, "| [searchFlights](nodes/searchFlights.md)")
 	assert.Contains(t, index, "```mermaid")
-	assert.Contains(t, index, "## Data Flow")
 
 	// Should have per-node files
 	for name := range g.Nodes {
@@ -218,24 +204,39 @@ func TestFindEntryNodes(t *testing.T) {
 	assert.NotContains(t, entries, "commitBooking")
 }
 
-func TestCollectOutboundNodes(t *testing.T) {
-	g := mustParseFile(t, "testdata/valid/travelport_booking.yaml")
+func TestCollectSatisfiedNodes(t *testing.T) {
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"searchFlights": {Name: "searchFlights", Satisfies: []string{"searchData"}},
+			"priceOffer":    {Name: "priceOffer", Requires: []string{"searchData"}},
+			"addOffer":      {Name: "addOffer", Requires: []string{"searchData"}},
+		},
+	}
+	g.BuildSatisfierIndex()
 
-	outbound := collectOutboundNodes("searchFlights", g)
+	satisfied := collectSatisfiedNodes("searchFlights", g)
 
-	assert.Contains(t, outbound, "priceOffer")
-	assert.Contains(t, outbound, "addOffer")
-	assert.NotContains(t, outbound, "searchFlights")
+	assert.Contains(t, satisfied, "priceOffer")
+	assert.Contains(t, satisfied, "addOffer")
+	assert.NotContains(t, satisfied, "searchFlights")
 }
 
-func TestCollectInboundNodes(t *testing.T) {
-	g := mustParseFile(t, "testdata/valid/travelport_booking.yaml")
+func TestCollectRequiredNodes(t *testing.T) {
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"createWorkbench": {Name: "createWorkbench", Satisfies: []string{"workbench"}},
+			"addOffer":        {Name: "addOffer", Satisfies: []string{"offer"}},
+			"addTraveler":     {Name: "addTraveler", Satisfies: []string{"traveler"}},
+			"commitBooking":   {Name: "commitBooking", Requires: []string{"workbench", "offer", "traveler"}},
+		},
+	}
+	g.BuildSatisfierIndex()
 
-	inbound := collectInboundNodes("commitBooking", g)
+	required := collectRequiredNodes("commitBooking", g)
 
-	assert.Contains(t, inbound, "createWorkbench")
-	assert.Contains(t, inbound, "addOffer")
-	assert.Contains(t, inbound, "addTraveler")
+	assert.Contains(t, required, "createWorkbench")
+	assert.Contains(t, required, "addOffer")
+	assert.Contains(t, required, "addTraveler")
 }
 
 func TestHasExamplesForNode_WithDomainExamples(t *testing.T) {

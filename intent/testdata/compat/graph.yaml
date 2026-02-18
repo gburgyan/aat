@@ -44,5 +44,3 @@ nodes:
     outputs:
       - name: addonResult
         type: string
-
-edges: []

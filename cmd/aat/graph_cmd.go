@@ -69,7 +69,7 @@ func graphValidateCommand(args *graphValidateArgs) int {
 		fmt.Fprintf(os.Stderr, "aat graph validate: %s\n", err)
 		return 1
 	}
-	fmt.Printf("Graph structure: OK (%d nodes, %d edges)\n", len(g.Nodes), len(g.Edges))
+	fmt.Printf("Graph structure: OK (%d nodes)\n", len(g.Nodes))
 
 	// 2. Apply OAS flag override before collecting spec paths
 	if args.OASPath != "" {

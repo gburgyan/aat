@@ -243,7 +243,7 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	if err != nil {
 		return &runResult{setupErr: true, err: fmt.Errorf("loading graph: %w", err)}
 	}
-	logf("aat: loaded graph (%d nodes, %d edges)\n", len(g.Nodes), len(g.Edges))
+	logf("aat: loaded graph (%d nodes)\n", len(g.Nodes))
 
 	// 4. Load plan
 	p, err := plan.ParseFile(args.PlanPath)

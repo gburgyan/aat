@@ -16,20 +16,22 @@ func buildLinearGraph(names ...string) *Graph {
 		Version: "1.0.0",
 		Nodes:   map[string]*Node{},
 	}
-	for _, name := range names {
-		g.Nodes[name] = &Node{
+	for i, name := range names {
+		node := &Node{
 			Name:    name,
 			Adapter: name,
 			Inputs:  []Input{{Name: "input1", Type: "string"}},
 			Outputs: []Output{{Name: "output1", Type: "string"}},
 		}
+		if i > 0 {
+			node.Requires = []string{names[i-1] + "_done"}
+		}
+		if i < len(names)-1 {
+			node.Satisfies = []string{name + "_done"}
+		}
+		g.Nodes[name] = node
 	}
-	for i := 0; i < len(names)-1; i++ {
-		g.Edges = append(g.Edges, Edge{
-			From: names[i] + ".output1",
-			To:   names[i+1] + ".input1",
-		})
-	}
+	g.BuildSatisfierIndex()
 	return g
 }
 
@@ -50,7 +52,6 @@ func TestBackwardChain_SingleNodeNoDeps(t *testing.T) {
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"standalone"}})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"standalone"}, result.Nodes)
-	assert.Empty(t, result.Edges)
 	assert.Equal(t, []string{"standalone"}, result.EntryNodes)
 }
 
@@ -60,7 +61,7 @@ func TestBackwardChain_LinearChain(t *testing.T) {
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"c"}})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a", "b", "c"}, result.Nodes)
-	assert.Len(t, result.Edges, 2)
+	assert.Len(t, result.RequiresEdges, 2)
 	assert.Equal(t, []string{"a"}, result.EntryNodes)
 }
 
@@ -70,7 +71,7 @@ func TestBackwardChain_MidChainGoal(t *testing.T) {
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"b"}})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a", "b"}, result.Nodes)
-	assert.Len(t, result.Edges, 1)
+	assert.Len(t, result.RequiresEdges, 1)
 	assert.Equal(t, []string{"a"}, result.EntryNodes)
 	// c should not be included
 	assert.NotContains(t, result.Nodes, "c")
@@ -81,18 +82,13 @@ func TestBackwardChain_FanIn(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"b": {Name: "b", Adapter: "b", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"c": {Name: "c", Adapter: "c", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"d": {Name: "d", Adapter: "d", Inputs: []Input{{Name: "x1", Type: "string"}, {Name: "x2", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-		},
-		Edges: []Edge{
-			{From: "a.y", To: "b.x"},
-			{From: "a.y", To: "c.x"},
-			{From: "b.y", To: "d.x1"},
-			{From: "c.y", To: "d.x2"},
+			"a": {Name: "a", Adapter: "a", Satisfies: []string{"aReady"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Requires: []string{"aReady"}, Satisfies: []string{"bReady"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"c": {Name: "c", Adapter: "c", Requires: []string{"aReady"}, Satisfies: []string{"cReady"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"d": {Name: "d", Adapter: "d", Requires: []string{"bReady", "cReady"}, Inputs: []Input{{Name: "x1", Type: "string"}, {Name: "x2", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"d"}})
 	require.NoError(t, err)
@@ -120,15 +116,12 @@ func TestBackwardChain_MultipleGoalsSharedPrereqs(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"b": {Name: "b", Adapter: "b", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"c": {Name: "c", Adapter: "c", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-		},
-		Edges: []Edge{
-			{From: "a.y", To: "b.x"},
-			{From: "a.y", To: "c.x"},
+			"a": {Name: "a", Adapter: "a", Satisfies: []string{"aReady"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Requires: []string{"aReady"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"c": {Name: "c", Adapter: "c", Requires: []string{"aReady"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"b", "c"}})
 	require.NoError(t, err)
@@ -211,11 +204,11 @@ func TestBackwardChain_CycleBreakerInNonCyclicGraph(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a", CycleBreaker: true, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"b": {Name: "b", Adapter: "b", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"a": {Name: "a", Adapter: "a", CycleBreaker: true, Satisfies: []string{"aDone"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Requires: []string{"aDone"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
 		},
-		Edges: []Edge{{From: "a.y", To: "b.x"}},
 	}
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"b"}})
 	require.NoError(t, err)
@@ -224,20 +217,16 @@ func TestBackwardChain_CycleBreakerInNonCyclicGraph(t *testing.T) {
 }
 
 func TestBackwardChain_CycleWithoutBreaker_Error(t *testing.T) {
-	// Build a cyclic graph (manually, bypassing Validate which would catch it)
+	// Build a cyclic graph via requires/satisfies (manually, bypassing Validate which would catch it)
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"b": {Name: "b", Adapter: "b", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"c": {Name: "c", Adapter: "c", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-		},
-		Edges: []Edge{
-			{From: "a.y", To: "b.x"},
-			{From: "b.y", To: "c.x"},
-			{From: "c.y", To: "a.x"},
+			"a": {Name: "a", Adapter: "a", Requires: []string{"tokenC"}, Satisfies: []string{"tokenA"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Requires: []string{"tokenA"}, Satisfies: []string{"tokenB"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"c": {Name: "c", Adapter: "c", Requires: []string{"tokenB"}, Satisfies: []string{"tokenC"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	_, err := BackwardChain(g, ChainOptions{Goals: []string{"c"}})
 	require.Error(t, err)
@@ -356,88 +345,18 @@ func TestBackwardChain_ConditionBeforeOrdering(t *testing.T) {
 	assert.Greater(t, idxFare, idxPassport, "addPassportInfo should come before selectFare")
 }
 
-// --- Multiple Path Tests ---
-
-func TestBackwardChain_ShortestPathChosen(t *testing.T) {
-	// Build graph where consumer.result can come from transform (depth 2) or shortcut (depth 0)
-	g := &Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*Node{
-			"source":    {Name: "source", Adapter: "source", Inputs: nil, Outputs: []Output{{Name: "data", Type: "string"}}},
-			"transform": {Name: "transform", Adapter: "transform", Inputs: []Input{{Name: "data", Type: "string"}}, Outputs: []Output{{Name: "result", Type: "string"}}},
-			"shortcut":  {Name: "shortcut", Adapter: "shortcut", Inputs: nil, Outputs: []Output{{Name: "result", Type: "string"}}},
-			"consumer":  {Name: "consumer", Adapter: "consumer", Inputs: []Input{{Name: "result", Type: "string"}}, Outputs: []Output{{Name: "output", Type: "string"}}},
-		},
-		Edges: []Edge{
-			{From: "source.data", To: "transform.data"},
-			{From: "transform.result", To: "consumer.result"},
-			{From: "shortcut.result", To: "consumer.result"},
-		},
-	}
-
-	result, err := BackwardChain(g, ChainOptions{Goals: []string{"consumer"}})
-	require.NoError(t, err)
-
-	// shortcut has depth 0, source has depth 0, transform has depth 1
-	// shortcut is shallowest producer for consumer.result
-	assert.Contains(t, result.Nodes, "shortcut")
-	assert.Contains(t, result.Nodes, "consumer")
-	// source and transform should be pruned as unreachable
-	assert.NotContains(t, result.Nodes, "source")
-	assert.NotContains(t, result.Nodes, "transform")
-
-	// Should have a path choice decision
-	var hasPathChoice bool
-	for _, d := range result.Decisions {
-		if d.Type == DecisionPathChoice {
-			hasPathChoice = true
-		}
-	}
-	assert.True(t, hasPathChoice)
-}
-
-func TestBackwardChain_PreferredEdgeOverridesShortest(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*Node{
-			"source":    {Name: "source", Adapter: "source", Inputs: nil, Outputs: []Output{{Name: "data", Type: "string"}}},
-			"preferred": {Name: "preferred", Adapter: "preferred", Inputs: []Input{{Name: "data", Type: "string"}}, Outputs: []Output{{Name: "result", Type: "string"}}},
-			"shortcut":  {Name: "shortcut", Adapter: "shortcut", Inputs: nil, Outputs: []Output{{Name: "result", Type: "string"}}},
-			"consumer":  {Name: "consumer", Adapter: "consumer", Inputs: []Input{{Name: "result", Type: "string"}}, Outputs: []Output{{Name: "output", Type: "string"}}},
-		},
-		Edges: []Edge{
-			{From: "source.data", To: "preferred.data"},
-			{From: "preferred.result", To: "consumer.result", Preferred: true},
-			{From: "shortcut.result", To: "consumer.result"},
-		},
-	}
-
-	result, err := BackwardChain(g, ChainOptions{Goals: []string{"consumer"}})
-	require.NoError(t, err)
-
-	// preferred path should be chosen despite being longer
-	assert.Contains(t, result.Nodes, "source")
-	assert.Contains(t, result.Nodes, "preferred")
-	assert.Contains(t, result.Nodes, "consumer")
-	// shortcut should be pruned
-	assert.NotContains(t, result.Nodes, "shortcut")
-}
-
 // --- Entry Node Tests ---
 
 func TestBackwardChain_EntryNodes_MultipleRoots(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"root1": {Name: "root1", Adapter: "root1", Inputs: nil, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"root2": {Name: "root2", Adapter: "root2", Inputs: nil, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"sink":  {Name: "sink", Adapter: "sink", Inputs: []Input{{Name: "x1", Type: "string"}, {Name: "x2", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-		},
-		Edges: []Edge{
-			{From: "root1.y", To: "sink.x1"},
-			{From: "root2.y", To: "sink.x2"},
+			"root1": {Name: "root1", Adapter: "root1", Satisfies: []string{"root1Ready"}, Inputs: nil, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"root2": {Name: "root2", Adapter: "root2", Satisfies: []string{"root2Ready"}, Inputs: nil, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"sink":  {Name: "sink", Adapter: "sink", Requires: []string{"root1Ready", "root2Ready"}, Inputs: []Input{{Name: "x1", Type: "string"}, {Name: "x2", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"sink"}})
 	require.NoError(t, err)
@@ -507,22 +426,17 @@ func TestBackwardChain_MultipleUnknownGoals(t *testing.T) {
 // --- Deduplication Tests ---
 
 func TestBackwardChain_DiamondGraph_NoDuplicates(t *testing.T) {
-	// Diamond: a → b, a → c, b → d, c → d
+	// Diamond: a → b, a → c, b → d, c → d (via requires/satisfies)
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a", Inputs: nil, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"b": {Name: "b", Adapter: "b", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"c": {Name: "c", Adapter: "c", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"d": {Name: "d", Adapter: "d", Inputs: []Input{{Name: "x1", Type: "string"}, {Name: "x2", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-		},
-		Edges: []Edge{
-			{From: "a.y", To: "b.x"},
-			{From: "a.y", To: "c.x"},
-			{From: "b.y", To: "d.x1"},
-			{From: "c.y", To: "d.x2"},
+			"a": {Name: "a", Adapter: "a", Satisfies: []string{"aReady"}, Inputs: nil, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Requires: []string{"aReady"}, Satisfies: []string{"bReady"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"c": {Name: "c", Adapter: "c", Requires: []string{"aReady"}, Satisfies: []string{"cReady"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"d": {Name: "d", Adapter: "d", Requires: []string{"bReady", "cReady"}, Inputs: []Input{{Name: "x1", Type: "string"}, {Name: "x2", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"d"}})
 	require.NoError(t, err)
@@ -551,21 +465,6 @@ func TestParse_CycleBreakerField(t *testing.T) {
 	assert.False(t, g.Nodes["getUser"].CycleBreaker)
 }
 
-func TestParse_PreferredEdgeField(t *testing.T) {
-	g, err := ParseFile("testdata/valid/with_multiple_paths.yaml")
-	require.NoError(t, err)
-
-	var preferredCount int
-	for _, e := range g.Edges {
-		if e.Preferred {
-			preferredCount++
-			assert.Equal(t, "preferredSource.result", e.From)
-			assert.Equal(t, "consumer.result", e.To)
-		}
-	}
-	assert.Equal(t, 1, preferredCount)
-}
-
 // --- Validation Tests ---
 
 func TestValidate_CycleBreakerToleratesCycle(t *testing.T) {
@@ -573,12 +472,6 @@ func TestValidate_CycleBreakerToleratesCycle(t *testing.T) {
 	// Should parse without error despite the auth cycle
 	assert.NoError(t, err)
 	assert.NotNil(t, g)
-}
-
-func TestValidate_CycleWithoutBreakerStillFails(t *testing.T) {
-	_, err := ParseFile("testdata/invalid/cycle.yaml")
-	require.Error(t, err)
-	assertValidationContains(t, err, "cycle detected")
 }
 
 func TestValidate_NewFixtures(t *testing.T) {
@@ -600,16 +493,14 @@ func TestBackwardChain_ConditionWithOnlyBefore(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"a": {Name: "a", Adapter: "a", Inputs: nil, Outputs: []Output{{Name: "y", Type: "string"}}},
-			"b": {Name: "b", Adapter: "b", Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
-		},
-		Edges: []Edge{
-			{From: "a.y", To: "b.x"},
+			"a": {Name: "a", Adapter: "a", Satisfies: []string{"aDone"}, Inputs: nil, Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Requires: []string{"aDone"}, Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
 		},
 		Conditions: []Condition{
 			{When: "always == true", Before: []string{"b"}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	evalPred := func(expr string, ctx map[string]any) (bool, error) {
 		return true, nil
@@ -659,7 +550,6 @@ func TestBackwardChain_GoalIsEntryNode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"a"}, result.Nodes)
 	assert.Equal(t, []string{"a"}, result.EntryNodes)
-	assert.Empty(t, result.Edges)
 }
 
 func TestBackwardChain_WithConditionContextValues(t *testing.T) {
@@ -771,16 +661,8 @@ func buildRequiresGraph() *Graph {
 				Outputs:  []Output{{Name: "locator", Type: "string"}},
 			},
 		},
-		// Data-flow: workbenchId flows from createWorkbench to all consumers.
-		Edges: []Edge{
-			{From: "createWorkbench.workbenchId", To: "addOffer.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "addTraveler.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "addFormOfPayment.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "addPayment.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "commitReservation.workbenchId"},
-		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 	return g
 }
 
@@ -840,7 +722,7 @@ func TestBackwardChain_RequiresSatisfies_SingleSatisfier(t *testing.T) {
 				Inputs: []Input{{Name: "x", Type: "string"}}},
 		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"consumer"}})
 	require.NoError(t, err)
@@ -865,7 +747,7 @@ func TestBackwardChain_RequiresSatisfies_PreferredWins(t *testing.T) {
 				Inputs: []Input{{Name: "x", Type: "string"}}},
 		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"consumer"}})
 	require.NoError(t, err)
@@ -896,7 +778,7 @@ func TestBackwardChain_RequiresSatisfies_NoPreferredPicksAlphabetical(t *testing
 			"consumer": {Name: "consumer", Adapter: "c", Requires: []string{"processed"}, Inputs: []Input{{Name: "x", Type: "string"}}},
 		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"consumer"}})
 	require.NoError(t, err)
@@ -917,7 +799,7 @@ func TestBackwardChain_RequiresSatisfies_RecursiveRequires(t *testing.T) {
 			"finish": {Name: "finish", Adapter: "f", Requires: []string{"phase3Done"}, Inputs: []Input{{Name: "x", Type: "string"}}},
 		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"finish"}})
 	require.NoError(t, err)
@@ -925,8 +807,8 @@ func TestBackwardChain_RequiresSatisfies_RecursiveRequires(t *testing.T) {
 	assert.Equal(t, []string{"step1", "step2", "step3", "finish"}, result.Nodes)
 }
 
-func TestBackwardChain_RequiresSatisfies_MixedWithDataFlow(t *testing.T) {
-	// Some dependencies via data-flow edges, some via requires/satisfies.
+func TestBackwardChain_RequiresSatisfies_MixedRequiresChain(t *testing.T) {
+	// Dependencies via requires/satisfies chain.
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
@@ -940,21 +822,14 @@ func TestBackwardChain_RequiresSatisfies_MixedWithDataFlow(t *testing.T) {
 				Inputs:  []Input{{Name: "out", Type: "string"}},
 				Outputs: []Output{{Name: "result", Type: "string"}}},
 		},
-		Edges: []Edge{
-			// Data-flow: search.results → prepare.data
-			{From: "search.results", To: "prepare.data"},
-			// Data-flow: prepare.out → commit.out
-			{From: "prepare.out", To: "commit.out"},
-		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commit"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"search", "prepare", "commit"}, result.Nodes)
-	// Should have both data-flow edges and requires edges.
-	assert.NotEmpty(t, result.Edges)
+	// Should have requires edges for the chain.
 	assert.NotEmpty(t, result.RequiresEdges)
 }
 
@@ -968,7 +843,7 @@ func TestBackwardChain_RequiresSatisfies_CycleBreakerStopsRequires(t *testing.T)
 			"end":    {Name: "end", Adapter: "e", Requires: []string{"middleDone"}, Inputs: []Input{{Name: "x", Type: "string"}}},
 		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"end"}})
 	require.NoError(t, err)
@@ -979,8 +854,8 @@ func TestBackwardChain_RequiresSatisfies_CycleBreakerStopsRequires(t *testing.T)
 	assert.NotContains(t, result.Nodes, "root")
 }
 
-func TestBackwardChain_RequiresSatisfies_NodeAlsoViaDataFlow(t *testing.T) {
-	// Node included via both data-flow and requires — should appear once.
+func TestBackwardChain_RequiresSatisfies_NodeAppearsOnce(t *testing.T) {
+	// Node included via requires — should appear exactly once.
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
@@ -990,30 +865,31 @@ func TestBackwardChain_RequiresSatisfies_NodeAlsoViaDataFlow(t *testing.T) {
 				Inputs:  []Input{{Name: "data", Type: "string"}},
 				Outputs: []Output{{Name: "out", Type: "string"}}},
 		},
-		Edges: []Edge{
-			{From: "source.data", To: "target.data"},
-		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"target"}})
 	require.NoError(t, err)
 
 	assert.Equal(t, []string{"source", "target"}, result.Nodes)
-	// Should have both data-flow edge and requires edge.
-	assert.Len(t, result.Edges, 1)
 	assert.Len(t, result.RequiresEdges, 1)
 }
 
-func TestBackwardChain_RequiresSatisfies_EmptyRequiresSatisfies(t *testing.T) {
-	// Graph with no requires/satisfies — should work exactly as before.
-	g := buildLinearGraph("a", "b", "c")
-	g.BuildEdgeIndex()
+func TestBackwardChain_RequiresSatisfies_NoRequiresReturnsGoalOnly(t *testing.T) {
+	// Graph with no requires/satisfies — only the goal node is reachable.
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a", Outputs: []Output{{Name: "y", Type: "string"}}},
+			"b": {Name: "b", Adapter: "b", Inputs: []Input{{Name: "x", Type: "string"}}},
+		},
+	}
+	g.BuildSatisfierIndex()
 
-	result, err := BackwardChain(g, ChainOptions{Goals: []string{"c"}})
+	result, err := BackwardChain(g, ChainOptions{Goals: []string{"b"}})
 	require.NoError(t, err)
 
-	assert.Equal(t, []string{"a", "b", "c"}, result.Nodes)
+	assert.Equal(t, []string{"b"}, result.Nodes)
 	assert.Empty(t, result.RequiresEdges)
 }
 
@@ -1064,8 +940,9 @@ func TestBackwardChain_TravelportFullGraph_CommitReservation(t *testing.T) {
 	assert.Less(t, indexOf["createWorkbench"], indexOf["addFormOfPaymentCash"])
 	// addFormOfPaymentCash before addPayment (formOfPaymentAdded)
 	assert.Less(t, indexOf["addFormOfPaymentCash"], indexOf["addPayment"])
-	// addOfferFullPayload before addPayment (data edge: offerIdentifierValue)
-	assert.Less(t, indexOf["addOfferFullPayload"], indexOf["addPayment"])
+	// Note: addOfferFullPayload → addPayment ordering was via data-flow edge
+	// (offerIdentifierValue), which no longer exists. No requires/satisfies
+	// link between them, so ordering is not guaranteed.
 	// addPayment before commitReservation (paymentApplied)
 	assert.Less(t, indexOf["addPayment"], indexOf["commitReservation"])
 	// addOfferFullPayload before commitReservation (offerAdded)
@@ -1095,21 +972,15 @@ func TestBackwardChain_TravelportFullGraph_CommitExchangeTicket(t *testing.T) {
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commitExchangeTicket"}})
 	require.NoError(t, err)
 
-	// Exchange chain must include exchange-specific nodes.
+	// Exchange chain via requires/satisfies only.
+	// addExchangeOffer has no requires, so searchExchange is NOT pulled in.
+	// commitExchangeTicket requires [exchangeOfferAdded, paymentApplied]
 	assert.Contains(t, result.Nodes, "commitExchangeTicket")
 	assert.Contains(t, result.Nodes, "addExchangeOffer")
 	assert.Contains(t, result.Nodes, "addPayment")
-	assert.Contains(t, result.Nodes, "searchExchange")
 
-	// Should include a workbench creator (createWorkbenchFromLocator via data edges).
-	hasWorkbenchCreator := false
-	for _, n := range result.Nodes {
-		if n == "createWorkbenchFromLocator" || n == "createWorkbenchFromIdentifier" {
-			hasWorkbenchCreator = true
-			break
-		}
-	}
-	assert.True(t, hasWorkbenchCreator, "expected a workbench creator node in exchange chain")
+	// createWorkbench (preferred) provides workbenchCreated for addFormOfPaymentCash.
+	assert.Contains(t, result.Nodes, "createWorkbench")
 
 	// Should include a form-of-payment node.
 	hasFOP := false
@@ -1124,22 +995,15 @@ func TestBackwardChain_TravelportFullGraph_CommitExchangeTicket(t *testing.T) {
 	// commitExchangeTicket should be last.
 	assert.Equal(t, "commitExchangeTicket", result.Nodes[len(result.Nodes)-1])
 
-	// Verify ordering: exchange-specific ordering constraints.
+	// Verify ordering.
 	indexOf := map[string]int{}
 	for i, n := range result.Nodes {
 		indexOf[n] = i
 	}
-	// searchExchange before addExchangeOffer (data edge)
-	assert.Less(t, indexOf["searchExchange"], indexOf["addExchangeOffer"])
 	// addExchangeOffer before commitExchangeTicket (exchangeOfferAdded)
 	assert.Less(t, indexOf["addExchangeOffer"], indexOf["commitExchangeTicket"])
 	// addPayment before commitExchangeTicket (paymentApplied)
 	assert.Less(t, indexOf["addPayment"], indexOf["commitExchangeTicket"])
-
-	// Note: addPayment has shared data-flow dependencies that may pull in
-	// booking-chain nodes (addOfferReference, etc.) because addPayment's
-	// inputs like offerId/amount have preferred edges to addOfferReference.
-	// This is expected — backward chaining finds ALL dependencies.
 }
 
 func TestBackwardChain_TravelportFullGraph_CommitTicket(t *testing.T) {
@@ -1149,19 +1013,14 @@ func TestBackwardChain_TravelportFullGraph_CommitTicket(t *testing.T) {
 	result, err := BackwardChain(g, ChainOptions{Goals: []string{"commitTicket"}})
 	require.NoError(t, err)
 
-	// Ticketing chain must include ticketing-specific nodes.
+	// Ticketing chain via requires/satisfies:
+	// commitTicket requires [paymentApplied]
+	// addPayment requires [formOfPaymentAdded]
+	// addFormOfPaymentCash requires [workbenchCreated]
+	// createWorkbench satisfies [workbenchCreated] (preferred)
 	assert.Contains(t, result.Nodes, "commitTicket")
 	assert.Contains(t, result.Nodes, "addPayment")
-
-	// Should include a workbench creator.
-	hasWorkbenchCreator := false
-	for _, n := range result.Nodes {
-		if n == "createWorkbenchFromLocator" || n == "createWorkbenchFromIdentifier" {
-			hasWorkbenchCreator = true
-			break
-		}
-	}
-	assert.True(t, hasWorkbenchCreator, "expected a workbench creator node in ticketing chain")
+	assert.Contains(t, result.Nodes, "createWorkbench")
 
 	// Should include a form-of-payment node.
 	hasFOP := false
@@ -1176,16 +1035,11 @@ func TestBackwardChain_TravelportFullGraph_CommitTicket(t *testing.T) {
 	// commitTicket should be last.
 	assert.Equal(t, "commitTicket", result.Nodes[len(result.Nodes)-1])
 
-	// Verify ordering: ticketing-specific ordering constraints.
+	// Verify ordering.
 	indexOf := map[string]int{}
 	for i, n := range result.Nodes {
 		indexOf[n] = i
 	}
 	// addPayment before commitTicket (paymentApplied)
 	assert.Less(t, indexOf["addPayment"], indexOf["commitTicket"])
-
-	// Note: addPayment has shared data-flow dependencies that pull in
-	// booking-chain nodes via preferred edges. This is expected behavior —
-	// backward chaining finds ALL transitive dependencies. The intent
-	// package narrows the chain to context-specific nodes during plan generation.
 }

@@ -125,6 +125,27 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 					if c.Constraint != "" {
 						ic.Format = c.Constraint
 					}
+					// Connect concept → TypeDef → pool.
+					// Concept name often matches TypeDef name (e.g., "airportCode").
+					if len(ic.PoolValues) == 0 {
+						if ctd := kb.GetType(c.Name); ctd != nil && ctd.Pool != "" {
+							ic.PoolValues = kb.SampleValues(ctd.Pool, 8)
+							if ic.Format == "" {
+								ic.Format = ctd.Format
+							}
+						}
+					}
+					// Include concept examples as fallback pool values.
+					if len(c.Examples) > 0 && len(ic.PoolValues) == 0 {
+						var examples []string
+						for _, vals := range c.Examples {
+							examples = append(examples, vals...)
+						}
+						if len(examples) > 8 {
+							examples = examples[:8]
+						}
+						ic.PoolValues = examples
+					}
 				}
 			}
 
@@ -503,6 +524,157 @@ func stripJSONPathPrefix(path string) string {
 		return path[2:]
 	}
 	return path
+}
+
+// TargetedValidationIssue describes a problem with the LLM's targeted response
+// that can be caught before applying it to the skeleton.
+type TargetedValidationIssue struct {
+	Key     string // "stepID.inputName" or "stepID.selectionName"
+	Kind    string // e.g. "missing_value", "non_literal_value", "invalid_strategy"
+	Message string // human-readable description for retry prompt
+}
+
+// validateTargetedResponse checks the LLM response for common mistakes before
+// applying it to the skeleton. Returns nil if the response is clean.
+func validateTargetedResponse(
+	resp *TargetedResponse,
+	unfedSet map[string]bool,
+	inputContexts []InputContext,
+	selectionContexts []SelectionContext,
+) []TargetedValidationIssue {
+	var issues []TargetedValidationIssue
+
+	// Valid selection strategies (matches plan/validate.go).
+	validStrategies := map[string]bool{
+		"":       true,
+		"first":  true,
+		"last":   true,
+		"index":  true,
+		"random": true,
+		"min":    true,
+		"max":    true,
+		"match":  true,
+		"llm":    true,
+	}
+
+	// Build element field name set per selection key for filter field validation.
+	selectionFields := map[string]map[string]bool{}
+	for _, sc := range selectionContexts {
+		key := sc.StepID + "." + sc.SelectionName
+		fields := map[string]bool{}
+		for _, ef := range sc.ElementFields {
+			// Element fields are formatted as "name (type)" — extract just the name.
+			name := ef
+			if idx := strings.Index(ef, " ("); idx >= 0 {
+				name = ef[:idx]
+			}
+			fields[name] = true
+		}
+		selectionFields[key] = fields
+	}
+
+	// Check 1: Every unfed input has a value.
+	for _, ic := range inputContexts {
+		key := ic.StepID + "." + ic.InputName
+		if !unfedSet[key] {
+			continue
+		}
+		if ic.CurrentDefault != "" {
+			// Has a template default — not strictly required from LLM.
+			continue
+		}
+		if _, provided := resp.Values[key]; !provided {
+			issues = append(issues, TargetedValidationIssue{
+				Key:     key,
+				Kind:    "missing_value",
+				Message: fmt.Sprintf("%s: no value provided for required input (type: %s)", key, ic.InputType),
+			})
+		}
+	}
+
+	// Check 2: Values are plain scalars, not objects or arrays.
+	for key, val := range resp.Values {
+		if !unfedSet[key] {
+			continue
+		}
+		switch v := val.(type) {
+		case map[string]any:
+			// LLM returned an object — likely {from: ..., select: ...}.
+			issues = append(issues, TargetedValidationIssue{
+				Key:     key,
+				Kind:    "non_literal_value",
+				Message: fmt.Sprintf("%s: expected a literal value (string, number, or date expression), got an object with keys %v", key, mapKeys(v)),
+			})
+		case []any:
+			issues = append(issues, TargetedValidationIssue{
+				Key:     key,
+				Kind:    "non_literal_value",
+				Message: fmt.Sprintf("%s: expected a literal value, got an array", key),
+			})
+		}
+	}
+
+	// Check 3–5: Selection overrides.
+	for key, sel := range resp.Selections {
+		// Check 3: Strategy is valid.
+		if sel.Strategy != "" && !validStrategies[sel.Strategy] {
+			issues = append(issues, TargetedValidationIssue{
+				Key:     key,
+				Kind:    "invalid_strategy",
+				Message: fmt.Sprintf("%s: unknown selection strategy %q; valid: first, last, random, index, min, max, match, llm", key, sel.Strategy),
+			})
+		}
+
+		// Check 4: Filter predicate parses.
+		if sel.Filter != "" {
+			if err := plan.ValidatePredicate(sel.Filter); err != nil {
+				issues = append(issues, TargetedValidationIssue{
+					Key:     key,
+					Kind:    "invalid_filter_syntax",
+					Message: fmt.Sprintf("%s: filter expression %q does not parse: %v", key, sel.Filter, err),
+				})
+				continue // Skip field check if syntax is bad.
+			}
+
+			// Check 5: Filter field references are in element fields.
+			if fields, ok := selectionFields[key]; ok && len(fields) > 0 {
+				filterFields := plan.PredicateFields(sel.Filter)
+				for _, ff := range filterFields {
+					if !fields[ff] {
+						var available []string
+						for f := range fields {
+							available = append(available, f)
+						}
+						issues = append(issues, TargetedValidationIssue{
+							Key:     key,
+							Kind:    "invalid_filter_field",
+							Message: fmt.Sprintf("%s: filter references field %q which is not in element fields; available: %s", key, ff, strings.Join(available, ", ")),
+						})
+					}
+				}
+			}
+		}
+	}
+
+	return issues
+}
+
+// mapKeys returns the keys of a map for error messages.
+func mapKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+// formatValidationIssues formats issues as a string list for retry prompts.
+func formatValidationIssues(issues []TargetedValidationIssue) []string {
+	msgs := make([]string, len(issues))
+	for i, iss := range issues {
+		msgs[i] = iss.Message
+	}
+	return msgs
 }
 
 // splitStepInput splits "stepID.inputName" into its components.

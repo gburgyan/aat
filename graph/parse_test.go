@@ -64,13 +64,6 @@ func TestParse_TravelFlow(t *testing.T) {
 	sel := g.Nodes["selectFare"]
 	require.NotNil(t, sel)
 
-	// Edges
-	assert.Len(t, g.Edges, 2)
-	assert.Equal(t, "searchFlights.searchId", g.Edges[0].From)
-	assert.Equal(t, "selectFare.searchId", g.Edges[0].To)
-	assert.False(t, g.Edges[0].Select)
-	assert.True(t, g.Edges[1].Select)
-
 	// Conditions
 	assert.Len(t, g.Conditions, 1)
 	assert.Equal(t, "route.type == international", g.Conditions[0].When)
@@ -132,7 +125,6 @@ func TestParse_TravelportBooking(t *testing.T) {
 
 	assert.Equal(t, "1.0.0", g.Version)
 	assert.Len(t, g.Nodes, 7)
-	assert.Len(t, g.Edges, 11)
 	assert.Empty(t, g.Conditions)
 
 	// --- searchFlights ---
@@ -271,45 +263,6 @@ func TestParse_TravelportBooking(t *testing.T) {
 	assert.Equal(t, "acknowledged", ignore.Outputs[0].Name)
 	assert.Equal(t, "boolean", ignore.Outputs[0].Type)
 
-	// --- Edges ---
-	edgeMap := make(map[string]Edge)
-	for _, e := range g.Edges {
-		edgeMap[e.From+"->"+e.To] = e
-	}
-
-	// searchFlights → priceOffer
-	assert.Contains(t, edgeMap, "searchFlights.catalogOfferingsId->priceOffer.catalogOfferingsId")
-	selectEdge, ok := edgeMap["searchFlights.catalogOfferings->priceOffer.offeringId"]
-	assert.True(t, ok)
-	assert.True(t, selectEdge.Select)
-
-	// searchFlights → addOffer
-	assert.Contains(t, edgeMap, "searchFlights.catalogOfferingsId->addOffer.catalogOfferingsId")
-	addOfferOfferingEdge, ok := edgeMap["searchFlights.catalogOfferings->addOffer.offeringId"]
-	assert.True(t, ok)
-	assert.True(t, addOfferOfferingEdge.Select)
-	addOfferProductEdge, ok := edgeMap["searchFlights.catalogOfferings->addOffer.productRef"]
-	assert.True(t, ok)
-	assert.True(t, addOfferProductEdge.Select)
-
-	// createWorkbench fan-out
-	assert.Contains(t, edgeMap, "createWorkbench.workbenchId->addOffer.workbenchId")
-	assert.Contains(t, edgeMap, "createWorkbench.workbenchId->addTraveler.workbenchId")
-	assert.Contains(t, edgeMap, "createWorkbench.workbenchId->commitBooking.workbenchId")
-	assert.Contains(t, edgeMap, "createWorkbench.workbenchId->ignoreWorkbench.workbenchId")
-
-	// Ordering edges into commitBooking
-	assert.Contains(t, edgeMap, "addOffer.offerStatus->commitBooking.offerStatus")
-	assert.Contains(t, edgeMap, "addTraveler.travelerId->commitBooking.travelerId")
-
-	// Three select edges (priceOffer.offeringId + addOffer.offeringId + addOffer.productRef)
-	selectCount := 0
-	for _, e := range g.Edges {
-		if e.Select {
-			selectCount++
-		}
-	}
-	assert.Equal(t, 3, selectCount)
 }
 
 func TestParse_WithOASFields(t *testing.T) {
@@ -340,7 +293,6 @@ nodes:
     outputs:
       - name: name
         type: string
-edges: []
 `)
 
 	g, err := Parse(data)
@@ -396,7 +348,6 @@ nodes:
     outputs:
       - name: results
         type: string
-edges: []
 `)
 	g, err := Parse(data)
 	require.NoError(t, err)
@@ -412,43 +363,6 @@ edges: []
 	require.NotNil(t, count.Constraints)
 	assert.Equal(t, 1.0, *count.Constraints.Min)
 	assert.Equal(t, 100.0, *count.Constraints.Max)
-}
-
-func TestParse_WithAutoWire(t *testing.T) {
-	data := []byte(`
-version: "1.0.0"
-autoWire: true
-nodes:
-  producer:
-    description: "Produces token"
-    adapter: producer
-    outputs:
-      - name: token
-        type: string
-  consumer:
-    description: "Consumes token"
-    adapter: consumer
-    inputs:
-      - name: token
-        type: string
-    outputs:
-      - name: result
-        type: string
-edges: []
-`)
-	g, err := Parse(data)
-	require.NoError(t, err)
-
-	assert.Equal(t, AutoWireSources, g.AutoWire)
-	require.Len(t, g.Edges, 1)
-	assert.Equal(t, "producer.token", g.Edges[0].From)
-	assert.Equal(t, "consumer.token", g.Edges[0].To)
-	assert.True(t, g.Edges[0].AutoWired)
-
-	// Edge index should be populated
-	edges := g.EdgesTo("consumer.token")
-	require.Len(t, edges, 1)
-	assert.Equal(t, "producer.token", edges[0].From)
 }
 
 func TestSplitRef(t *testing.T) {

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 )
@@ -59,23 +58,6 @@ type MessageTrace struct {
 	Content string `json:"content"`
 }
 
-// ChainTrace captures the backward chaining result and timing.
-type ChainTrace struct {
-	Nodes      []string              `json:"nodes"`
-	EntryNodes []string              `json:"entryNodes"`
-	Edges      []EdgeTrace           `json:"edges"`
-	Decisions  []graph.ChainDecision `json:"decisions,omitempty"`
-	DurationMs int64                 `json:"durationMs"`
-}
-
-// EdgeTrace captures a single edge in the chain result.
-type EdgeTrace struct {
-	From      string `json:"from"`
-	To        string `json:"to"`
-	Select    bool   `json:"select,omitempty"`
-	Preferred bool   `json:"preferred,omitempty"`
-}
-
 // SkeletonTrace captures the skeleton plan construction and the YAML sent to the LLM.
 type SkeletonTrace struct {
 	Plan        *plan.Plan `json:"plan"`
@@ -111,31 +93,6 @@ func generateTraceID() string {
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
 	return fmt.Sprintf("trace-%s-%08x", now.Format("20060102-150405"), suffix)
-}
-
-// toEdgeTraces converts graph edges to EdgeTrace values.
-func toEdgeTraces(edges []graph.Edge) []EdgeTrace {
-	traces := make([]EdgeTrace, len(edges))
-	for i, e := range edges {
-		traces[i] = EdgeTrace{
-			From:      e.From,
-			To:        e.To,
-			Select:    e.Select,
-			Preferred: e.Preferred,
-		}
-	}
-	return traces
-}
-
-// toChainTrace converts a ChainResult and duration to a ChainTrace.
-func toChainTrace(cr *graph.ChainResult, dur time.Duration) *ChainTrace {
-	return &ChainTrace{
-		Nodes:      cr.Nodes,
-		EntryNodes: cr.EntryNodes,
-		Edges:      toEdgeTraces(cr.Edges),
-		Decisions:  cr.Decisions,
-		DurationMs: dur.Milliseconds(),
-	}
 }
 
 // toLLMCallTrace builds an LLMCallTrace from the messages, response, and timing.

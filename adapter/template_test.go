@@ -487,6 +487,122 @@ func TestIterationIntegration_PriceOfferReference(t *testing.T) {
 	}
 }
 
+func TestIterationIntegration_PriceOfferReference_RoundTrip(t *testing.T) {
+	body := `{
+  "CatalogProductOfferingSelection": [
+    {
+      "CatalogProductOfferingIdentifier": {
+        "Identifier": {
+          "value": "{{offeringId}}"
+        }
+      },
+      "ProductIdentifier": [
+        {{#productIds}}
+        {"Identifier": {"value": "{{.}}"}}
+        {{/productIds}}
+      ]
+    }
+    {{?returnOfferingId}},{
+      "CatalogProductOfferingIdentifier": {
+        "Identifier": {
+          "value": "{{returnOfferingId}}"
+        }
+      },
+      "ProductIdentifier": [
+        {{#returnProductIds}}
+        {"Identifier": {"value": "{{.}}"}}
+        {{/returnProductIds}}
+      ]
+    }{{/returnOfferingId}}
+  ]
+}`
+
+	inputs := map[string]any{
+		"offeringId":       "offer-out",
+		"productIds":       []any{"p0", "p1"},
+		"returnOfferingId": "offer-ret",
+		"returnProductIds": []any{"r0", "r1", "r2"},
+	}
+
+	result, err := substitutePlaceholders(body, inputs, nil)
+	require.NoError(t, err)
+
+	// Verify valid JSON
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(result), &parsed), "output should be valid JSON: %s", result)
+
+	// Verify 2 CatalogProductOfferingSelection entries (outbound + return)
+	selections := parsed["CatalogProductOfferingSelection"].([]any)
+	require.Len(t, selections, 2)
+
+	// Outbound selection
+	outbound := selections[0].(map[string]any)
+	outId := outbound["CatalogProductOfferingIdentifier"].(map[string]any)["Identifier"].(map[string]any)
+	assert.Equal(t, "offer-out", outId["value"])
+	outProducts := outbound["ProductIdentifier"].([]any)
+	assert.Len(t, outProducts, 2)
+
+	// Return selection
+	ret := selections[1].(map[string]any)
+	retId := ret["CatalogProductOfferingIdentifier"].(map[string]any)["Identifier"].(map[string]any)
+	assert.Equal(t, "offer-ret", retId["value"])
+	retProducts := ret["ProductIdentifier"].([]any)
+	assert.Len(t, retProducts, 3)
+	for i, pid := range []string{"r0", "r1", "r2"} {
+		prod := retProducts[i].(map[string]any)
+		ident := prod["Identifier"].(map[string]any)
+		assert.Equal(t, pid, ident["value"])
+	}
+}
+
+func TestIterationIntegration_PriceOfferReference_OneWayNoReturn(t *testing.T) {
+	// Verify one-way case: no returnOfferingId means conditional block is omitted
+	body := `{
+  "CatalogProductOfferingSelection": [
+    {
+      "CatalogProductOfferingIdentifier": {
+        "Identifier": {
+          "value": "{{offeringId}}"
+        }
+      },
+      "ProductIdentifier": [
+        {{#productIds}}
+        {"Identifier": {"value": "{{.}}"}}
+        {{/productIds}}
+      ]
+    }
+    {{?returnOfferingId}},{
+      "CatalogProductOfferingIdentifier": {
+        "Identifier": {
+          "value": "{{returnOfferingId}}"
+        }
+      },
+      "ProductIdentifier": [
+        {{#returnProductIds}}
+        {"Identifier": {"value": "{{.}}"}}
+        {{/returnProductIds}}
+      ]
+    }{{/returnOfferingId}}
+  ]
+}`
+
+	inputs := map[string]any{
+		"offeringId": "offer-1",
+		"productIds": []any{"p0", "p1", "p2"},
+	}
+
+	result, err := substitutePlaceholders(body, inputs, nil)
+	require.NoError(t, err)
+
+	// Verify valid JSON
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal([]byte(result), &parsed), "output should be valid JSON: %s", result)
+
+	// Only 1 selection entry (no return)
+	selections := parsed["CatalogProductOfferingSelection"].([]any)
+	require.Len(t, selections, 1)
+}
+
 func TestNormalizeJSONPath(t *testing.T) {
 	tests := []struct {
 		input string

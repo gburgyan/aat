@@ -2,7 +2,6 @@ package intent
 
 import (
 	"testing"
-	"time"
 
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
@@ -10,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFixDependsOn_AddsMissing(t *testing.T) {
+func TestFixDependsOn_AddsMissingFromRefs(t *testing.T) {
 	g := loadTravelportGraph(t)
 
 	p := &plan.Plan{
@@ -18,9 +17,18 @@ func TestFixDependsOn_AddsMissing(t *testing.T) {
 			Steps: []plan.Step{
 				{Node: "searchFlights"},
 				{Node: "createWorkbench"},
-				{Node: "addOffer"}, // missing dependsOn
-				{Node: "addTraveler"},
-				{Node: "commitBooking"},
+				{Node: "addOffer", Values: map[string]plan.StepValue{
+					"workbenchId":        {From: "createWorkbench.workbenchId"},
+					"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+				}},
+				{Node: "addTraveler", Values: map[string]plan.StepValue{
+					"workbenchId": {From: "createWorkbench.workbenchId"},
+				}},
+				{Node: "commitBooking", Values: map[string]plan.StepValue{
+					"workbenchId":  {From: "createWorkbench.workbenchId"},
+					"offerStatus":  {From: "addOffer.offerStatus"},
+					"travelerId":   {From: "addTraveler.travelerId"},
+				}},
 			},
 		},
 	}
@@ -28,11 +36,11 @@ func TestFixDependsOn_AddsMissing(t *testing.T) {
 	stepIndex := buildStepIndex(p)
 	fixDependsOn(p, g, stepIndex)
 
-	// addOffer should depend on searchFlights and createWorkbench
+	// addOffer should depend on searchFlights and createWorkbench (from refs)
 	assert.Contains(t, p.Execution.Steps[2].DependsOn, "searchFlights")
 	assert.Contains(t, p.Execution.Steps[2].DependsOn, "createWorkbench")
 
-	// commitBooking should depend on addOffer, addTraveler, createWorkbench
+	// commitBooking should depend on addOffer, addTraveler, createWorkbench (from refs)
 	assert.Contains(t, p.Execution.Steps[4].DependsOn, "addOffer")
 	assert.Contains(t, p.Execution.Steps[4].DependsOn, "addTraveler")
 	assert.Contains(t, p.Execution.Steps[4].DependsOn, "createWorkbench")
@@ -85,9 +93,18 @@ func TestFixDependsOn_SortsDeterministically(t *testing.T) {
 			Steps: []plan.Step{
 				{Node: "searchFlights"},
 				{Node: "createWorkbench"},
-				{Node: "addOffer"},
-				{Node: "addTraveler"},
-				{Node: "commitBooking"},
+				{Node: "addOffer", Values: map[string]plan.StepValue{
+					"workbenchId":        {From: "createWorkbench.workbenchId"},
+					"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+				}},
+				{Node: "addTraveler", Values: map[string]plan.StepValue{
+					"workbenchId": {From: "createWorkbench.workbenchId"},
+				}},
+				{Node: "commitBooking", Values: map[string]plan.StepValue{
+					"workbenchId": {From: "createWorkbench.workbenchId"},
+					"offerStatus": {From: "addOffer.offerStatus"},
+					"travelerId":  {From: "addTraveler.travelerId"},
+				}},
 			},
 		},
 	}
@@ -141,7 +158,7 @@ func TestAddCleanupSteps_DoesNotDuplicate(t *testing.T) {
 	assert.Len(t, p.Execution.Cleanup, 1) // no duplicate
 }
 
-func TestFixSelectionConfigs_AddsDefault(t *testing.T) {
+func TestFixSelectionConfigs_DefaultsInlineStrategy(t *testing.T) {
 	g := loadTravelportGraph(t)
 
 	p := &plan.Plan{
@@ -150,7 +167,15 @@ func TestFixSelectionConfigs_AddsDefault(t *testing.T) {
 				{Node: "searchFlights"},
 				{
 					Node: "addOffer",
-					// No values for select-edge inputs
+					Values: map[string]plan.StepValue{
+						"offeringId": {
+							From: "searchFlights.catalogOfferings",
+							Select: &plan.SelectionConfig{
+								// Empty strategy — should be defaulted to "first"
+								Field: "offeringId",
+							},
+						},
+					},
 				},
 			},
 		},
@@ -159,20 +184,10 @@ func TestFixSelectionConfigs_AddsDefault(t *testing.T) {
 	stepIndex := buildStepIndex(p)
 	fixSelectionConfigs(p, g, stepIndex)
 
-	// addOffer.offeringId is fed by a select edge
-	sv, ok := p.Execution.Steps[1].Values["offeringId"]
-	require.True(t, ok, "offeringId should have been added")
-	assert.Equal(t, "searchFlights.catalogOfferings", sv.From)
+	sv := p.Execution.Steps[1].Values["offeringId"]
 	require.NotNil(t, sv.Select)
 	assert.Equal(t, "first", sv.Select.Strategy)
-	assert.Equal(t, "offeringId", sv.Select.Field) // elementField name, not gjson path
-
-	// addOffer.productRef is also fed by a select edge
-	svProd, ok := p.Execution.Steps[1].Values["productRef"]
-	require.True(t, ok, "productRef should have been added")
-	assert.Equal(t, "searchFlights.catalogOfferings", svProd.From)
-	require.NotNil(t, svProd.Select)
-	assert.Equal(t, "productRef", svProd.Select.Field) // elementField name, not gjson path
+	assert.Equal(t, "offeringId", sv.Select.Field)
 }
 
 func TestFixSelectionConfigs_PreservesExisting(t *testing.T) {
@@ -277,34 +292,6 @@ func TestPopulateIntent_NilWorkflowSelection(t *testing.T) {
 	assert.Empty(t, p.Intent.Description)
 }
 
-func TestPopulateIntentFromGoal(t *testing.T) {
-	ga := &GoalAnalysis{
-		Goal:        "commitBooking",
-		Description: "Book a flight from DEN to SFO",
-		Constraints: ConstraintSet{
-			Hard: []ConstraintInfo{{Name: "origin", Description: "Must be DEN"}},
-			Soft: []ConstraintInfo{{Name: "nonstop", Description: "Prefer direct flights"}},
-			Free: []string{"departure date"},
-		},
-	}
-
-	p := &plan.Plan{}
-	populateIntentFromGoal(p, ga)
-
-	assert.Equal(t, "commitBooking", p.Intent.Goal)
-	assert.Equal(t, "Book a flight from DEN to SFO", p.Intent.Description)
-	require.NotNil(t, p.Intent.Constraints)
-	assert.Len(t, p.Intent.Constraints.Hard, 1)
-	assert.Len(t, p.Intent.Constraints.Soft, 1)
-	assert.Contains(t, p.Intent.Constraints.Free, "departure date")
-}
-
-func TestPopulateIntentFromGoal_NilGoalAnalysis(t *testing.T) {
-	p := &plan.Plan{}
-	populateIntentFromGoal(p, nil)
-	assert.Empty(t, p.Intent.Goal)
-}
-
 func TestPostProcess_FullPipeline(t *testing.T) {
 	g := loadTravelportGraph(t)
 
@@ -318,16 +305,23 @@ func TestPostProcess_FullPipeline(t *testing.T) {
 			Steps: []plan.Step{
 				{Node: "searchFlights", Values: map[string]plan.StepValue{"origin": {Default: "DEN"}, "destination": {Default: "SFO"}, "departureDate": {Default: "2025-06-15"}}},
 				{Node: "createWorkbench"},
-				{Node: "addOffer"},
-				{Node: "addTraveler", Values: map[string]plan.StepValue{"surname": {Default: "Smith"}, "givenName": {Default: "John"}}},
-				{Node: "commitBooking", IsGoal: true},
+				{Node: "addOffer", Values: map[string]plan.StepValue{
+					"workbenchId":        {From: "createWorkbench.workbenchId"},
+					"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+				}},
+				{Node: "addTraveler", Values: map[string]plan.StepValue{"surname": {Default: "Smith"}, "givenName": {Default: "John"}, "workbenchId": {From: "createWorkbench.workbenchId"}}},
+				{Node: "commitBooking", IsGoal: true, Values: map[string]plan.StepValue{
+					"workbenchId": {From: "createWorkbench.workbenchId"},
+					"offerStatus": {From: "addOffer.offerStatus"},
+					"travelerId":  {From: "addTraveler.travelerId"},
+				}},
 			},
 		},
 	}
 
 	PostProcess(p, g, ws, "book a flight from DEN to SFO")
 
-	// dependsOn should be fixed
+	// dependsOn should be derived from from refs
 	assert.Contains(t, p.Execution.Steps[2].DependsOn, "searchFlights")
 	assert.Contains(t, p.Execution.Steps[2].DependsOn, "createWorkbench")
 
@@ -341,165 +335,6 @@ func TestPostProcess_FullPipeline(t *testing.T) {
 
 	// intent should be populated
 	assert.Equal(t, "Book a flight", p.Intent.Description)
-}
-
-// --- BuildSkeleton Tests ---
-
-func travelportChainResult() *graph.ChainResult {
-	return &graph.ChainResult{
-		Nodes:      []string{"searchFlights", "createWorkbench", "addOffer", "addTraveler", "commitBooking"},
-		EntryNodes: []string{"searchFlights", "createWorkbench"},
-		Edges: []graph.Edge{
-			{From: "searchFlights.catalogOfferingsId", To: "addOffer.catalogOfferingsId"},
-			{From: "searchFlights.catalogOfferings", To: "addOffer.offeringId", Select: true},
-			{From: "searchFlights.catalogOfferings", To: "addOffer.productRef", Select: true},
-			{From: "createWorkbench.workbenchId", To: "addOffer.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "addTraveler.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "commitBooking.workbenchId"},
-			{From: "addOffer.offerStatus", To: "commitBooking.offerStatus"},
-			{From: "addTraveler.travelerId", To: "commitBooking.travelerId"},
-		},
-	}
-}
-
-func TestBuildSkeleton_TravelportBooking(t *testing.T) {
-	g := loadTravelportGraph(t)
-	cr := travelportChainResult()
-	ga := &GoalAnalysis{
-		Goal:        "commitBooking",
-		Description: "Book a flight from DEN to SFO",
-		Constraints: ConstraintSet{
-			Hard: []ConstraintInfo{{Name: "origin", Description: "Must be DEN", AppliesTo: []string{"searchFlights.origin"}}},
-			Free: []string{"departureDate"},
-		},
-	}
-	now := time.Date(2026, 2, 8, 12, 0, 0, 0, time.UTC)
-
-	skel := BuildSkeleton(g, cr, ga, "book a flight from DEN to SFO", now)
-
-	// Should have 5 steps in chain order.
-	require.Len(t, skel.Execution.Steps, 5)
-	assert.Equal(t, "searchFlights", skel.Execution.Steps[0].Node)
-	assert.Equal(t, "createWorkbench", skel.Execution.Steps[1].Node)
-	assert.Equal(t, "addOffer", skel.Execution.Steps[2].Node)
-	assert.Equal(t, "addTraveler", skel.Execution.Steps[3].Node)
-	assert.Equal(t, "commitBooking", skel.Execution.Steps[4].Node)
-
-	// IsGoal should only be set on commitBooking.
-	assert.False(t, skel.Execution.Steps[0].IsGoal)
-	assert.True(t, skel.Execution.Steps[4].IsGoal)
-
-	// DependsOn for addOffer: createWorkbench, searchFlights.
-	assert.Equal(t, []string{"createWorkbench", "searchFlights"}, skel.Execution.Steps[2].DependsOn)
-
-	// DependsOn for addTraveler: createWorkbench.
-	assert.Equal(t, []string{"createWorkbench"}, skel.Execution.Steps[3].DependsOn)
-
-	// DependsOn for commitBooking: addOffer, addTraveler, createWorkbench.
-	assert.Equal(t, []string{"addOffer", "addTraveler", "createWorkbench"}, skel.Execution.Steps[4].DependsOn)
-
-	// searchFlights: no dependsOn, no from refs.
-	assert.Empty(t, skel.Execution.Steps[0].DependsOn)
-
-	// addOffer: offeringId and productRef share the same source (searchFlights.catalogOfferings)
-	// so they should be grouped into a named selection.
-	addOfferStep := skel.Execution.Steps[2]
-	addOfferVals := addOfferStep.Values
-	require.NotNil(t, addOfferStep.Selections, "addOffer should have named selections")
-	require.Contains(t, addOfferStep.Selections, "catalogOffering")
-	assert.Equal(t, "searchFlights.catalogOfferings", addOfferStep.Selections["catalogOffering"].From)
-	assert.Equal(t, "first", addOfferStep.Selections["catalogOffering"].Strategy)
-
-	// offeringId and productRef should use fromSelection references
-	assert.Equal(t, "catalogOffering.offeringId", addOfferVals["offeringId"].FromSelection)
-	assert.Empty(t, addOfferVals["offeringId"].From)
-	assert.Nil(t, addOfferVals["offeringId"].Select)
-	assert.Equal(t, "catalogOffering.productRef", addOfferVals["productRef"].FromSelection)
-	assert.Empty(t, addOfferVals["productRef"].From)
-	assert.Nil(t, addOfferVals["productRef"].Select)
-
-	// addOffer: workbenchId should be a scalar from ref (no select).
-	assert.Equal(t, "createWorkbench.workbenchId", addOfferVals["workbenchId"].From)
-	assert.Nil(t, addOfferVals["workbenchId"].Select)
-
-	// addOffer: catalogOfferingsId should be a scalar from ref.
-	assert.Equal(t, "searchFlights.catalogOfferingsId", addOfferVals["catalogOfferingsId"].From)
-	assert.Nil(t, addOfferVals["catalogOfferingsId"].Select)
-
-	// searchFlights: graph defaults should be present.
-	sfVals := skel.Execution.Steps[0].Values
-	assert.Equal(t, 1, sfVals["passengers"].Default)
-	assert.Equal(t, "economy", sfVals["cabinPreference"].Default)
-	// origin, destination, departureDate: no edge, no default → absent (unfed).
-	_, hasOrigin := sfVals["origin"]
-	assert.False(t, hasOrigin, "origin should be absent — unfed input for LLM")
-	_, hasDest := sfVals["destination"]
-	assert.False(t, hasDest, "destination should be absent — unfed input for LLM")
-	_, hasDeptDate := sfVals["departureDate"]
-	assert.False(t, hasDeptDate, "departureDate should be absent — unfed input for LLM")
-
-	// Cleanup should have ignoreWorkbench.
-	require.Len(t, skel.Execution.Cleanup, 1)
-	assert.Equal(t, "ignoreWorkbench", skel.Execution.Cleanup[0].Node)
-	assert.Equal(t, "always", skel.Execution.Cleanup[0].RunOn)
-
-	// Metadata.
-	assert.Equal(t, "book a flight from DEN to SFO", skel.Metadata.Prompt)
-	assert.Equal(t, "1.0.0", skel.Metadata.GraphVersion)
-	assert.Equal(t, now, skel.Metadata.Created)
-
-	// Intent.
-	assert.Equal(t, "commitBooking", skel.Intent.Goal)
-	assert.Equal(t, "Book a flight from DEN to SFO", skel.Intent.Description)
-	require.NotNil(t, skel.Intent.Constraints)
-	assert.Len(t, skel.Intent.Constraints.Hard, 1)
-}
-
-func TestBuildSkeleton_SingleNode(t *testing.T) {
-	g := loadTravelportGraph(t)
-	cr := &graph.ChainResult{
-		Nodes:      []string{"searchFlights"},
-		EntryNodes: []string{"searchFlights"},
-		Edges:      []graph.Edge{},
-	}
-	ga := &GoalAnalysis{
-		Goal:        "searchFlights",
-		Description: "Search for flights",
-	}
-	now := time.Date(2026, 2, 8, 12, 0, 0, 0, time.UTC)
-
-	skel := BuildSkeleton(g, cr, ga, "search for flights", now)
-
-	require.Len(t, skel.Execution.Steps, 1)
-	assert.Equal(t, "searchFlights", skel.Execution.Steps[0].Node)
-	assert.True(t, skel.Execution.Steps[0].IsGoal)
-	assert.Empty(t, skel.Execution.Steps[0].DependsOn)
-
-	// No cleanup (searchFlights has no cleanup field).
-	assert.Empty(t, skel.Execution.Cleanup)
-
-	// Graph defaults present.
-	assert.Equal(t, 1, skel.Execution.Steps[0].Values["passengers"].Default)
-}
-
-func TestUnfedInputs_TravelportBooking(t *testing.T) {
-	g := loadTravelportGraph(t)
-	cr := travelportChainResult()
-
-	unfed := UnfedInputs(g, cr)
-
-	// Required unfed: searchFlights.origin, searchFlights.destination, searchFlights.departureDate
-	// addTraveler.surname, addTraveler.givenName, addTraveler.birthDate, addTraveler.gender
-	// (optional inputs like returnDate are excluded)
-	// (inputs with defaults like passengers, cabinPreference, passengerTypeCode are excluded)
-	require.Len(t, unfed, 7)
-	assert.Contains(t, unfed, "searchFlights.origin (string)")
-	assert.Contains(t, unfed, "searchFlights.destination (string)")
-	assert.Contains(t, unfed, "searchFlights.departureDate (date)")
-	assert.Contains(t, unfed, "addTraveler.surname (string)")
-	assert.Contains(t, unfed, "addTraveler.givenName (string)")
-	assert.Contains(t, unfed, "addTraveler.birthDate (date)")
-	assert.Contains(t, unfed, "addTraveler.gender (enum[Male, Female, Undisclosed])")
 }
 
 // --- MergeLLMValues Tests ---
@@ -1042,123 +877,6 @@ func TestLookupElementFieldPath_WrongOutput(t *testing.T) {
 	assert.Equal(t, "offeringId", path)
 }
 
-// --- Named Selections: BuildSkeleton grouping tests ---
-
-func TestBuildSkeleton_GroupsMultiFieldSelections(t *testing.T) {
-	// When 2+ inputs share the same select-edge source, BuildSkeleton should
-	// create a named selection instead of old-style from+select per input.
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"source": {
-				Name:        "source",
-				Description: "Source node",
-				Outputs: []graph.Output{
-					{
-						Name: "items",
-						Type: "array",
-						ElementFields: []graph.Field{
-							{Name: "itemId", Type: "string", Path: "id"},
-							{Name: "itemRef", Type: "string", Path: "ref"},
-						},
-					},
-				},
-			},
-			"target": {
-				Name:        "target",
-				Description: "Target node",
-				Inputs: []graph.Input{
-					{Name: "itemId", Type: "string"},
-					{Name: "itemRef", Type: "string"},
-				},
-			},
-		},
-	}
-	cr := &graph.ChainResult{
-		Nodes:      []string{"source", "target"},
-		EntryNodes: []string{"source"},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-			{From: "source.items", To: "target.itemRef", Select: true},
-		},
-	}
-	ga := &GoalAnalysis{Goal: "target", Description: "test"}
-	now := time.Date(2026, 2, 8, 0, 0, 0, 0, time.UTC)
-
-	skel := BuildSkeleton(g, cr, ga, "test", now)
-
-	require.Len(t, skel.Execution.Steps, 2)
-	targetStep := skel.Execution.Steps[1]
-	assert.Equal(t, "target", targetStep.Node)
-
-	// Should have a named selection named "item" (singular of "items")
-	require.NotNil(t, targetStep.Selections)
-	require.Contains(t, targetStep.Selections, "item")
-	assert.Equal(t, "source.items", targetStep.Selections["item"].From)
-	assert.Equal(t, "first", targetStep.Selections["item"].Strategy)
-
-	// Both inputs should use fromSelection
-	assert.Equal(t, "item.itemId", targetStep.Values["itemId"].FromSelection)
-	assert.Empty(t, targetStep.Values["itemId"].From)
-	assert.Nil(t, targetStep.Values["itemId"].Select)
-
-	assert.Equal(t, "item.itemRef", targetStep.Values["itemRef"].FromSelection)
-	assert.Empty(t, targetStep.Values["itemRef"].From)
-	assert.Nil(t, targetStep.Values["itemRef"].Select)
-}
-
-func TestBuildSkeleton_SingleInputKeepsOldStyle(t *testing.T) {
-	// When only 1 input uses a select-edge source, keep old-style from+select.
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"source": {
-				Name:        "source",
-				Description: "Source node",
-				Outputs: []graph.Output{
-					{
-						Name: "items",
-						Type: "array",
-						ElementFields: []graph.Field{
-							{Name: "itemId", Type: "string"},
-						},
-					},
-				},
-			},
-			"target": {
-				Name:        "target",
-				Description: "Target node",
-				Inputs: []graph.Input{
-					{Name: "itemId", Type: "string"},
-				},
-			},
-		},
-	}
-	cr := &graph.ChainResult{
-		Nodes:      []string{"source", "target"},
-		EntryNodes: []string{"source"},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
-	}
-	ga := &GoalAnalysis{Goal: "target", Description: "test"}
-	now := time.Date(2026, 2, 8, 0, 0, 0, 0, time.UTC)
-
-	skel := BuildSkeleton(g, cr, ga, "test", now)
-
-	require.Len(t, skel.Execution.Steps, 2)
-	targetStep := skel.Execution.Steps[1]
-
-	// No named selections — single input
-	assert.Nil(t, targetStep.Selections)
-
-	// Old-style from+select
-	assert.Equal(t, "source.items", targetStep.Values["itemId"].From)
-	require.NotNil(t, targetStep.Values["itemId"].Select)
-	assert.Equal(t, "first", targetStep.Values["itemId"].Select.Strategy)
-	assert.Equal(t, "itemId", targetStep.Values["itemId"].Select.Field)
-}
-
 // --- Named Selections: deriveSelectionName tests ---
 
 func TestDeriveSelectionName(t *testing.T) {
@@ -1356,79 +1074,6 @@ func TestMergeLLMValues_IgnoresUnknownNamedSelection(t *testing.T) {
 	assert.Equal(t, "first", skeleton.Execution.Steps[0].Selections["offering"].Strategy)
 }
 
-// --- BuildSkeleton with RequiresEdges ---
-
-func TestBuildSkeleton_WithRequiresEdges(t *testing.T) {
-	// Build a graph with requires/satisfies but no data-flow edges between
-	// some nodes. The requires edges should generate dependsOn.
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"searchFlights": {
-				Name: "searchFlights", Adapter: "search",
-				Satisfies: []string{"flightsSearched"},
-				Inputs:    []graph.Input{{Name: "origin", Type: "string"}},
-				Outputs:   []graph.Output{{Name: "results", Type: "string"}},
-			},
-			"createWorkbench": {
-				Name: "createWorkbench", Adapter: "createWB",
-				Satisfies: []string{"workbenchCreated"},
-				Outputs:   []graph.Output{{Name: "workbenchId", Type: "string"}},
-			},
-			"addOffer": {
-				Name: "addOffer", Adapter: "addOffer",
-				Requires:  []string{"flightsSearched", "workbenchCreated"},
-				Satisfies: []string{"offerAdded"},
-				Inputs:    []graph.Input{{Name: "workbenchId", Type: "string"}},
-				Outputs:   []graph.Output{{Name: "status", Type: "string"}},
-			},
-			"commit": {
-				Name: "commit", Adapter: "commit",
-				Requires: []string{"offerAdded"},
-				Inputs:   []graph.Input{{Name: "workbenchId", Type: "string"}},
-				Outputs:  []graph.Output{{Name: "locator", Type: "string"}},
-			},
-		},
-		Edges: []graph.Edge{
-			{From: "createWorkbench.workbenchId", To: "addOffer.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "commit.workbenchId"},
-		},
-	}
-	g.BuildEdgeIndex()
-
-	cr := &graph.ChainResult{
-		Nodes:      []string{"searchFlights", "createWorkbench", "addOffer", "commit"},
-		EntryNodes: []string{"searchFlights", "createWorkbench"},
-		Edges: []graph.Edge{
-			{From: "createWorkbench.workbenchId", To: "addOffer.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "commit.workbenchId"},
-		},
-		RequiresEdges: []graph.RequiresEdge{
-			{From: "searchFlights", To: "addOffer", Token: "flightsSearched"},
-			{From: "createWorkbench", To: "addOffer", Token: "workbenchCreated"},
-			{From: "addOffer", To: "commit", Token: "offerAdded"},
-		},
-	}
-	ga := &GoalAnalysis{Goal: "commit", Description: "Commit booking"}
-	now := time.Date(2026, 2, 15, 12, 0, 0, 0, time.UTC)
-
-	skel := BuildSkeleton(g, cr, ga, "commit booking", now)
-
-	require.Len(t, skel.Execution.Steps, 4)
-
-	// addOffer should depend on searchFlights (via requires edge) and createWorkbench (via data + requires).
-	addOfferStep := skel.Execution.Steps[2]
-	assert.Equal(t, "addOffer", addOfferStep.Node)
-	assert.Contains(t, addOfferStep.DependsOn, "searchFlights")
-	assert.Contains(t, addOfferStep.DependsOn, "createWorkbench")
-
-	// commit should depend on addOffer (via requires edge) and createWorkbench (via data edge).
-	commitStep := skel.Execution.Steps[3]
-	assert.Equal(t, "commit", commitStep.Node)
-	assert.Contains(t, commitStep.DependsOn, "addOffer")
-	assert.Contains(t, commitStep.DependsOn, "createWorkbench")
-}
-
 func TestFixDependsOn_IncludesRequiresSatisfies(t *testing.T) {
 	// Graph where node B requires token from A but no data-flow edge A→B.
 	g := &graph.Graph{
@@ -1438,7 +1083,7 @@ func TestFixDependsOn_IncludesRequiresSatisfies(t *testing.T) {
 			"b": {Name: "b", Adapter: "b", Requires: []string{"tokenA"}, Inputs: []graph.Input{{Name: "x", Type: "string"}}},
 		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	p := &plan.Plan{
 		Execution: plan.Execution{
@@ -1467,12 +1112,8 @@ func TestFixDependsOn_ResolvesNodeNameToStepID(t *testing.T) {
 			"addSeatOffer":    {Name: "addSeatOffer", Adapter: "aso", Inputs: []graph.Input{{Name: "workbenchId", Type: "string"}}},
 			"addPayment":      {Name: "addPayment", Adapter: "ap", Inputs: []graph.Input{{Name: "workbenchId", Type: "string"}}},
 		},
-		Edges: []graph.Edge{
-			{From: "createWorkbench.workbenchId", To: "addSeatOffer.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "addPayment.workbenchId"},
-		},
 	}
-	g.BuildEdgeIndex()
+	g.BuildSatisfierIndex()
 
 	p := &plan.Plan{
 		Execution: plan.Execution{

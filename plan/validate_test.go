@@ -228,8 +228,9 @@ func TestValidate_DependsOnCycle(t *testing.T) {
 
 func TestValidate_InputWiredByEdge_NoValueNeeded(t *testing.T) {
 	g := loadTravelportGraph(t)
-	// addOffer requires workbenchId, catalogOfferingsId, offeringId, productRef — all wired by edges
-	// priceOffer requires productRef which has no edge, so provide it
+	// Without edges, all required inputs need explicit plan values.
+	// addOffer needs: workbenchId, catalogOfferingsId, offeringId, productRef
+	// priceOffer needs: catalogOfferingsId, offeringId, productRef
 	p := &Plan{
 		Execution: Execution{
 			Steps: []Step{
@@ -241,11 +242,22 @@ func TestValidate_InputWiredByEdge_NoValueNeeded(t *testing.T) {
 						"departureDate": {Default: "2026-03-15"},
 					},
 				},
-				{Node: "priceOffer", Values: map[string]StepValue{
-					"productRef": {Default: "p0"},
+				{Node: "priceOffer", DependsOn: []string{"searchFlights"}, Selections: map[string]StepSelection{
+					"offering": {From: "searchFlights.catalogOfferings", Strategy: "first"},
+				}, Values: map[string]StepValue{
+					"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+					"offeringId":         {FromSelection: "offering.offeringId"},
+					"productRef":         {FromSelection: "offering.productRef"},
 				}},
 				{Node: "createWorkbench"},
-				{Node: "addOffer"}, // all inputs come from edges
+				{Node: "addOffer", DependsOn: []string{"searchFlights", "createWorkbench"}, Selections: map[string]StepSelection{
+					"offering": {From: "searchFlights.catalogOfferings", Strategy: "first"},
+				}, Values: map[string]StepValue{
+					"workbenchId":        {From: "createWorkbench.workbenchId"},
+					"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+					"offeringId":         {FromSelection: "offering.offeringId"},
+					"productRef":         {FromSelection: "offering.productRef"},
+				}},
 			},
 		},
 	}
@@ -270,9 +282,12 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 						},
 					},
 					{
-						Node: "priceOffer",
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
+								From: "searchFlights.catalogOfferings",
 								Select: &SelectionConfig{
 									Strategy: "first",
 									Filter:   "stops == 0 && carrier == 'AA'",
@@ -333,10 +348,13 @@ func TestValidate_PredicateExpressions(t *testing.T) {
 						},
 					},
 					{
-						Node: "priceOffer",
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
 								Constraint: "value > 0",
+								Default:    "o1",
 							},
 							"productRef": {Default: "p0"},
 						},
@@ -476,10 +494,12 @@ func TestValidate_SelectionStrategies(t *testing.T) {
 						},
 					},
 					{
-						Node: "priceOffer",
+						Node:      "priceOffer",
+						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
-							"offeringId":  {Select: sel},
-							"productRef":  {Default: "p0"},
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+							"offeringId":         {From: "searchFlights.catalogOfferings", Select: sel},
+							"productRef":         {Default: "p0"},
 						},
 					},
 				},
@@ -630,6 +650,7 @@ func TestValidate_From(t *testing.T) {
 						Node:      "priceOffer",
 						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
 								From: "searchFlights.catalogOfferings",
 								Select: &SelectionConfig{
@@ -753,6 +774,7 @@ func TestValidate_SelectionSource(t *testing.T) {
 						Node:      "priceOffer",
 						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
 								From:   "searchFlights.catalogOfferings",
 								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
@@ -798,35 +820,6 @@ func TestValidate_SelectionSource(t *testing.T) {
 		assert.Contains(t, err.Error(), "not an array type")
 	})
 
-	t.Run("implicit select edge", func(t *testing.T) {
-		// priceOffer.offeringId has a select edge from searchFlights.catalogOfferings
-		p := &Plan{
-			Execution: Execution{
-				Steps: []Step{
-					{
-						Node: "searchFlights",
-						Values: map[string]StepValue{
-							"origin":        {Default: "DEN"},
-							"destination":   {Default: "SFO"},
-							"departureDate": {Default: "2026-03-15"},
-						},
-					},
-					{
-						Node: "priceOffer",
-						Values: map[string]StepValue{
-							"offeringId": {
-								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
-							},
-							"productRef": {Default: "p0"},
-						},
-					},
-				},
-			},
-		}
-		err := Validate(p, g)
-		assert.NoError(t, err)
-	})
-
 	t.Run("no from no select edge", func(t *testing.T) {
 		// priceOffer.productRef has no select edge in the graph
 		p := &Plan{
@@ -854,7 +847,7 @@ func TestValidate_SelectionSource(t *testing.T) {
 		}
 		err := Validate(p, g)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "no 'from' and no select edge")
+		assert.Contains(t, err.Error(), "no 'from' reference")
 	})
 }
 
@@ -879,6 +872,7 @@ func TestValidate_SortField(t *testing.T) {
 						Node:      "priceOffer",
 						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
 								From: "searchFlights.catalogOfferings",
 								Select: &SelectionConfig{
@@ -913,6 +907,7 @@ func TestValidate_SortField(t *testing.T) {
 						Node:      "priceOffer",
 						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
 								From: "searchFlights.catalogOfferings",
 								Select: &SelectionConfig{
@@ -948,6 +943,7 @@ func TestValidate_SortField(t *testing.T) {
 						Node:      "priceOffer",
 						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
 								From: "searchFlights.catalogOfferings",
 								Select: &SelectionConfig{
@@ -984,6 +980,7 @@ func TestValidate_SortField(t *testing.T) {
 						Node:      "priceOffer",
 						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
 								From: "searchFlights.catalogOfferings",
 								Select: &SelectionConfig{
@@ -999,12 +996,11 @@ func TestValidate_SortField(t *testing.T) {
 						Node:      "addTraveler",
 						DependsOn: []string{"priceOffer"},
 						Values: map[string]StepValue{
-							"surname":   {Default: "Smith"},
-							"givenName": {Default: "Jane"},
-							"birthDate": {Default: "1990-01-15"},
-							"gender":    {Default: "Male"},
-							// Use a From to a scalar output; selection won't be valid
-							// but we're testing sortField skip when no elementFields
+							"workbenchId": {Default: "wb-123"},
+							"surname":     {Default: "Smith"},
+							"givenName":   {Default: "Jane"},
+							"birthDate":   {Default: "1990-01-15"},
+							"gender":      {Default: "Male"},
 						},
 					},
 				},
@@ -1384,11 +1380,30 @@ func TestValidate_GoalConsistency(t *testing.T) {
 							"departureDate": {Default: "2026-03-15"},
 						},
 					},
-					{Node: "priceOffer", Values: map[string]StepValue{"productRef": {Default: "p0"}}},
+					{Node: "priceOffer", DependsOn: []string{"searchFlights"}, Values: map[string]StepValue{
+						"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+						"offeringId":         {Default: "o1"},
+						"productRef":         {Default: "p0"},
+					}},
 					{Node: "createWorkbench"},
-					{Node: "addOffer"},
-					{Node: "addTraveler", Values: map[string]StepValue{"surname": {Default: "S"}, "givenName": {Default: "J"}, "birthDate": {Default: "1990-01-15"}, "gender": {Default: "Male"}}},
-					{Node: "commitBooking", IsGoal: true},
+					{Node: "addOffer", DependsOn: []string{"searchFlights", "createWorkbench"}, Values: map[string]StepValue{
+						"workbenchId":        {From: "createWorkbench.workbenchId"},
+						"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+						"offeringId":         {Default: "o1"},
+						"productRef":         {Default: "p0"},
+					}},
+					{Node: "addTraveler", DependsOn: []string{"createWorkbench"}, Values: map[string]StepValue{
+						"workbenchId": {From: "createWorkbench.workbenchId"},
+						"surname":     {Default: "S"},
+						"givenName":   {Default: "J"},
+						"birthDate":   {Default: "1990-01-15"},
+						"gender":      {Default: "Male"},
+					}},
+					{Node: "commitBooking", DependsOn: []string{"addOffer", "addTraveler", "createWorkbench"}, IsGoal: true, Values: map[string]StepValue{
+						"workbenchId":  {From: "createWorkbench.workbenchId"},
+						"offerStatus":  {From: "addOffer.offerStatus"},
+						"travelerId":   {From: "addTraveler.travelerId"},
+					}},
 				},
 			},
 		}
@@ -1511,6 +1526,7 @@ func TestValidate_DependsOnCompleteness(t *testing.T) {
 						Node:      "priceOffer",
 						DependsOn: []string{"searchFlights"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							"offeringId": {
 								From:   "searchFlights.catalogOfferings",
 								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
@@ -1593,8 +1609,9 @@ func TestValidate_NamedSelections(t *testing.T) {
 							},
 						},
 						Values: map[string]StepValue{
-							"offeringId": {FromSelection: "offering.offeringId"},
-							"productRef": {FromSelection: "offering.productRef"},
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+							"offeringId":         {FromSelection: "offering.offeringId"},
+							"productRef":         {FromSelection: "offering.productRef"},
 						},
 					},
 				},
@@ -2054,8 +2071,9 @@ func TestValidate_FromSelectionFieldValidation(t *testing.T) {
 							},
 						},
 						Values: map[string]StepValue{
-							"offeringId": {FromSelection: "offering.offeringId"},
-							"productRef": {FromSelection: "offering.productRef"},
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+							"offeringId":         {FromSelection: "offering.offeringId"},
+							"productRef":         {FromSelection: "offering.productRef"},
 						},
 					},
 				},
@@ -2160,6 +2178,7 @@ func TestValidate_FromSelectionFieldValidation(t *testing.T) {
 							},
 						},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
 							// No dot — references the whole selection, field check skipped
 							"offeringId": {FromSelection: "offering"},
 							"productRef": {Default: "p0"},
@@ -2201,8 +2220,9 @@ func TestValidate_FilterFieldValidation(t *testing.T) {
 							},
 						},
 						Values: map[string]StepValue{
-							"offeringId": {FromSelection: "offering.offeringId"},
-							"productRef": {FromSelection: "offering.productRef"},
+							"catalogOfferingsId": {From: "searchFlights.catalogOfferingsId"},
+							"offeringId":         {FromSelection: "offering.offeringId"},
+							"productRef":         {FromSelection: "offering.productRef"},
 						},
 					},
 				},
@@ -2432,6 +2452,7 @@ func TestValidate_StepAliasing(t *testing.T) {
 						Node:      "priceOffer",
 						DependsOn: []string{"search_leg1"},
 						Values: map[string]StepValue{
+							"catalogOfferingsId": {From: "search_leg1.catalogOfferingsId"},
 							"offeringId": {
 								From:   "search_leg1.catalogOfferings",
 								Select: &SelectionConfig{Strategy: "first", Field: "offeringId"},
@@ -2501,8 +2522,9 @@ func TestValidate_StepAliasing(t *testing.T) {
 							},
 						},
 						Values: map[string]StepValue{
-							"offeringId": {FromSelection: "offering.offeringId"},
-							"productRef": {FromSelection: "offering.productRef"},
+							"catalogOfferingsId": {From: "search_leg1.catalogOfferingsId"},
+							"offeringId":         {FromSelection: "offering.offeringId"},
+							"productRef":         {FromSelection: "offering.productRef"},
 						},
 					},
 				},
@@ -2542,9 +2564,8 @@ func TestValidate_StepAliasing(t *testing.T) {
 		}
 		err := Validate(p, g)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "needs explicit value")
+		assert.Contains(t, err.Error(), "has no plan value or default")
 		assert.Contains(t, err.Error(), "departureDate")
-		assert.Contains(t, err.Error(), "appears in multiple steps")
 	})
 
 	t.Run("goal uses step ID", func(t *testing.T) {

@@ -93,6 +93,7 @@ func TestHandleDescribeNode_ValidNode(t *testing.T) {
 				Name:        "search",
 				Description: "Search for things",
 				Adapter:     "searchTemplate",
+				Satisfies:   []string{"searchResults"},
 				Inputs:      []graph.Input{{Name: "query", Type: "string"}},
 				Outputs: []graph.Output{
 					{
@@ -105,12 +106,13 @@ func TestHandleDescribeNode_ValidNode(t *testing.T) {
 				},
 			},
 			"detail": {
-				Name:   "detail",
-				Inputs: []graph.Input{{Name: "id", Type: "string"}},
+				Name:     "detail",
+				Requires: []string{"searchResults"},
+				Inputs:   []graph.Input{{Name: "id", Type: "string"}},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "search.results", To: "detail.id", Select: true},
+		SatisfiersByToken: map[string][]string{
+			"searchResults": {"search"},
 		},
 	}
 	srv := newTestServer(g)
@@ -124,8 +126,8 @@ func TestHandleDescribeNode_ValidNode(t *testing.T) {
 	assert.Contains(t, text, "| query | string | yes |")
 	assert.Contains(t, text, "| results | result[] |")
 	assert.Contains(t, text, "id")
-	assert.Contains(t, text, "## Outbound Edges")
-	assert.Contains(t, text, "[select]")
+	assert.Contains(t, text, "## Depended On By")
+	assert.Contains(t, text, "detail")
 }
 
 func TestHandleDescribeNode_UnknownNode(t *testing.T) {
@@ -150,18 +152,20 @@ func TestHandleTraceWorkflow_ValidGoal(t *testing.T) {
 			"search": {
 				Name:        "search",
 				Description: "Search",
+				Satisfies:   []string{"searchResults"},
 				Inputs:      []graph.Input{{Name: "origin", Type: "string"}},
 				Outputs:     []graph.Output{{Name: "results", Type: "result[]"}},
 			},
 			"book": {
 				Name:        "book",
 				Description: "Book",
+				Requires:    []string{"searchResults"},
 				Inputs:      []graph.Input{{Name: "resultId", Type: "string"}},
 				Outputs:     []graph.Output{{Name: "locator", Type: "string"}},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "search.results", To: "book.resultId", Select: true},
+		SatisfiersByToken: map[string][]string{
+			"searchResults": {"search"},
 		},
 	}
 	srv := newTestServer(g)
@@ -174,7 +178,6 @@ func TestHandleTraceWorkflow_ValidGoal(t *testing.T) {
 	assert.Contains(t, text, "**Entry nodes:** search")
 	assert.Contains(t, text, "## search")
 	assert.Contains(t, text, "## book")
-	assert.Contains(t, text, "## Data Flow")
 }
 
 func TestHandleTraceWorkflow_UnknownGoal(t *testing.T) {
@@ -197,16 +200,18 @@ func TestHandleTraceWorkflow_CycleBreaker(t *testing.T) {
 			"entry": {
 				Name:         "entry",
 				CycleBreaker: true,
+				Satisfies:    []string{"entryData"},
 				Outputs:      []graph.Output{{Name: "data", Type: "string"}},
 			},
 			"process": {
-				Name:    "process",
-				Inputs:  []graph.Input{{Name: "data", Type: "string"}},
-				Outputs: []graph.Output{{Name: "out", Type: "string"}},
+				Name:     "process",
+				Requires: []string{"entryData"},
+				Inputs:   []graph.Input{{Name: "data", Type: "string"}},
+				Outputs:  []graph.Output{{Name: "out", Type: "string"}},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "entry.data", To: "process.data"},
+		SatisfiersByToken: map[string][]string{
+			"entryData": {"entry"},
 		},
 	}
 	srv := newTestServer(g)

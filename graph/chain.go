@@ -19,10 +19,9 @@ type ChainOptions struct {
 // ChainResult contains the output of a backward chaining operation.
 type ChainResult struct {
 	Nodes              []string          // dependency-ordered (topo sort)
-	Edges              []Edge            // subset of graph edges connecting chain nodes
 	RequiresEdges      []RequiresEdge    // virtual edges from requires/satisfies relationships
 	EntryNodes         []string          // in-degree 0 within the chain
-	Decisions          []ChainDecision   // cycle breaks, path choices, satisfier selections
+	Decisions          []ChainDecision   // cycle breaks, satisfier selections
 	IncludedConditions []ConditionResult // conditions that evaluated true
 	ExcludedConditions []ConditionResult // conditions that evaluated false
 }
@@ -76,15 +75,9 @@ type orderingEdge struct {
 	to   string
 }
 
-// inputKey identifies a specific input on a specific node.
-type inputKey struct {
-	node  string
-	input string
-}
-
 // BackwardChain computes the minimal subgraph needed to reach the given goal
 // nodes. It returns the nodes in dependency order (topological sort), the
-// connecting edges, and any decisions made during traversal.
+// requires/satisfies edges, and any decisions made during traversal.
 func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 	var errs []string
 
@@ -105,16 +98,6 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 	result := &ChainResult{}
 
 	// --- Phase 1: Condition Evaluation ---
-
-	// Build edge index by consumer node
-	edgesByConsumer := map[string][]Edge{}
-	for _, edge := range g.Edges {
-		toNode, _, err := splitRef(edge.To)
-		if err != nil {
-			continue
-		}
-		edgesByConsumer[toNode] = append(edgesByConsumer[toNode], edge)
-	}
 
 	// Evaluate conditions
 	conditionRequired := map[string]bool{}
@@ -150,7 +133,7 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		return nil, &ChainError{Errors: errs}
 	}
 
-	// --- Phase 2: BFS Backward from Goals ---
+	// --- Phase 2: BFS Backward from Goals (requires/satisfies only) ---
 
 	queue := make([]string, 0, len(opts.Goals)+len(conditionRequired))
 	queue = append(queue, opts.Goals...)
@@ -160,12 +143,9 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 
 	visited := map[string]bool{}
 	includedNodes := map[string]bool{}
-	var includedEdges []Edge
 
 	// Track requirement tokens encountered and their candidate satisfiers.
-	// tokenCandidates maps each token to the set of candidate satisfier node names.
 	tokenCandidates := map[string]map[string]bool{}
-	// tokenRequirers maps each token to the set of nodes that require it.
 	tokenRequirers := map[string]map[string]bool{}
 
 	for len(queue) > 0 {
@@ -186,18 +166,6 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 				Detail: fmt.Sprintf("stopped traversal at cycle-breaker node %q", node),
 			})
 			continue // don't traverse upstream
-		}
-
-		// Traverse data-flow edges backward.
-		for _, edge := range edgesByConsumer[node] {
-			fromNode, _, err := splitRef(edge.From)
-			if err != nil {
-				continue
-			}
-			includedEdges = append(includedEdges, edge)
-			if !visited[fromNode] {
-				queue = append(queue, fromNode)
-			}
 		}
 
 		// Traverse requires tokens: enqueue all candidate satisfiers.
@@ -222,58 +190,9 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		}
 	}
 
-	// --- Phase 3: Path Selection + Topo Sort ---
+	// --- Phase 3: Satisfier Resolution + Topo Sort ---
 
-	// 3a. Multiple-path resolution
-	edgesByInput := map[inputKey][]Edge{}
-	for _, edge := range includedEdges {
-		toNode, toField, _ := splitRef(edge.To)
-		key := inputKey{node: toNode, input: toField}
-		edgesByInput[key] = append(edgesByInput[key], edge)
-	}
-
-	depth := computeDepth(includedNodes, includedEdges)
-
-	var finalEdges []Edge
-	for _, key := range sortedInputKeysFrom(edgesByInput) {
-		edges := edgesByInput[key]
-		if len(edges) <= 1 {
-			finalEdges = append(finalEdges, edges...)
-			continue
-		}
-
-		// Group by producer node
-		producerEdges := map[string][]Edge{}
-		for _, e := range edges {
-			fromNode, _, _ := splitRef(e.From)
-			producerEdges[fromNode] = append(producerEdges[fromNode], e)
-		}
-
-		if len(producerEdges) <= 1 {
-			// Multiple edges from same producer — keep all
-			finalEdges = append(finalEdges, edges...)
-			continue
-		}
-
-		// Multiple producers for same input — pick one
-		chosen := pickProducer(producerEdges, depth, g)
-		finalEdges = append(finalEdges, producerEdges[chosen]...)
-
-		var alternatives []string
-		for producer := range producerEdges {
-			if producer != chosen {
-				alternatives = append(alternatives, producer)
-			}
-		}
-		result.Decisions = append(result.Decisions, ChainDecision{
-			Type:         DecisionPathChoice,
-			Node:         key.node,
-			Detail:       fmt.Sprintf("input %q: chose producer %q", key.input, chosen),
-			Alternatives: alternatives,
-		})
-	}
-
-	// 3a-ii. Satisfier resolution: pick one satisfier per requirement token.
+	// Pick one satisfier per requirement token.
 	var requiresEdges []RequiresEdge
 	for _, token := range sortedKeys(tokenCandidates) {
 		candidates := tokenCandidates[token]
@@ -289,11 +208,10 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		sortStrings(validCandidates)
 
 		if len(validCandidates) == 0 {
-			// No satisfier — will be caught by validation, skip here.
 			continue
 		}
 
-		chosen := pickSatisfier(validCandidates, g, depth)
+		chosen := pickSatisfier(validCandidates, g)
 
 		// Record decision if there were alternatives.
 		if len(validCandidates) > 1 {
@@ -325,8 +243,6 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		// Prune unchosen satisfiers if they're not needed for other reasons.
 		for _, c := range validCandidates {
 			if c != chosen {
-				// Check if this node is needed as a satisfier for another token
-				// or as a data-flow source.
 				neededElsewhere := false
 				for _, otherToken := range sortedKeys(tokenCandidates) {
 					if otherToken == token {
@@ -337,17 +253,7 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 						break
 					}
 				}
-				if !neededElsewhere {
-					// Check if any finalEdge references this node.
-					for _, edge := range finalEdges {
-						fromNode, _, _ := splitRef(edge.From)
-						if fromNode == c {
-							neededElsewhere = true
-							break
-						}
-					}
-				}
-				// Also check if it's a goal or condition-required node.
+				// Check if it's a goal or condition-required node.
 				for _, goal := range opts.Goals {
 					if c == goal {
 						neededElsewhere = true
@@ -364,9 +270,8 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		}
 	}
 
-	// Prune nodes that become unreachable after path selection.
-	// Include requires edges in reachability.
-	reachable := computeReachableWithRequires(opts.Goals, conditionRequired, finalEdges, requiresEdges)
+	// Prune nodes that become unreachable after satisfier selection.
+	reachable := computeReachable(opts.Goals, conditionRequired, requiresEdges)
 	for node := range includedNodes {
 		if !reachable[node] {
 			delete(includedNodes, node)
@@ -382,7 +287,7 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 	}
 	requiresEdges = filteredRequiresEdges
 
-	// 3b. Condition Before ordering
+	// Condition Before ordering
 	var virtualEdges []orderingEdge
 	for _, cr := range result.IncludedConditions {
 		for _, req := range cr.Condition.Require {
@@ -403,27 +308,19 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 		virtualEdges = append(virtualEdges, orderingEdge{from: re.From, to: re.To})
 	}
 
-	// 3c. Topological sort
-	sorted, err := chainTopoSort(includedNodes, finalEdges, virtualEdges)
+	// Topological sort
+	sorted, err := chainTopoSort(includedNodes, virtualEdges)
 	if err != nil {
 		return nil, &ChainError{Errors: []string{err.Error()}}
 	}
 
 	result.Nodes = sorted
-	result.Edges = finalEdges
 	result.RequiresEdges = requiresEdges
 
-	// 3d. Identify entry nodes (in-degree 0)
+	// Identify entry nodes (in-degree 0)
 	inDegree := map[string]int{}
 	for _, node := range sorted {
 		inDegree[node] = 0
-	}
-	for _, edge := range finalEdges {
-		fromNode, _, _ := splitRef(edge.From)
-		toNode, _, _ := splitRef(edge.To)
-		if includedNodes[fromNode] && includedNodes[toNode] {
-			inDegree[toNode]++
-		}
 	}
 	for _, ve := range virtualEdges {
 		if includedNodes[ve.from] && includedNodes[ve.to] {
@@ -439,134 +336,21 @@ func BackwardChain(g *Graph, opts ChainOptions) (*ChainResult, error) {
 	return result, nil
 }
 
-// computeDepth calculates BFS depth from entry nodes (in-degree 0) for each node.
-func computeDepth(nodes map[string]bool, edges []Edge) map[string]int {
-	adj := map[string]map[string]bool{}
-	inDeg := map[string]int{}
-	for node := range nodes {
-		adj[node] = map[string]bool{}
-		inDeg[node] = 0
-	}
-	for _, edge := range edges {
-		fromNode, _, err1 := splitRef(edge.From)
-		toNode, _, err2 := splitRef(edge.To)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		if !nodes[fromNode] || !nodes[toNode] {
-			continue
-		}
-		if !adj[fromNode][toNode] {
-			adj[fromNode][toNode] = true
-			inDeg[toNode]++
-		}
-	}
-
-	depth := map[string]int{}
-	var queue []string
-	for node := range nodes {
-		if inDeg[node] == 0 {
-			queue = append(queue, node)
-			depth[node] = 0
-		}
-	}
-
-	for len(queue) > 0 {
-		node := queue[0]
-		queue = queue[1:]
-		for neighbor := range adj[node] {
-			inDeg[neighbor]--
-			d := depth[node] + 1
-			if existing, ok := depth[neighbor]; !ok || d < existing {
-				depth[neighbor] = d
-			}
-			if inDeg[neighbor] == 0 {
-				queue = append(queue, neighbor)
-			}
-		}
-	}
-
-	return depth
-}
-
-// pickProducer selects the best producer for an input.
-// Prefers edges marked Preferred, then nodes marked Preferred, then shallowest depth.
-func pickProducer(producerEdges map[string][]Edge, depth map[string]int, g *Graph) string {
-	// 1. Edge-level preferred
-	for producer, edges := range producerEdges {
-		for _, e := range edges {
-			if e.Preferred {
-				return producer
-			}
-		}
-	}
-
-	// 2. Node-level preferred (reconciles with satisfier resolution)
-	if g != nil {
-		var preferredProducer string
-		for producer := range producerEdges {
-			if n := g.Nodes[producer]; n != nil && n.Preferred {
-				if preferredProducer == "" || producer < preferredProducer {
-					preferredProducer = producer
-				}
-			}
-		}
-		if preferredProducer != "" {
-			return preferredProducer
-		}
-	}
-
-	// 3. Shallowest depth, then alphabetical
-	bestProducer := ""
-	bestDepth := -1
-	for producer := range producerEdges {
-		d := depth[producer]
-		if bestProducer == "" || d < bestDepth || (d == bestDepth && producer < bestProducer) {
-			bestProducer = producer
-			bestDepth = d
-		}
-	}
-	return bestProducer
-}
-
 // pickSatisfier selects the best satisfier node for a requirement token.
-// Prefers nodes marked Preferred, then shallowest depth, then alphabetical.
-func pickSatisfier(candidates []string, g *Graph, depth map[string]int) string {
-	// Check for preferred nodes.
+// Prefers nodes marked Preferred, then alphabetical.
+func pickSatisfier(candidates []string, g *Graph) string {
 	for _, c := range candidates {
 		if n := g.Nodes[c]; n != nil && n.Preferred {
 			return c
 		}
 	}
-
-	// Pick shallowest depth, then alphabetical.
-	best := candidates[0]
-	bestDepth := depth[best]
-	for _, c := range candidates[1:] {
-		d := depth[c]
-		if d < bestDepth || (d == bestDepth && c < best) {
-			best = c
-			bestDepth = d
-		}
-	}
-	return best
+	return candidates[0] // already sorted alphabetically
 }
 
-// computeReachableWithRequires finds all nodes reachable by backward traversal
-// from goals, considering both data-flow edges and requires edges.
-func computeReachableWithRequires(goals []string, condRequired map[string]bool, edges []Edge, requiresEdges []RequiresEdge) map[string]bool {
+// computeReachable finds all nodes reachable by backward traversal
+// from goals, considering requires edges.
+func computeReachable(goals []string, condRequired map[string]bool, requiresEdges []RequiresEdge) map[string]bool {
 	reverseAdj := map[string]map[string]bool{}
-	for _, edge := range edges {
-		fromNode, _, err1 := splitRef(edge.From)
-		toNode, _, err2 := splitRef(edge.To)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		if reverseAdj[toNode] == nil {
-			reverseAdj[toNode] = map[string]bool{}
-		}
-		reverseAdj[toNode][fromNode] = true
-	}
 	for _, re := range requiresEdges {
 		if reverseAdj[re.To] == nil {
 			reverseAdj[re.To] = map[string]bool{}
@@ -598,7 +382,7 @@ func computeReachableWithRequires(goals []string, condRequired map[string]bool, 
 }
 
 // chainTopoSort performs Kahn's algorithm on the node set with deterministic ordering.
-func chainTopoSort(nodes map[string]bool, edges []Edge, virtual []orderingEdge) ([]string, error) {
+func chainTopoSort(nodes map[string]bool, virtual []orderingEdge) ([]string, error) {
 	adj := map[string]map[string]bool{}
 	inDeg := map[string]int{}
 	for node := range nodes {
@@ -614,15 +398,6 @@ func chainTopoSort(nodes map[string]bool, edges []Edge, virtual []orderingEdge) 
 			adj[from][to] = true
 			inDeg[to]++
 		}
-	}
-
-	for _, edge := range edges {
-		fromNode, _, err1 := splitRef(edge.From)
-		toNode, _, err2 := splitRef(edge.To)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		addEdge(fromNode, toNode)
 	}
 
 	for _, ve := range virtual {
@@ -693,22 +468,4 @@ func insertSorted(s []string, val string) []string {
 	copy(s[i+1:], s[i:])
 	s[i] = val
 	return s
-}
-
-// sortedInputKeysFrom returns deterministically ordered keys for an inputKey map.
-func sortedInputKeysFrom(m map[inputKey][]Edge) []inputKey {
-	keys := make([]inputKey, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	for i := 1; i < len(keys); i++ {
-		key := keys[i]
-		j := i - 1
-		for j >= 0 && (keys[j].node > key.node || (keys[j].node == key.node && keys[j].input > key.input)) {
-			keys[j+1] = keys[j]
-			j--
-		}
-		keys[j+1] = key
-	}
-	return keys
 }

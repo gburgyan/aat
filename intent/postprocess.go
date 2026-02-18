@@ -40,13 +40,8 @@ func buildStepIndex(p *plan.Plan) map[string]bool {
 // constraints. Dependencies come from three sources:
 //
 //  1. Actual from references in step values and selections (data flow)
-//  2. Graph edges for unwired inputs (potential data flow the engine resolves)
-//  3. Requires/satisfies token relationships (ordering constraints)
-//
-// Graph edge deps are only added for inputs that don't already have a from
-// reference to a different source. This prevents spurious cycles when a
-// sub-workflow input is auto-wired to a parent step but the graph has a
-// reverse edge between the sub-workflow nodes.
+//  2. Requires/satisfies token relationships (ordering constraints)
+//  3. Existing valid dependsOn entries
 func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 	// Build nodeToStepIDs: maps node name → list of step IDs using that node.
 	// For non-composed plans, step IDs == node names. For composed plans,
@@ -54,19 +49,6 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 	nodeToStepIDs := map[string][]string{}
 	for _, step := range p.Execution.Steps {
 		nodeToStepIDs[step.Node] = append(nodeToStepIDs[step.Node], step.StepID())
-	}
-
-	// Build per-input edge map: "targetNode.inputName" → set of sourceNodes.
-	inputEdgeSources := map[string]map[string]bool{}
-	for _, edge := range g.Edges {
-		fromNode := splitNodeName(edge.From)
-		if fromNode == "" {
-			continue
-		}
-		if inputEdgeSources[edge.To] == nil {
-			inputEdgeSources[edge.To] = map[string]bool{}
-		}
-		inputEdgeSources[edge.To][fromNode] = true
 	}
 
 	// Build requires/satisfies deps: targetNode → set of sourceNodes.
@@ -111,7 +93,6 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 
 	for i, step := range p.Execution.Steps {
 		stepID := step.StepID()
-		node := g.Nodes[step.Node]
 		required := map[string]bool{}
 
 		// 1. Dependencies from actual from references in values.
@@ -128,36 +109,12 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 			}
 		}
 
-		// 3. Graph edge deps — only for inputs not already wired via from.
-		if node != nil {
-			for _, inp := range node.Inputs {
-				edgeKey := step.Node + "." + inp.Name
-				sources := inputEdgeSources[edgeKey]
-				if len(sources) == 0 {
-					continue
-				}
-
-				// Check if this input is already wired.
-				sv, hasValue := step.Values[inp.Name]
-				if hasValue && (sv.From != "" || sv.FromSelection != "") {
-					// Input is wired — deps already handled in steps 1/2.
-					continue
-				}
-
-				// Input is unwired — add graph edge deps so the engine can
-				// resolve it at runtime.
-				for sourceNode := range sources {
-					addStepDeps(required, sourceNode, stepID)
-				}
-			}
-		}
-
-		// 4. Requires/satisfies token deps (ordering constraints).
+		// 3. Requires/satisfies token deps (ordering constraints).
 		for depNode := range tokenDeps[step.Node] {
 			addStepDeps(required, depNode, stepID)
 		}
 
-		// 5. Existing valid dependsOn entries (resolved via addStepDeps
+		// 4. Existing valid dependsOn entries (resolved via addStepDeps
 		// so bare node names get mapped to prefixed step IDs).
 		for _, dep := range step.DependsOn {
 			addStepDeps(required, dep, stepID)
@@ -174,23 +131,10 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 	}
 }
 
-// fixSelectionConfigs ensures that inputs fed by select edges have proper
-// from/select config (or named selection). If missing, defaults to strategy: first.
+// fixSelectionConfigs ensures named selections have a strategy set.
+// Defaults empty strategy to "first".
 func fixSelectionConfigs(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
-	// Build select edge index: "toNode.toInput" → "fromNode.fromOutput"
-	selectEdges := map[string]string{}
-	for _, edge := range g.Edges {
-		if edge.Select {
-			selectEdges[edge.To] = edge.From
-		}
-	}
-
 	for i, step := range p.Execution.Steps {
-		node := g.Nodes[step.Node]
-		if node == nil {
-			continue
-		}
-
 		if p.Execution.Steps[i].Values == nil {
 			p.Execution.Steps[i].Values = map[string]plan.StepValue{}
 		}
@@ -203,45 +147,12 @@ func fixSelectionConfigs(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool
 			}
 		}
 
-		for _, inp := range node.Inputs {
-			// Skip values that use fromSelection — they're handled by named selections
-			if sv, exists := step.Values[inp.Name]; exists && sv.FromSelection != "" {
-				continue
-			}
-
-			edgeKey := step.Node + "." + inp.Name
-			source, isSelect := selectEdges[edgeKey]
-			if !isSelect {
-				continue
-			}
-
-			// Check if source node is in the plan
-			sourceNode := splitNodeName(source)
-			if !stepIndex[sourceNode] {
-				continue
-			}
-
-			sv, exists := step.Values[inp.Name]
-			if !exists {
-				sv = plan.StepValue{}
-			}
-
-			// Ensure from is set
-			if sv.From == "" {
-				sv.From = source
-			}
-
-			// Ensure select config exists with a default strategy
-			if sv.Select == nil {
-				sv.Select = &plan.SelectionConfig{
-					Strategy: "first",
-					Field:    lookupElementFieldPath(g, source, inp.Name),
-				}
-			} else if sv.Select.Strategy == "" {
+		// Fix inline selection strategies: default empty strategy to "first"
+		for name, sv := range step.Values {
+			if sv.Select != nil && sv.Select.Strategy == "" {
 				sv.Select.Strategy = "first"
+				p.Execution.Steps[i].Values[name] = sv
 			}
-
-			p.Execution.Steps[i].Values[inp.Name] = sv
 		}
 	}
 }
@@ -371,20 +282,6 @@ func populateIntent(p *plan.Plan, ws *WorkflowSelection) {
 	populateConstraints(p, ws.Constraints)
 }
 
-// populateIntentFromGoal transfers constraint classification from GoalAnalysis
-// into the plan. Used by BuildSkeleton for backward-chaining-based scaffolding.
-func populateIntentFromGoal(p *plan.Plan, ga *GoalAnalysis) {
-	if ga == nil {
-		return
-	}
-
-	p.Intent.Goal = ga.Goal
-	if p.Intent.Description == "" {
-		p.Intent.Description = ga.Description
-	}
-
-	populateConstraints(p, ga.Constraints)
-}
 
 // populateConstraints backfills constraints from a ConstraintSet into the plan.
 func populateConstraints(p *plan.Plan, cs ConstraintSet) {
@@ -463,197 +360,6 @@ func resolveConstraintRefs(p *plan.Plan) {
 	for i := range p.Intent.Constraints.Soft {
 		p.Intent.Constraints.Soft[i].AppliesTo = resolveRefs(p.Intent.Constraints.Soft[i].AppliesTo)
 	}
-}
-
-// BuildSkeleton constructs a deterministic plan scaffold from the graph,
-// backward chain result, and goal analysis. All structural elements (steps,
-// dependsOn, from refs, select configs, cleanup, metadata, intent) are
-// computed from the graph. Only literal values for unfed inputs are left
-// empty for the LLM to fill.
-func BuildSkeleton(g *graph.Graph, cr *graph.ChainResult, ga *GoalAnalysis, prompt string, now time.Time) *plan.Plan {
-	p := &plan.Plan{}
-
-	// Build edge indexes from the chain's edges (not the full graph).
-	// allEdges: "toNode.toInput" → "fromNode.fromOutput"
-	allEdges := map[string]string{}
-	// selectEdges: same but only for select:true edges
-	selectEdges := map[string]string{}
-	for _, edge := range cr.Edges {
-		allEdges[edge.To] = edge.From
-		if edge.Select {
-			selectEdges[edge.To] = edge.From
-		}
-	}
-
-	// Build step index from chain nodes.
-	stepIndex := map[string]bool{}
-	for _, name := range cr.Nodes {
-		stepIndex[name] = true
-	}
-
-	// Build edge-based dependency map: targetNode → set of sourceNodes
-	edgeDeps := map[string]map[string]bool{}
-	for _, edge := range cr.Edges {
-		fromNode := splitNodeName(edge.From)
-		toNode := splitNodeName(edge.To)
-		if fromNode == "" || toNode == "" {
-			continue
-		}
-		if edgeDeps[toNode] == nil {
-			edgeDeps[toNode] = map[string]bool{}
-		}
-		edgeDeps[toNode][fromNode] = true
-	}
-
-	// Include requires edges in dependency map.
-	for _, re := range cr.RequiresEdges {
-		if edgeDeps[re.To] == nil {
-			edgeDeps[re.To] = map[string]bool{}
-		}
-		edgeDeps[re.To][re.From] = true
-	}
-
-	// Create steps in chain order.
-	for _, nodeName := range cr.Nodes {
-		node := g.Nodes[nodeName]
-		if node == nil {
-			continue
-		}
-
-		step := plan.Step{
-			Node:   nodeName,
-			IsGoal: ga != nil && nodeName == ga.Goal,
-			Values: map[string]plan.StepValue{},
-		}
-
-		// Compute dependsOn from chain edges.
-		deps := map[string]bool{}
-		for dep := range edgeDeps[nodeName] {
-			if stepIndex[dep] && dep != nodeName {
-				deps[dep] = true
-			}
-		}
-		depList := make([]string, 0, len(deps))
-		for dep := range deps {
-			depList = append(depList, dep)
-		}
-		sortStrings(depList)
-		step.DependsOn = depList
-
-		// Collect select-edge inputs grouped by source to detect multi-field extraction.
-		// source → []inputName
-		selectBySource := map[string][]string{}
-		for _, inp := range node.Inputs {
-			edgeKey := nodeName + "." + inp.Name
-			if source, isSelect := selectEdges[edgeKey]; isSelect {
-				sourceNode := splitNodeName(source)
-				if stepIndex[sourceNode] {
-					selectBySource[source] = append(selectBySource[source], inp.Name)
-				}
-			}
-		}
-
-		// Create named selections for sources with 2+ inputs.
-		namedSources := map[string]string{} // source → selection name
-		for source, inputs := range selectBySource {
-			if len(inputs) >= 2 {
-				selName := deriveSelectionName(source)
-				if step.Selections == nil {
-					step.Selections = map[string]plan.StepSelection{}
-				}
-				step.Selections[selName] = plan.StepSelection{
-					From:     source,
-					Strategy: "first",
-				}
-				namedSources[source] = selName
-			}
-		}
-
-		// For each input, wire up from/select, fromSelection, or leave empty for LLM.
-		for _, inp := range node.Inputs {
-			edgeKey := nodeName + "." + inp.Name
-
-			if source, isSelect := selectEdges[edgeKey]; isSelect {
-				sourceNode := splitNodeName(source)
-				if !stepIndex[sourceNode] {
-					continue
-				}
-				if selName, isNamed := namedSources[source]; isNamed {
-					// Use named selection
-					fieldName := lookupElementFieldPath(g, source, inp.Name)
-					step.Values[inp.Name] = plan.StepValue{
-						FromSelection: selName + "." + fieldName,
-					}
-				} else {
-					// Single input from this source: use old-style from+select
-					step.Values[inp.Name] = plan.StepValue{
-						From: source,
-						Select: &plan.SelectionConfig{
-							Strategy: "first",
-							Field:    lookupElementFieldPath(g, source, inp.Name),
-						},
-					}
-				}
-			} else if source, hasEdge := allEdges[edgeKey]; hasEdge {
-				// Scalar edge: set from only.
-				sourceNode := splitNodeName(source)
-				if stepIndex[sourceNode] {
-					step.Values[inp.Name] = plan.StepValue{
-						From: source,
-					}
-				}
-			} else if inp.Default != nil {
-				// Graph-level default: set as default value.
-				step.Values[inp.Name] = plan.StepValue{
-					Default: inp.Default,
-				}
-			}
-			// else: unfed input → leave absent, LLM will fill it.
-		}
-
-		p.Execution.Steps = append(p.Execution.Steps, step)
-	}
-
-	// Add cleanup steps.
-	addCleanupSteps(p, g, stepIndex)
-
-	// Set metadata and intent.
-	setMetadataWithTime(p, g, prompt, now)
-	populateIntentFromGoal(p, ga)
-
-	return p
-}
-
-// UnfedInputs returns a list of "node.input" keys that have no edge feeding
-// them and no graph-level default — these need LLM-provided values.
-func UnfedInputs(g *graph.Graph, cr *graph.ChainResult) []string {
-	// Build fed set from chain edges.
-	fed := map[string]bool{}
-	for _, edge := range cr.Edges {
-		fed[edge.To] = true
-	}
-
-	var unfed []string
-	for _, nodeName := range cr.Nodes {
-		node := g.Nodes[nodeName]
-		if node == nil {
-			continue
-		}
-		for _, inp := range node.Inputs {
-			key := nodeName + "." + inp.Name
-			if fed[key] {
-				continue
-			}
-			if inp.Optional {
-				continue
-			}
-			if inp.Default != nil {
-				continue
-			}
-			unfed = append(unfed, fmt.Sprintf("%s.%s (%s)", nodeName, inp.Name, inp.Type))
-		}
-	}
-	return unfed
 }
 
 // MergeLLMValues merges LLM-provided creative content into the skeleton plan,

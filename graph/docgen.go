@@ -31,7 +31,7 @@ func GenerateDocs(g *Graph, opts *DocGenOptions) string {
 
 	// Header
 	fmt.Fprintf(&b, "# %s\n\n", title)
-	fmt.Fprintf(&b, "%d nodes, %d edges", len(g.Nodes), len(g.Edges))
+	fmt.Fprintf(&b, "%d nodes", len(g.Nodes))
 	if g.Version != "" {
 		fmt.Fprintf(&b, " | Version %s", g.Version)
 	}
@@ -86,9 +86,6 @@ func GenerateDocs(g *Graph, opts *DocGenOptions) string {
 		writeNodeSection(&b, name, node, g, opts)
 	}
 
-	// Data flow table
-	writeDataFlowTable(&b, g)
-
 	// Cleanup table
 	writeCleanupTable(&b, g)
 
@@ -122,7 +119,7 @@ func GenerateDocsSplit(g *Graph, opts *DocGenOptions) map[string]string {
 	// Build index.md
 	var idx strings.Builder
 	fmt.Fprintf(&idx, "# %s\n\n", title)
-	fmt.Fprintf(&idx, "%d nodes, %d edges", len(g.Nodes), len(g.Edges))
+	fmt.Fprintf(&idx, "%d nodes", len(g.Nodes))
 	if g.Version != "" {
 		fmt.Fprintf(&idx, " | Version %s", g.Version)
 	}
@@ -181,9 +178,6 @@ func GenerateDocsSplit(g *Graph, opts *DocGenOptions) map[string]string {
 			name, name, desc, len(node.Inputs), len(node.Outputs))
 	}
 	idx.WriteString("\n")
-
-	// Data flow table
-	writeDataFlowTable(&idx, g)
 
 	// Cleanup table
 	writeCleanupTable(&idx, g)
@@ -305,42 +299,24 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 		b.WriteString("\n")
 	}
 
-	// Connections
-	outbound := collectOutboundNodes(name, g)
-	if len(outbound) > 0 {
-		fmt.Fprintf(b, "**Provides data to:** %s\n\n", strings.Join(outbound, ", "))
+	// Connections via requires/satisfies
+	satisfies := collectSatisfiedNodes(name, g)
+	if len(satisfies) > 0 {
+		fmt.Fprintf(b, "**Provides data to:** %s\n\n", strings.Join(satisfies, ", "))
 	}
 
-	inbound := collectInboundNodes(name, g)
-	if len(inbound) > 0 {
-		fmt.Fprintf(b, "**Receives data from:** %s\n\n", strings.Join(inbound, ", "))
+	requires := collectRequiredNodes(name, g)
+	if len(requires) > 0 {
+		fmt.Fprintf(b, "**Receives data from:** %s\n\n", strings.Join(requires, ", "))
 	}
-}
-
-// writeDataFlowTable writes the data flow section.
-func writeDataFlowTable(b *strings.Builder, g *Graph) {
-	if len(g.Edges) == 0 {
-		return
-	}
-	b.WriteString("## Data Flow\n\n")
-	b.WriteString("| From | To | Select |\n")
-	b.WriteString("|------|----|--------|\n")
-	for _, edge := range g.Edges {
-		sel := ""
-		if edge.Select {
-			sel = "\u2713"
-		}
-		fmt.Fprintf(b, "| %s | %s | %s |\n", edge.From, edge.To, sel)
-	}
-	b.WriteString("\n")
 }
 
 // writeCleanupTable writes the cleanup section.
 func writeCleanupTable(b *strings.Builder, g *Graph) {
 	type cleanupEntry struct {
-		node    string
+		node     string
 		cleansUp string
-		desc    string
+		desc     string
 	}
 	var entries []cleanupEntry
 	for _, name := range sortedKeys(g.Nodes) {
@@ -352,9 +328,9 @@ func writeCleanupTable(b *strings.Builder, g *Graph) {
 				desc = cleanupNode.Description
 			}
 			entries = append(entries, cleanupEntry{
-				node:    node.Cleanup,
+				node:     node.Cleanup,
 				cleansUp: name,
-				desc:    desc,
+				desc:     desc,
 			})
 		}
 	}
@@ -370,35 +346,41 @@ func writeCleanupTable(b *strings.Builder, g *Graph) {
 	b.WriteString("\n")
 }
 
-// findEntryNodes returns nodes with no inbound data edges (in-degree 0), sorted.
+// findEntryNodes returns nodes with no requires tokens (in-degree 0 in the
+// requires/satisfies graph), sorted.
 func findEntryNodes(g *Graph) []string {
-	hasInbound := make(map[string]bool)
-	for _, edge := range g.Edges {
-		toNode, _, err := splitRef(edge.To)
-		if err != nil {
-			continue
-		}
-		hasInbound[toNode] = true
-	}
-
 	var entry []string
 	for _, name := range sortedKeys(g.Nodes) {
-		if !hasInbound[name] {
+		node := g.Nodes[name]
+		if len(node.Requires) == 0 {
 			entry = append(entry, name)
 		}
 	}
 	return entry
 }
 
-// topoSortNodes returns graph nodes in dependency order using Kahn's algorithm.
-// Falls back to alphabetical order if cycle detection fails.
+// topoSortNodes returns graph nodes in dependency order using Kahn's algorithm
+// on the requires/satisfies graph. Falls back to alphabetical order if cycle
+// detection fails.
 func topoSortNodes(g *Graph) []string {
 	nodes := make(map[string]bool)
 	for name := range g.Nodes {
 		nodes[name] = true
 	}
 
-	sorted, err := chainTopoSort(nodes, g.Edges, nil)
+	// Build virtual edges from requires/satisfies
+	var virtual []orderingEdge
+	for name, node := range g.Nodes {
+		for _, token := range node.Requires {
+			for _, satisfier := range g.SatisfiersByToken[token] {
+				if satisfier != name {
+					virtual = append(virtual, orderingEdge{from: satisfier, to: name})
+				}
+			}
+		}
+	}
+
+	sorted, err := chainTopoSort(nodes, virtual)
 	if err != nil {
 		// Fallback to alphabetical
 		return sortedKeys(g.Nodes)
@@ -468,38 +450,47 @@ func hasExamplesForNode(nodeName string, node *Node, opts *DocGenOptions) bool {
 	return false
 }
 
-// collectOutboundNodes returns unique sorted node names that receive data from nodeName.
-func collectOutboundNodes(nodeName string, g *Graph) []string {
+// collectSatisfiedNodes returns unique sorted node names that depend on nodeName
+// (nodes that require tokens this node satisfies).
+func collectSatisfiedNodes(nodeName string, g *Graph) []string {
+	node := g.Nodes[nodeName]
+	if node == nil {
+		return nil
+	}
 	seen := make(map[string]bool)
 	var result []string
-	for _, edge := range g.Edges {
-		fromNode, _, err1 := splitRef(edge.From)
-		toNode, _, err2 := splitRef(edge.To)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		if fromNode == nodeName && !seen[toNode] {
-			seen[toNode] = true
-			result = append(result, toNode)
+	for _, token := range node.Satisfies {
+		for reqName, reqNode := range g.Nodes {
+			if reqName == nodeName {
+				continue
+			}
+			for _, rt := range reqNode.Requires {
+				if rt == token && !seen[reqName] {
+					seen[reqName] = true
+					result = append(result, reqName)
+				}
+			}
 		}
 	}
 	sort.Strings(result)
 	return result
 }
 
-// collectInboundNodes returns unique sorted node names that provide data to nodeName.
-func collectInboundNodes(nodeName string, g *Graph) []string {
+// collectRequiredNodes returns unique sorted node names that nodeName depends on
+// (nodes that satisfy tokens this node requires).
+func collectRequiredNodes(nodeName string, g *Graph) []string {
+	node := g.Nodes[nodeName]
+	if node == nil {
+		return nil
+	}
 	seen := make(map[string]bool)
 	var result []string
-	for _, edge := range g.Edges {
-		fromNode, _, err1 := splitRef(edge.From)
-		toNode, _, err2 := splitRef(edge.To)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		if toNode == nodeName && !seen[fromNode] {
-			seen[fromNode] = true
-			result = append(result, fromNode)
+	for _, token := range node.Requires {
+		for _, satisfier := range g.SatisfiersByToken[token] {
+			if satisfier != nodeName && !seen[satisfier] {
+				seen[satisfier] = true
+				result = append(result, satisfier)
+			}
 		}
 	}
 	sort.Strings(result)

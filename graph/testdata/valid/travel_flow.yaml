@@ -4,6 +4,7 @@ nodes:
   searchFlights:
     description: "Search for available flights"
     adapter: searchFlights
+    satisfies: [flightsSearched]
     inputs:
       - name: origin
         type: airportCode
@@ -46,6 +47,7 @@ nodes:
   selectFare:
     description: "Select a specific fare from search results"
     adapter: selectFare
+    requires: [flightsSearched]
     inputs:
       - name: searchId
         type: string
@@ -80,13 +82,6 @@ nodes:
     outputs:
       - name: cancelled
         type: boolean
-
-edges:
-  - from: searchFlights.searchId
-    to: selectFare.searchId
-  - from: searchFlights.flights
-    to: selectFare.flightId
-    select: true
 
 conditions:
   - when: "route.type == international"

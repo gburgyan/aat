@@ -72,7 +72,6 @@ func Generate(model *v3high.Document, specFile string) (*GenerateResult, error) 
 			Version: "1.0.0",
 			OAS:     specFile,
 			Nodes:   make(map[string]*graph.Node),
-			Edges:   []graph.Edge{},
 		},
 	}
 

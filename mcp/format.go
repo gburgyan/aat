@@ -66,18 +66,22 @@ func formatNodeDetail(node *graph.Node, g *graph.Graph) string {
 		b.WriteString(formatOutputTable(node.Outputs))
 	}
 
-	// Inbound edges (edges where To targets this node)
-	inbound := collectInboundEdges(node.Name, g)
-	if len(inbound) > 0 {
-		b.WriteString("\n## Inbound Edges\n\n")
-		b.WriteString(formatEdgeList(inbound))
+	// Requires (nodes this node depends on)
+	requires := collectRequiredNodeNames(node.Name, g)
+	if len(requires) > 0 {
+		b.WriteString("\n## Depends On\n\n")
+		for _, name := range requires {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
 	}
 
-	// Outbound edges (edges where From references this node)
-	outbound := collectOutboundEdges(node.Name, g)
-	if len(outbound) > 0 {
-		b.WriteString("\n## Outbound Edges\n\n")
-		b.WriteString(formatEdgeList(outbound))
+	// Satisfies (nodes that depend on this node)
+	satisfies := collectSatisfiedNodeNames(node.Name, g)
+	if len(satisfies) > 0 {
+		b.WriteString("\n## Depended On By\n\n")
+		for _, name := range satisfies {
+			fmt.Fprintf(&b, "- %s\n", name)
+		}
 	}
 
 	return b.String()
@@ -182,25 +186,6 @@ func formatOutputTable(outputs []graph.Output) string {
 	return b.String()
 }
 
-// formatEdgeList returns a Markdown bullet list for a slice of edges.
-func formatEdgeList(edges []graph.Edge) string {
-	if len(edges) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	for _, edge := range edges {
-		annotations := ""
-		if edge.Select {
-			annotations += " [select]"
-		}
-		if edge.Preferred {
-			annotations += " [preferred]"
-		}
-		fmt.Fprintf(&b, "- %s → %s%s\n", edge.From, edge.To, annotations)
-	}
-	return b.String()
-}
-
 // formatChainTrace formats a backward chain result for display as an MCP tool response.
 func formatChainTrace(cr *graph.ChainResult, g *graph.Graph) string {
 	var b strings.Builder
@@ -234,13 +219,6 @@ func formatChainTrace(cr *graph.ChainResult, g *graph.Graph) string {
 		}
 	}
 
-	// Data flow edges
-	if len(cr.Edges) > 0 {
-		b.WriteString("## Data Flow\n\n")
-		b.WriteString(formatEdgeList(cr.Edges))
-		b.WriteString("\n")
-	}
-
 	// Decisions
 	if len(cr.Decisions) > 0 {
 		b.WriteString("## Chain Decisions\n\n")
@@ -256,36 +234,51 @@ func formatChainTrace(cr *graph.ChainResult, g *graph.Graph) string {
 	return b.String()
 }
 
-// collectInboundEdges returns edges where To targets the named node.
-func collectInboundEdges(nodeName string, g *graph.Graph) []graph.Edge {
-	var edges []graph.Edge
-	for _, edge := range g.Edges {
-		toNode := edgeRefNode(edge.To)
-		if toNode == nodeName {
-			edges = append(edges, edge)
+// collectRequiredNodeNames returns sorted node names that the given node depends on
+// (nodes that satisfy tokens this node requires).
+func collectRequiredNodeNames(nodeName string, g *graph.Graph) []string {
+	node := g.Nodes[nodeName]
+	if node == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var result []string
+	for _, token := range node.Requires {
+		for _, satisfier := range g.SatisfiersByToken[token] {
+			if satisfier != nodeName && !seen[satisfier] {
+				seen[satisfier] = true
+				result = append(result, satisfier)
+			}
 		}
 	}
-	return edges
+	sort.Strings(result)
+	return result
 }
 
-// collectOutboundEdges returns edges where From references the named node.
-func collectOutboundEdges(nodeName string, g *graph.Graph) []graph.Edge {
-	var edges []graph.Edge
-	for _, edge := range g.Edges {
-		fromNode := edgeRefNode(edge.From)
-		if fromNode == nodeName {
-			edges = append(edges, edge)
+// collectSatisfiedNodeNames returns sorted node names that depend on the given node
+// (nodes that require tokens this node satisfies).
+func collectSatisfiedNodeNames(nodeName string, g *graph.Graph) []string {
+	node := g.Nodes[nodeName]
+	if node == nil {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var result []string
+	for _, token := range node.Satisfies {
+		for reqName, reqNode := range g.Nodes {
+			if reqName == nodeName {
+				continue
+			}
+			for _, rt := range reqNode.Requires {
+				if rt == token && !seen[reqName] {
+					seen[reqName] = true
+					result = append(result, reqName)
+				}
+			}
 		}
 	}
-	return edges
-}
-
-// edgeRefNode extracts the node name from an edge reference like "node.output".
-func edgeRefNode(ref string) string {
-	if idx := strings.Index(ref, "."); idx >= 0 {
-		return ref[:idx]
-	}
-	return ref
+	sort.Strings(result)
+	return result
 }
 
 // sortedNodeNames returns graph node names in sorted order.

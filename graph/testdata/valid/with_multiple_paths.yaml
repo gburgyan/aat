@@ -4,6 +4,7 @@ nodes:
   source:
     description: "Primary data source"
     adapter: source
+    satisfies: [dataReady]
     inputs: []
     outputs:
       - name: data
@@ -12,6 +13,8 @@ nodes:
   transform:
     description: "Transform data (longer path)"
     adapter: transform
+    requires: [dataReady]
+    satisfies: [resultReady]
     inputs:
       - name: data
         type: string
@@ -22,6 +25,7 @@ nodes:
   shortcut:
     description: "Direct shortcut (shorter path)"
     adapter: shortcut
+    satisfies: [resultReady]
     inputs: []
     outputs:
       - name: result
@@ -30,6 +34,9 @@ nodes:
   preferredSource:
     description: "Preferred path source"
     adapter: preferredSource
+    preferred: true
+    requires: [dataReady]
+    satisfies: [resultReady]
     inputs:
       - name: data
         type: string
@@ -40,27 +47,10 @@ nodes:
   consumer:
     description: "Consumes result from one of the paths"
     adapter: consumer
+    requires: [resultReady]
     inputs:
       - name: result
         type: string
     outputs:
       - name: output
         type: string
-
-edges:
-  # Path 1: source → transform → consumer (longer, depth 2)
-  - from: source.data
-    to: transform.data
-  - from: transform.result
-    to: consumer.result
-
-  # Path 2: shortcut → consumer (shorter, depth 1)
-  - from: shortcut.result
-    to: consumer.result
-
-  # Path 3: source → preferredSource → consumer (preferred edge)
-  - from: source.data
-    to: preferredSource.data
-  - from: preferredSource.result
-    to: consumer.result
-    preferred: true

@@ -1039,3 +1039,283 @@ func TestResolveElementFields(t *testing.T) {
 	fields = resolveElementFields(g, "nodot")
 	assert.Nil(t, fields)
 }
+
+// --- validateTargetedResponse tests ---
+
+func TestValidateTargetedResponse_CleanResponse(t *testing.T) {
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "JFK", "search.destination": "LHR"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{
+		"search.origin":      true,
+		"search.destination": true,
+	}
+
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string"},
+		{StepID: "search", InputName: "destination", InputType: "string"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
+}
+
+func TestValidateTargetedResponse_MissingValue(t *testing.T) {
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "JFK"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{
+		"search.origin":      true,
+		"search.destination": true,
+	}
+
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string"},
+		{StepID: "search", InputName: "destination", InputType: "string"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+
+	require.Len(t, issues, 1)
+	assert.Equal(t, "search.destination", issues[0].Key)
+	assert.Equal(t, "missing_value", issues[0].Kind)
+}
+
+func TestValidateTargetedResponse_MissingValueWithDefault(t *testing.T) {
+	// If the input has a CurrentDefault, it's not required from the LLM.
+	resp := &TargetedResponse{
+		Values:       map[string]any{},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{
+		"search.origin": true,
+	}
+
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", CurrentDefault: "DEN"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
+}
+
+func TestValidateTargetedResponse_NonLiteralObject(t *testing.T) {
+	resp := &TargetedResponse{
+		Values: map[string]any{
+			"search.origin": map[string]any{"from": "setup.origin", "select": "first"},
+		},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.origin": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+
+	require.Len(t, issues, 1)
+	assert.Equal(t, "search.origin", issues[0].Key)
+	assert.Equal(t, "non_literal_value", issues[0].Kind)
+	assert.Contains(t, issues[0].Message, "object")
+}
+
+func TestValidateTargetedResponse_NonLiteralArray(t *testing.T) {
+	resp := &TargetedResponse{
+		Values: map[string]any{
+			"search.tags": []any{"a", "b"},
+		},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.tags": true}
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "tags", InputType: "string"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+
+	require.Len(t, issues, 1)
+	assert.Equal(t, "non_literal_value", issues[0].Kind)
+	assert.Contains(t, issues[0].Message, "array")
+}
+
+func TestValidateTargetedResponse_InvalidStrategy(t *testing.T) {
+	resp := &TargetedResponse{
+		Values: map[string]any{},
+		Selections: map[string]TargetedSelection{
+			"process.item": {Strategy: "cheapest"},
+		},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	issues := validateTargetedResponse(resp, map[string]bool{}, nil, nil)
+
+	require.Len(t, issues, 1)
+	assert.Equal(t, "process.item", issues[0].Key)
+	assert.Equal(t, "invalid_strategy", issues[0].Kind)
+	assert.Contains(t, issues[0].Message, "cheapest")
+}
+
+func TestValidateTargetedResponse_InvalidFilterSyntax(t *testing.T) {
+	resp := &TargetedResponse{
+		Values: map[string]any{},
+		Selections: map[string]TargetedSelection{
+			"process.item": {Strategy: "match", Filter: "price >>== 100"},
+		},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	issues := validateTargetedResponse(resp, map[string]bool{}, nil, nil)
+
+	require.Len(t, issues, 1)
+	assert.Equal(t, "invalid_filter_syntax", issues[0].Kind)
+}
+
+func TestValidateTargetedResponse_InvalidFilterField(t *testing.T) {
+	resp := &TargetedResponse{
+		Values: map[string]any{},
+		Selections: map[string]TargetedSelection{
+			"process.item": {Strategy: "match", Filter: "departureDate == '2026-03-10'"},
+		},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	selContexts := []SelectionContext{
+		{
+			StepID:        "process",
+			SelectionName: "item",
+			ElementFields: []string{"carrier (string)", "stops (integer)"},
+		},
+	}
+
+	issues := validateTargetedResponse(resp, map[string]bool{}, nil, selContexts)
+
+	require.Len(t, issues, 1)
+	assert.Equal(t, "invalid_filter_field", issues[0].Kind)
+	assert.Contains(t, issues[0].Message, "departureDate")
+}
+
+func TestValidateTargetedResponse_ValidFilterField(t *testing.T) {
+	resp := &TargetedResponse{
+		Values: map[string]any{},
+		Selections: map[string]TargetedSelection{
+			"process.item": {Strategy: "match", Filter: "carrier == 'UA'"},
+		},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	selContexts := []SelectionContext{
+		{
+			StepID:        "process",
+			SelectionName: "item",
+			ElementFields: []string{"carrier (string)", "stops (integer)"},
+		},
+	}
+
+	issues := validateTargetedResponse(resp, map[string]bool{}, nil, selContexts)
+	assert.Empty(t, issues)
+}
+
+func TestValidateTargetedResponse_MultipleIssues(t *testing.T) {
+	resp := &TargetedResponse{
+		Values: map[string]any{
+			"search.origin": map[string]any{"from": "x"},
+		},
+		Selections: map[string]TargetedSelection{
+			"process.item": {Strategy: "bogus"},
+		},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{
+		"search.origin":      true,
+		"search.destination": true,
+	}
+
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string"},
+		{StepID: "search", InputName: "destination", InputType: "string"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+
+	// Should find: missing destination, non-literal origin, invalid strategy
+	assert.Len(t, issues, 3)
+
+	kinds := map[string]bool{}
+	for _, iss := range issues {
+		kinds[iss.Kind] = true
+	}
+	assert.True(t, kinds["missing_value"])
+	assert.True(t, kinds["non_literal_value"])
+	assert.True(t, kinds["invalid_strategy"])
+}
+
+func TestValidateTargetedResponse_WiredInputsIgnored(t *testing.T) {
+	// Values for non-unfed inputs should not trigger non_literal_value checks.
+	resp := &TargetedResponse{
+		Values: map[string]any{
+			"process.itemId": map[string]any{"from": "search.id"},
+		},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	// itemId is NOT in unfedSet — it's wired.
+	unfedSet := map[string]bool{}
+
+	issues := validateTargetedResponse(resp, unfedSet, nil, nil)
+	assert.Empty(t, issues)
+}
+
+func TestValidateTargetedResponse_ValidStrategiesAccepted(t *testing.T) {
+	strategies := []string{"first", "last", "random", "index", "min", "max", "match", "llm", ""}
+	for _, s := range strategies {
+		resp := &TargetedResponse{
+			Values: map[string]any{},
+			Selections: map[string]TargetedSelection{
+				"step.sel": {Strategy: s},
+			},
+			Assertions:   map[string][]TargetedAssertion{},
+			Descriptions: map[string]string{},
+		}
+
+		issues := validateTargetedResponse(resp, map[string]bool{}, nil, nil)
+		assert.Empty(t, issues, "strategy %q should be valid", s)
+	}
+}
+
+func TestFormatValidationIssues(t *testing.T) {
+	issues := []TargetedValidationIssue{
+		{Key: "a.b", Kind: "missing_value", Message: "a.b: missing"},
+		{Key: "c.d", Kind: "non_literal_value", Message: "c.d: got object"},
+	}
+
+	msgs := formatValidationIssues(issues)
+
+	require.Len(t, msgs, 2)
+	assert.Equal(t, "a.b: missing", msgs[0])
+	assert.Equal(t, "c.d: got object", msgs[1])
+}

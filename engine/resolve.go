@@ -31,17 +31,6 @@ type ResolveContext struct {
 	Plan      *plan.Plan             // for constraint classification (may be nil)
 	Tracker   *RelaxationTracker     // per-step relaxation tracker (may be nil)
 	Registry  *adapter.Registry      // may be nil; enables template-side elementField resolution
-
-	// NodeToStepID maps graph node names to step IDs for unique nodes.
-	// Used to translate graph edge references (which use node names) to
-	// RunState keys (which use step IDs). Only populated when step aliasing
-	// is active (i.e., some step has an explicit ID).
-	NodeToStepID map[string]string // may be nil
-
-	// DuplicateNodes contains graph node names that appear in multiple steps.
-	// Graph-edge auto-wiring is disabled for these nodes; the plan must use
-	// explicit from/fromSelection references with step IDs.
-	DuplicateNodes map[string]bool // may be nil
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -54,9 +43,9 @@ func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunS
 
 // ResolveInputsWithContext resolves all input values for a step by checking
 // sources in priority order:
-//  1. Graph edge targeting this input → upstream output from RunState
-//  2. SELECT edge → select from upstream array using strategy, extract field via gjson
-//  3. Plan StepValue.Default (with expression evaluation, constraint checking, fallback pools)
+//  1. Plan-level fromSelection (named selection reference)
+//  2. Plan-level from (explicit upstream reference, with or without select)
+//  3. Plan default (literal value, expression, or fallback pool)
 //  4. Graph node Input.Default
 //  5. Optional → skip (not included in result)
 //  6. None → error: required input has no value
@@ -65,37 +54,6 @@ func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunS
 // checking, and fallback pool iteration are activated at priority 3. When rctx
 // is nil, the behavior is identical to the basic ResolveInputs.
 func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.Node, g *graph.Graph, state *RunState, rctx *ResolveContext) (map[string]any, []SelectionDecision, []ValueResolution, error) {
-	// Build edge lookup for this node: inputName → edge.
-	// Skip graph-edge auto-wiring for duplicate nodes (same graph node in
-	// multiple plan steps) — those require explicit from/fromSelection.
-	// When multiple edges target the same input, prefer edges from nodes
-	// that have been executed (are in RunState) over those that haven't.
-	edgeMap := make(map[string]graph.Edge)
-	isDuplicateNode := rctx != nil && rctx.DuplicateNodes != nil && rctx.DuplicateNodes[step.Node]
-	if !isDuplicateNode {
-		for _, edge := range g.Edges {
-			toNode, toField, err := splitRef(edge.To)
-			if err != nil {
-				continue
-			}
-			if toNode == step.Node {
-				existing, exists := edgeMap[toField]
-				if !exists {
-					edgeMap[toField] = edge
-				} else {
-					// Prefer edge from a node that has outputs in state.
-					existingFrom, _, _ := splitRef(existing.From)
-					newFrom, _, _ := splitRef(edge.From)
-					_, existingRan := state.GetAllOutputs(existingFrom)
-					_, newRan := state.GetAllOutputs(newFrom)
-					if !existingRan && newRan {
-						edgeMap[toField] = edge
-					}
-				}
-			}
-		}
-	}
-
 	inputs := make(map[string]any)
 	var decisions []SelectionDecision
 	var resolutions []ValueResolution
@@ -132,7 +90,7 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 		default:
 		}
 
-		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, g, edgeMap, state, dedupCache, namedSelections, rctx, ectx, inputs)
+		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, g, state, dedupCache, namedSelections, rctx, ectx, inputs)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
@@ -279,12 +237,11 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 // Resolution priority:
 //  1. Plan-level fromSelection (named selection reference)
 //  2. Plan-level from (explicit upstream reference, with or without select)
-//  3. Graph edge (auto-wired or explicit edges from the graph definition)
-//  4. Plan default (literal value, expression, or fallback pool)
-//  5. Graph node Input.Default
-//  6. Optional → skip
-//  7. Error: required input has no value
-func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, g *graph.Graph, edgeMap map[string]graph.Edge, state *RunState, dedupCache map[string]*selectionResult, namedSelections map[string]*namedSelectionEntry, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
+//  3. Plan default (literal value, expression, or fallback pool)
+//  4. Graph node Input.Default
+//  5. Optional → skip
+//  6. Error: required input has no value
+func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, namedSelections map[string]*namedSelectionEntry, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
 	// 0. Empty StepValue (e.g., `returnDate: {}`) → treat as explicitly absent.
 	// Skip all plan-level resolution and graph edges; fall through to
 	// graph default / optional skip / required error.
@@ -394,83 +351,7 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 		return val, nil, res, nil
 	}
 
-	// 3. Graph edge (auto-wired or explicit)
-	if edge, ok := edgeMap[input.Name]; ok {
-		fromNode, fromField, err := splitRef(edge.From)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("invalid edge source %q: %w", edge.From, err)
-		}
-
-		// Translate graph node name to step ID for RunState lookup.
-		// Graph edges use node names, but RunState keys by step IDs.
-		lookupKey := fromNode
-		if rctx != nil && rctx.NodeToStepID != nil {
-			if sid, ok := rctx.NodeToStepID[fromNode]; ok {
-				lookupKey = sid
-			}
-		}
-
-		// For optional inputs where the plan step has no value entry at all,
-		// skip graph edges. This prevents auto-wired edges from filling
-		// optional inputs that the plan author intentionally omitted
-		// (e.g., return-leg inputs in a one-way booking plan).
-		// If the source node wasn't executed, also skip for optional inputs
-		// even if they have a plan value entry.
-		_, hasStepValue := step.Values[input.Name]
-		_, sourceRan := state.GetAllOutputs(lookupKey)
-		if input.Optional && !hasStepValue {
-			goto fallthrough_edge
-		}
-		if !sourceRan && (input.Optional || input.Default != nil) {
-			goto fallthrough_edge
-		}
-
-		if edge.Select {
-			// SELECT edge: select from upstream array using strategy
-			val, decision, err := resolveSelectEdge(ctx, lookupKey, fromField, input.Name, step, g, state, dedupCache, rctx)
-			if err != nil {
-				// If the source node wasn't executed (not in plan) and the
-				// input is optional, fall through to defaults/skip.
-				if input.Optional || input.Default != nil {
-					goto fallthrough_edge
-				}
-				return nil, nil, nil, err
-			}
-			res := &ValueResolution{
-				InputName:  input.Name,
-				Source:     "select_edge",
-				FinalValue: val,
-				FromStep:   lookupKey,
-				FromOutput: fromField,
-				PoolIndex:  -1,
-			}
-			return val, decision, res, nil
-		}
-
-		// Regular edge: get the output value directly
-		// Edge-resolved values are NOT subject to expression evaluation.
-		val, err := state.GetOutput(lookupKey, fromField)
-		if err != nil {
-			// If the source node wasn't executed (not in plan) and the
-			// input is optional, fall through to defaults/skip.
-			if input.Optional || input.Default != nil {
-				goto fallthrough_edge
-			}
-			return nil, nil, nil, fmt.Errorf("edge from %q: %w", edge.From, err)
-		}
-		res := &ValueResolution{
-			InputName:  input.Name,
-			Source:     "edge",
-			FinalValue: val,
-			FromStep:   lookupKey,
-			FromOutput: fromField,
-			PoolIndex:  -1,
-		}
-		return val, nil, res, nil
-	}
-fallthrough_edge:
-
-	// 4. Plan StepValue default / fallback pool
+	// 3. Plan StepValue default / fallback pool
 	if sv, ok := step.Values[input.Name]; ok {
 		if sv.Default != nil {
 			// Enhanced path: evaluate expressions, check constraints, try fallback pool
@@ -505,7 +386,7 @@ fallthrough_edge:
 		return input.Default, nil, res, nil
 	}
 
-	// 5. Optional → skip
+	// 5. Optional → skip (not included in result)
 	if input.Optional {
 		res := &ValueResolution{
 			InputName: input.Name,
@@ -515,124 +396,8 @@ fallthrough_edge:
 		return nil, nil, res, nil
 	}
 
-	// 6. No value → error
+	// 6. Required input with no value → error
 	return nil, nil, nil, fmt.Errorf("required input has no value")
-}
-
-// resolveSelectEdge handles a SELECT edge: the source is an array, select using
-// strategy, and if a plan-level select config exists for this input, extract
-// the specified field.
-func resolveSelectEdge(ctx context.Context, fromNode, fromField, inputName string, step plan.Step, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext) (any, *SelectionDecision, error) {
-	arr, err := getArrayFromState(fromNode, fromField, state)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Get plan-level select config for this input (if any)
-	var sel *plan.SelectionConfig
-	if sv, ok := step.Values[inputName]; ok && sv.Select != nil {
-		sel = sv.Select
-	}
-
-	// LLM selection strategy — check dedup cache first
-	if sel != nil && sel.Strategy == "llm" {
-		llmKey := llmDedupKey(fromNode, fromField, sel)
-		if cached, ok := dedupCache[llmKey]; ok {
-			// Reuse cached element, extract field if needed
-			decision := &SelectionDecision{
-				InputName:     inputName,
-				SourceNode:    fromNode,
-				SourceField:   fromField,
-				SourceSize:    len(arr),
-				FilteredSize:  cached.filteredSize,
-				Strategy:      "llm",
-				SelectedIndex: cached.index,
-			}
-			if sel.Field != "" {
-				resolvedField := resolveElementFieldPath(rctx, g, fromNode, fromField, sel.Field)
-				val, exErr := extractField(cached.element, resolvedField)
-				if exErr != nil {
-					return nil, nil, exErr
-				}
-				return val, decision, nil
-			}
-			return cached.element, decision, nil
-		}
-
-		result, llmRec, llmErr := llmSelectElement(ctx, rctx, arr, sel, inputName, g, fromNode, fromField)
-		if llmErr != nil {
-			return nil, nil, fmt.Errorf("select edge from %s.%s: %w", fromNode, fromField, llmErr)
-		}
-		dedupCache[llmKey] = result
-		decision := &SelectionDecision{
-			InputName:     inputName,
-			SourceNode:    fromNode,
-			SourceField:   fromField,
-			SourceSize:    len(arr),
-			FilteredSize:  result.filteredSize,
-			Strategy:      "llm",
-			SelectedIndex: result.index,
-			LLMCall:       llmRec,
-		}
-		if sel.Field != "" {
-			resolvedField := resolveElementFieldPath(rctx, g, fromNode, fromField, sel.Field)
-			val, exErr := extractField(result.element, resolvedField)
-			if exErr != nil {
-				return nil, nil, exErr
-			}
-			return val, decision, nil
-		}
-		return result.element, decision, nil
-	}
-
-	// Resolve elementField names to extraction keys for applySelection (min/max SortField)
-	resolvedSel := resolveSelectionFields(sel, rctx, g, fromNode, fromField)
-
-	// Check dedup cache
-	key := dedupKey(fromNode, fromField, sel)
-	cached, hasCached := dedupCache[key]
-
-	var result *selectionResult
-	var filterRelaxed bool
-	if hasCached {
-		result = cached
-	} else {
-		result, err = applySelection(arr, resolvedSel)
-		if err != nil {
-			relaxedResult, wasRelaxed, relaxErr := tryRelaxFilter(rctx, step.Node, inputName, arr, resolvedSel, err)
-			if relaxErr != nil || !wasRelaxed {
-				return nil, nil, fmt.Errorf("select edge from %s.%s: %w", fromNode, fromField, err)
-			}
-			result = relaxedResult
-			filterRelaxed = true
-		}
-		dedupCache[key] = result
-	}
-
-	decision := &SelectionDecision{
-		InputName:     inputName,
-		SourceNode:    fromNode,
-		SourceField:   fromField,
-		SourceSize:    len(arr),
-		FilteredSize:  result.filteredSize,
-		Strategy:      strategyName(sel),
-		SelectedIndex: result.index,
-		FilterRelaxed: filterRelaxed,
-	}
-	if sel != nil && sel.Filter != "" {
-		decision.FilterExpr = sel.Filter
-	}
-
-	// Extract field if specified — use resolved gjson path
-	if resolvedSel != nil && resolvedSel.Field != "" {
-		val, err := extractField(result.element, resolvedSel.Field)
-		if err != nil {
-			return nil, nil, err
-		}
-		return val, decision, nil
-	}
-
-	return result.element, decision, nil
 }
 
 // resolveSelectValue handles plan-defined "from" + "select" value resolution.

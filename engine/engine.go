@@ -45,10 +45,6 @@ type Engine struct {
 
 	// plan is set during Run() for constraint-aware resolution.
 	plan *plan.Plan
-
-	// Step aliasing mappings, computed per-run.
-	nodeToStepID   map[string]string // graph node → step ID (unique nodes only)
-	duplicateNodes map[string]bool   // graph nodes appearing in multiple steps
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -104,13 +100,10 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
-	// 4. Build step aliasing mappings
+	// 4. Set plan for constraint-aware resolution
 	e.plan = p
-	e.buildStepMappings(sorted)
 	defer func() {
 		e.plan = nil
-		e.nodeToStepID = nil
-		e.duplicateNodes = nil
 	}()
 
 	state := NewRunState()
@@ -371,42 +364,15 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 // checking are active.
 func (e *Engine) buildResolveContext(node *graph.Node, tracker *RelaxationTracker) *ResolveContext {
 	return &ResolveContext{
-		Mode:           e.effectiveMode(),
-		Now:            time.Now(),
-		EnvLookup:      os.Getenv,
-		KB:             e.KB,
-		LLM:            e.LLMClient,
-		Node:           node,
-		Plan:           e.plan,
-		Tracker:        tracker,
-		Registry:       e.registry,
-		NodeToStepID:   e.nodeToStepID,
-		DuplicateNodes: e.duplicateNodes,
-	}
-}
-
-// buildStepMappings computes the nodeToStepID and duplicateNodes maps from
-// the sorted step list. These are used during resolution to translate graph
-// edge references (node names) to RunState keys (step IDs).
-func (e *Engine) buildStepMappings(steps []plan.Step) {
-	nodeCount := make(map[string]int, len(steps))
-	nodeFirstStepID := make(map[string]string, len(steps))
-	for _, step := range steps {
-		nodeCount[step.Node]++
-		if nodeCount[step.Node] == 1 {
-			nodeFirstStepID[step.Node] = step.StepID()
-		}
-	}
-
-	// Only build mappings if there are aliased steps
-	e.nodeToStepID = make(map[string]string, len(nodeFirstStepID))
-	e.duplicateNodes = make(map[string]bool)
-	for nodeName, count := range nodeCount {
-		if count > 1 {
-			e.duplicateNodes[nodeName] = true
-		} else {
-			e.nodeToStepID[nodeName] = nodeFirstStepID[nodeName]
-		}
+		Mode:      e.effectiveMode(),
+		Now:       time.Now(),
+		EnvLookup: os.Getenv,
+		KB:        e.KB,
+		LLM:       e.LLMClient,
+		Node:      node,
+		Plan:      e.plan,
+		Tracker:   tracker,
+		Registry:  e.registry,
 	}
 }
 

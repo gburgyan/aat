@@ -76,167 +76,73 @@ Rules:
 	return system, user
 }
 
-// buildPlanPrompt constructs the messages for the second LLM call (plan generation).
-// It provides the pre-built skeleton YAML, lists which inputs need values, and asks
-// the LLM to fill in literal values, optionally refine selection strategies, and
-// add assertions.
-func buildPlanPrompt(skeletonYAML string, unfedInputs []string, domainContext, selectionJSON, userPrompt string, now time.Time) (system, user string) {
-	dateStr := now.Format("2006-01-02")
-
-	system = `You are an API testing plan generator. A pre-built plan skeleton with all data flow already wired is provided. Your job is to fill in literal values for inputs that need them, optionally refine selection strategies, and add assertions.
-
-Rules:
-- Return a complete plan YAML wrapped in a ` + "```yaml" + ` code block
-- Keep ALL existing structure (nodes, dependsOn, from refs, select configs, cleanup, metadata, intent) exactly as-is
-- Fill in literal values for the inputs listed as "NEEDS VALUE"
-- You may override selection strategies (e.g., change "first" to "match" with a filter) if the user's intent suggests it
-- Add mechanical assertions (status, fieldExists, fieldEquals, predicate) on steps, especially the goal step
-- Add step descriptions if helpful
-- Today's date is ` + dateStr + `. When generating dates, use dates at least 7 days in the future.
-- For selection strategy overrides, valid strategies are: first, last, random, index, min, max, match
-  - match: requires a "filter" predicate expression
-  - min/max: requires a "sortField"
-  - index: requires an "index" number
-- Use the "id" field on a step when the same graph node appears multiple times in the plan (e.g., multi-leg flights, multiple travelers). The id becomes the step's unique identifier; dependsOn and from references use step IDs (which default to the node name when id is omitted). Example:
-  - id: search_leg1
-    node: searchFlights
-    values: {origin: MEL, destination: SYD, departureDate: "2026-03-01"}
-  - id: search_leg2
-    node: searchFlights
-    dependsOn: [search_leg1]
-    values: {origin: SYD, destination: BNE, departureDate: "2026-03-05"}`
-
-	var ub strings.Builder
-
-	ub.WriteString("## Plan Skeleton\n\n")
-	ub.WriteString("```yaml\n")
-	ub.WriteString(skeletonYAML)
-	ub.WriteString("```\n\n")
-
-	if len(unfedInputs) > 0 {
-		ub.WriteString("## Inputs That Need Values\n\n")
-		for _, inp := range unfedInputs {
-			fmt.Fprintf(&ub, "- %s\n", inp)
-		}
-		ub.WriteString("\n")
-	}
-
-	if domainContext != "" {
-		ub.WriteString("## Domain Knowledge\n\n")
-		ub.WriteString(domainContext)
-		ub.WriteString("\n")
-	}
-
-	ub.WriteString("## Workflow Selection\n\n")
-	ub.WriteString(selectionJSON)
-	ub.WriteString("\n\n")
-
-	ub.WriteString("## User Intent\n\n")
-	ub.WriteString(userPrompt)
-	ub.WriteString("\n")
-
-	user = ub.String()
-	return system, user
-}
-
-// buildRetryPrompt constructs prompts for retrying plan generation after validation
-// failure. It extends buildPlanPrompt with information about the validation errors
-// and hints about correct elementField names.
-func buildRetryPrompt(skeletonYAML string, unfedInputs []string, domainContext, selectionJSON, userPrompt string, now time.Time, validationErrors []string, hints []string) (system, user string) {
-	system, user = buildPlanPrompt(skeletonYAML, unfedInputs, domainContext, selectionJSON, userPrompt, now)
-
-	// Append validation error context to the system prompt.
-	var sb strings.Builder
-	sb.WriteString(system)
-	sb.WriteString("\n\nIMPORTANT: The previous attempt produced a plan with these validation errors:\n")
-	for _, e := range validationErrors {
-		fmt.Fprintf(&sb, "- %s\n", e)
-	}
-	if len(hints) > 0 {
-		sb.WriteString("\n")
-		for _, h := range hints {
-			fmt.Fprintf(&sb, "%s\n", h)
-		}
-	}
-	sb.WriteString("\nFix these issues. For fromSelection references, use the correct elementField name.")
-	system = sb.String()
-
-	return system, user
-}
-
 // buildTargetedPlanPrompt constructs the messages for the targeted phase 2 LLM call.
 // Instead of sending the full skeleton YAML and asking for a complete YAML response,
 // it provides per-input context and asks for a flat JSON response with only the
 // decisions the LLM needs to make: values, selection overrides, assertions, and descriptions.
+//
+// The prompt is deliberately narrow: it only includes the inputs that need values,
+// selection contexts for optional overrides, and the user's intent. Plan structure
+// (step ordering, deps, outputs, cleanup) is omitted because it doesn't help
+// the LLM pick literal values and can confuse it into inventing wiring syntax.
 func buildTargetedPlanPrompt(
 	inputContexts []InputContext,
 	selectionContexts []SelectionContext,
-	planFlow string,
-	selectionJSON string,
 	userPrompt string,
 	now time.Time,
 ) (system, user string) {
 	dateStr := now.Format("2006-01-02")
 
-	system = `You are an API testing plan generator. A workflow has been composed and all data flow is pre-wired. Your job is to provide literal values for inputs, optionally override selection strategies, add assertions, and add step descriptions.
+	system = `You are an API testing value generator. A workflow has been composed and all data flow is pre-wired. Your ONLY job is to pick concrete values for unfed inputs.
 
 Respond with a JSON object (no markdown fencing, just raw JSON):
 {
-  "values": {
-    "stepID.inputName": "value"
-  },
-  "selections": {
-    "stepID.selectionName": {
-      "strategy": "match",
-      "filter": "predicate expression"
-    }
-  },
-  "assertions": {
-    "stepID": [
-      {"type": "status", "expect": 200},
-      {"type": "fieldExists", "path": "locator"}
-    ]
-  },
-  "descriptions": {
-    "stepID": "What this step does"
-  }
+  "values": {"stepID.inputName": "value"},
+  "selections": {"stepID.selectionName": {"strategy": "match", "filter": "expr"}},
+  "assertions": {"stepID": [{"type": "status", "expect": 200}]},
+  "descriptions": {"stepID": "What this step does"}
 }
+Omit empty categories.
 
-Rules:
-- Provide values for ALL inputs listed below — do not skip any
-- Inputs that show "Current value:" have a template default. Override them if the user's intent requires different values; otherwise keep the current value.
-- Values must be appropriate for the input type and any constraints listed
-- Today's date is ` + dateStr + `. When generating dates, use dates at least 7 days in the future. You may use expression syntax like {{today + 30 days}} for relative dates.
-- For selection overrides, valid strategies are: first, last, random, index, min, max, match
-  - match: requires a "filter" predicate expression (field references are relative to the element, not qualified by selection name)
-  - min/max: requires a "sortField"
+Today's date is ` + dateStr + `. Use dates at least 7 days in the future. Expression syntax: {{today + 30 days}}.
+
+## Values
+
+For each input listed below, provide a LITERAL value (string, number, or date expression).
+- Pick from the sample values when provided (e.g., airport codes from the sample list)
+- Hard constraints MUST be met; soft constraints SHOULD be met
+- For date fields, use {{today + N days}} syntax
+- If "Current value:" is shown, keep it unless the user's intent requires a different value
+- DO NOT use "from", "fromSelection", "select", or any reference/object syntax — only plain scalars
+
+## Selections — optional
+
+Only override if the user's intent specifically suggests a preference (e.g., "cheapest", "nonstop").
+Valid strategies: first, last, random, index, min, max, match
+  - match: requires a "filter" using ONLY the listed element fields
+  - min/max: requires a "sortField" from element fields
   - index: requires an "index" number
-- Only override selections if the user's intent suggests a specific preference
-- Add mechanical assertions on steps — at minimum a status assertion on each step, and fieldExists/fieldEquals on the goal step
-- Valid assertion types: status, fieldExists, fieldEquals, predicate
-  - status: {"type": "status", "expect": 200}
-  - fieldExists: {"type": "fieldExists", "path": "fieldName"} — path is a dot-separated field name (e.g., "pnrLocator", "price.amount"), NOT jsonpath (no $ prefix)
-  - fieldEquals: {"type": "fieldEquals", "path": "fieldName", "value": "expected"}
-  - predicate: {"type": "predicate", "expr": "expression"} — the expression goes in "expr" (not "expect"). Predicate syntax: bare identifiers (not $.field), comparison operators (==, !=, <, >, <=, >=), boolean operators (&&, ||, !), membership (field in ['a', 'b']), parentheses for grouping. Examples: status == 'CONFIRMED', price > 0, carrier in ['AA', 'UA']
-- Do NOT use jsonpath $ prefix in field paths or predicate expressions — use bare field names like "locator" not "$.locator"
-- Do NOT use functions like size(), all(), any() in predicates — they are not supported
-- For fieldExists/fieldEquals/predicate assertions, use the output field names listed in the plan flow (e.g., "workbenchId", "pnrLocator") — these are the extracted response fields available at runtime
-- Add descriptions to clarify what each step is doing in the context of the user's intent
-- Omit empty categories (e.g., if no selection overrides, omit "selections")`
+
+DO NOT filter on fields not in the element fields list.
+DO NOT re-filter on values already constrained by search inputs (dates, prices — redundant and brittle).
+
+## Assertions — only when explicitly requested
+
+Do NOT add assertions unless the user explicitly says "verify that..." or "assert that...".
+Valid types: status, fieldExists, fieldEquals, predicate.
+Use bare field names (no jsonpath $ prefix).
+
+## Descriptions
+
+Add a brief description for each step explaining what it does in context.`
 
 	var ub strings.Builder
 
-	// Plan flow summary.
-	ub.WriteString("## Plan Flow\n\n")
-	ub.WriteString(planFlow)
-	ub.WriteString("\n")
-
-	// Per-input context.
+	// Per-input context — the core of the prompt.
 	if len(inputContexts) > 0 {
 		ub.WriteString("## Inputs That Need Values\n\n")
 		for _, ic := range inputContexts {
 			fmt.Fprintf(&ub, "### %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
-			fmt.Fprintf(&ub, "Node: %s\n", ic.NodeDesc)
 			if ic.CurrentDefault != "" {
 				fmt.Fprintf(&ub, "Current value: %s\n", ic.CurrentDefault)
 			}
@@ -254,7 +160,7 @@ Rules:
 				fmt.Fprintf(&ub, "Validation: %s\n", ic.GraphConstr)
 			}
 			if ic.IsDate {
-				ub.WriteString("Note: This is a date field. Use {{today + N days}} for relative dates.\n")
+				ub.WriteString("Date field — use {{today + N days}}\n")
 			}
 			for _, c := range ic.Constraints {
 				fmt.Fprintf(&ub, "Constraint: %s\n", c)
@@ -274,7 +180,7 @@ Rules:
 			fmt.Fprintf(&ub, "### %s.%s (%s, current: %s)\n", sc.StepID, sc.SelectionName, kind, sc.CurrentStrategy)
 			fmt.Fprintf(&ub, "Source: %s\n", sc.Source)
 			if len(sc.ElementFields) > 0 {
-				fmt.Fprintf(&ub, "Available fields: %s\n", strings.Join(sc.ElementFields, ", "))
+				fmt.Fprintf(&ub, "Available fields (ONLY these can be used in filters): %s\n", strings.Join(sc.ElementFields, ", "))
 			}
 			if len(sc.FeedsInto) > 0 {
 				fmt.Fprintf(&ub, "Feeds into: %s\n", strings.Join(sc.FeedsInto, ", "))
@@ -282,11 +188,6 @@ Rules:
 			ub.WriteString("\n")
 		}
 	}
-
-	// Workflow selection context.
-	ub.WriteString("## Workflow Selection\n\n")
-	ub.WriteString(selectionJSON)
-	ub.WriteString("\n\n")
 
 	// User intent.
 	ub.WriteString("## User Intent\n\n")
@@ -302,14 +203,12 @@ Rules:
 func buildTargetedRetryPrompt(
 	inputContexts []InputContext,
 	selectionContexts []SelectionContext,
-	planFlow string,
-	selectionJSON string,
 	userPrompt string,
 	now time.Time,
 	validationErrors []string,
 	hints []string,
 ) (system, user string) {
-	system, user = buildTargetedPlanPrompt(inputContexts, selectionContexts, planFlow, selectionJSON, userPrompt, now)
+	system, user = buildTargetedPlanPrompt(inputContexts, selectionContexts, userPrompt, now)
 
 	// Append validation error context to the system prompt.
 	var sb strings.Builder

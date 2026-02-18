@@ -15,5 +15,3 @@ nodes:
         type: integer
       - name: name
         type: string
-
-edges: []

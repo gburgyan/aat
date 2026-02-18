@@ -4,6 +4,7 @@ nodes:
   searchFlights:
     description: "Search for available flights via Travelport catalog"
     adapter: travelport.searchFlights
+    satisfies: [flightsSearched]
     inputs:
       - name: origin
         type: string
@@ -60,6 +61,7 @@ nodes:
   priceOffer:
     description: "Confirm pricing on a selected catalog offering"
     adapter: travelport.priceOffer
+    requires: [flightsSearched]
     inputs:
       - name: catalogOfferingsId
         type: string
@@ -87,6 +89,7 @@ nodes:
   createWorkbench:
     description: "Create a reservation workbench (booking session)"
     adapter: travelport.createWorkbench
+    satisfies: [workbenchCreated]
     inputs: []
     outputs:
       - name: workbenchId
@@ -97,6 +100,8 @@ nodes:
   addOffer:
     description: "Add an offer to the reservation workbench via BuildFromCatalogProductOfferings"
     adapter: travelport.addOffer
+    requires: [flightsSearched, workbenchCreated]
+    satisfies: [offerAdded]
     inputs:
       - name: workbenchId
         type: string
@@ -118,6 +123,8 @@ nodes:
   addTraveler:
     description: "Add passenger details to the reservation workbench"
     adapter: travelport.addTraveler
+    requires: [workbenchCreated]
+    satisfies: [travelerAdded]
     inputs:
       - name: workbenchId
         type: string
@@ -147,6 +154,7 @@ nodes:
   commitBooking:
     description: "Finalize the reservation to create a PNR"
     adapter: travelport.commitBooking
+    requires: [offerAdded, travelerAdded]
     inputs:
       - name: workbenchId
         type: string
@@ -176,39 +184,3 @@ nodes:
       - name: acknowledged
         type: boolean
         description: "Whether the workbench was successfully discarded"
-
-edges:
-  # searchFlights → priceOffer
-  - from: searchFlights.catalogOfferingsId
-    to: priceOffer.catalogOfferingsId
-  - from: searchFlights.catalogOfferings
-    to: priceOffer.offeringId
-    select: true
-
-  # searchFlights → addOffer (catalog offering references from search)
-  - from: searchFlights.catalogOfferingsId
-    to: addOffer.catalogOfferingsId
-  - from: searchFlights.catalogOfferings
-    to: addOffer.offeringId
-    select: true
-  - from: searchFlights.catalogOfferings
-    to: addOffer.productRef
-    select: true
-
-  # createWorkbench → addOffer, addTraveler, commitBooking, ignoreWorkbench
-  - from: createWorkbench.workbenchId
-    to: addOffer.workbenchId
-  - from: createWorkbench.workbenchId
-    to: addTraveler.workbenchId
-  - from: createWorkbench.workbenchId
-    to: commitBooking.workbenchId
-
-  # addOffer, addTraveler → commitBooking (ordering via data edges)
-  - from: addOffer.offerStatus
-    to: commitBooking.offerStatus
-  - from: addTraveler.travelerId
-    to: commitBooking.travelerId
-
-  # createWorkbench → ignoreWorkbench (cleanup edge)
-  - from: createWorkbench.workbenchId
-    to: ignoreWorkbench.workbenchId

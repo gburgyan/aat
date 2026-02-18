@@ -34,10 +34,6 @@ func workflowTestGraph() *graph.Graph {
 			"searchSeat": {Name: "searchSeat", Adapter: "searchSeat", Inputs: []graph.Input{{Name: "workbenchId", Type: "string"}}, Outputs: []graph.Output{{Name: "seats", Type: "string[]"}}},
 			"addSeat":    {Name: "addSeat", Adapter: "addSeat", Inputs: []graph.Input{{Name: "workbenchId", Type: "string"}, {Name: "seatId", Type: "string"}}, Outputs: []graph.Output{{Name: "confirmId", Type: "string"}}},
 		},
-		Edges: []graph.Edge{
-			{From: "search.results", To: "book.flightId", Select: true},
-			{From: "book.workbenchId", To: "commit.workbenchId"},
-		},
 	}
 }
 
@@ -71,28 +67,6 @@ func TestHandleListWorkflows_WithWorkflows(t *testing.T) {
 	assert.Contains(t, text, "Seat Selection")
 	assert.Contains(t, text, "[addon]")
 	assert.Contains(t, text, "After: `book`")
-}
-
-// --- scaffold_template ---
-
-func TestHandleScaffoldTemplate(t *testing.T) {
-	g := workflowTestGraph()
-	g.BuildEdgeIndex()
-	srv := newWorkflowTestServer(g)
-	result := callTool(t, srv.handleScaffoldTemplate, map[string]any{"goal": "commit"})
-	require.False(t, result.IsError)
-	text := resultText(t, result)
-	assert.Contains(t, text, "Scaffolded Template")
-	assert.Contains(t, text, "commit")
-	assert.Contains(t, text, "yaml")
-}
-
-func TestHandleScaffoldTemplate_UnknownNode(t *testing.T) {
-	g := workflowTestGraph()
-	srv := newWorkflowTestServer(g)
-	result := callTool(t, srv.handleScaffoldTemplate, map[string]any{"goal": "nonexistent"})
-	assert.True(t, result.IsError)
-	assert.Contains(t, resultText(t, result), "unknown goal node")
 }
 
 // --- instantiate_workflow ---

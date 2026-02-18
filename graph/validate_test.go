@@ -42,18 +42,6 @@ func TestValidate_DuplicateInput(t *testing.T) {
 	assertValidationContains(t, err, "duplicate input name")
 }
 
-func TestValidate_BadEdgeRef(t *testing.T) {
-	_, err := ParseFile("testdata/invalid/bad_edge_ref.yaml")
-	require.Error(t, err)
-	assertValidationContains(t, err, "unknown node")
-}
-
-func TestValidate_Cycle(t *testing.T) {
-	_, err := ParseFile("testdata/invalid/cycle.yaml")
-	require.Error(t, err)
-	assertValidationContains(t, err, "cycle detected")
-}
-
 func TestValidate_BadType(t *testing.T) {
 	_, err := ParseFile("testdata/invalid/bad_type.yaml")
 	require.Error(t, err)
@@ -64,12 +52,6 @@ func TestValidate_MissingAdapter(t *testing.T) {
 	_, err := ParseFile("testdata/invalid/missing_adapter.yaml")
 	require.Error(t, err)
 	assertValidationContains(t, err, "adapter is required")
-}
-
-func TestValidate_SelectNonArray(t *testing.T) {
-	_, err := ParseFile("testdata/invalid/select_non_array.yaml")
-	require.Error(t, err)
-	assertValidationContains(t, err, "not an array type")
 }
 
 func TestValidate_MultiError(t *testing.T) {
@@ -136,32 +118,6 @@ func TestValidate_CleanupUnknownNode(t *testing.T) {
 	assertValidationContains(t, err, "cleanup references unknown node")
 }
 
-func TestValidate_DuplicateEdge(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*Node{
-			"a": {
-				Name: "a", Adapter: "a",
-				Inputs:  []Input{{Name: "x", Type: "string"}},
-				Outputs: []Output{{Name: "y", Type: "string"}},
-			},
-			"b": {
-				Name: "b", Adapter: "b",
-				Inputs:  []Input{{Name: "x", Type: "string"}},
-				Outputs: []Output{{Name: "y", Type: "string"}},
-			},
-		},
-		Edges: []Edge{
-			{From: "a.y", To: "b.x"},
-			{From: "a.y", To: "b.x"},
-		},
-	}
-
-	err := Validate(g)
-	require.Error(t, err)
-	assertValidationContains(t, err, "duplicate edge")
-}
-
 func TestValidate_ElementFieldsOnNonArray(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
@@ -225,26 +181,6 @@ func TestValidate_ConditionEmptyWhen(t *testing.T) {
 	err := Validate(g)
 	require.Error(t, err)
 	assertValidationContains(t, err, "'when' is required")
-}
-
-func TestValidate_EdgeBadFormat(t *testing.T) {
-	g := &Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*Node{
-			"n": {
-				Name: "n", Adapter: "n",
-				Inputs:  []Input{{Name: "x", Type: "string"}},
-				Outputs: []Output{{Name: "y", Type: "string"}},
-			},
-		},
-		Edges: []Edge{
-			{From: "nofield", To: "n.x"},
-		},
-	}
-
-	err := Validate(g)
-	require.Error(t, err)
-	assertValidationContains(t, err, "invalid 'from'")
 }
 
 // assertValidationContains checks that the error is a ValidationError
@@ -482,49 +418,6 @@ func TestValidate_ElementFieldPathValid(t *testing.T) {
 	}
 	err := Validate(g)
 	assert.NoError(t, err)
-}
-
-// --- Edge index ---
-
-func TestBuildEdgeIndex(t *testing.T) {
-	g := &Graph{
-		Edges: []Edge{
-			{From: "a.x", To: "b.y"},
-			{From: "a.x", To: "c.y"},
-			{From: "b.z", To: "c.w"},
-		},
-	}
-	g.BuildEdgeIndex()
-
-	// EdgesTo
-	toB := g.EdgesTo("b.y")
-	require.Len(t, toB, 1)
-	assert.Equal(t, "a.x", toB[0].From)
-
-	toC := g.EdgesTo("c.y")
-	require.Len(t, toC, 1)
-	assert.Equal(t, "a.x", toC[0].From)
-
-	toCw := g.EdgesTo("c.w")
-	require.Len(t, toCw, 1)
-	assert.Equal(t, "b.z", toCw[0].From)
-
-	// EdgesFrom
-	fromA := g.EdgesFrom("a.x")
-	require.Len(t, fromA, 2)
-
-	fromB := g.EdgesFrom("b.z")
-	require.Len(t, fromB, 1)
-
-	// No results
-	assert.Empty(t, g.EdgesTo("nonexistent.ref"))
-	assert.Empty(t, g.EdgesFrom("nonexistent.ref"))
-}
-
-func TestEdgeIndex_NilIndex(t *testing.T) {
-	g := &Graph{}
-	assert.Empty(t, g.EdgesTo("a.b"))
-	assert.Empty(t, g.EdgesFrom("a.b"))
 }
 
 // --- Requires/Satisfies Validation ---

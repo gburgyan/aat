@@ -27,18 +27,20 @@ func twoNodeGraph() *graph.Graph {
 			"search": {
 				Name:        "search",
 				Description: "Search for flights",
+				Satisfies:   []string{"searchResults"},
 				Inputs:      []graph.Input{{Name: "origin", Type: "string"}, {Name: "dest", Type: "string"}},
 				Outputs:     []graph.Output{{Name: "results", Type: "result[]"}},
 			},
 			"book": {
 				Name:        "book",
 				Description: "Book a flight",
+				Requires:    []string{"searchResults"},
 				Inputs:      []graph.Input{{Name: "resultId", Type: "string"}},
 				Outputs:     []graph.Output{{Name: "locator", Type: "string"}},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "search.results", To: "book.resultId", Select: true},
+		SatisfiersByToken: map[string][]string{
+			"searchResults": {"search"},
 		},
 	}
 }

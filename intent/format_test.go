@@ -33,10 +33,6 @@ func TestFormatGraph_Travelport(t *testing.T) {
 	assert.Contains(t, result, "catalogOfferings: offering[]")
 	assert.Contains(t, result, "locator: string")
 
-	// Should contain edges
-	assert.Contains(t, result, "searchFlights.catalogOfferingsId")
-	assert.Contains(t, result, "[select]")
-
 	// Should contain optional marker
 	assert.Contains(t, result, "(optional)")
 
@@ -72,61 +68,6 @@ func TestFormatGraph_ElementFields(t *testing.T) {
 	assert.NotContains(t, result, "stops: integer (path:")
 }
 
-func TestFormatChainResult_Travelport(t *testing.T) {
-	g := loadTravelportGraph(t)
-
-	cr := &graph.ChainResult{
-		Nodes:      []string{"searchFlights", "createWorkbench", "addOffer", "addTraveler", "commitBooking"},
-		EntryNodes: []string{"searchFlights", "createWorkbench"},
-		Edges: []graph.Edge{
-			{From: "searchFlights.catalogOfferingsId", To: "addOffer.catalogOfferingsId"},
-			{From: "searchFlights.catalogOfferings", To: "addOffer.offeringId", Select: true},
-			{From: "createWorkbench.workbenchId", To: "addOffer.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "addTraveler.workbenchId"},
-			{From: "createWorkbench.workbenchId", To: "commitBooking.workbenchId"},
-			{From: "addOffer.offerStatus", To: "commitBooking.offerStatus"},
-			{From: "addTraveler.travelerId", To: "commitBooking.travelerId"},
-		},
-	}
-
-	result := FormatChainResult(cr, g)
-
-	// Should show chain order
-	assert.Contains(t, result, "searchFlights → createWorkbench → addOffer → addTraveler → commitBooking")
-
-	// Should show entry nodes
-	assert.Contains(t, result, "searchFlights, createWorkbench")
-
-	// Should show node details
-	assert.Contains(t, result, "Step: commitBooking")
-	assert.Contains(t, result, "Step: searchFlights")
-
-	// Should show data flow with select markers
-	assert.Contains(t, result, "[select]")
-}
-
-func TestFormatChainResult_WithDecisions(t *testing.T) {
-	g := loadTravelportGraph(t)
-
-	cr := &graph.ChainResult{
-		Nodes:      []string{"searchFlights"},
-		EntryNodes: []string{"searchFlights"},
-		Decisions: []graph.ChainDecision{
-			{
-				Type:         graph.DecisionPathChoice,
-				Node:         "addOffer",
-				Detail:       "input \"offeringId\": chose producer \"searchFlights\"",
-				Alternatives: []string{"priceOffer"},
-			},
-		},
-	}
-
-	result := FormatChainResult(cr, g)
-	assert.Contains(t, result, "Chain Decisions")
-	assert.Contains(t, result, "chose producer")
-	assert.Contains(t, result, "priceOffer")
-}
-
 func TestFormatPlanSchema_NonEmpty(t *testing.T) {
 	schema := FormatPlanSchema()
 
@@ -148,16 +89,6 @@ func TestFormatGraph_EmptyGraph(t *testing.T) {
 	result := FormatGraph(g)
 	assert.Contains(t, result, "version 1.0.0")
 	assert.NotContains(t, result, "## Node:")
-}
-
-func TestFormatChainResult_EmptyChain(t *testing.T) {
-	g := &graph.Graph{Nodes: map[string]*graph.Node{}}
-	cr := &graph.ChainResult{
-		Nodes:      []string{},
-		EntryNodes: []string{},
-	}
-	result := FormatChainResult(cr, g)
-	assert.Contains(t, result, "Execution Chain")
 }
 
 func TestFormatGraph_WithTitle(t *testing.T) {
@@ -278,32 +209,6 @@ func TestFormatGraph_WithConstraints(t *testing.T) {
 	assert.Contains(t, result, "range: 1..100")
 }
 
-func TestFormatGraph_AutoWireOmitsEdges(t *testing.T) {
-	g := &graph.Graph{
-		Version:  "1.0.0",
-		AutoWire: graph.AutoWireSources,
-		Nodes: map[string]*graph.Node{
-			"producer": {
-				Name:    "producer",
-				Adapter: "p",
-				Outputs: []graph.Output{{Name: "token", Type: "string"}},
-			},
-			"consumer": {
-				Name:    "consumer",
-				Adapter: "c",
-				Inputs:  []graph.Input{{Name: "token", Type: "string"}},
-				Outputs: []graph.Output{{Name: "result", Type: "string"}},
-			},
-		},
-		Edges: []graph.Edge{
-			{From: "producer.token", To: "consumer.token", AutoWired: true},
-		},
-	}
-	result := FormatGraph(g)
-	assert.Contains(t, result, "Auto-wired")
-	assert.NotContains(t, result, "producer.token → consumer.token")
-}
-
 func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
@@ -333,33 +238,3 @@ func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
 	assert.Contains(t, result, "**Main Booking** [template]")
 }
 
-func TestFormatGraph_AutoWireWithExplicit(t *testing.T) {
-	g := &graph.Graph{
-		Version:  "1.0.0",
-		AutoWire: graph.AutoWireSources,
-		Nodes: map[string]*graph.Node{
-			"a": {
-				Name: "a", Adapter: "a",
-				Outputs: []graph.Output{
-					{Name: "token", Type: "string"},
-					{Name: "items", Type: "item[]"},
-				},
-			},
-			"b": {
-				Name: "b", Adapter: "b",
-				Inputs:  []graph.Input{{Name: "token", Type: "string"}, {Name: "itemId", Type: "string"}},
-				Outputs: []graph.Output{{Name: "out", Type: "string"}},
-			},
-		},
-		Edges: []graph.Edge{
-			{From: "a.items", To: "b.itemId", Select: true}, // explicit
-			{From: "a.token", To: "b.token", AutoWired: true},
-		},
-	}
-	result := FormatGraph(g)
-	// Explicit edge should appear
-	assert.Contains(t, result, "a.items → b.itemId [select]")
-	// Auto-wired edge should not
-	assert.NotContains(t, result, "a.token → b.token")
-	assert.Contains(t, result, "Auto-wired")
-}

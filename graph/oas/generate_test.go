@@ -41,7 +41,6 @@ func TestGenerate_Petstore_GraphMeta(t *testing.T) {
 	fix := loadPetstoreModel(t)
 	assert.Equal(t, "1.0.0", fix.result.Graph.Version)
 	assert.Equal(t, "petstore.yaml", fix.result.Graph.OAS)
-	assert.Empty(t, fix.result.Graph.Edges)
 }
 
 func TestGenerate_ListPets_Node(t *testing.T) {

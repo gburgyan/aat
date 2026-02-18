@@ -63,10 +63,3 @@ nodes:
     outputs:
       - name: locator
         type: string
-
-edges:
-  - from: search.results
-    to: book.flightId
-    select: true
-  - from: book.workbenchId
-    to: commit.workbenchId

@@ -9,12 +9,7 @@ import (
 )
 
 // TopologicalSort returns plan steps in a valid execution order using Kahn's
-// algorithm. Dependencies come from two sources:
-//  1. Explicit step.DependsOn (references step IDs)
-//  2. Graph edges: if an edge goes from A.output → B.input and both A and B
-//     have exactly one step in the plan, B depends on A. When a graph node
-//     appears in multiple steps, graph-edge auto-wiring is skipped (the plan
-//     must use explicit dependsOn).
+// algorithm. Dependencies come from explicit step.DependsOn references (step IDs).
 //
 // Returns an error if a cycle is detected.
 func TopologicalSort(steps []plan.Step, g *graph.Graph) ([]plan.Step, error) {
@@ -25,12 +20,6 @@ func TopologicalSort(steps []plan.Step, g *graph.Graph) ([]plan.Step, error) {
 		sid := step.StepID()
 		stepSet[sid] = true
 		stepIndex[sid] = i
-	}
-
-	// Build node → step IDs mapping for graph edge resolution
-	nodeToStepIDs := make(map[string][]string, len(steps))
-	for _, step := range steps {
-		nodeToStepIDs[step.Node] = append(nodeToStepIDs[step.Node], step.StepID())
 	}
 
 	// Build adjacency: stepID → set of step IDs it must come after
@@ -57,31 +46,13 @@ func TopologicalSort(steps []plan.Step, g *graph.Graph) ([]plan.Step, error) {
 		dependents[from] = append(dependents[from], to)
 	}
 
-	// Source 1: explicit dependsOn (step IDs)
+	// Explicit dependsOn (step IDs)
 	for _, step := range steps {
 		sid := step.StepID()
 		for _, dep := range step.DependsOn {
 			if stepSet[dep] {
 				addEdge(dep, sid)
 			}
-		}
-	}
-
-	// Source 2: graph edges between plan steps.
-	// Only auto-wire when both source and target nodes appear exactly once.
-	for _, edge := range g.Edges {
-		fromNode, _, err := splitRef(edge.From)
-		if err != nil {
-			continue
-		}
-		toNode, _, err := splitRef(edge.To)
-		if err != nil {
-			continue
-		}
-		fromSteps := nodeToStepIDs[fromNode]
-		toSteps := nodeToStepIDs[toNode]
-		if len(fromSteps) == 1 && len(toSteps) == 1 {
-			addEdge(fromSteps[0], toSteps[0])
 		}
 	}
 

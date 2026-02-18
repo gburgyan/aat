@@ -40,8 +40,8 @@ func TestTravelportTemplates_AllValidate(t *testing.T) {
 		})
 	}
 
-	// Ensure we found all 28 templated workflows (9 original + 6 post-commit + 6 pre-commit addons + 7 post-commit addons).
-	assert.Equal(t, 28, templatedWorkflows, "expected 28 workflows with templates")
+	// Ensure we found all 29 templated workflows (10 standalone + 6 post-commit + 6 pre-commit addons + 7 post-commit addons).
+	assert.Equal(t, 29, templatedWorkflows, "expected 29 workflows with templates")
 }
 
 // TestTravelportTemplates_UnfedInputs verifies the unfed inputs for each
@@ -62,23 +62,23 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 	}{
 		{
 			workflow:  "Full-Payload Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination", "searchFlights.departureDate", "addTraveler.givenName", "addTraveler.surname", "addPayment.fopIdentifierValue", "addPayment.offerId"},
-			exact:     7,
-		},
-		{
-			workflow:  "Reference-Based Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addPayment.fopIdentifierValue", "addPayment.offerId"},
-			exact:     7,
-		},
-		{
-			workflow:  "Post-Commit Ticketing",
-			contains:  []string{"createWorkbenchFromLocator.locator", "addPayment.fopIdentifierValue", "addPayment.offerId"},
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "searchFlights.departureDate", "addTraveler.givenName", "addTraveler.surname"},
 			exact:     5,
 		},
 		{
+			workflow:  "Reference-Based Booking",
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addTraveler.givenName", "addTraveler.surname"},
+			exact:     5,
+		},
+		{
+			workflow:  "Post-Commit Ticketing",
+			contains:  []string{"createWorkbenchFromLocator.locator", "addPayment.amount", "addPayment.currencyCode"},
+			exact:     3,
+		},
+		{
 			workflow:  "Exchange",
-			contains:  []string{"getExchangeEligibility.locator", "searchExchange.origin", "addPayment.fopIdentifierValue"},
-			exact:     7,
+			contains:  []string{"getExchangeEligibility.locator", "searchExchange.origin"},
+			exact:     5,
 		},
 		{
 			workflow:  "Ancillary Booking",
@@ -97,12 +97,12 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		},
 		{
 			workflow:  "Round-Trip Full-Payload Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addPayment.fopIdentifierValue"},
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addTraveler.givenName"},
 			exact:     -1,
 		},
 		{
 			workflow:  "Round-Trip Leg-Based Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addPayment.fopIdentifierValue"},
+			contains:  []string{"searchFlights.origin", "searchFlights.destination", "addTraveler.givenName"},
 			exact:     -1,
 		},
 		{

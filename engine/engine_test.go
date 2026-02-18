@@ -55,12 +55,6 @@ func buildTestGraph() *graph.Graph {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "search.sessionId", To: "select.sessionId"},
-			{From: "search.results", To: "select.itemId", Select: true},
-			{From: "search.sessionId", To: "book.sessionId"},
-			{From: "select.confirmed", To: "book.confirmed"},
-		},
 	}
 }
 
@@ -158,7 +152,9 @@ func TestEngine_Run_ThreeNodeFlow(t *testing.T) {
 					Node:      "select",
 					DependsOn: []string{"search"},
 					Values: map[string]plan.StepValue{
+						"sessionId": {From: "search.sessionId"},
 						"itemId": {
+							From: "search.results",
 							Select: &plan.SelectionConfig{
 								Strategy: "first",
 								Field:    "id",
@@ -168,7 +164,11 @@ func TestEngine_Run_ThreeNodeFlow(t *testing.T) {
 				},
 				{
 					Node:      "book",
-					DependsOn: []string{"select"},
+					DependsOn: []string{"search", "select"},
+					Values: map[string]plan.StepValue{
+						"sessionId": {From: "search.sessionId"},
+						"confirmed": {From: "select.confirmed"},
+					},
 				},
 			},
 		},
@@ -297,9 +297,6 @@ func TestEngine_Run_OutputPropagation(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "producer.value", To: "consumer.value"},
-		},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -338,7 +335,9 @@ func TestEngine_Run_OutputPropagation(t *testing.T) {
 		Execution: plan.Execution{
 			Steps: []plan.Step{
 				{Node: "producer"},
-				{Node: "consumer", DependsOn: []string{"producer"}},
+				{Node: "consumer", DependsOn: []string{"producer"}, Values: map[string]plan.StepValue{
+					"value": {From: "producer.value"},
+				}},
 			},
 		},
 	}
@@ -1568,8 +1567,14 @@ func TestEngine_Run_CancelledContext(t *testing.T) {
 		Execution: plan.Execution{
 			Steps: []plan.Step{
 				{Node: "search", Values: map[string]plan.StepValue{"query": {Default: "test"}}},
-				{Node: "select", DependsOn: []string{"search"}},
-				{Node: "book", DependsOn: []string{"select"}},
+				{Node: "select", DependsOn: []string{"search"}, Values: map[string]plan.StepValue{
+					"sessionId": {From: "search.sessionId"},
+					"itemId":    {From: "search.results", Select: &plan.SelectionConfig{Strategy: "first", Field: "id"}},
+				}},
+				{Node: "book", DependsOn: []string{"search", "select"}, Values: map[string]plan.StepValue{
+					"sessionId": {From: "search.sessionId"},
+					"confirmed": {From: "select.confirmed"},
+				}},
 			},
 		},
 	}
@@ -1610,10 +1615,6 @@ func TestEngine_Run_CleanupRunsDespiteCancellation(t *testing.T) {
 				Outputs: []graph.Output{},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "create.id", To: "verify.id"},
-			{From: "create.id", To: "delete.id"},
-		},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1642,7 +1643,9 @@ func TestEngine_Run_CleanupRunsDespiteCancellation(t *testing.T) {
 		Execution: plan.Execution{
 			Steps: []plan.Step{
 				{Node: "create", Values: map[string]plan.StepValue{"name": {Default: "test"}}},
-				{Node: "verify", DependsOn: []string{"create"}},
+				{Node: "verify", DependsOn: []string{"create"}, Values: map[string]plan.StepValue{
+					"id": {From: "create.id"},
+				}},
 			},
 		},
 	}

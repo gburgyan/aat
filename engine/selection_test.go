@@ -434,9 +434,6 @@ func TestFilterRelaxation_SelectEdge(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.selectedItem", Select: true},
-		},
 	}
 
 	state := NewRunState()
@@ -451,6 +448,7 @@ func TestFilterRelaxation_SelectEdge(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"selectedItem": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "first",
 					Filter:   "carrier == 'DL'", // no match

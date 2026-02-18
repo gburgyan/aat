@@ -53,7 +53,7 @@ func TestParseFile_TravelportBooking(t *testing.T) {
 	commitStep := p.Execution.Steps[5]
 	assert.Equal(t, "commitBooking", commitStep.Node)
 	assert.True(t, commitStep.IsGoal)
-	assert.Equal(t, []string{"addOffer", "addTraveler"}, commitStep.DependsOn)
+	assert.Equal(t, []string{"addOffer", "addTraveler", "createWorkbench"}, commitStep.DependsOn)
 }
 
 func TestParseFile_FullFeatured(t *testing.T) {

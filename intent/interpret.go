@@ -140,7 +140,6 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	}
 
 	ws := sr.Selection
-	selJSON := sr.SelectionJSON
 
 	if trace != nil {
 		trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), nil)
@@ -210,9 +209,8 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	// --- Call 2: Targeted Value Fill ---
 	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB, ws)
 	selectionContexts := buildSelectionContexts(skeleton, req.Graph)
-	planFlow := buildCompactPlanFlow(skeleton, req.Graph)
 
-	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, planFlow, selJSON, req.Prompt, now)
+	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, now)
 
 	planCallStart := time.Now()
 	planResp, err := req.Client.Complete(ctx, &llm.Request{
@@ -233,7 +231,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		trace.PlanCall = toLLMCallTrace(system, user, 0.2, planResp, time.Since(planCallStart), nil)
 	}
 
-	// --- Parse and Apply ---
+	// --- Parse, Validate Response, and Apply ---
 	targeted, err := parseTargetedResponse(planResp.Content)
 	if err != nil {
 		return traceErr(fmt.Errorf("intent: %w", err))
@@ -241,6 +239,41 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 
 	if trace != nil {
 		trace.TargetedResponse = targeted
+	}
+
+	// Validate the LLM response before applying it to the skeleton.
+	issues := validateTargetedResponse(targeted, unfedSet, inputContexts, selectionContexts)
+	if len(issues) > 0 {
+		// Retry once with specific error feedback.
+		retryMsgs := formatValidationIssues(issues)
+		retrySystem, retryUser := buildTargetedRetryPrompt(
+			inputContexts, selectionContexts, req.Prompt, now, retryMsgs, nil,
+		)
+
+		retryStart := time.Now()
+		retryResp, retryErr := req.Client.Complete(ctx, &llm.Request{
+			Messages: []llm.Message{
+				{Role: llm.RoleSystem, Content: retrySystem},
+				{Role: llm.RoleUser, Content: retryUser},
+			},
+			Temperature: 0.2,
+		})
+		if retryErr == nil {
+			if retried, parseErr := parseTargetedResponse(retryResp.Content); parseErr == nil {
+				retryIssues := validateTargetedResponse(retried, unfedSet, inputContexts, selectionContexts)
+				if len(retryIssues) == 0 {
+					// Retry succeeded — use the retried response.
+					targeted = retried
+					if trace != nil {
+						ct := toLLMCallTrace(retrySystem, retryUser, 0.2, retryResp, time.Since(retryStart), nil)
+						trace.RetryCall = &ct
+						trace.TargetedResponse = targeted
+					}
+				}
+				// If retry still has issues, fall through with original response
+				// and let plan.Validate catch structural problems.
+			}
+		}
 	}
 
 	applyTargetedResponse(skeleton, targeted, unfedSet)
@@ -266,7 +299,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 			trace.ValidationErr = err.Error()
 		}
 
-		retryResult := retryPlanGeneration(ctx, req, skeleton, ws, selJSON, valErr, trace, pipelineStart)
+		retryResult := retryPlanGeneration(ctx, req, skeleton, ws, valErr, trace, pipelineStart)
 		if retryResult != nil {
 			retryResult.WorkflowSelection = ws
 			return retryResult, nil
@@ -300,7 +333,6 @@ func retryPlanGeneration(
 	req InterpretRequest,
 	skeleton *plan.Plan,
 	ws *WorkflowSelection,
-	selJSON string,
 	valErr *plan.ValidationError,
 	trace *PlanTrace,
 	pipelineStart time.Time,
@@ -332,11 +364,10 @@ func retryPlanGeneration(
 	// Rebuild contexts for the retry skeleton.
 	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB, ws)
 	selectionContexts := buildSelectionContexts(retrySkeleton, req.Graph)
-	planFlow := buildCompactPlanFlow(retrySkeleton, req.Graph)
 
 	now := time.Now()
 	system, user := buildTargetedRetryPrompt(
-		inputContexts, selectionContexts, planFlow, selJSON,
+		inputContexts, selectionContexts,
 		req.Prompt, now, valErr.Errors, hints,
 	)
 

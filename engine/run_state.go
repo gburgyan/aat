@@ -37,3 +37,12 @@ func (s *RunState) GetAllOutputs(nodeName string) (map[string]any, bool) {
 	outputs, ok := s.outputs[nodeName]
 	return outputs, ok
 }
+
+// ExecutedSteps returns the IDs of all steps that have stored outputs.
+func (s *RunState) ExecutedSteps() []string {
+	keys := make([]string, 0, len(s.outputs))
+	for k := range s.outputs {
+		keys = append(keys, k)
+	}
+	return keys
+}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/intent"
@@ -35,16 +34,6 @@ func (s *Server) registerWorkflowTools() {
 		s.handleInstantiateWorkflow,
 	)
 
-	s.mcp.AddTool(
-		mcp.NewTool("scaffold_template",
-			mcp.WithDescription("Generate a new workflow template skeleton from a backward chain. Input: goal node, optional intermediate nodes. Output: skeleton plan YAML with all wiring from graph edges, AUTOWIRE markers for user-provided values. Use validate_plan and save_plan to refine and persist."),
-			mcp.WithString("goal",
-				mcp.Description("Goal node name to build the plan toward"),
-				mcp.Required(),
-			),
-		),
-		s.handleScaffoldTemplate,
-	)
 }
 
 // handleListWorkflows lists all workflows with their metadata.
@@ -190,58 +179,6 @@ func (s *Server) handleInstantiateWorkflow(_ context.Context, req mcp.CallToolRe
 	narrative := plan.FormatNarrative(tpl, g)
 	b.WriteString("\n## Narrative\n\n")
 	b.WriteString(narrative)
-
-	return mcp.NewToolResultText(b.String()), nil
-}
-
-// handleScaffoldTemplate generates a skeleton plan from a backward chain.
-func (s *Server) handleScaffoldTemplate(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	goalNode, err := req.RequireString("goal")
-	if err != nil {
-		return mcp.NewToolResultError("missing required parameter: goal"), nil
-	}
-
-	g := s.ctx.Graph
-	if g.Nodes[goalNode] == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("unknown goal node %q", goalNode)), nil
-	}
-
-	cr, err := graph.BackwardChain(g, graph.ChainOptions{
-		Goals: []string{goalNode},
-	})
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("backward chaining failed: %v", err)), nil
-	}
-
-	skeleton := intent.BuildSkeleton(g, cr, &intent.GoalAnalysis{
-		Goal:        goalNode,
-		Description: fmt.Sprintf("Scaffold for %s", goalNode),
-	}, "", time.Now())
-
-	yamlBytes, err := plan.Marshal(skeleton)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("marshalling skeleton: %v", err)), nil
-	}
-
-	unfed := intent.UnfedInputs(g, cr)
-
-	var b strings.Builder
-	b.WriteString("## Scaffolded Template\n\n```yaml\n")
-	b.Write(yamlBytes)
-	b.WriteString("```\n")
-
-	if len(unfed) > 0 {
-		b.WriteString("\n## Inputs That Need Values\n\n")
-		for _, inp := range unfed {
-			fmt.Fprintf(&b, "- %s\n", inp)
-		}
-	}
-
-	b.WriteString("\n## Chain\n\n")
-	fmt.Fprintf(&b, "Nodes: %s\n", strings.Join(cr.Nodes, " → "))
-	fmt.Fprintf(&b, "Entry nodes: %s\n", strings.Join(cr.EntryNodes, ", "))
-
-	b.WriteString("\n*Next steps: fill in literal values, refine selection strategies, add assertions, then use `validate_plan` and `save_plan`.*\n")
 
 	return mcp.NewToolResultText(b.String()), nil
 }

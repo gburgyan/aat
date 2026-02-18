@@ -318,7 +318,7 @@ func TestEnrichDocumentation_ConnectedNodes(t *testing.T) {
 
 	ctxText := result.Messages[0].Content.(mcp.TextContent).Text
 	assert.Contains(t, ctxText, "Connected Nodes")
-	assert.Contains(t, ctxText, "Receives data from")
+	assert.Contains(t, ctxText, "Depends on:")
 	assert.Contains(t, ctxText, "search")
 }
 

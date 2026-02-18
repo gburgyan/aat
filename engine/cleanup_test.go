@@ -149,10 +149,6 @@ func TestEngine_Run_WithCleanup(t *testing.T) {
 				Outputs: []graph.Output{},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "create.resourceId", To: "use.resourceId"},
-			{From: "create.resourceId", To: "destroy.resourceId"},
-		},
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -193,7 +189,9 @@ func TestEngine_Run_WithCleanup(t *testing.T) {
 		Execution: plan.Execution{
 			Steps: []plan.Step{
 				{Node: "create"},
-				{Node: "use", DependsOn: []string{"create"}},
+				{Node: "use", DependsOn: []string{"create"}, Values: map[string]plan.StepValue{
+					"resourceId": {From: "create.resourceId"},
+				}},
 			},
 		},
 	}
@@ -242,10 +240,6 @@ func TestEngine_Run_CleanupOnFailure(t *testing.T) {
 				Outputs: []graph.Output{},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "create.resourceId", To: "fail.resourceId"},
-			{From: "create.resourceId", To: "destroy.resourceId"},
-		},
 	}
 
 	requestCount := 0
@@ -292,7 +286,9 @@ func TestEngine_Run_CleanupOnFailure(t *testing.T) {
 		Execution: plan.Execution{
 			Steps: []plan.Step{
 				{Node: "create"},
-				{Node: "fail", DependsOn: []string{"create"}},
+				{Node: "fail", DependsOn: []string{"create"}, Values: map[string]plan.StepValue{
+					"resourceId": {From: "create.resourceId"},
+				}},
 			},
 		},
 	}
@@ -331,9 +327,6 @@ func TestEngine_Run_DeleteNoBody(t *testing.T) {
 				},
 				Outputs: []graph.Output{},
 			},
-		},
-		Edges: []graph.Edge{
-			{From: "create.id", To: "delete.id"},
 		},
 	}
 

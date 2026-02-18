@@ -316,9 +316,6 @@ func TestResolveInputs_LLMSelection_ViaSelectEdge(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
 	}
 
 	stub := &stubLLMClient{responses: []string{"1"}}
@@ -334,6 +331,7 @@ func TestResolveInputs_LLMSelection_ViaSelectEdge(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"itemId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "llm",
 					Field:    "itemId",
@@ -421,9 +419,6 @@ func TestResolveInputs_LLMSelection_StrictModeErrors(t *testing.T) {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "source.items", To: "target.itemId", Select: true},
-		},
 	}
 
 	stub := &stubLLMClient{responses: []string{"0"}}
@@ -436,6 +431,7 @@ func TestResolveInputs_LLMSelection_StrictModeErrors(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"itemId": {
+				From: "source.items",
 				Select: &plan.SelectionConfig{
 					Strategy: "llm",
 					Prompt:   "pick one",

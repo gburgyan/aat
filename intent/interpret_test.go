@@ -248,12 +248,7 @@ execution:
 			"addItem": {Name: "addItem", Description: "Add item", Adapter: "b", Inputs: []graph.Input{{Name: "setupId", Type: "string"}, {Name: "name", Type: "string"}}, Outputs: []graph.Output{{Name: "itemId", Type: "string"}}},
 			"commit":  {Name: "commit", Description: "Commit", Adapter: "c", Inputs: []graph.Input{{Name: "setupId", Type: "string"}}, Outputs: []graph.Output{{Name: "result", Type: "string"}}},
 		},
-		Edges: []graph.Edge{
-			{From: "setup.setupId", To: "addItem.setupId"},
-			{From: "setup.setupId", To: "commit.setupId"},
-		},
 	}
-	g.BuildEdgeIndex()
 
 	wsJSON := `{"workflow": "Multi-Item", "description": "Add 2 items and commit", "repetitions": {"addItem": 2}, "constraints": {"hard": [], "soft": [], "free": []}}`
 
@@ -380,11 +375,7 @@ execution:
 				Inputs: []graph.Input{}, Outputs: []graph.Output{},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "search.resultId", To: "process.itemId"},
-		},
 	}
-	g.BuildEdgeIndex()
 
 	kbYAML := `
 concepts:
@@ -551,10 +542,6 @@ func buildMismatchGraph() *graph.Graph {
 				},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "search.items", To: "process.itemId", Select: true},
-			{From: "search.items", To: "process.origin", Select: true},
-		},
 	}
 }
 
@@ -620,11 +607,7 @@ execution:
 				Outputs:     []graph.Output{},
 			},
 		},
-		Edges: []graph.Edge{
-			{From: "search.resultId", To: "process.itemId"},
-		},
 	}
-	g.BuildEdgeIndex()
 
 	return g, dir
 }
@@ -686,15 +669,14 @@ func TestInterpret_RetryOnValidationFailure(t *testing.T) {
 
 	// The template has a broken fromSelection (item.origin where "origin"
 	// isn't a valid elementField). Validation catches this. The retry blanks
-	// the broken fromSelection and re-runs PostProcess, which normalizes the
-	// origin input via fixSelectionConfigs (since a select edge exists in the
-	// graph). This creates a from+select config that validates successfully.
-	t.Run("retry fixes broken fromSelection via normalization", func(t *testing.T) {
+	// the broken fromSelection and re-runs PostProcess. Since there are no
+	// edges to backfill from, the retry returns nil (validation still fails).
+	t.Run("retry_returns_nil_when_broken_fromSelection_cannot_be_fixed", func(t *testing.T) {
 		client := &stubClient{
 			responses: []string{
 				wsJSON,       // Call 1: workflow selection
 				targetedJSON, // Call 2: targeted fill (broken fromSelection in template)
-				targetedJSON, // Call 3: retry (PostProcess normalizes blanked origin)
+				targetedJSON, // Call 3: retry (still can't fix)
 			},
 		}
 
@@ -705,19 +687,13 @@ func TestInterpret_RetryOnValidationFailure(t *testing.T) {
 			GraphDir: graphDir,
 		})
 
+		// Retry returns the original plan (before retry) since retry couldn't fix it.
+		// The pipeline falls through to the pre-retry result.
 		require.NoError(t, err)
 		require.NotNil(t, result.Plan)
 
 		// Should have made 3 LLM calls (selection + targeted + retry)
 		assert.Len(t, client.calls, 3)
-
-		// The "origin" input should be wired via from+select after normalization.
-		for _, step := range result.Plan.Execution.Steps {
-			if step.Node == "process" {
-				sv := step.Values["origin"]
-				assert.NotEmpty(t, sv.From, "origin should have from ref after normalization")
-			}
-		}
 	})
 
 	t.Run("retry trace captures validation error and retry", func(t *testing.T) {

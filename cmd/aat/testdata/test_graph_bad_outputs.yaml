@@ -12,5 +12,3 @@ nodes:
         type: string
       - name: ghost
         type: string
-
-edges: []

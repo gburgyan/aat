@@ -5,6 +5,7 @@ nodes:
     description: "Authenticate with the API"
     adapter: auth.authenticate
     cycleBreaker: true
+    satisfies: [authenticated]
     inputs:
       - name: clientId
         type: string
@@ -17,6 +18,8 @@ nodes:
   refreshToken:
     description: "Refresh an expired token"
     adapter: auth.refreshToken
+    requires: [authenticated]
+    satisfies: [authenticated]
     inputs:
       - name: token
         type: string
@@ -27,6 +30,8 @@ nodes:
   getUser:
     description: "Get user details"
     adapter: api.getUser
+    requires: [authenticated]
+    satisfies: [userRetrieved]
     inputs:
       - name: token
         type: string
@@ -41,6 +46,7 @@ nodes:
   updateUser:
     description: "Update user details"
     adapter: api.updateUser
+    requires: [authenticated, userRetrieved]
     inputs:
       - name: token
         type: string
@@ -51,20 +57,3 @@ nodes:
     outputs:
       - name: updated
         type: boolean
-
-edges:
-  # Auth cycle: authenticate → refreshToken → authenticate
-  - from: authenticate.token
-    to: refreshToken.token
-  - from: refreshToken.token
-    to: authenticate.clientId
-
-  # Auth → API nodes
-  - from: authenticate.token
-    to: getUser.token
-  - from: authenticate.token
-    to: updateUser.token
-
-  # getUser → updateUser (data dependency)
-  - from: getUser.name
-    to: updateUser.name

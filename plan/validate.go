@@ -24,10 +24,8 @@ func Validate(p *Plan, g *graph.Graph) error {
 	// Build step ID set for uniqueness and reference validation.
 	// stepIDs: stepID → true (for dependency and reference checks)
 	// stepIDToNode: stepID → graph node name (for output validation)
-	// nodeCount: graph node name → count of steps using it
 	stepIDs := make(map[string]bool, len(p.Execution.Steps))
 	stepIDToNode := make(map[string]string, len(p.Execution.Steps))
-	nodeCount := make(map[string]int, len(p.Execution.Steps))
 	for _, step := range p.Execution.Steps {
 		sid := step.StepID()
 		if stepIDs[sid] {
@@ -35,13 +33,6 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 		stepIDs[sid] = true
 		stepIDToNode[sid] = step.Node
-		nodeCount[step.Node]++
-	}
-
-	// Build edge lookup: targetNode.targetInput → sourceNode.sourceOutput
-	edgeTargets := make(map[string]bool) // "node.input" that are wired by edges
-	for _, edge := range g.Edges {
-		edgeTargets[edge.To] = true
 	}
 
 	// Build output lookup: node → output name → Output
@@ -52,12 +43,6 @@ func Validate(p *Plan, g *graph.Graph) error {
 			outs[out.Name] = out
 		}
 		outputsByNode[name] = outs
-	}
-
-	// Build edge-by-target lookup: "node.input" → edges (for finding select edges)
-	edgesByTarget := make(map[string][]graph.Edge)
-	for _, edge := range g.Edges {
-		edgesByTarget[edge.To] = append(edgesByTarget[edge.To], edge)
 	}
 
 	for i, step := range p.Execution.Steps {
@@ -88,30 +73,15 @@ func Validate(p *Plan, g *graph.Graph) error {
 			inputNames[input.Name] = true
 		}
 
-		// Check that required inputs without edges have plan values or defaults.
-		// For duplicate nodes (same graph node used by multiple steps), graph-edge
-		// auto-wiring is disabled — all non-default, non-optional inputs must have
-		// explicit plan values (with from/fromSelection).
-		isDuplicate := nodeCount[step.Node] > 1
+		// Check that required inputs have plan values or graph defaults.
 		for _, input := range node.Inputs {
 			if input.Optional {
 				continue
 			}
-
 			_, hasPlanValue := step.Values[input.Name]
 			hasDefault := input.Default != nil
-
-			if isDuplicate {
-				// Duplicate node: require explicit plan value or graph default
-				if !hasPlanValue && !hasDefault {
-					errs = append(errs, fmt.Sprintf("step %d (%s): required input %q needs explicit value (node %q appears in multiple steps)", i, sid, input.Name, step.Node))
-				}
-			} else {
-				edgeKey := step.Node + "." + input.Name
-				hasEdge := edgeTargets[edgeKey]
-				if !hasEdge && !hasPlanValue && !hasDefault {
-					errs = append(errs, fmt.Sprintf("step %d (%s): required input %q has no edge, plan value, or default", i, sid, input.Name))
-				}
+			if !hasPlanValue && !hasDefault {
+				errs = append(errs, fmt.Sprintf("step %d (%s): required input %q has no plan value or default", i, sid, input.Name))
 			}
 		}
 
@@ -248,27 +218,8 @@ func Validate(p *Plan, g *graph.Graph) error {
 						}
 					}
 				} else {
-					// No From: look for a select edge targeting this input
-					targetKey := step.Node + "." + name
-					edges := edgesByTarget[targetKey]
-					hasSelectEdge := false
-					for _, e := range edges {
-						if e.Select {
-							hasSelectEdge = true
-							srcNode, srcField, err := splitRef(e.From)
-							if err == nil {
-								if outs, ok := outputsByNode[srcNode]; ok {
-									if out, outExists := outs[srcField]; outExists {
-										sourceOutput = &out
-									}
-								}
-							}
-							break
-						}
-					}
-					if !hasSelectEdge {
-						errs = append(errs, fmt.Sprintf("step %d (%s): selection on %q has no 'from' and no select edge in the graph", i, sid, name))
-					}
+					// Selection requires a 'from' reference
+					errs = append(errs, fmt.Sprintf("step %d (%s): selection on %q has no 'from' reference", i, sid, name))
 				}
 
 				// Gap 3: SortField validation against elementFields

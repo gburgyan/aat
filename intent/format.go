@@ -130,35 +130,6 @@ func FormatGraph(g *graph.Graph) string {
 		b.WriteString("\n")
 	}
 
-	// Edges — omit auto-wired edges to keep LLM context compact
-	var explicitEdges []graph.Edge
-	for _, edge := range g.Edges {
-		if !edge.AutoWired {
-			explicitEdges = append(explicitEdges, edge)
-		}
-	}
-	if len(explicitEdges) > 0 {
-		b.WriteString("## Edges\n")
-		if g.AutoWire.IsEnabled() {
-			b.WriteString("Auto-wired: inputs with matching output names are connected automatically.\n")
-		}
-		for _, edge := range explicitEdges {
-			sel := ""
-			if edge.Select {
-				sel = " [select]"
-			}
-			pref := ""
-			if edge.Preferred {
-				pref = " [preferred]"
-			}
-			fmt.Fprintf(&b, "- %s → %s%s%s\n", edge.From, edge.To, sel, pref)
-		}
-		b.WriteString("\n")
-	} else if g.AutoWire.IsEnabled() {
-		b.WriteString("## Edges\n")
-		b.WriteString("Auto-wired: inputs with matching output names are connected automatically.\n\n")
-	}
-
 	// Conditions
 	if len(g.Conditions) > 0 {
 		b.WriteString("## Conditions\n")
@@ -169,103 +140,6 @@ func FormatGraph(g *graph.Graph) string {
 			}
 			if len(cond.Before) > 0 {
 				fmt.Fprintf(&b, "  before: %s\n", strings.Join(cond.Before, ", "))
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	return b.String()
-}
-
-// FormatChainResult serializes a ChainResult with its graph context into
-// structured text showing only the relevant subgraph. Used for the second
-// LLM call after backward chaining.
-func FormatChainResult(cr *graph.ChainResult, g *graph.Graph) string {
-	var b strings.Builder
-
-	b.WriteString("# Execution Chain\n\n")
-	fmt.Fprintf(&b, "Nodes (dependency order): %s\n", strings.Join(cr.Nodes, " → "))
-	fmt.Fprintf(&b, "Entry nodes: %s\n\n", strings.Join(cr.EntryNodes, ", "))
-
-	// Node details in chain order
-	for _, name := range cr.Nodes {
-		node := g.Nodes[name]
-		if node == nil {
-			continue
-		}
-		fmt.Fprintf(&b, "## Step: %s\n", name)
-		fmt.Fprintf(&b, "%s\n", node.Description)
-		if node.Cleanup != "" {
-			fmt.Fprintf(&b, "Cleanup: %s\n", node.Cleanup)
-		}
-		if len(node.Requires) > 0 {
-			fmt.Fprintf(&b, "Requires: %s\n", strings.Join(node.Requires, ", "))
-		}
-		if len(node.Satisfies) > 0 {
-			fmt.Fprintf(&b, "Satisfies: %s\n", strings.Join(node.Satisfies, ", "))
-		}
-
-		if len(node.Inputs) > 0 {
-			b.WriteString("Inputs:\n")
-			for _, inp := range node.Inputs {
-				opt := ""
-				if inp.Optional {
-					opt = " (optional)"
-				}
-				def := ""
-				if inp.Default != nil {
-					def = fmt.Sprintf(" [default: %v]", inp.Default)
-				}
-				constraint := formatConstraintAnnotation(inp.Constraints)
-				fmt.Fprintf(&b, "  - %s: %s%s%s%s\n", inp.Name, inp.Type, constraint, opt, def)
-			}
-		}
-
-		if len(node.Outputs) > 0 {
-			b.WriteString("Outputs:\n")
-			for _, out := range node.Outputs {
-				fmt.Fprintf(&b, "  - %s: %s\n", out.Name, out.Type)
-				for _, ef := range out.ElementFields {
-					if ef.Path != "" && ef.Path != ef.Name {
-						fmt.Fprintf(&b, "    - %s: %s (path: %s)\n", ef.Name, ef.Type, ef.Path)
-					} else {
-						fmt.Fprintf(&b, "    - %s: %s\n", ef.Name, ef.Type)
-					}
-				}
-			}
-		}
-		b.WriteString("\n")
-	}
-
-	// Chain edges
-	if len(cr.Edges) > 0 {
-		b.WriteString("## Data Flow\n")
-		for _, edge := range cr.Edges {
-			sel := ""
-			if edge.Select {
-				sel = " [select]"
-			}
-			fmt.Fprintf(&b, "- %s → %s%s\n", edge.From, edge.To, sel)
-		}
-		b.WriteString("\n")
-	}
-
-	// Requires edges
-	if len(cr.RequiresEdges) > 0 {
-		b.WriteString("## Semantic Prerequisites\n")
-		for _, re := range cr.RequiresEdges {
-			fmt.Fprintf(&b, "- %s → %s (token: %s)\n", re.From, re.To, re.Token)
-		}
-		b.WriteString("\n")
-	}
-
-	// Decisions
-	if len(cr.Decisions) > 0 {
-		b.WriteString("## Chain Decisions\n")
-		for _, d := range cr.Decisions {
-			fmt.Fprintf(&b, "- %s\n", d.Detail)
-			if len(d.Alternatives) > 0 {
-				fmt.Fprintf(&b, "  Alternatives: %s\n", strings.Join(d.Alternatives, ", "))
 			}
 		}
 		b.WriteString("\n")

@@ -37,9 +37,6 @@ func TestGraphResource(t *testing.T) {
 			"search": {Name: "search", Description: "Search flights", Inputs: []graph.Input{{Name: "origin", Type: "string"}}},
 			"book":   {Name: "book", Description: "Book flight", Inputs: []graph.Input{{Name: "id", Type: "string"}}},
 		},
-		Edges: []graph.Edge{
-			{From: "search.results", To: "book.id"},
-		},
 	}
 	srv := newTestServer(g)
 	text, err := callResource(t, srv.handleGraphResource, "aat://graph", nil)
@@ -125,7 +122,6 @@ func TestMetadataResource(t *testing.T) {
 			"a": {Name: "a"},
 			"b": {Name: "b"},
 		},
-		Edges:      []graph.Edge{{From: "a.out", To: "b.in"}},
 		Conditions: []graph.Condition{{When: "true"}},
 	}
 	ctx := &ServerContext{
@@ -146,7 +142,6 @@ func TestMetadataResource(t *testing.T) {
 	assert.Contains(t, text, "api, test")
 	assert.Contains(t, text, "**Version:** 2.0")
 	assert.Contains(t, text, "**Nodes:** 2")
-	assert.Contains(t, text, "**Edges:** 1")
 	assert.Contains(t, text, "**Conditions:** 1")
 }
 

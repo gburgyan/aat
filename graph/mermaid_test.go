@@ -45,15 +45,12 @@ func TestGenerateMermaid_TravelportBooking(t *testing.T) {
 func TestGenerateMermaid_LinearGraph(t *testing.T) {
 	g := &Graph{
 		Nodes: map[string]*Node{
-			"a": {Name: "a", Description: "First"},
-			"b": {Name: "b", Description: "Second"},
-			"c": {Name: "c", Description: "Third"},
-		},
-		Edges: []Edge{
-			{From: "a.out", To: "b.in"},
-			{From: "b.out", To: "c.in"},
+			"a": {Name: "a", Description: "First", Satisfies: []string{"tokenA"}},
+			"b": {Name: "b", Description: "Second", Requires: []string{"tokenA"}, Satisfies: []string{"tokenB"}},
+			"c": {Name: "c", Description: "Third", Requires: []string{"tokenB"}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	result := GenerateMermaid(g)
 
@@ -65,17 +62,13 @@ func TestGenerateMermaid_LinearGraph(t *testing.T) {
 func TestGenerateMermaid_FanOut(t *testing.T) {
 	g := &Graph{
 		Nodes: map[string]*Node{
-			"source": {Name: "source", Description: "Source node"},
-			"dest1":  {Name: "dest1", Description: "Destination 1"},
-			"dest2":  {Name: "dest2", Description: "Destination 2"},
-			"dest3":  {Name: "dest3", Description: "Destination 3"},
-		},
-		Edges: []Edge{
-			{From: "source.out", To: "dest1.in"},
-			{From: "source.out", To: "dest2.in"},
-			{From: "source.out", To: "dest3.in"},
+			"source": {Name: "source", Description: "Source node", Satisfies: []string{"tokenS"}},
+			"dest1":  {Name: "dest1", Description: "Destination 1", Requires: []string{"tokenS"}},
+			"dest2":  {Name: "dest2", Description: "Destination 2", Requires: []string{"tokenS"}},
+			"dest3":  {Name: "dest3", Description: "Destination 3", Requires: []string{"tokenS"}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	result := GenerateMermaid(g)
 
@@ -87,15 +80,12 @@ func TestGenerateMermaid_FanOut(t *testing.T) {
 func TestGenerateMermaid_CleanupEdges(t *testing.T) {
 	g := &Graph{
 		Nodes: map[string]*Node{
-			"create":  {Name: "create", Description: "Create resource", Cleanup: "cleanup"},
-			"use":     {Name: "use", Description: "Use resource"},
+			"create":  {Name: "create", Description: "Create resource", Cleanup: "cleanup", Satisfies: []string{"tokenCreate"}},
+			"use":     {Name: "use", Description: "Use resource", Requires: []string{"tokenCreate"}},
 			"cleanup": {Name: "cleanup", Description: "Clean up resource"},
 		},
-		Edges: []Edge{
-			{From: "create.id", To: "use.id"},
-			{From: "create.id", To: "cleanup.id"},
-		},
 	}
+	g.BuildSatisfierIndex()
 
 	result := GenerateMermaid(g)
 
@@ -108,14 +98,11 @@ func TestGenerateMermaid_CleanupEdges(t *testing.T) {
 func TestGenerateMermaid_DeduplicatesEdges(t *testing.T) {
 	g := &Graph{
 		Nodes: map[string]*Node{
-			"a": {Name: "a"},
-			"b": {Name: "b"},
-		},
-		Edges: []Edge{
-			{From: "a.out1", To: "b.in1"},
-			{From: "a.out2", To: "b.in2"},
+			"a": {Name: "a", Satisfies: []string{"token1", "token2"}},
+			"b": {Name: "b", Requires: []string{"token1", "token2"}},
 		},
 	}
+	g.BuildSatisfierIndex()
 
 	result := GenerateMermaid(g)
 

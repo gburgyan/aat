@@ -15,5 +15,3 @@ nodes:
     outputs:
       - name: id
         type: integer
-
-edges: []

@@ -179,7 +179,6 @@ func (s *Server) handleMetadataResource(_ context.Context, req mcp.ReadResourceR
 	b.WriteString("## Graph Statistics\n\n")
 	fmt.Fprintf(&b, "**Version:** %s\n", g.Version)
 	fmt.Fprintf(&b, "**Nodes:** %d\n", len(g.Nodes))
-	fmt.Fprintf(&b, "**Edges:** %d\n", len(g.Edges))
 	fmt.Fprintf(&b, "**Conditions:** %d\n", len(g.Conditions))
 
 	return []mcp.ResourceContents{

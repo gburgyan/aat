@@ -13,5 +13,3 @@ nodes:
     outputs:
       - name: bar
         type: string
-
-edges: []
