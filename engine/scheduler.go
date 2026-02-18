@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -12,7 +11,7 @@ import (
 // algorithm. Dependencies come from explicit step.DependsOn references (step IDs).
 //
 // Returns an error if a cycle is detected.
-func TopologicalSort(steps []plan.Step, g *graph.Graph) ([]plan.Step, error) {
+func TopologicalSort(steps []plan.Step) ([]plan.Step, error) {
 	// Build set of step IDs
 	stepSet := make(map[string]bool, len(steps))
 	stepIndex := make(map[string]int, len(steps))

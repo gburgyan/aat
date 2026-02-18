@@ -90,7 +90,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 	}
 
 	// 2. Topological sort
-	sorted, err := TopologicalSort(p.Execution.Steps, e.graph)
+	sorted, err := TopologicalSort(p.Execution.Steps)
 	if err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}

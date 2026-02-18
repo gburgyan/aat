@@ -3,22 +3,12 @@ package engine
 import (
 	"testing"
 
-	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func loadTravelportGraph(t *testing.T) *graph.Graph {
-	t.Helper()
-	g, err := graph.ParseFile("../graph/testdata/valid/travelport_booking.yaml")
-	require.NoError(t, err)
-	return g
-}
-
 func TestTopologicalSort_TravelportBooking(t *testing.T) {
-	g := loadTravelportGraph(t)
-
 	steps := []plan.Step{
 		{Node: "searchFlights"},
 		{Node: "priceOffer", DependsOn: []string{"searchFlights"}},
@@ -28,7 +18,7 @@ func TestTopologicalSort_TravelportBooking(t *testing.T) {
 		{Node: "commitBooking", DependsOn: []string{"addOffer", "addTraveler"}},
 	}
 
-	sorted, err := TopologicalSort(steps, g)
+	sorted, err := TopologicalSort(steps)
 	require.NoError(t, err)
 	require.Len(t, sorted, 6)
 
@@ -51,24 +41,22 @@ func TestTopologicalSort_TravelportBooking(t *testing.T) {
 }
 
 func TestTopologicalSort_SingleStep(t *testing.T) {
-	g := loadTravelportGraph(t)
 	steps := []plan.Step{{Node: "searchFlights"}}
 
-	sorted, err := TopologicalSort(steps, g)
+	sorted, err := TopologicalSort(steps)
 	require.NoError(t, err)
 	require.Len(t, sorted, 1)
 	assert.Equal(t, "searchFlights", sorted[0].Node)
 }
 
 func TestTopologicalSort_IndependentSteps(t *testing.T) {
-	g := loadTravelportGraph(t)
 	// searchFlights and createWorkbench have no dependencies between them
 	steps := []plan.Step{
 		{Node: "searchFlights"},
 		{Node: "createWorkbench"},
 	}
 
-	sorted, err := TopologicalSort(steps, g)
+	sorted, err := TopologicalSort(steps)
 	require.NoError(t, err)
 	require.Len(t, sorted, 2)
 	// Both should be present (order between them is valid either way)
@@ -78,41 +66,24 @@ func TestTopologicalSort_IndependentSteps(t *testing.T) {
 }
 
 func TestTopologicalSort_CycleDetection(t *testing.T) {
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"a": {Name: "a"},
-			"b": {Name: "b"},
-		},
-	}
-
 	steps := []plan.Step{
 		{Node: "a", DependsOn: []string{"b"}},
 		{Node: "b", DependsOn: []string{"a"}},
 	}
 
-	_, err := TopologicalSort(steps, g)
+	_, err := TopologicalSort(steps)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "cycle")
 }
 
 func TestTopologicalSort_ExplicitDependsOn(t *testing.T) {
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"a": {Name: "a"},
-			"b": {Name: "b"},
-			"c": {Name: "c"},
-		},
-	}
-
 	steps := []plan.Step{
 		{Node: "c", DependsOn: []string{"b"}},
 		{Node: "b", DependsOn: []string{"a"}},
 		{Node: "a"},
 	}
 
-	sorted, err := TopologicalSort(steps, g)
+	sorted, err := TopologicalSort(steps)
 	require.NoError(t, err)
 	require.Len(t, sorted, 3)
 	assert.Equal(t, "a", sorted[0].Node)
@@ -122,20 +93,13 @@ func TestTopologicalSort_ExplicitDependsOn(t *testing.T) {
 
 func TestTopologicalSort_StepAliasing(t *testing.T) {
 	t.Run("aliased steps with explicit dependsOn", func(t *testing.T) {
-		g := &graph.Graph{
-			Version: "1.0.0",
-			Nodes: map[string]*graph.Node{
-				"search": {Name: "search"},
-			},
-		}
-
 		steps := []plan.Step{
 			{ID: "search_leg1", Node: "search"},
 			{ID: "search_leg2", Node: "search", DependsOn: []string{"search_leg1"}},
 			{ID: "search_leg3", Node: "search", DependsOn: []string{"search_leg2"}},
 		}
 
-		sorted, err := TopologicalSort(steps, g)
+		sorted, err := TopologicalSort(steps)
 		require.NoError(t, err)
 		require.Len(t, sorted, 3)
 		assert.Equal(t, "search_leg1", sorted[0].StepID())
@@ -144,8 +108,6 @@ func TestTopologicalSort_StepAliasing(t *testing.T) {
 	})
 
 	t.Run("mixed aliased and non-aliased steps", func(t *testing.T) {
-		g := loadTravelportGraph(t)
-
 		steps := []plan.Step{
 			{ID: "search_leg1", Node: "searchFlights", Values: map[string]plan.StepValue{
 				"origin": {Default: "MEL"}, "destination": {Default: "SYD"}, "departureDate": {Default: "2026-03-01"},
@@ -156,7 +118,7 @@ func TestTopologicalSort_StepAliasing(t *testing.T) {
 			{Node: "createWorkbench"},
 		}
 
-		sorted, err := TopologicalSort(steps, g)
+		sorted, err := TopologicalSort(steps)
 		require.NoError(t, err)
 		require.Len(t, sorted, 3)
 

@@ -14,11 +14,11 @@ import (
 func PostProcess(p *plan.Plan, g *graph.Graph, ws *WorkflowSelection, prompt string) {
 	stepIndex := buildStepIndex(p)
 
-	fixSelectionConfigs(p, g, stepIndex)
+	fixSelectionConfigs(p)
 	fixDependsOn(p, g, stepIndex)
 	fixFilterPrefixes(p)
 	fixAssertions(p)
-	addCleanupSteps(p, g, stepIndex)
+	addCleanupSteps(p, g)
 	setMetadata(p, g, prompt)
 	populateIntent(p, ws)
 }
@@ -133,7 +133,7 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 
 // fixSelectionConfigs ensures named selections have a strategy set.
 // Defaults empty strategy to "first".
-func fixSelectionConfigs(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
+func fixSelectionConfigs(p *plan.Plan) {
 	for i, step := range p.Execution.Steps {
 		if p.Execution.Steps[i].Values == nil {
 			p.Execution.Steps[i].Values = map[string]plan.StepValue{}
@@ -238,7 +238,7 @@ func fixAssertions(p *plan.Plan) {
 }
 
 // addCleanupSteps ensures cleanup steps exist for nodes that have Cleanup fields.
-func addCleanupSteps(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
+func addCleanupSteps(p *plan.Plan, g *graph.Graph) {
 	// Build set of existing cleanup nodes
 	existingCleanup := map[string]bool{}
 	for _, cs := range p.Execution.Cleanup {

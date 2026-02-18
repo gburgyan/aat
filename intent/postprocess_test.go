@@ -130,8 +130,7 @@ func TestAddCleanupSteps_AddsForNodeWithCleanup(t *testing.T) {
 		},
 	}
 
-	stepIndex := buildStepIndex(p)
-	addCleanupSteps(p, g, stepIndex)
+	addCleanupSteps(p, g)
 
 	require.Len(t, p.Execution.Cleanup, 1)
 	assert.Equal(t, "ignoreWorkbench", p.Execution.Cleanup[0].Node)
@@ -152,15 +151,12 @@ func TestAddCleanupSteps_DoesNotDuplicate(t *testing.T) {
 		},
 	}
 
-	stepIndex := buildStepIndex(p)
-	addCleanupSteps(p, g, stepIndex)
+	addCleanupSteps(p, g)
 
 	assert.Len(t, p.Execution.Cleanup, 1) // no duplicate
 }
 
 func TestFixSelectionConfigs_DefaultsInlineStrategy(t *testing.T) {
-	g := loadTravelportGraph(t)
-
 	p := &plan.Plan{
 		Execution: plan.Execution{
 			Steps: []plan.Step{
@@ -181,8 +177,7 @@ func TestFixSelectionConfigs_DefaultsInlineStrategy(t *testing.T) {
 		},
 	}
 
-	stepIndex := buildStepIndex(p)
-	fixSelectionConfigs(p, g, stepIndex)
+	fixSelectionConfigs(p)
 
 	sv := p.Execution.Steps[1].Values["offeringId"]
 	require.NotNil(t, sv.Select)
@@ -191,8 +186,6 @@ func TestFixSelectionConfigs_DefaultsInlineStrategy(t *testing.T) {
 }
 
 func TestFixSelectionConfigs_PreservesExisting(t *testing.T) {
-	g := loadTravelportGraph(t)
-
 	p := &plan.Plan{
 		Execution: plan.Execution{
 			Steps: []plan.Step{
@@ -214,8 +207,7 @@ func TestFixSelectionConfigs_PreservesExisting(t *testing.T) {
 		},
 	}
 
-	stepIndex := buildStepIndex(p)
-	fixSelectionConfigs(p, g, stepIndex)
+	fixSelectionConfigs(p)
 
 	sv := p.Execution.Steps[1].Values["offeringId"]
 	assert.Equal(t, "match", sv.Select.Strategy)
@@ -899,8 +891,6 @@ func TestDeriveSelectionName(t *testing.T) {
 // --- Named Selections: fixSelectionConfigs tests ---
 
 func TestFixSelectionConfigs_DefaultsNamedSelectionStrategy(t *testing.T) {
-	g := loadTravelportGraph(t)
-
 	p := &plan.Plan{
 		Execution: plan.Execution{
 			Steps: []plan.Step{
@@ -924,8 +914,7 @@ func TestFixSelectionConfigs_DefaultsNamedSelectionStrategy(t *testing.T) {
 		},
 	}
 
-	stepIndex := buildStepIndex(p)
-	fixSelectionConfigs(p, g, stepIndex)
+	fixSelectionConfigs(p)
 
 	// Strategy should default to "first"
 	assert.Equal(t, "first", p.Execution.Steps[2].Selections["offering"].Strategy)
@@ -937,8 +926,6 @@ func TestFixSelectionConfigs_DefaultsNamedSelectionStrategy(t *testing.T) {
 }
 
 func TestFixSelectionConfigs_SkipsFromSelectionValues(t *testing.T) {
-	g := loadTravelportGraph(t)
-
 	p := &plan.Plan{
 		Execution: plan.Execution{
 			Steps: []plan.Step{
@@ -964,8 +951,7 @@ func TestFixSelectionConfigs_SkipsFromSelectionValues(t *testing.T) {
 		},
 	}
 
-	stepIndex := buildStepIndex(p)
-	fixSelectionConfigs(p, g, stepIndex)
+	fixSelectionConfigs(p)
 
 	// fromSelection values should NOT gain from/select
 	assert.Equal(t, "offering.offeringId", p.Execution.Steps[2].Values["offeringId"].FromSelection)
