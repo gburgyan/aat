@@ -313,27 +313,29 @@ func populateConstraints(p *plan.Plan, cs ConstraintSet) {
 }
 
 // resolveConstraintRefs rewrites constraint AppliesTo entries so that bare
-// node names are replaced with the actual step IDs from the plan. This is
-// needed for composed plans where step IDs are prefixed.
+// node names are replaced with the actual step IDs from the plan. This handles
+// two cases:
+//  1. Composed plans where step IDs are prefixed (e.g., "inc0_searchSeatMap").
+//  2. LLM hallucination where it uses a shortened node name (e.g., "searchFlights"
+//     when the actual step is "searchFlights2Leg").
 func resolveConstraintRefs(p *plan.Plan) {
 	if p.Intent.Constraints == nil {
 		return
 	}
 
-	// Build nodeToStepID: node name → first step ID using that node.
+	// Build two maps:
+	// 1. nodeToStepID: node name → first step ID using that node (for prefixed steps).
+	// 2. allStepIDs: set of all step IDs in the plan (for existence checks).
 	nodeToStepID := map[string]string{}
+	allStepIDs := map[string]bool{}
 	for _, step := range p.Execution.Steps {
 		sid := step.StepID()
+		allStepIDs[sid] = true
 		if sid != step.Node {
-			// Only populate for steps where the step ID differs from the node
-			// name (i.e., composed/prefixed steps).
 			if _, exists := nodeToStepID[step.Node]; !exists {
 				nodeToStepID[step.Node] = sid
 			}
 		}
-	}
-	if len(nodeToStepID) == 0 {
-		return // No prefixed steps — nothing to resolve.
 	}
 
 	resolveRefs := func(refs []string) []string {
@@ -345,8 +347,36 @@ func resolveConstraintRefs(p *plan.Plan) {
 				stepRef = ref[:idx]
 				suffix = ref[idx:] // includes the dot
 			}
+
+			// Direct match on node-to-prefixed-step mapping.
 			if mapped, ok := nodeToStepID[stepRef]; ok {
 				resolved[i] = mapped + suffix
+				continue
+			}
+
+			// Already a valid step ID — keep as-is.
+			if allStepIDs[stepRef] {
+				resolved[i] = ref
+				continue
+			}
+
+			// Fuzzy match: LLM sometimes abbreviates node names. If stepRef
+			// is a prefix of exactly one step ID, use that step ID.
+			// e.g., "searchFlights" → "searchFlights2Leg".
+			var match string
+			ambiguous := false
+			for sid := range allStepIDs {
+				if strings.HasPrefix(sid, stepRef) && sid != stepRef {
+					if match == "" {
+						match = sid
+					} else {
+						ambiguous = true
+						break
+					}
+				}
+			}
+			if match != "" && !ambiguous {
+				resolved[i] = match + suffix
 			} else {
 				resolved[i] = ref
 			}

@@ -1205,6 +1205,67 @@ func TestResolveConstraintRefs_NoPrefixes(t *testing.T) {
 	assert.Equal(t, []string{"searchFlights.origin"}, p.Intent.Constraints.Soft[0].AppliesTo)
 }
 
+func TestResolveConstraintRefs_FuzzyNodeName(t *testing.T) {
+	// When LLM uses a shortened node name in constraints (e.g., "searchFlights")
+	// but the plan only has "searchFlights2Leg", fuzzy prefix matching should resolve it.
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "searchFlights2Leg"},
+				{ID: "searchNextLeg2", Node: "searchFlightsNextLeg"},
+				{Node: "priceOfferFullPayload"},
+			},
+		},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Hard: []plan.Constraint{
+					{
+						Name:      "route",
+						AppliesTo: []string{"searchFlights.input.origin", "searchFlights.input.destination"},
+					},
+					{
+						Name:      "leg-based",
+						AppliesTo: []string{"searchFlights.input.searchRepresentation"},
+					},
+				},
+			},
+		},
+	}
+
+	resolveConstraintRefs(p)
+
+	// "searchFlights" should resolve to "searchFlights2Leg" via prefix match (unique).
+	assert.Equal(t, []string{"searchFlights2Leg.input.origin", "searchFlights2Leg.input.destination"}, p.Intent.Constraints.Hard[0].AppliesTo)
+	assert.Equal(t, []string{"searchFlights2Leg.input.searchRepresentation"}, p.Intent.Constraints.Hard[1].AppliesTo)
+}
+
+func TestResolveConstraintRefs_FuzzyAmbiguous(t *testing.T) {
+	// When the prefix matches multiple step IDs, it should NOT resolve (ambiguous).
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "searchFlights2Leg"},
+				{Node: "searchFlights3Leg"},
+			},
+		},
+		Intent: plan.Intent{
+			Constraints: &plan.Constraints{
+				Hard: []plan.Constraint{
+					{
+						Name:      "ambiguous",
+						AppliesTo: []string{"searchFlights.origin"},
+					},
+				},
+			},
+		},
+	}
+
+	resolveConstraintRefs(p)
+
+	// "searchFlights" matches both "searchFlights2Leg" and "searchFlights3Leg" — should be left unchanged.
+	assert.Equal(t, []string{"searchFlights.origin"}, p.Intent.Constraints.Hard[0].AppliesTo)
+}
+
 func TestMergeLLMValues_SkipsFromSelectionValues(t *testing.T) {
 	skeleton := &plan.Plan{
 		Execution: plan.Execution{
