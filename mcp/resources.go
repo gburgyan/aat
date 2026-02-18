@@ -70,6 +70,14 @@ func (s *Server) registerResources() {
 		),
 		s.handleTemplateResource,
 	)
+
+	s.mcp.AddResourceTemplate(
+		mcp.NewResourceTemplate("aat://workflow/{name}", "Workflow Detail",
+			mcp.WithTemplateDescription("Enriched step-by-step recipe for a workflow showing HTTP methods, data flow, and inputs"),
+			mcp.WithTemplateMIMEType("text/markdown"),
+		),
+		s.handleWorkflowResource,
+	)
 }
 
 // handleGraphResource returns the full API graph formatted as Markdown.
@@ -239,6 +247,36 @@ func (s *Server) handleTemplateResource(_ context.Context, req mcp.ReadResourceR
 	}
 
 	content := formatTemplate(tmpl)
+	return []mcp.ResourceContents{
+		mcp.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "text/markdown",
+			Text:     content,
+		},
+	}, nil
+}
+
+// handleWorkflowResource returns an enriched step-by-step recipe for a specific workflow.
+func (s *Server) handleWorkflowResource(_ context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	name, err := extractURIParam(req, "name")
+	if err != nil {
+		return nil, err
+	}
+
+	wf, found := findWorkflowByName(s.ctx.Graph, name)
+	if !found {
+		return nil, fmt.Errorf("unknown workflow %q", name)
+	}
+	if wf.Template == "" {
+		return nil, fmt.Errorf("workflow %q has no template", name)
+	}
+
+	p, err := intent.LoadWorkflowTemplate(wf.Template, s.ctx.GraphDir, s.ctx.Graph)
+	if err != nil {
+		return nil, fmt.Errorf("loading workflow template: %w", err)
+	}
+
+	content := formatWorkflowDetail(wf, p, s.ctx.Graph, s.ctx.Registry)
 	return []mcp.ResourceContents{
 		mcp.TextResourceContents{
 			URI:      req.Params.URI,

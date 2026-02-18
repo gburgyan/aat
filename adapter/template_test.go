@@ -923,6 +923,130 @@ func TestLoadTemplates(t *testing.T) {
 	})
 }
 
+func TestClassifyInputs(t *testing.T) {
+	tests := []struct {
+		name            string
+		tmpl            *Template
+		wantRequired    []string
+		wantConditional []string
+		wantIterable    []string
+	}{
+		{
+			name: "all three categories",
+			tmpl: &Template{
+				Request: TemplateRequest{
+					Method: "POST",
+					Path:   "/api/{{version}}/search",
+					Body: `{
+  "origin": "{{origin}}",
+  "destination": "{{destination}}",
+  {{?carrierPreference}}"carrier": "{{carrierPreference}}"{{/carrierPreference}},
+  "products": [{{#productIds}}"{{.}}"{{/productIds}}]
+}`,
+				},
+			},
+			wantRequired:    []string{"destination", "origin", "version"},
+			wantConditional: []string{"carrierPreference"},
+			wantIterable:    []string{"productIds"},
+		},
+		{
+			name: "no body template",
+			tmpl: &Template{
+				Request: TemplateRequest{
+					Method: "GET",
+					Path:   "/api/{{resource}}/{{id}}",
+				},
+			},
+			wantRequired:    []string{"id", "resource"},
+			wantConditional: nil,
+			wantIterable:    nil,
+		},
+		{
+			name: "conditional with inner keys",
+			tmpl: &Template{
+				Request: TemplateRequest{
+					Method: "POST",
+					Path:   "/search",
+					Body: `{
+  "origin": "{{origin}}",
+  {{?returnDate}}"returnDate": "{{returnDate}}", "returnOrigin": "{{returnOrigin}}"{{/returnDate}}
+}`,
+				},
+			},
+			wantRequired:    []string{"origin"},
+			wantConditional: []string{"returnDate", "returnOrigin"},
+			wantIterable:    nil,
+		},
+		{
+			name: "header placeholders",
+			tmpl: &Template{
+				Request: TemplateRequest{
+					Method:  "GET",
+					Path:    "/test",
+					Headers: map[string]string{"Authorization": "Bearer {{token}}"},
+				},
+			},
+			wantRequired:    []string{"token"},
+			wantConditional: nil,
+			wantIterable:    nil,
+		},
+		{
+			name: "iteration only",
+			tmpl: &Template{
+				Request: TemplateRequest{
+					Method: "POST",
+					Path:   "/batch",
+					Body:   `[{{#items}}{"id":"{{.id}}"}{{/items}}]`,
+				},
+			},
+			wantRequired:    nil,
+			wantConditional: nil,
+			wantIterable:    []string{"items"},
+		},
+		{
+			name: "empty template",
+			tmpl: &Template{
+				Request: TemplateRequest{
+					Method: "GET",
+					Path:   "/health",
+				},
+			},
+			wantRequired:    nil,
+			wantConditional: nil,
+			wantIterable:    nil,
+		},
+		{
+			name: "complex roundtrip template",
+			tmpl: &Template{
+				Request: TemplateRequest{
+					Method: "POST",
+					Path:   "/api/price",
+					Body: `{
+  "offeringId": "{{offeringId}}",
+  "products": [{{#productIds}}"{{.}}"{{/productIds}}]
+  {{?returnOfferingId}},
+  "returnOffering": "{{returnOfferingId}}",
+  "returnProducts": [{{#returnProductIds}}"{{.}}"{{/returnProductIds}}]
+  {{/returnOfferingId}}
+}`,
+				},
+			},
+			wantRequired:    []string{"offeringId"},
+			wantConditional: []string{"returnOfferingId", "returnProductIds"},
+			wantIterable:    []string{"productIds", "returnProductIds"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, cond, iter := ClassifyInputs(tt.tmpl)
+			assert.Equal(t, tt.wantRequired, req, "required")
+			assert.Equal(t, tt.wantConditional, cond, "conditional")
+			assert.Equal(t, tt.wantIterable, iter, "iterable")
+		})
+	}
+}
+
 func TestParseTemplateFile(t *testing.T) {
 	t.Run("valid file", func(t *testing.T) {
 		tmpl, err := ParseTemplateFile("testdata/templates/valid/search_flights.yaml")

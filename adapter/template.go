@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/tidwall/gjson"
@@ -463,6 +464,153 @@ func normalizeJSONPath(path string) string {
 	path = bracketRe.ReplaceAllString(path, ".$1")
 
 	return path
+}
+
+// ClassifyInputs scans a template's path, headers, and body to classify each
+// placeholder into one of three categories:
+//   - required: placeholders that appear in unconditional context
+//   - conditional: placeholders that appear only inside {{?key}}...{{/key}} blocks
+//     (both the gate key and any {{innerKey}} only referenced inside)
+//   - iterable: placeholders that appear inside {{#key}}...{{/key}} blocks
+//
+// Returns sorted, deduplicated slices.
+func ClassifyInputs(tmpl *Template) (required, conditional, iterable []string) {
+	iterKeys := make(map[string]bool)
+	condKeys := make(map[string]bool)
+	condInnerKeys := make(map[string]bool)
+	allKeys := make(map[string]bool)
+
+	// Analyze all text sources: path, header values, and body.
+	sources := []string{tmpl.Request.Path}
+	for _, v := range tmpl.Request.Headers {
+		sources = append(sources, v)
+	}
+	if tmpl.Request.Body != "" {
+		sources = append(sources, tmpl.Request.Body)
+	}
+
+	for _, src := range sources {
+		classifySource(src, iterKeys, condKeys, condInnerKeys, allKeys)
+	}
+
+	reqSet := make(map[string]bool)
+	for k := range allKeys {
+		if !iterKeys[k] && !condKeys[k] && !condInnerKeys[k] {
+			reqSet[k] = true
+		}
+	}
+
+	required = sortedKeys(reqSet)
+	conditional = sortedKeys(condKeys)
+	// Also add inner-only keys to conditional (they are only inside cond blocks).
+	for k := range condInnerKeys {
+		if !condKeys[k] {
+			conditional = append(conditional, k)
+		}
+	}
+	sort.Strings(conditional)
+	iterable = sortedKeys(iterKeys)
+	return
+}
+
+// classifySource analyzes a single template string for placeholder classification.
+func classifySource(src string, iterKeys, condKeys, condInnerKeys, allKeys map[string]bool) {
+	// First, find all iteration blocks and mark their keys.
+	remaining := src
+	for {
+		loc := iterOpenRe.FindStringIndex(remaining)
+		if loc == nil {
+			break
+		}
+		match := iterOpenRe.FindStringSubmatch(remaining[loc[0]:loc[1]])
+		key := match[1]
+		closeTag := "{{/" + key + "}}"
+		closeIdx := strings.Index(remaining[loc[1]:], closeTag)
+		if closeIdx < 0 {
+			break
+		}
+		iterKeys[key] = true
+		allKeys[key] = true
+		remaining = remaining[:loc[0]] + remaining[loc[1]+closeIdx+len(closeTag):]
+	}
+
+	// Find all conditional blocks and mark their gate keys and inner-only keys.
+	remaining = src
+	for {
+		loc := condOpenRe.FindStringIndex(remaining)
+		if loc == nil {
+			break
+		}
+		match := condOpenRe.FindStringSubmatch(remaining[loc[0]:loc[1]])
+		key := match[1]
+		closeTag := "{{/" + key + "}}"
+		closeIdx := strings.Index(remaining[loc[1]:], closeTag)
+		if closeIdx < 0 {
+			break
+		}
+		body := remaining[loc[1] : loc[1]+closeIdx]
+		condKeys[key] = true
+		allKeys[key] = true
+
+		// Find inner placeholders that only appear in this conditional block.
+		// First, find iteration blocks inside the conditional to mark their keys.
+		innerBody := body
+		for {
+			iloc := iterOpenRe.FindStringIndex(innerBody)
+			if iloc == nil {
+				break
+			}
+			imatch := iterOpenRe.FindStringSubmatch(innerBody[iloc[0]:iloc[1]])
+			ikey := imatch[1]
+			icloseTag := "{{/" + ikey + "}}"
+			icloseIdx := strings.Index(innerBody[iloc[1]:], icloseTag)
+			if icloseIdx < 0 {
+				break
+			}
+			iterKeys[ikey] = true
+			allKeys[ikey] = true
+			condInnerKeys[ikey] = true
+			innerBody = innerBody[:iloc[0]] + innerBody[iloc[1]+icloseIdx+len(icloseTag):]
+		}
+
+		// Now find regular placeholders in the remaining body text.
+		innerMatches := placeholderRe.FindAllStringSubmatch(innerBody, -1)
+		for _, m := range innerMatches {
+			innerKey := strings.TrimSpace(m[1])
+			// Skip dot-access, block open/close, and iteration tags
+			if strings.HasPrefix(innerKey, ".") || strings.HasPrefix(innerKey, "#") ||
+				strings.HasPrefix(innerKey, "?") || strings.HasPrefix(innerKey, "/") {
+				continue
+			}
+			allKeys[innerKey] = true
+			condInnerKeys[innerKey] = true
+		}
+
+		remaining = remaining[:loc[0]] + remaining[loc[1]+closeIdx+len(closeTag):]
+	}
+
+	// Find all remaining regular placeholders (outside conditional/iteration blocks).
+	matches := placeholderRe.FindAllStringSubmatch(remaining, -1)
+	for _, m := range matches {
+		key := strings.TrimSpace(m[1])
+		if strings.HasPrefix(key, ".") || strings.HasPrefix(key, "#") || strings.HasPrefix(key, "?") || strings.HasPrefix(key, "/") {
+			continue
+		}
+		allKeys[key] = true
+	}
+}
+
+// sortedKeys returns the keys of a map as a sorted slice.
+func sortedKeys(m map[string]bool) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // LoadTemplates reads all .yaml/.yml files from dir, parses each as a template,

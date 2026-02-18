@@ -119,5 +119,28 @@ func formatTemplate(tmpl *adapter.Template) string {
 		}
 	}
 
+	if tmpl.Response.Transform != "" {
+		b.WriteString("\n## Transform (Lua)\n\n```lua\n")
+		b.WriteString(tmpl.Response.Transform)
+		if !strings.HasSuffix(tmpl.Response.Transform, "\n") {
+			b.WriteString("\n")
+		}
+		b.WriteString("```\n")
+	}
+
+	required, conditional, iterable := adapter.ClassifyInputs(tmpl)
+	if len(required) > 0 || len(conditional) > 0 || len(iterable) > 0 {
+		b.WriteString("\n## Template Inputs\n\n")
+		if len(required) > 0 {
+			fmt.Fprintf(&b, "**Required:** %s\n", strings.Join(required, ", "))
+		}
+		if len(conditional) > 0 {
+			fmt.Fprintf(&b, "**Conditional:** %s\n", strings.Join(conditional, ", "))
+		}
+		if len(iterable) > 0 {
+			fmt.Fprintf(&b, "**Iterable:** %s\n", strings.Join(iterable, ", "))
+		}
+	}
+
 	return b.String()
 }

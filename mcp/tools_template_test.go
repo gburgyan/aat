@@ -135,6 +135,66 @@ func TestHandleInspectTemplate_MinimalTemplate(t *testing.T) {
 	assert.NotContains(t, text, "## Headers")
 	assert.NotContains(t, text, "## Body")
 	assert.NotContains(t, text, "## Extract Rules")
+	assert.NotContains(t, text, "## Transform")
+	assert.NotContains(t, text, "## Template Inputs")
+}
+
+func TestHandleInspectTemplate_WithLuaTransform(t *testing.T) {
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("withLua", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "withLua",
+		Protocol: "http",
+		Request: adapter.TemplateRequest{
+			Method: "POST",
+			Path:   "/api/search",
+			Body:   `{"q": "{{query}}"}`,
+		},
+		Response: adapter.TemplateResponse{
+			Extract: map[string]adapter.ExtractRule{
+				"raw": {Path: "$.data"},
+			},
+			Transform: "result = raw\nresult.extra = 'added'",
+		},
+	})))
+
+	srv := newTemplateTestServer(reg)
+	result := callTool(t, srv.handleInspectTemplate, map[string]any{"adapter": "withLua"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+
+	assert.Contains(t, text, "## Transform (Lua)")
+	assert.Contains(t, text, "result = raw")
+	assert.Contains(t, text, "result.extra = 'added'")
+}
+
+func TestHandleInspectTemplate_WithInputClassification(t *testing.T) {
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("classified", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "classified",
+		Protocol: "http",
+		Request: adapter.TemplateRequest{
+			Method: "POST",
+			Path:   "/api/search",
+			Body: `{
+  "origin": "{{origin}}",
+  "destination": "{{destination}}",
+  {{?carrier}}"carrier": "{{carrier}}"{{/carrier}},
+  "items": [{{#productIds}}"{{.}}"{{/productIds}}]
+}`,
+		},
+	})))
+
+	srv := newTemplateTestServer(reg)
+	result := callTool(t, srv.handleInspectTemplate, map[string]any{"adapter": "classified"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+
+	assert.Contains(t, text, "## Template Inputs")
+	assert.Contains(t, text, "**Required:** destination, origin")
+	assert.Contains(t, text, "**Conditional:** carrier")
+	assert.Contains(t, text, "**Iterable:** productIds")
 }
 
 func TestHandleInspectTemplate_UnknownAdapter(t *testing.T) {

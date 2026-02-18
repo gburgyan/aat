@@ -286,3 +286,106 @@ func TestTemplateResource_MissingArg(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "missing required parameter")
 }
+
+// --- aat://workflow/{name} ---
+
+func TestWorkflowResource_Valid(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{
+				Name:        "Test Booking",
+				Description: "Book a test flight",
+				Template:    "testdata/plans/booking.yaml",
+			},
+		},
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "searchTmpl",
+				Inputs:  []graph.Input{{Name: "origin", Type: "string"}, {Name: "destination", Type: "string"}},
+				Outputs: []graph.Output{{Name: "results", Type: "flight[]"}},
+			},
+			"book": {
+				Name:    "book",
+				Adapter: "bookTmpl",
+				Inputs:  []graph.Input{{Name: "flightId", Type: "string"}},
+				Outputs: []graph.Output{{Name: "workbenchId", Type: "string"}},
+			},
+			"commit": {
+				Name:    "commit",
+				Adapter: "commitTmpl",
+				Inputs:  []graph.Input{{Name: "workbenchId", Type: "string"}},
+				Outputs: []graph.Output{{Name: "locator", Type: "string"}},
+			},
+			"cancel": {Name: "cancel", Adapter: "cancelTmpl"},
+		},
+	}
+
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("searchTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "searchTmpl", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "POST", Path: "/search"},
+	})))
+	require.NoError(t, reg.Register("bookTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "bookTmpl", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "POST", Path: "/book"},
+	})))
+	require.NoError(t, reg.Register("commitTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "commitTmpl", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "POST", Path: "/commit"},
+	})))
+	require.NoError(t, reg.Register("cancelTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "cancelTmpl", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "DELETE", Path: "/cancel"},
+	})))
+
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+		GraphDir: ".",
+	}
+	srv := NewServer(ctx)
+
+	text, err := callResource(t, srv.handleWorkflowResource, "aat://workflow/Test Booking", map[string]any{"name": "Test Booking"})
+	require.NoError(t, err)
+	assert.Contains(t, text, "# Workflow: Test Booking")
+	assert.Contains(t, text, "## Steps (3)")
+	assert.Contains(t, text, "### 1. search")
+	assert.Contains(t, text, "**HTTP:** POST /search")
+	assert.Contains(t, text, "## Data Flow")
+	assert.Contains(t, text, "## Cleanup")
+}
+
+func TestWorkflowResource_Unknown(t *testing.T) {
+	srv := newTestServer(&graph.Graph{Nodes: map[string]*graph.Node{}})
+	_, err := callResource(t, srv.handleWorkflowResource, "aat://workflow/nope", map[string]any{"name": "nope"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown workflow")
+}
+
+func TestWorkflowResource_NoTemplate(t *testing.T) {
+	g := &graph.Graph{
+		Workflows: []graph.Workflow{{Name: "NoTemplate"}},
+		Nodes:     map[string]*graph.Node{"a": {Name: "a"}},
+	}
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+		GraphDir: ".",
+	}
+	srv := NewServer(ctx)
+
+	_, err := callResource(t, srv.handleWorkflowResource, "aat://workflow/NoTemplate", map[string]any{"name": "NoTemplate"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no template")
+}
+
+func TestWorkflowResource_MissingArg(t *testing.T) {
+	srv := newTestServer(&graph.Graph{Nodes: map[string]*graph.Node{}})
+	_, err := callResource(t, srv.handleWorkflowResource, "aat://workflow/", nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "missing required parameter")
+}

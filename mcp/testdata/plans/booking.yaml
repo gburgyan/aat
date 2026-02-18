@@ -1,0 +1,28 @@
+metadata:
+  prompt: "test booking"
+execution:
+  steps:
+    - node: search
+      description: Search for flights
+      values:
+        origin: "DEN"
+        destination: "SFO"
+    - node: book
+      dependsOn: [search]
+      description: Book a flight
+      selections:
+        flight:
+          from: search.results
+          strategy: first
+      values:
+        flightId:
+          fromSelection: flight.id
+    - node: commit
+      dependsOn: [book]
+      description: Commit reservation
+      values:
+        workbenchId:
+          from: book.workbenchId
+  cleanup:
+    - node: cancel
+      runOn: always
