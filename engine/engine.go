@@ -20,8 +20,7 @@ import (
 type Engine struct {
 	graph    *graph.Graph
 	registry *adapter.Registry
-	executor *adapter.HTTPExecutor
-	config   *adapter.EnvironmentConfig
+	router   *ExecutorRouter
 
 	// ContinueOnAssertionFailure controls whether execution continues after
 	// a step's mechanical assertions fail. When false (default), assertion
@@ -48,12 +47,12 @@ type Engine struct {
 }
 
 // NewEngine creates an Engine with the given dependencies.
-func NewEngine(g *graph.Graph, registry *adapter.Registry, executor *adapter.HTTPExecutor, config *adapter.EnvironmentConfig) *Engine {
+// The router handles per-node executor/config resolution.
+func NewEngine(g *graph.Graph, registry *adapter.Registry, router *ExecutorRouter) *Engine {
 	return &Engine{
 		graph:    g,
 		registry: registry,
-		executor: executor,
-		config:   config,
+		router:   router,
 	}
 }
 
@@ -118,7 +117,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 	for _, step := range sorted {
 		select {
 		case <-ctx.Done():
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
 				Outcome:        OutcomeError,
 				Steps:          stepResults,
@@ -149,7 +148,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		if result.Error != nil {
 			outcome = OutcomeError
 			// Run cleanup before returning
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
 				Outcome:        outcome,
 				Steps:          stepResults,
@@ -182,7 +181,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 				if result.Validation != nil && !result.Validation.Passed {
 					outcome = OutcomeFailed
 					if !e.ContinueOnAssertionFailure {
-						cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+						cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 						return &RunResult{
 							Outcome:        outcome,
 							Steps:          stepResults,
@@ -196,7 +195,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 
 			// Unexpected success or wrong error code — FAIL.
 			outcome = OutcomeFailed
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
 				Outcome:        outcome,
 				Steps:          stepResults,
@@ -208,7 +207,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		if result.StatusCode >= 400 {
 			outcome = OutcomeFailed
 			// Run cleanup before returning
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
 				Outcome:        outcome,
 				Steps:          stepResults,
@@ -222,7 +221,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			outcome = OutcomeFailed
 			// Do NOT store outputs — error responses produce unreliable data
 			// Do NOT push cleanup — failing node did not create a valid resource
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
 				Outcome:        outcome,
 				Steps:          stepResults,
@@ -249,7 +248,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		if result.Validation != nil && !result.Validation.Passed {
 			outcome = OutcomeFailed
 			if !e.ContinueOnAssertionFailure {
-				cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+				cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 				return &RunResult{
 					Outcome:        outcome,
 					Steps:          stepResults,
@@ -261,7 +260,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 	}
 
 	// All steps succeeded — run cleanup
-	cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.executor, e.config, state)
+	cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 
 	return &RunResult{
 		Outcome:        outcome,
@@ -302,8 +301,11 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		}
 	}
 
+	// Resolve executor/config/rewrite for this node
+	exec, cfg, rewrite := e.router.Resolve(node.Name)
+
 	// Build request
-	req, err := adp.BuildRequest(inputs, e.config)
+	req, err := adp.BuildRequest(inputs, cfg)
 	if err != nil {
 		return StepResult{
 			StepID:    sid,
@@ -315,8 +317,13 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		}
 	}
 
+	// Apply path rewriting if configured for this node
+	if rewrite != nil {
+		req.Path = adapter.RewritePath(req.Path, rewrite)
+	}
+
 	// Execute
-	resp, err := e.executor.Execute(ctx, req)
+	resp, err := exec.Execute(ctx, req)
 	if err != nil {
 		return StepResult{
 			StepID:    sid,

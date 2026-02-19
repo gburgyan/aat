@@ -53,7 +53,7 @@ func TestCleanupStack_FILOOrder(t *testing.T) {
 	}
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	results := stack.ExecuteAll(context.Background(), g, registry, executor, &adapter.EnvironmentConfig{}, NewRunState())
+	results := stack.ExecuteAll(context.Background(), g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}), NewRunState())
 
 	require.Len(t, results, 3)
 	// FILO: C, B, A
@@ -78,7 +78,7 @@ func (a *orderTrackingAdapter) BuildRequest(inputs map[string]any, config *adapt
 
 func TestCleanupStack_Empty(t *testing.T) {
 	stack := &CleanupStack{}
-	results := stack.ExecuteAll(context.Background(), nil, nil, nil, nil, nil)
+	results := stack.ExecuteAll(context.Background(), nil, nil, nil, nil)
 	assert.Nil(t, results)
 }
 
@@ -109,7 +109,7 @@ func TestCleanupStack_ErrorDoesNotStop(t *testing.T) {
 	stack.Push(CleanupEntry{NodeName: "cleanOK", ForNode: "ok"})
 	stack.Push(CleanupEntry{NodeName: "cleanFail", ForNode: "fail"})
 
-	results := stack.ExecuteAll(context.Background(), g, registry, executor, &adapter.EnvironmentConfig{}, NewRunState())
+	results := stack.ExecuteAll(context.Background(), g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}), NewRunState())
 
 	require.Len(t, results, 2)
 	// cleanFail runs first (FILO) and errors
@@ -182,7 +182,7 @@ func TestEngine_Run_WithCleanup(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -279,7 +279,7 @@ func TestEngine_Run_CleanupOnFailure(t *testing.T) {
 	_ = destroyCalled // tracked by cleanup results
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -354,7 +354,7 @@ func TestEngine_Run_DeleteNoBody(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},

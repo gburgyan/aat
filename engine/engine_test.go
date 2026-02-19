@@ -136,7 +136,7 @@ func TestEngine_Run_ThreeNodeFlow(t *testing.T) {
 	executor := adapter.NewHTTPExecutor(server.URL)
 	config := &adapter.EnvironmentConfig{}
 
-	engine := NewEngine(g, registry, executor, config)
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, config))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -230,7 +230,7 @@ func TestEngine_Run_FailOnNon2xx(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -259,7 +259,7 @@ func TestEngine_Run_ValidationError(t *testing.T) {
 		Nodes:   map[string]*graph.Node{},
 	}
 
-	engine := NewEngine(g, adapter.NewRegistry(), nil, nil)
+	engine := NewEngine(g, adapter.NewRegistry(), NewExecutorRouter(nil, nil))
 
 	p := &plan.Plan{
 		Execution: plan.Execution{
@@ -328,7 +328,7 @@ func TestEngine_Run_OutputPropagation(t *testing.T) {
 	require.NoError(t, registry.Register("test.consumer", consumerAdapter))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -390,7 +390,7 @@ func TestEngine_Run_StatusAssertionPasses(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -467,7 +467,7 @@ func TestEngine_Run_FailingAssertionTriggersCleanup(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -529,7 +529,7 @@ func TestEngine_Run_FieldExistsAssertionOnBody(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -581,7 +581,7 @@ func TestEngine_Run_NoAssertions(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -626,7 +626,7 @@ func TestEngine_Run_PredicateAssertion(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -689,7 +689,7 @@ func TestEngine_Run_ContinueOnAssertionFailure(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 	engine.ContinueOnAssertionFailure = true
 
 	p := &plan.Plan{
@@ -743,7 +743,7 @@ func TestEngine_Run_StepDurations(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -800,7 +800,7 @@ func TestAdaptiveMode_StepRelaxation_400WithSoftConstraint(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).
 		WithMode("adaptive")
 
 	p := &plan.Plan{
@@ -868,7 +868,7 @@ func TestAdaptiveMode_HardConstraintOnly_NoRelaxation(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).
 		WithMode("adaptive")
 
 	p := &plan.Plan{
@@ -931,7 +931,7 @@ func TestAdaptiveMode_500Error_NoRelaxation(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).
 		WithMode("adaptive")
 
 	p := &plan.Plan{
@@ -992,7 +992,7 @@ func TestNonAdaptiveMode_NoStepRelaxation(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).
 		WithMode("lean")
 
 	p := &plan.Plan{
@@ -1053,7 +1053,7 @@ func TestAdaptiveMode_ExpectFailure_SkipsRelaxation(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).
 		WithMode("adaptive")
 
 	p := &plan.Plan{
@@ -1124,7 +1124,7 @@ func TestExpectFailure_MatchingStatus_Passes(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1190,7 +1190,7 @@ func TestExpectFailure_NonMatchingStatus_Fails(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1255,7 +1255,7 @@ func TestExpectFailure_SkipsRetry(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1344,7 +1344,7 @@ func TestExpectFailure_NoOutputsStored(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1415,7 +1415,7 @@ func TestExpectFailure_MechanicalAssertions(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	engine := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1486,7 +1486,7 @@ func TestAdaptiveMode_BudgetExhausted(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{}).
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).
 		WithMode("adaptive").
 		WithMaxRelaxationDepth(1)
 
@@ -1560,7 +1560,7 @@ func TestEngine_Run_CancelledContext(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1636,7 +1636,7 @@ func TestEngine_Run_CleanupRunsDespiteCancellation(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1711,7 +1711,7 @@ func TestEngine_Run_StepAliasing(t *testing.T) {
 	executor := adapter.NewHTTPExecutor(server.URL)
 	config := &adapter.EnvironmentConfig{}
 
-	eng := NewEngine(g, registry, executor, config)
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, config))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1839,7 +1839,7 @@ func TestEngine_Run_DisplayOutputs(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
@@ -1897,7 +1897,7 @@ func TestEngine_Run_NoDisplayOutputs(t *testing.T) {
 	}))
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	eng := NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	eng := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 
 	p := &plan.Plan{
 		Metadata: plan.Metadata{GraphVersion: "1.0.0"},

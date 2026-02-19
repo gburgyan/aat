@@ -36,8 +36,7 @@ func (s *CleanupStack) ExecuteAll(
 	ctx context.Context,
 	g *graph.Graph,
 	registry *adapter.Registry,
-	executor *adapter.HTTPExecutor,
-	config *adapter.EnvironmentConfig,
+	router *ExecutorRouter,
 	state *RunState,
 ) []StepResult {
 	if len(s.entries) == 0 {
@@ -54,7 +53,7 @@ func (s *CleanupStack) ExecuteAll(
 	// Execute in reverse order (FILO)
 	for i := len(s.entries) - 1; i >= 0; i-- {
 		entry := s.entries[i]
-		result := executeCleanupEntry(cleanupCtx, entry, g, registry, executor, config, state)
+		result := executeCleanupEntry(cleanupCtx, entry, g, registry, router, state)
 		results = append(results, result)
 	}
 
@@ -66,8 +65,7 @@ func executeCleanupEntry(
 	entry CleanupEntry,
 	g *graph.Graph,
 	registry *adapter.Registry,
-	executor *adapter.HTTPExecutor,
-	config *adapter.EnvironmentConfig,
+	router *ExecutorRouter,
 	state *RunState,
 ) StepResult {
 	start := time.Now()
@@ -111,7 +109,10 @@ func executeCleanupEntry(
 		}
 	}
 
-	req, err := adp.BuildRequest(inputs, config)
+	// Resolve executor/config/rewrite for the cleanup node
+	exec, cfg, rewrite := router.Resolve(entry.NodeName)
+
+	req, err := adp.BuildRequest(inputs, cfg)
 	if err != nil {
 		return StepResult{
 			Node:     entry.NodeName,
@@ -121,7 +122,11 @@ func executeCleanupEntry(
 		}
 	}
 
-	resp, err := executor.Execute(ctx, req)
+	if rewrite != nil {
+		req.Path = adapter.RewritePath(req.Path, rewrite)
+	}
+
+	resp, err := exec.Execute(ctx, req)
 	if err != nil {
 		return StepResult{
 			Node:     entry.NodeName,

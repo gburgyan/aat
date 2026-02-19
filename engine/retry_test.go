@@ -44,7 +44,7 @@ func buildRetryEngine(t *testing.T, serverURL string) *Engine {
 		response: map[string]any{"output": "result"},
 	}))
 	executor := adapter.NewHTTPExecutor(serverURL)
-	return NewEngine(g, registry, executor, &adapter.EnvironmentConfig{})
+	return NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
 }
 
 func buildRetryPlan(retry *plan.RetryConfig) *plan.Plan {
