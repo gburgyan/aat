@@ -151,7 +151,7 @@ func TestBuildValueSelectionPrompt_Basic(t *testing.T) {
 	}
 	sv := plan.StepValue{
 		Default:      "INVALID",
-		FallbackPool: []any{"BAD1", "BAD2"},
+		Pool: []any{"BAD1", "BAD2"},
 		Constraint:   "value != 'INVALID'",
 	}
 	resolved := map[string]any{

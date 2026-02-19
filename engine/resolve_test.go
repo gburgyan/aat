@@ -888,7 +888,7 @@ func TestResolveInputsWithContext_ConstraintPasses(t *testing.T) {
 	assert.Equal(t, 2, inputs["passengers"])
 }
 
-func TestResolveInputsWithContext_ConstraintFails_FallbackPool(t *testing.T) {
+func TestResolveInputsWithContext_ConstraintFails_Pool(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
@@ -908,7 +908,8 @@ func TestResolveInputsWithContext_ConstraintFails_FallbackPool(t *testing.T) {
 			"origin": {
 				Default:      "INVALID",
 				Constraint:   "value != 'INVALID'",
-				FallbackPool: []any{"DEN", "LAX", "ORD"},
+				Pool:         []any{"DEN", "LAX", "ORD"},
+				PoolStrategy: strPtr("sequential"),
 			},
 		},
 	}
@@ -919,7 +920,7 @@ func TestResolveInputsWithContext_ConstraintFails_FallbackPool(t *testing.T) {
 	assert.Equal(t, "DEN", inputs["origin"]) // first pool value that passes
 }
 
-func TestResolveInputsWithContext_FallbackPoolSequential(t *testing.T) {
+func TestResolveInputsWithContext_PoolSequential(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
@@ -939,7 +940,8 @@ func TestResolveInputsWithContext_FallbackPoolSequential(t *testing.T) {
 			"code": {
 				Default:      "BAD",
 				Constraint:   "value != 'BAD' && value != 'ALSO_BAD'",
-				FallbackPool: []any{"ALSO_BAD", "GOOD", "ALSO_GOOD"},
+				Pool:         []any{"ALSO_BAD", "GOOD", "ALSO_GOOD"},
+				PoolStrategy: strPtr("sequential"),
 			},
 		},
 	}
@@ -950,7 +952,7 @@ func TestResolveInputsWithContext_FallbackPoolSequential(t *testing.T) {
 	assert.Equal(t, "GOOD", inputs["code"]) // first pool value that passes
 }
 
-func TestResolveInputsWithContext_FallbackPoolRandom(t *testing.T) {
+func TestResolveInputsWithContext_PoolRandom(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
@@ -969,8 +971,8 @@ func TestResolveInputsWithContext_FallbackPoolRandom(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"code": {
-				FallbackPool:     []any{"A", "B", "C", "D", "E"},
-				FallbackStrategy: &strategy,
+				Pool:     []any{"A", "B", "C", "D", "E"},
+				PoolStrategy: &strategy,
 			},
 		},
 	}
@@ -1008,7 +1010,7 @@ func TestResolveInputsWithContext_AllPoolFail(t *testing.T) {
 			"code": {
 				Default:      "A",
 				Constraint:   "value == 'Z'", // nothing will match
-				FallbackPool: []any{"B", "C"},
+				Pool: []any{"B", "C"},
 			},
 		},
 	}
@@ -1019,7 +1021,7 @@ func TestResolveInputsWithContext_AllPoolFail(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed constraint")
 }
 
-func TestResolveInputsWithContext_ExpressionInFallbackPool(t *testing.T) {
+func TestResolveInputsWithContext_ExpressionInPool(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
@@ -1037,7 +1039,8 @@ func TestResolveInputsWithContext_ExpressionInFallbackPool(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"date": {
-				FallbackPool: []any{"{{today + 5 days}}", "{{today + 10 days}}"},
+				Pool:         []any{"{{today + 5 days}}", "{{today + 10 days}}"},
+				PoolStrategy: strPtr("sequential"),
 			},
 		},
 	}
@@ -1111,9 +1114,10 @@ func TestResolveInputsWithContext_MixedInputs(t *testing.T) {
 			"departureDate": {Default: "{{today + 5 days}}"},
 			"origin":        {Default: "DEN"},
 			"passengers": {
-				Default:    10,
-				Constraint: "value <= 9",
-				FallbackPool: []any{1, 2, 3},
+				Default:      10,
+				Constraint:   "value <= 9",
+				Pool:         []any{1, 2, 3},
+				PoolStrategy: strPtr("sequential"),
 			},
 		},
 	}
@@ -1225,7 +1229,7 @@ func TestResolveInputsWithContext_EnvExpression(t *testing.T) {
 }
 
 func TestResolveInputsWithContext_NoDefaultOnlyPool(t *testing.T) {
-	// StepValue with no Default but a FallbackPool
+	// StepValue with no Default but a Pool
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
@@ -1243,7 +1247,8 @@ func TestResolveInputsWithContext_NoDefaultOnlyPool(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"code": {
-				FallbackPool: []any{"DEN", "LAX", "ORD"},
+				Pool:         []any{"DEN", "LAX", "ORD"},
+				PoolStrategy: strPtr("sequential"),
 			},
 		},
 	}
@@ -1383,7 +1388,7 @@ func TestResolution_ExpressionSource(t *testing.T) {
 	assert.Equal(t, "2026-02-13", resolutions[0].FinalValue)
 }
 
-func TestResolution_FallbackPool(t *testing.T) {
+func TestResolution_Pool(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
@@ -1401,7 +1406,8 @@ func TestResolution_FallbackPool(t *testing.T) {
 			"code": {
 				Default:      "BAD",
 				Constraint:   "value != 'BAD' && value != 'ALSO_BAD'",
-				FallbackPool: []any{"ALSO_BAD", "GOOD", "ALSO_GOOD"},
+				Pool:         []any{"ALSO_BAD", "GOOD", "ALSO_GOOD"},
+				PoolStrategy: strPtr("sequential"),
 			},
 		},
 	}
@@ -1780,7 +1786,7 @@ func TestResolution_LLMFallback(t *testing.T) {
 			"origin": {
 				Default:      "BAD",
 				Constraint:   "value == 'DEN' || value == 'LAX'",
-				FallbackPool: []any{"ALSO_BAD"},
+				Pool: []any{"ALSO_BAD"},
 			},
 		},
 	}
@@ -2390,7 +2396,7 @@ func TestResolveWithFallback_PoolExhausted_Relaxation(t *testing.T) {
 		Values: map[string]plan.StepValue{
 			"origin": {
 				Default:      "DEN",
-				FallbackPool: []any{"SFO", "JFK"},
+				Pool: []any{"SFO", "JFK"},
 				Constraint:   "value == 'LAX'",
 			},
 		},
@@ -2631,3 +2637,113 @@ func TestResolveInputsWithContext_CancelledContext(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 	assert.Contains(t, err.Error(), "cancelled")
 }
+
+// --- FromResolved tests ---
+
+func TestResolveInputs_FromResolved_Basic(t *testing.T) {
+	// Input B references input A via fromResolved, A resolves from pool
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "leg1Destination", Type: "string"},
+					{Name: "leg2Origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"leg1Destination": {Pool: []any{"SFO", "LAX", "SEA"}, PoolStrategy: strPtr("sequential")},
+			"leg2Origin":      {FromResolved: "leg1Destination"},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "SFO", inputs["leg1Destination"])
+	assert.Equal(t, "SFO", inputs["leg2Origin"])
+
+	// Check resolution record
+	sources := map[string]string{}
+	for _, r := range resolutions {
+		sources[r.InputName] = r.Source
+	}
+	assert.Equal(t, "from_resolved", sources["leg2Origin"])
+}
+
+func TestResolveInputs_FromResolved_WithConstraint(t *testing.T) {
+	// A=pool, B=fromResolved(A), C=pool with constraint "value != leg2Origin"
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "leg1Destination", Type: "string"},
+					{Name: "leg2Origin", Type: "string"},
+					{Name: "leg2Destination", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"leg1Destination": {Default: "SFO"},
+			"leg2Origin":      {FromResolved: "leg1Destination"},
+			"leg2Destination": {
+				Pool:         []any{"SFO", "LAX", "SEA"},
+				PoolStrategy: strPtr("sequential"),
+				Constraint:   "value != leg2Origin",
+			},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "SFO", inputs["leg1Destination"])
+	assert.Equal(t, "SFO", inputs["leg2Origin"])
+	// SFO fails constraint (== leg2Origin), so first passing pool value is LAX
+	assert.Equal(t, "LAX", inputs["leg2Destination"])
+}
+
+func TestResolveInputs_FromResolved_Unresolved(t *testing.T) {
+	// fromResolved references an input that doesn't exist in resolvedInputs
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "a", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"a": {FromResolved: "nonexistent"},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "fromResolved references")
+	assert.Contains(t, err.Error(), "not been resolved yet")
+}
+
+func strPtr(s string) *string { return &s }

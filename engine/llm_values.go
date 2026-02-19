@@ -106,7 +106,7 @@ func buildValueSelectionPrompt(input graph.Input, sv plan.StepValue, kb *domain.
 	if sv.Default != nil {
 		tried = append(tried, fmt.Sprintf("%v", sv.Default))
 	}
-	for _, v := range sv.FallbackPool {
+	for _, v := range sv.Pool {
 		tried = append(tried, fmt.Sprintf("%v", v))
 	}
 	if len(tried) > 0 {

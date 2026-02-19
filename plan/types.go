@@ -98,13 +98,14 @@ type StepSelection struct {
 // When a bare scalar appears in YAML (e.g., origin: "DEN"), only Default is set.
 // When a mapping appears, the full struct is unmarshalled.
 type StepValue struct {
-	Default          any              `yaml:"default,omitempty" json:"default,omitempty"`
-	FallbackPool     []any            `yaml:"fallbackPool,omitempty" json:"fallbackPool,omitempty"`
-	FallbackStrategy *string          `yaml:"fallbackStrategy,omitempty" json:"fallbackStrategy,omitempty"`
-	Constraint       string           `yaml:"constraint,omitempty" json:"constraint,omitempty"`
-	From             string           `yaml:"from,omitempty" json:"from,omitempty"`
-	Select           *SelectionConfig `yaml:"select,omitempty" json:"select,omitempty"`
-	FromSelection    string           `yaml:"fromSelection,omitempty" json:"fromSelection,omitempty"`
+	Default       any              `yaml:"default,omitempty" json:"default,omitempty"`
+	Pool          []any            `yaml:"pool,omitempty" json:"pool,omitempty"`
+	PoolStrategy  *string          `yaml:"poolStrategy,omitempty" json:"poolStrategy,omitempty"`
+	Constraint    string           `yaml:"constraint,omitempty" json:"constraint,omitempty"`
+	From          string           `yaml:"from,omitempty" json:"from,omitempty"`
+	Select        *SelectionConfig `yaml:"select,omitempty" json:"select,omitempty"`
+	FromSelection string           `yaml:"fromSelection,omitempty" json:"fromSelection,omitempty"`
+	FromResolved  string           `yaml:"fromResolved,omitempty" json:"fromResolved,omitempty"`
 }
 
 // IsEmpty returns true when the StepValue carries no resolution information.
@@ -115,10 +116,11 @@ func (sv StepValue) IsEmpty() bool {
 	return sv.Default == nil &&
 		sv.From == "" &&
 		sv.FromSelection == "" &&
+		sv.FromResolved == "" &&
 		sv.Select == nil &&
 		sv.Constraint == "" &&
-		len(sv.FallbackPool) == 0 &&
-		sv.FallbackStrategy == nil
+		len(sv.Pool) == 0 &&
+		sv.PoolStrategy == nil
 }
 
 // SelectionConfig describes how to select an element from an array output.

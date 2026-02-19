@@ -175,7 +175,7 @@ execution:
 	assert.Nil(t, sv.Default)
 }
 
-func TestStepValue_DefaultWithFallbackPool(t *testing.T) {
+func TestStepValue_DefaultWithPool(t *testing.T) {
 	data := []byte(`
 execution:
   steps:
@@ -183,16 +183,16 @@ execution:
       values:
         origin:
           default: "DEN"
-          fallbackPool: ["LAX", "ORD", "ATL"]
-          fallbackStrategy: "sequential"
+          pool: ["LAX", "ORD", "ATL"]
+          poolStrategy: "sequential"
 `)
 	p, err := Parse(data)
 	require.NoError(t, err)
 	sv := p.Execution.Steps[0].Values["origin"]
 	assert.Equal(t, "DEN", sv.Default)
-	assert.Equal(t, []any{"LAX", "ORD", "ATL"}, sv.FallbackPool)
-	require.NotNil(t, sv.FallbackStrategy)
-	assert.Equal(t, "sequential", *sv.FallbackStrategy)
+	assert.Equal(t, []any{"LAX", "ORD", "ATL"}, sv.Pool)
+	require.NotNil(t, sv.PoolStrategy)
+	assert.Equal(t, "sequential", *sv.PoolStrategy)
 }
 
 func TestAssertions_FlatList(t *testing.T) {
@@ -320,8 +320,8 @@ func TestStepValue_IsEmpty(t *testing.T) {
 		{"with fromSelection", StepValue{FromSelection: "sel.field"}, false},
 		{"with select", StepValue{Select: &SelectionConfig{Strategy: "first"}}, false},
 		{"with constraint", StepValue{Constraint: "value > 0"}, false},
-		{"with fallback pool", StepValue{FallbackPool: []any{"a", "b"}}, false},
-		{"with fallback strategy", StepValue{FallbackStrategy: strPtr("random")}, false},
+		{"with pool", StepValue{Pool: []any{"a", "b"}}, false},
+		{"with pool strategy", StepValue{PoolStrategy: strPtr("random")}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -437,6 +437,56 @@ execution:
 	require.NoError(t, err)
 	assert.Nil(t, p.Auth)
 	assert.Empty(t, p.Headers)
+}
+
+func TestStepValue_FromResolved(t *testing.T) {
+	data := []byte(`
+execution:
+  steps:
+    - node: test
+      values:
+        leg1Destination:
+          pool: [SFO, LAX, SEA]
+        leg2Origin:
+          fromResolved: leg1Destination
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	sv := p.Execution.Steps[0].Values["leg2Origin"]
+	assert.Equal(t, "leg1Destination", sv.FromResolved)
+	assert.Nil(t, sv.Default)
+	assert.Empty(t, sv.From)
+	assert.Empty(t, sv.FromSelection)
+}
+
+func TestStepValue_FromResolved_RoundTrip(t *testing.T) {
+	original := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "test",
+					Values: map[string]StepValue{
+						"leg1Dest":   {Pool: []any{"SFO", "LAX"}},
+						"leg2Origin": {FromResolved: "leg1Dest"},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(original)
+	require.NoError(t, err)
+
+	parsed, err := Parse(data)
+	require.NoError(t, err)
+
+	assert.Equal(t, "leg1Dest", parsed.Execution.Steps[0].Values["leg2Origin"].FromResolved)
+	assert.Nil(t, parsed.Execution.Steps[0].Values["leg2Origin"].Default)
+}
+
+func TestStepValue_IsEmpty_FromResolved(t *testing.T) {
+	sv := StepValue{FromResolved: "someInput"}
+	assert.False(t, sv.IsEmpty(), "StepValue with fromResolved should not be empty")
 }
 
 func TestStepValue_FromSelectionNoWholeElement(t *testing.T) {

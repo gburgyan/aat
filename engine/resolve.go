@@ -308,6 +308,21 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 		return val, decision, res, nil
 	}
 
+	// 1.5. FromResolved: same-step intra-input reference
+	if sv, ok := step.Values[input.Name]; ok && sv.FromResolved != "" {
+		val, exists := resolvedInputs[sv.FromResolved]
+		if !exists {
+			return nil, nil, nil, fmt.Errorf("fromResolved references %q which has not been resolved yet", sv.FromResolved)
+		}
+		res := &ValueResolution{
+			InputName:  input.Name,
+			Source:     "from_resolved",
+			FinalValue: val,
+			PoolIndex:  -1,
+		}
+		return val, nil, res, nil
+	}
+
 	// 2. Plan-level "from" reference (explicit upstream output)
 	// This takes priority over graph edges because the plan is more specific:
 	// auto-wired graphs may have multiple edges for the same input, but the
@@ -351,10 +366,10 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 		return val, nil, res, nil
 	}
 
-	// 3. Plan StepValue default / fallback pool
+	// 3. Plan StepValue default / pool
 	if sv, ok := step.Values[input.Name]; ok {
 		if sv.Default != nil {
-			// Enhanced path: evaluate expressions, check constraints, try fallback pool
+			// Enhanced path: evaluate expressions, check constraints, try pool
 			if rctx != nil && ectx != nil {
 				return resolveWithFallback(ctx, sv, input, *ectx, resolvedInputs, rctx)
 			}
@@ -369,8 +384,8 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 			return sv.Default, nil, res, nil
 		}
 		// StepValue exists but no Default and no From+Select:
-		// try fallback pool if enhanced context is available
-		if rctx != nil && ectx != nil && len(sv.FallbackPool) > 0 {
+		// try pool if enhanced context is available
+		if rctx != nil && ectx != nil && len(sv.Pool) > 0 {
 			return resolveWithFallback(ctx, sv, input, *ectx, resolvedInputs, rctx)
 		}
 	}
@@ -636,10 +651,10 @@ func checkConstraint(constraint string, candidate any, resolvedInputs map[string
 }
 
 // resolveWithFallback tries the StepValue default (with expression evaluation
-// and constraint checking), then iterates the fallback pool. If all deterministic
+// and constraint checking), then iterates the pool. If all deterministic
 // values are exhausted and mode allows, delegates to the LLM. Returns the first
-// value that passes the constraint. FallbackStrategy controls iteration order:
-// nil/"sequential" = in order, "random" = shuffled.
+// value that passes the constraint. PoolStrategy controls iteration order:
+// nil/"random" = shuffled (default), "sequential" = in order.
 //
 // When a RelaxationTracker is present (via rctx), and all resolution paths are
 // exhausted, resolveWithFallback will attempt to relax the corresponding soft
@@ -684,7 +699,7 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 				Constraint:   sv.Constraint,
 				ConstraintOK: true,
 				PoolIndex:    -1,
-				PoolSize:     len(sv.FallbackPool),
+				PoolSize:     len(sv.Pool),
 			}
 			if constraintSkipped {
 				res.Relaxed = true
@@ -701,9 +716,9 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 	}
 
 	// Try the fallback pool
-	if len(sv.FallbackPool) > 0 {
-		pool := make([]any, len(sv.FallbackPool))
-		copy(pool, sv.FallbackPool)
+	if len(sv.Pool) > 0 {
+		pool := make([]any, len(sv.Pool))
+		copy(pool, sv.Pool)
 
 		// Track original indices for resolution record
 		indices := make([]int, len(pool))
@@ -711,7 +726,7 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 			indices[i] = i
 		}
 
-		if sv.FallbackStrategy != nil && *sv.FallbackStrategy == "random" {
+		if sv.PoolStrategy == nil || *sv.PoolStrategy != "sequential" {
 			rand.Shuffle(len(pool), func(i, j int) {
 				pool[i], pool[j] = pool[j], pool[i]
 				indices[i], indices[j] = indices[j], indices[i]
@@ -744,7 +759,7 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 					Constraint:   sv.Constraint,
 					ConstraintOK: true,
 					PoolIndex:    indices[pi],
-					PoolSize:     len(sv.FallbackPool),
+					PoolSize:     len(sv.Pool),
 					Tried:        tried,
 				}
 				if isExpression(candidate) {
@@ -767,7 +782,7 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 				Constraint:   sv.Constraint,
 				ConstraintOK: true,
 				PoolIndex:    -1,
-				PoolSize:     len(sv.FallbackPool),
+				PoolSize:     len(sv.Pool),
 				Tried:        tried,
 				LLMCall:      llmRec,
 			}
@@ -882,7 +897,7 @@ func tryRelaxResolution(rctx *ResolveContext, inputName string, sv plan.StepValu
 		Constraint:        sv.Constraint,
 		ConstraintOK:      false,
 		PoolIndex:         -1,
-		PoolSize:          len(sv.FallbackPool),
+		PoolSize:          len(sv.Pool),
 		Tried:             tried,
 		Relaxed:           true,
 		RelaxedConstraint: sc.Name,

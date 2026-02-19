@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -299,6 +300,124 @@ func TestBuildInputContexts_Multiplicity(t *testing.T) {
 	assert.Equal(t, "name", contexts[0].InputName)
 	assert.Equal(t, "addItem_2", contexts[1].StepID)
 	assert.Equal(t, "name", contexts[1].InputName)
+}
+
+// --- Template pool tests ---
+
+func TestBuildInputContexts_PooledInput(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search flights", Adapter: "a",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"origin":      {Pool: []any{"DEN", "SFO", "ORD", "JFK", "LAX"}},
+						"destination": {},
+					},
+				},
+			},
+		},
+	}
+
+	contexts := buildInputContexts(p, g, nil)
+
+	// Both inputs should appear: origin (pooled) and destination (unfed)
+	require.Len(t, contexts, 2)
+
+	var originCtx *InputContext
+	for i, ic := range contexts {
+		if ic.InputName == "origin" {
+			originCtx = &contexts[i]
+		}
+	}
+	require.NotNil(t, originCtx)
+	assert.True(t, originCtx.HasTemplatePool)
+	assert.Equal(t, []string{"DEN", "SFO", "ORD", "JFK", "LAX"}, originCtx.PoolValues)
+	assert.Empty(t, originCtx.CurrentDefault) // no default, just pool
+}
+
+func TestValidateTargetedResponse_PooledInputOmitted(t *testing.T) {
+	// Missing value for a pooled input should NOT produce a missing_value issue.
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.destination": "LHR"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{
+		"search.origin":      true,
+		"search.destination": true,
+	}
+
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", HasTemplatePool: true, PoolValues: []string{"DEN", "SFO"}},
+		{StepID: "search", InputName: "destination", InputType: "string"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
+}
+
+func TestBuildTargetedPlanPrompt_PoolDisplay(t *testing.T) {
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", IsPoolInput: true, HasTemplatePool: true, PoolValues: []string{"DEN", "SFO", "ORD"}},
+		{StepID: "search", InputName: "destination", InputType: "string", PoolValues: []string{"LHR", "CDG"}},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", time.Now())
+
+	// Template pool should use "Pool (random at runtime)" label
+	assert.Contains(t, user, "Pool (random at runtime): DEN, SFO, ORD")
+	// Domain pool should use "Sample values" label
+	assert.Contains(t, user, "Sample values: LHR, CDG")
+}
+
+func TestBuildTargetedPlanPrompt_PoolSeparateSection(t *testing.T) {
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", IsPoolInput: true, HasTemplatePool: true, PoolValues: []string{"DEN", "SFO"}},
+		{StepID: "search", InputName: "destination", InputType: "string"},
+		{StepID: "search", InputName: "carrier", InputType: "string", IsConfigurable: true},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", time.Now())
+
+	// Pool inputs should be under their own section, not "Inputs That Need Values".
+	assert.Contains(t, user, "## Pool Inputs — already have randomized values")
+	assert.Contains(t, user, "## Inputs That Need Values")
+	assert.Contains(t, user, "## Optional Configuration")
+
+	// origin (pool) should NOT be under "Inputs That Need Values"
+	// destination (required) should be under "Inputs That Need Values"
+	// carrier (configurable) should be under "Optional Configuration"
+
+	// Verify section ordering: required inputs come before pool inputs
+	requiredIdx := strings.Index(user, "## Inputs That Need Values")
+	poolIdx := strings.Index(user, "## Pool Inputs")
+	configIdx := strings.Index(user, "## Optional Configuration")
+	assert.Less(t, requiredIdx, poolIdx)
+	assert.Less(t, poolIdx, configIdx)
+
+	// origin should appear in pool section (after pool header)
+	originIdx := strings.Index(user, "### search.origin")
+	assert.Greater(t, originIdx, poolIdx)
+
+	// destination should appear in required section (before pool header)
+	destIdx := strings.Index(user, "### search.destination")
+	assert.Greater(t, destIdx, requiredIdx)
+	assert.Less(t, destIdx, poolIdx)
 }
 
 // --- Configurable input tests ---
@@ -1531,4 +1650,317 @@ func TestParseTargetedResponse_WrongPlan(t *testing.T) {
 		assert.Nil(t, resp.WrongPlan)
 		assert.Contains(t, resp.Values, "step.input")
 	})
+}
+
+// --- applyTargetedResponse pool clearing tests ---
+
+func TestApplyTargetedResponse_ClearsPoolWhenLLMProvides(t *testing.T) {
+	// Template has a pool; LLM provides a specific value.
+	// Pool should be cleared — the LLM value is authoritative.
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{
+					"origin": {Pool: []any{"DEN", "ORD", "SFO"}},
+				}},
+			},
+		},
+	}
+
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "BNA"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.origin": true}
+
+	applyTargetedResponse(skeleton, resp, unfedSet)
+
+	sv := skeleton.Execution.Steps[0].Values["origin"]
+	assert.Equal(t, "BNA", sv.Default)
+	assert.Nil(t, sv.Pool)
+}
+
+func TestApplyTargetedResponse_ClearsPoolPreservesConstraint(t *testing.T) {
+	// Template has pool + constraint; LLM provides a value.
+	// Pool should be cleared; constraint should be preserved (it validates the LLM value).
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{
+					"origin": {
+						Pool:       []any{"DEN", "ORD", "SFO"},
+						Constraint: "value != 'LAX'",
+					},
+				}},
+			},
+		},
+	}
+
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "BNA"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.origin": true}
+
+	applyTargetedResponse(skeleton, resp, unfedSet)
+
+	sv := skeleton.Execution.Steps[0].Values["origin"]
+	assert.Equal(t, "BNA", sv.Default)
+	assert.Nil(t, sv.Pool)
+	assert.Equal(t, "value != 'LAX'", sv.Constraint)
+}
+
+func TestApplyTargetedResponse_NewInputNoExisting(t *testing.T) {
+	// When no existing StepValue, should create a fresh one with just Default.
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{}},
+			},
+		},
+	}
+
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search.origin": "JFK"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search.origin": true}
+
+	applyTargetedResponse(skeleton, resp, unfedSet)
+
+	sv := skeleton.Execution.Steps[0].Values["origin"]
+	assert.Equal(t, "JFK", sv.Default)
+	assert.Nil(t, sv.Pool)
+}
+
+// --- buildInputContexts IsPoolInput tests ---
+
+func TestBuildInputContexts_IsPoolInput(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search", Adapter: "a",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+					{Name: "carrier", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"origin":      {Pool: []any{"DEN", "ORD", "SFO"}},              // pool, no default → IsPoolInput
+						"destination": {Default: "LHR"},                                  // default, no pool → not IsPoolInput
+						"carrier":     {Pool: []any{"UA", "AA"}, Default: "UA"},          // pool + default → not IsPoolInput
+					},
+				},
+			},
+		},
+	}
+
+	contexts := buildInputContexts(p, g, nil)
+
+	require.Len(t, contexts, 3)
+
+	var originCtx, destCtx, carrierCtx *InputContext
+	for i, ic := range contexts {
+		switch ic.InputName {
+		case "origin":
+			originCtx = &contexts[i]
+		case "destination":
+			destCtx = &contexts[i]
+		case "carrier":
+			carrierCtx = &contexts[i]
+		}
+	}
+
+	require.NotNil(t, originCtx)
+	assert.True(t, originCtx.IsPoolInput, "pool-only input should be IsPoolInput")
+	assert.True(t, originCtx.HasTemplatePool)
+
+	require.NotNil(t, destCtx)
+	assert.False(t, destCtx.IsPoolInput, "default-only input should not be IsPoolInput")
+
+	require.NotNil(t, carrierCtx)
+	assert.False(t, carrierCtx.IsPoolInput, "pool+default input should not be IsPoolInput")
+}
+
+func TestBuildInputContexts_FromResolvedInContexts(t *testing.T) {
+	// fromResolved inputs should appear in contexts with the FromResolved
+	// field set, so the LLM can override them when user intent conflicts.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"process": {
+				Name: "process", Description: "Process", Adapter: "a",
+				Inputs: []graph.Input{
+					{Name: "destination", Type: "string"},
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "process",
+					Values: map[string]plan.StepValue{
+						"destination": {FromResolved: "leg1Destination"},
+						// origin has no value — should also appear in contexts
+					},
+				},
+			},
+		},
+	}
+
+	contexts := buildInputContexts(p, g, nil)
+
+	// Both inputs should appear: destination (fromResolved) and origin (unfed).
+	require.Len(t, contexts, 2)
+
+	var destCtx, originCtx *InputContext
+	for i, ic := range contexts {
+		switch ic.InputName {
+		case "destination":
+			destCtx = &contexts[i]
+		case "origin":
+			originCtx = &contexts[i]
+		}
+	}
+
+	require.NotNil(t, destCtx)
+	assert.Equal(t, "leg1Destination", destCtx.FromResolved)
+
+	require.NotNil(t, originCtx)
+	assert.Empty(t, originCtx.FromResolved)
+}
+
+// --- fromResolved override tests ---
+
+func TestApplyTargetedResponse_ClearsFromResolved(t *testing.T) {
+	// When the LLM overrides a fromResolved input, FromResolved must be
+	// cleared so the engine uses the LLM's value instead of auto-wiring.
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search2", Values: map[string]plan.StepValue{
+					"leg2Origin": {FromResolved: "leg1Destination"},
+				}},
+			},
+		},
+	}
+
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search2.leg2Origin": "BNA"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search2.leg2Origin": true}
+
+	applyTargetedResponse(skeleton, resp, unfedSet)
+
+	sv := skeleton.Execution.Steps[0].Values["leg2Origin"]
+	assert.Equal(t, "BNA", sv.Default)
+	assert.Empty(t, sv.FromResolved, "FromResolved should be cleared when LLM overrides")
+}
+
+func TestApplyTargetedResponse_FromResolvedPreservedWhenNotOverridden(t *testing.T) {
+	// When the LLM doesn't provide a value for a fromResolved input,
+	// the FromResolved wiring should remain intact.
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search2", Values: map[string]plan.StepValue{
+					"leg2Origin": {FromResolved: "leg1Destination"},
+				}},
+			},
+		},
+	}
+
+	resp := &TargetedResponse{
+		Values:       map[string]any{}, // LLM doesn't override
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{"search2.leg2Origin": true}
+
+	applyTargetedResponse(skeleton, resp, unfedSet)
+
+	sv := skeleton.Execution.Steps[0].Values["leg2Origin"]
+	assert.Equal(t, "leg1Destination", sv.FromResolved, "FromResolved should be preserved when LLM doesn't override")
+	assert.Nil(t, sv.Default)
+}
+
+func TestBuildTargetedPlanPrompt_AutoWiredSection(t *testing.T) {
+	inputContexts := []InputContext{
+		{StepID: "search1", InputName: "origin", InputType: "string"},
+		{StepID: "search2", InputName: "leg2Origin", InputType: "string", FromResolved: "leg1Destination", DomainType: "IATA airport code"},
+		{StepID: "search1", InputName: "carrier", InputType: "string", IsConfigurable: true},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "fly from Nashville on both legs", time.Now())
+
+	// Auto-wired section should appear.
+	assert.Contains(t, user, "## Auto-Wired Inputs")
+	assert.Contains(t, user, "override only when user intent conflicts")
+	assert.Contains(t, user, "automatically derived from sibling inputs")
+
+	// The auto-wired input should show its source.
+	assert.Contains(t, user, "### search2.leg2Origin (string)")
+	assert.Contains(t, user, "Auto-wired from: leg1Destination")
+	assert.Contains(t, user, "Domain: IATA airport code")
+
+	// Section ordering: required < pool < auto-wired < configurable.
+	requiredIdx := strings.Index(user, "## Inputs That Need Values")
+	autoWiredIdx := strings.Index(user, "## Auto-Wired Inputs")
+	configIdx := strings.Index(user, "## Optional Configuration")
+	assert.Greater(t, autoWiredIdx, requiredIdx)
+	assert.Less(t, autoWiredIdx, configIdx)
+
+	// The auto-wired input should NOT be in the required section.
+	leg2Idx := strings.Index(user, "### search2.leg2Origin")
+	assert.Greater(t, leg2Idx, autoWiredIdx)
+}
+
+func TestValidateTargetedResponse_FromResolvedMissing_NoError(t *testing.T) {
+	// Missing value for a fromResolved input should NOT produce a missing_value issue.
+	resp := &TargetedResponse{
+		Values:       map[string]any{"search1.origin": "BNA"},
+		Selections:   map[string]TargetedSelection{},
+		Assertions:   map[string][]TargetedAssertion{},
+		Descriptions: map[string]string{},
+	}
+
+	unfedSet := map[string]bool{
+		"search1.origin":      true,
+		"search2.leg2Origin":  true,
+	}
+
+	inputContexts := []InputContext{
+		{StepID: "search1", InputName: "origin", InputType: "string"},
+		{StepID: "search2", InputName: "leg2Origin", InputType: "string", FromResolved: "leg1Destination"},
+	}
+
+	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
+	assert.Empty(t, issues)
 }

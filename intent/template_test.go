@@ -651,6 +651,69 @@ func TestIsInputFed_ConfigurableStructurallyWired(t *testing.T) {
 	assert.Empty(t, unfed)
 }
 
+// --- isInputFed: fromResolved ---
+
+func TestIsInputFed_FromResolvedIsUnfed(t *testing.T) {
+	// fromResolved is overridable — it should be treated as unfed so the LLM
+	// can override it when user intent conflicts with auto-wiring.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"process": {
+				Name: "process",
+				Inputs: []graph.Input{
+					{Name: "destination", Type: "string"},
+				},
+			},
+		},
+	}
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "process",
+					Values: map[string]plan.StepValue{
+						"destination": {FromResolved: "leg1Destination"},
+					},
+				},
+			},
+		},
+	}
+
+	unfed := UnfedInputsFromTemplate(p, g)
+	require.Len(t, unfed, 1)
+	assert.Contains(t, unfed[0], "process.destination")
+}
+
+func TestIsInputFed_PoolOnlyNotFed(t *testing.T) {
+	// Pool-only inputs (no fromResolved) should NOT be fed — they need to be shown.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"origin": {Pool: []any{"DEN", "ORD", "SFO"}},
+					},
+				},
+			},
+		},
+	}
+
+	unfed := UnfedInputsFromTemplate(p, g)
+	assert.Len(t, unfed, 1)
+	assert.Contains(t, unfed[0], "search.origin")
+}
+
 // --- MergeLLMValuesWithIDs ---
 
 func TestMergeLLMValuesWithIDs_MatchesByStepID(t *testing.T) {

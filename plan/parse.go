@@ -60,8 +60,8 @@ func (a *Assertions) UnmarshalYAML(value *yaml.Node) error {
 // When only Default is set, marshal as a bare scalar instead of a mapping.
 func (sv StepValue) MarshalYAML() (interface{}, error) {
 	if sv.From == "" && sv.Select == nil && sv.Constraint == "" &&
-		len(sv.FallbackPool) == 0 && sv.FallbackStrategy == nil &&
-		sv.FromSelection == "" && sv.Default != nil {
+		len(sv.Pool) == 0 && sv.PoolStrategy == nil &&
+		sv.FromSelection == "" && sv.FromResolved == "" && sv.Default != nil {
 		return sv.Default, nil
 	}
 	type rawStepValue StepValue

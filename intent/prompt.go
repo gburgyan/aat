@@ -25,9 +25,9 @@ Respond with a JSON object (no markdown fencing, just raw JSON):
 Rules:
 - Select the workflow whose description best matches the user's intent
 - Use the EXACT workflow name from the available list
-- The "addons" array lists addon workflows to compose into the main workflow. Include addons when the user mentions capabilities matching an addon (e.g., seat selection, ancillary services). Omit "addons" if no addons are needed.
-- The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addTraveler": 2} for two travelers). Omit if no nodes need repeating.
-- Today's date is ` + dateStr + `. When generating dates, use dates at least 7 days in the future.`
+- The "addons" array lists addon workflows to compose into the main workflow. Include addons when the user mentions capabilities matching an addon's description. Omit "addons" if no addons are needed.
+- The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addItem": 3} for three items). Omit if no nodes need repeating.
+- Today's date is ` + dateStr + `. When generating dates, default to at least 7 days in the future or past depending on context. The user's prompt takes priority (e.g., "tomorrow" → {{today + 1 day}}).`
 
 	user = fmt.Sprintf("## Available Workflows\n\n%s\n## User Intent\n\n%s", workflowMenu, userPrompt)
 	return system, user
@@ -61,12 +61,12 @@ Respond with a JSON object (no markdown fencing, just raw JSON):
 }
 Omit empty categories.
 
-Today's date is ` + dateStr + `. Use dates at least 7 days in the future. Expression syntax: {{today + 30 days}}.
+Today's date is ` + dateStr + `. Default to dates at least 7 days in the future or past depending on context. The user's prompt takes priority (e.g., "tomorrow" → {{today + 1 day}}). Expression syntax: {{today + 30 days}}.
 
 ## Values
 
 For each input listed below, provide a LITERAL value (string, number, or date expression).
-- Pick from the sample values when provided (e.g., airport codes from the sample list)
+- Pick from the sample values when provided
 - Hard constraints MUST be met; soft constraints SHOULD be met
 - For date fields, use {{today + N days}} syntax
 - If "Current value:" is shown, keep it unless the user's intent requires a different value
@@ -82,9 +82,9 @@ Some inputs have sensible defaults but can be overridden based on user intent.
 ## Selections — optional overrides
 
 Only add selection overrides when the user's intent explicitly calls for it:
-- "cheapest" → strategy: min, sortField: totalPrice
-- "nonstop" → filter: "maxConnections == 0"
-- "on United" → filter: "carrier == 'UA'"
+- "cheapest" → strategy: min, sortField: price
+- "no stops" → filter: "stops == 0"
+- "by vendor X" → filter: "vendor == 'X'"
 
 If the user doesn't mention preferences for how results should be selected, do NOT add any selection overrides. The template defaults are correct.
 
@@ -94,7 +94,7 @@ Valid strategies: first, last, random, index, min, max, match
   - index: requires an "index" number
 
 DO NOT filter on fields not in the element fields list.
-DO NOT re-filter on values already constrained by search inputs (dates, cities — redundant and brittle).
+DO NOT re-filter on values already constrained by search inputs — redundant and brittle.
 
 ## Assertions — only when explicitly requested
 
@@ -108,20 +108,24 @@ Add a brief description for each step explaining what it does in context.
 
 ## Wrong Workflow
 
-If the composed workflow clearly doesn't match the user's intent (e.g., the user asked about hotels but this is a flight booking workflow), respond with ONLY:
+If the composed workflow clearly doesn't match the user's intent (e.g., a fundamental mismatch between what the user asked for and what this workflow does), respond with ONLY:
 {"wrongPlan": {"reason": "explanation", "suggested": "Workflow Name"}}
 Rules:
 - Only signal this for fundamental domain mismatches (completely wrong workflow type)
 - Do NOT signal wrongPlan because current/default values don't match — replacing those values is YOUR job
-- A workflow with example cities A→B→C can be used for a round trip A→B→A — just set the values accordingly`
+- A workflow with example values can be adapted to different scenarios — just set the values accordingly`
 
 	var ub strings.Builder
 
-	// Separate required vs configurable inputs.
-	var requiredInputs, configurableInputs []InputContext
+	// Separate required vs pool vs auto-wired vs configurable inputs.
+	var requiredInputs, poolInputs, autoWiredInputs, configurableInputs []InputContext
 	for _, ic := range inputContexts {
 		if ic.IsConfigurable {
 			configurableInputs = append(configurableInputs, ic)
+		} else if ic.FromResolved != "" {
+			autoWiredInputs = append(autoWiredInputs, ic)
+		} else if ic.IsPoolInput {
+			poolInputs = append(poolInputs, ic)
 		} else {
 			requiredInputs = append(requiredInputs, ic)
 		}
@@ -131,6 +135,28 @@ Rules:
 	if len(requiredInputs) > 0 {
 		ub.WriteString("## Inputs That Need Values\n\n")
 		for _, ic := range requiredInputs {
+			writeInputContext(&ub, ic)
+		}
+	}
+
+	// Pool inputs — already have randomized values.
+	if len(poolInputs) > 0 {
+		ub.WriteString("## Pool Inputs — already have randomized values\n\n")
+		ub.WriteString("These inputs have curated value pools. A random value will be chosen at runtime.\n")
+		ub.WriteString("Do NOT provide values for these UNLESS the user's intent names a specific value.\n")
+		ub.WriteString("If the user doesn't specify, omit entirely.\n\n")
+		for _, ic := range poolInputs {
+			writeInputContext(&ub, ic)
+		}
+	}
+
+	// Auto-wired inputs — fromResolved, overridable when user intent conflicts.
+	if len(autoWiredInputs) > 0 {
+		ub.WriteString("## Auto-Wired Inputs — override only when user intent conflicts\n\n")
+		ub.WriteString("These inputs are automatically derived from sibling inputs at runtime.\n")
+		ub.WriteString("Do NOT provide values for these UNLESS the user's intent explicitly requires\n")
+		ub.WriteString("a different value than what the wiring would produce.\n\n")
+		for _, ic := range autoWiredInputs {
 			writeInputContext(&ub, ic)
 		}
 	}
@@ -175,6 +201,9 @@ Rules:
 // writeInputContext writes the per-input prompt block for a single InputContext.
 func writeInputContext(ub *strings.Builder, ic InputContext) {
 	fmt.Fprintf(ub, "### %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
+	if ic.FromResolved != "" {
+		fmt.Fprintf(ub, "Auto-wired from: %s\n", ic.FromResolved)
+	}
 	if ic.CurrentDefault != "" {
 		if ic.IsConfigurable {
 			fmt.Fprintf(ub, "Default: %s (used if omitted)\n", ic.CurrentDefault)
@@ -190,7 +219,11 @@ func writeInputContext(ub *strings.Builder, ic InputContext) {
 		ub.WriteString("\n")
 	}
 	if len(ic.PoolValues) > 0 {
-		fmt.Fprintf(ub, "Sample values: %s\n", strings.Join(ic.PoolValues, ", "))
+		if ic.HasTemplatePool {
+			fmt.Fprintf(ub, "Pool (random at runtime): %s\n", strings.Join(ic.PoolValues, ", "))
+		} else {
+			fmt.Fprintf(ub, "Sample values: %s\n", strings.Join(ic.PoolValues, ", "))
+		}
 	}
 	if ic.GraphConstr != "" {
 		fmt.Fprintf(ub, "Validation: %s\n", ic.GraphConstr)

@@ -2708,6 +2708,114 @@ func TestValidate_PlanAuth_Invalid(t *testing.T) {
 	assert.Contains(t, err.Error(), "plan auth: auth.credentials.username")
 }
 
+// --- FromResolved validation ---
+
+func TestValidate_FromResolved(t *testing.T) {
+	g := loadTravelportGraph(t)
+
+	t.Run("valid fromResolved references earlier input", func(t *testing.T) {
+		// searchFlights inputs: origin, destination, departureDate (in that order)
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Pool: []any{"DEN", "ORD"}},
+							"destination":   {FromResolved: "origin"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		assert.NoError(t, err)
+	})
+
+	t.Run("fromResolved references non-existent input", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {FromResolved: "nonexistent"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "not an input on node")
+	})
+
+	t.Run("fromResolved forward reference", func(t *testing.T) {
+		// searchFlights inputs: origin, destination, departureDate
+		// origin tries to reference destination, which comes after it
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {FromResolved: "destination"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "forward reference")
+	})
+
+	t.Run("fromResolved with from is mutually exclusive", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {FromResolved: "origin", From: "someStep.output"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "mutually exclusive with fromResolved")
+	})
+
+	t.Run("fromResolved with pool is mutually exclusive", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {FromResolved: "origin", Pool: []any{"SFO", "LAX"}},
+							"departureDate": {Default: "2026-03-15"},
+						},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "mutually exclusive with fromResolved")
+	})
+}
+
 func TestValidate_PlanAuth_Nil(t *testing.T) {
 	// No plan auth → no auth validation errors
 	g := loadTravelportGraph(t)

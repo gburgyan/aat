@@ -176,7 +176,7 @@ func TestMarshal_WithMetadata(t *testing.T) {
 	assert.Contains(t, yaml, "graphVersion: 1.0.0")
 }
 
-func TestMarshal_StepValueWithFallback(t *testing.T) {
+func TestMarshal_StepValueWithPool(t *testing.T) {
 	strategy := "random"
 	p := &Plan{
 		Execution: Execution{
@@ -185,9 +185,9 @@ func TestMarshal_StepValueWithFallback(t *testing.T) {
 					Node: "test",
 					Values: map[string]StepValue{
 						"city": {
-							Default:          "DEN",
-							FallbackPool:     []any{"SFO", "LAX"},
-							FallbackStrategy: &strategy,
+							Default:      "DEN",
+							Pool:         []any{"SFO", "LAX"},
+							PoolStrategy: &strategy,
 						},
 					},
 				},
@@ -201,8 +201,8 @@ func TestMarshal_StepValueWithFallback(t *testing.T) {
 	yaml := string(data)
 	// Should marshal as mapping, not bare scalar
 	assert.Contains(t, yaml, "default: DEN")
-	assert.Contains(t, yaml, "fallbackPool:")
-	assert.Contains(t, yaml, "fallbackStrategy: random")
+	assert.Contains(t, yaml, "pool:")
+	assert.Contains(t, yaml, "poolStrategy: random")
 }
 
 func TestMarshal_FromSelection(t *testing.T) {

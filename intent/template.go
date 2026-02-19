@@ -159,6 +159,9 @@ func unfedInputSet(p *plan.Plan, g *graph.Graph) map[string]bool {
 // the LLM should be able to override them based on user intent.
 // Configurable inputs are never auto-fed — they are surfaced to the LLM
 // so it can set/override them based on user intent.
+// fromResolved inputs are treated as overridable — they appear in the LLM
+// prompt so the LLM can override them when user intent conflicts with the
+// auto-wiring (e.g., "fly out of Nashville on BOTH legs").
 func isInputFed(step plan.Step, inp graph.Input) bool {
 	if sv, exists := step.Values[inp.Name]; exists {
 		if sv.From != "" || sv.FromSelection != "" || sv.Select != nil {

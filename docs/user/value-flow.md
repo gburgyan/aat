@@ -137,6 +137,52 @@ values:
       field: productId
 ```
 
+## Intra-Step References: `fromResolved`
+
+Sometimes one input within a step should take its value from another input in the **same** step. For example, in a multi-city flight search, leg 2's origin should be wherever leg 1 arrives — you don't want independent random pools producing unrealistic itineraries like DEN→SFO, ATL→BOS.
+
+Use `fromResolved` to reference another input's resolved value:
+
+```yaml
+steps:
+  - node: searchFlights2Leg
+    values:
+      leg1Origin: {pool: [DEN, ORD, ATL, DFW]}
+      leg1Destination: {pool: [SFO, LAX, SEA, BOS]}
+      leg2Origin: {fromResolved: leg1Destination}
+      leg2Destination:
+        pool: [SFO, LAX, SEA, BOS]
+        constraint: "value != leg2Origin"
+```
+
+Here, `leg2Origin` will always equal whatever `leg1Destination` resolved to. The constraint on `leg2Destination` ensures no same-city legs (the destination differs from the origin).
+
+### Rules
+
+- The referenced input must appear **before** the current input in the graph node's input list (no forward references)
+- `fromResolved` is mutually exclusive with `from`, `fromSelection`, `default`, and `pool`
+- The referenced input must exist on the same graph node
+
+### Chaining
+
+You can chain `fromResolved` across multiple legs:
+
+```yaml
+values:
+  leg1Origin: {pool: [DEN, ORD, ATL]}
+  leg1Destination: {pool: [SFO, LAX, SEA]}
+  leg2Origin: {fromResolved: leg1Destination}
+  leg2Destination:
+    pool: [SFO, LAX, SEA]
+    constraint: "value != leg2Origin"
+  leg3Origin: {fromResolved: leg2Destination}
+  leg3Destination:
+    pool: [SFO, LAX, SEA]
+    constraint: "value != leg3Origin"
+```
+
+Each leg departs from the previous leg's destination, producing realistic multi-city itineraries.
+
 ## Dynamic Expressions
 
 Values can include `{{...}}` expressions that are evaluated at runtime:
@@ -168,16 +214,16 @@ values:
 
 When the entire value is a single expression (e.g., `"{{today + 30 days}}"`), it returns a typed value. When mixed with literal text, it returns a concatenated string.
 
-## Constraints and Fallback Pools
+## Constraints and Value Pools
 
-Constraints validate that a resolved value meets a condition. Fallback pools provide alternative values to try when the primary value fails the constraint.
+Constraints validate that a resolved value meets a condition. Pools provide alternative values to try when the primary value fails the constraint, or a set of curated values to pick from randomly.
 
 ```yaml
 values:
   deliveryDate:
     default: "{{today + 7 days}}"
     constraint: "value >= today"
-    fallbackPool:
+    pool:
       - "{{today + 10 days}}"
       - "{{today + 14 days}}"
       - "{{today + 21 days}}"
@@ -188,10 +234,20 @@ Resolution works like this:
 1. Evaluate `default` (including any expressions)
 2. Check the `constraint` predicate — `value` refers to the candidate
 3. If it passes, use it
-4. If it fails, try each value in `fallbackPool` in order
+4. If it fails, try each value in `pool`
 5. Use the first one that passes the constraint
 
-The `fallbackStrategy` field controls the order: `"sequential"` (default) tries values in order; `"random"` shuffles them first.
+The `poolStrategy` field controls the order: `"random"` (default) shuffles the pool; `"sequential"` tries values in declaration order.
+
+Pools can also be used without a default — this is common in workflow templates where each run should use a different value:
+
+```yaml
+values:
+  origin: {pool: [DEN, SFO, ORD, JFK, LAX]}
+  destination: {pool: [LHR, CDG, FRA, NRT]}
+```
+
+When no default is set, the engine picks directly from the pool (randomly by default).
 
 ### Constraint Expressions
 
@@ -432,7 +488,7 @@ When AAT resolves an input value, it checks these sources in order:
 4. **Plan value** — literal, expression, or constraint+fallback from the plan YAML
    - Evaluate the `default` value (including `{{...}}` expressions)
    - Check the `constraint` predicate
-   - If the constraint fails, try each `fallbackPool` value in order
+   - If the constraint fails, try each `pool` value
    - If all pool values fail, ask the LLM (lean/adaptive modes only)
    - If everything fails and the constraint is soft, relax it and accept the first tried value (adaptive mode, or lean with relaxation tracker)
 5. **Graph default** — default defined in the graph schema

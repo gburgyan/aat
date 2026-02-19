@@ -57,8 +57,11 @@ type InputContext struct {
 	PoolValues     []string // sample values from value pool
 	GraphConstr    string   // graph-level constraint annotation
 	IsDate         bool
-	IsConfigurable bool   // true if graph.Input.Configurable
-	CurrentDefault string // template default value, if any (e.g., "DEN")
+	IsConfigurable  bool   // true if graph.Input.Configurable
+	IsPoolInput     bool   // true if template has a pool and no Default is set
+	CurrentDefault  string // template default value, if any (e.g., "DEN")
+	HasTemplatePool bool   // true if template has a pool of curated values
+	FromResolved    string // non-empty if auto-wired from sibling input (e.g., "leg1Destination")
 
 	// Validation metadata from graph.Input.Constraints — used by validateTargetedResponse.
 	ConstraintPattern   string // regex pattern (e.g., "^[A-Z]{3}$")
@@ -100,9 +103,32 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 				IsConfigurable: inp.Configurable,
 			}
 
+			// Check for fromResolved auto-wiring.
+			if sv, exists := step.Values[inp.Name]; exists && sv.FromResolved != "" {
+				ic.FromResolved = sv.FromResolved
+			}
+
 			// Check for existing template default value.
 			if sv, exists := step.Values[inp.Name]; exists && sv.Default != nil {
 				ic.CurrentDefault = fmt.Sprintf("%v", sv.Default)
+			}
+
+			// Check for template pool values.
+			if sv, exists := step.Values[inp.Name]; exists && len(sv.Pool) > 0 {
+				var poolStrs []string
+				for _, v := range sv.Pool {
+					poolStrs = append(poolStrs, fmt.Sprintf("%v", v))
+				}
+				if len(poolStrs) > 8 {
+					poolStrs = poolStrs[:8]
+				}
+				ic.PoolValues = poolStrs
+				ic.HasTemplatePool = true
+			}
+
+			// Mark as pool input when template has a pool and no explicit default.
+			if ic.HasTemplatePool && ic.CurrentDefault == "" {
+				ic.IsPoolInput = true
 			}
 
 			// For configurable inputs, also show graph-level default.
@@ -312,7 +338,20 @@ func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet
 		if step.Values == nil {
 			step.Values = map[string]plan.StepValue{}
 		}
-		step.Values[inputName] = plan.StepValue{Default: val}
+		// Merge the LLM value into any existing StepValue. The LLM value
+		// represents user intent — it's authoritative. Clear Pool,
+		// PoolStrategy, and FromResolved so the engine uses the LLM's
+		// value instead of auto-wiring or pool fallback.
+		// Preserve Constraint (validation still applies to the LLM's value).
+		if existing, exists := step.Values[inputName]; exists {
+			existing.Default = val
+			existing.Pool = nil
+			existing.PoolStrategy = nil
+			existing.FromResolved = ""
+			step.Values[inputName] = existing
+		} else {
+			step.Values[inputName] = plan.StepValue{Default: val}
+		}
 	}
 
 	// Apply selection overrides.
@@ -535,8 +574,11 @@ func validateTargetedResponse(
 		if ic.IsConfigurable {
 			continue // configurable inputs are optional in the response
 		}
-		if ic.CurrentDefault != "" {
-			// Has a template default — not strictly required from LLM.
+		if ic.FromResolved != "" {
+			continue // auto-wired inputs have a fallback — not required from LLM
+		}
+		if ic.CurrentDefault != "" || ic.HasTemplatePool {
+			// Has a template default or pool — not strictly required from LLM.
 			continue
 		}
 		if _, provided := resp.Values[key]; !provided {

@@ -75,10 +75,12 @@ func Validate(p *Plan, g *graph.Graph) error {
 			}
 		}
 
-		// Build input name set for this node
+		// Build input name set and index for this node
 		inputNames := make(map[string]bool, len(node.Inputs))
-		for _, input := range node.Inputs {
+		inputIndex := make(map[string]int, len(node.Inputs))
+		for idx, input := range node.Inputs {
 			inputNames[input.Name] = true
+			inputIndex[input.Name] = idx
 		}
 
 		// Check that required inputs have plan values or graph defaults.
@@ -175,6 +177,25 @@ func Validate(p *Plan, g *graph.Graph) error {
 								}
 							}
 						}
+					}
+				}
+			}
+
+			// Validate FromResolved: intra-step value reference
+			if sv.FromResolved != "" {
+				// Mutual exclusion: fromResolved cannot coexist with from, fromSelection, default, or pool
+				if sv.From != "" || sv.FromSelection != "" || sv.Default != nil || len(sv.Pool) > 0 {
+					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromResolved but also has from/fromSelection/default/pool — these are mutually exclusive with fromResolved", i, sid, name))
+				}
+				// Referenced input must exist on the same graph node
+				if !inputNames[sv.FromResolved] {
+					errs = append(errs, fmt.Sprintf("step %d (%s): value %q fromResolved references %q which is not an input on node %q", i, sid, name, sv.FromResolved, step.Node))
+				} else {
+					// Ordering: referenced input must appear before the current input in node.Inputs
+					refIdx, refExists := inputIndex[sv.FromResolved]
+					curIdx, curExists := inputIndex[name]
+					if refExists && curExists && refIdx >= curIdx {
+						errs = append(errs, fmt.Sprintf("step %d (%s): value %q fromResolved references %q which is not defined before it in node inputs (forward reference)", i, sid, name, sv.FromResolved))
 					}
 				}
 			}

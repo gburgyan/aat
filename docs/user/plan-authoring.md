@@ -279,8 +279,8 @@ For more control, use the full mapping form:
 values:
   name:
     default: "Buddy"
-    fallbackPool: ["Max", "Bella", "Charlie"]
-    fallbackStrategy: random
+    pool: ["Max", "Bella", "Charlie"]
+    poolStrategy: sequential
     constraint: "len(name) > 2"
   petId:
     from: createPet.petId
@@ -301,9 +301,10 @@ values:
 | `default` | Literal value to use. For bare scalars (`name: "Buddy"`), this is the only field set. |
 | `from` | Reference to an upstream step's output (e.g., `createPet.petId`). Uses step IDs (which default to node names). |
 | `fromSelection` | Reference to a named selection (e.g., `offering.offeringId`). See [Named Selections](#named-selections). |
+| `fromResolved` | Reference to another input's resolved value within the same step (e.g., `leg1Destination`). See [Value Flow](value-flow.md#intra-step-references-fromresolved). |
 | `select` | Inline selection config for picking from an array output. See [Selection Strategies](#selection-strategies). |
-| `fallbackPool` | List of alternative values to try if the default fails. |
-| `fallbackStrategy` | How to pick from the fallback pool: `sequential` (default) or `random`. |
+| `pool` | List of alternative values to try if the default fails, or curated values to pick from randomly. |
+| `poolStrategy` | How to pick from the pool: `random` (default) or `sequential`. |
 | `constraint` | Predicate expression that the resolved value must satisfy. |
 
 For a deep dive into value resolution, see [Value Flow](value-flow.md).
