@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
@@ -50,6 +51,8 @@ var runCmd = &cobra.Command{
 		mode, _ := cmd.Flags().GetString("mode")
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 		quiet, _ := cmd.Flags().GetBool("quiet")
+		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
+		envOverlay, _ := cmd.Flags().GetString("env-overlay")
 
 		outputDir := "runs"
 		if cmd.Flags().Changed("output") {
@@ -68,6 +71,8 @@ var runCmd = &cobra.Command{
 			DomainPath:    resolved.DomainPath,
 			JSON:          jsonFlag,
 			Quiet:         quiet,
+			Overrides:     overrideFlags,
+			EnvOverlay:    envOverlay,
 		}
 
 		code := executeRun(ra)
@@ -88,6 +93,8 @@ func init() {
 	runCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
 	runCmd.Flags().Bool("json", false, "output machine-readable JSON summary to stdout")
 	runCmd.Flags().Bool("quiet", false, "suppress progress messages, show only final summary")
+	runCmd.Flags().StringSlice("override", nil, "node=url override (repeatable, e.g. searchFlights=http://localhost:8080)")
+	runCmd.Flags().String("env-overlay", "", "path to environment overlay YAML file")
 }
 
 // runArgs holds parsed CLI flags for the run command.
@@ -101,6 +108,8 @@ type runArgs struct {
 	DomainPath    string
 	JSON          bool
 	Quiet         bool
+	Overrides     []string // "nodeName=http://url" pairs
+	EnvOverlay    string   // path to overlay YAML
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -260,32 +269,39 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	}
 	logf("aat: loaded environment %q\n", env.Name)
 
-	// 2. Authenticate
-	apiConfig, err := env.BuildAPIConfig(ctx)
-	if err != nil {
-		return &runResult{setupErr: true, err: fmt.Errorf("building API config: %w", err)}
-	}
-	logf("aat: authenticated via %s\n", env.Auth.Type)
-
-	// 3. Load graph
+	// 2. Load graph
 	g, err := graph.ParseFile(args.GraphPath)
 	if err != nil {
 		return &runResult{setupErr: true, err: fmt.Errorf("loading graph: %w", err)}
 	}
 	logf("aat: loaded graph (%d nodes)\n", len(g.Nodes))
 
-	// 4. Load plan
+	// 3. Load plan
 	p, err := plan.ParseFile(args.PlanPath)
 	if err != nil {
 		return &runResult{setupErr: true, err: fmt.Errorf("loading plan: %w", err)}
 	}
 
-	// 5. Validate plan against graph (early validation for clear CI error reporting)
+	// 4. Validate plan against graph (early validation for clear CI error reporting)
 	if err := plan.Validate(p, g); err != nil {
 		return &runResult{setupErr: true, err: fmt.Errorf("plan validation: %w", err)}
 	}
 
-	// 6. Load domain knowledge (optional)
+	// 5. Determine effective auth: plan auth overrides env auth
+	effectiveAuth := env.Auth
+	if p.Auth != nil {
+		effectiveAuth = *p.Auth
+		logf("aat: using plan-level auth (%s)\n", effectiveAuth.Type)
+	}
+
+	// 6. Authenticate with effective auth, merging plan headers
+	apiConfig, err := env.BuildAPIConfigFromAuth(ctx, effectiveAuth, p.Headers)
+	if err != nil {
+		return &runResult{setupErr: true, err: fmt.Errorf("building API config: %w", err)}
+	}
+	logf("aat: authenticated via %s\n", effectiveAuth.Type)
+
+	// 7. Load domain knowledge (optional)
 	var kb *domain.KnowledgeBase
 	if args.DomainPath != "" {
 		kb, err = domain.ParseFile(args.DomainPath)
@@ -295,7 +311,7 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 		logf("aat: loaded domain knowledge\n")
 	}
 
-	// 7. Load templates
+	// 8. Load templates
 	registry := adapter.NewRegistry()
 	count, err := adapter.LoadTemplates(args.TemplatesPath, registry)
 	if err != nil {
@@ -303,15 +319,69 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	}
 	logf("aat: loaded %d templates\n", count)
 
-	// 8. Create executor and environment config
+	// 9. Create executor, environment config, and router
 	executor := adapter.NewHTTPExecutor(apiConfig.BaseURL)
 	envConfig := &adapter.EnvironmentConfig{
 		BaseURL: apiConfig.BaseURL,
 		Headers: apiConfig.Headers,
 		Values:  apiConfig.Values,
 	}
+	router := engine.NewExecutorRouter(executor, envConfig)
 
-	// 9. Determine execution mode
+	// 9a. Apply env-file overrides (inherit plan auth if present)
+	if len(env.Overrides) > 0 {
+		resolvedOverrides, err := env.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		if err != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("building overrides: %w", err)}
+		}
+		for _, ov := range resolvedOverrides {
+			addResolvedOverride(router, ov)
+		}
+	}
+
+	// 9b. Apply overlay file overrides
+	if args.EnvOverlay != "" {
+		overlayOverrides, err := config.LoadOverlayFile(args.EnvOverlay)
+		if err != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("loading overlay: %w", err)}
+		}
+		env.Overrides = config.MergeOverrides(env.Overrides, overlayOverrides)
+		resolvedOverrides, err := (&config.Environment{
+			APIBaseURL: env.APIBaseURL,
+			Auth:       effectiveAuth,
+			Overrides:  overlayOverrides,
+		}).BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		if err != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("building overlay overrides: %w", err)}
+		}
+		for _, ov := range resolvedOverrides {
+			addResolvedOverride(router, ov)
+		}
+	}
+
+	// 9c. Apply CLI --override flags (auth: none)
+	for _, flag := range args.Overrides {
+		name, url, err := parseOverrideFlag(flag)
+		if err != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("parsing --override: %w", err)}
+		}
+		overrideExec := adapter.NewHTTPExecutor(url)
+		overrideCfg := &adapter.EnvironmentConfig{
+			BaseURL: url,
+			Headers: make(map[string]string),
+			Values:  make(map[string]string),
+		}
+		router.AddOverride(name, overrideExec, overrideCfg, nil)
+	}
+
+	// Log active overrides
+	if router.HasOverrides() {
+		for _, p := range router.OverridePatterns() {
+			logf("aat: override: %s\n", p)
+		}
+	}
+
+	// 10. Determine execution mode
 	effectiveMode := config.ExecutionMode(args.Mode)
 	if effectiveMode == "" {
 		effectiveMode = env.LLM.Mode
@@ -320,7 +390,7 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 		effectiveMode = config.ModeStrict
 	}
 
-	// 10. Create LLM client if mode requires it
+	// 11. Create LLM client if mode requires it
 	var llmClient llm.Client
 	if effectiveMode != config.ModeStrict && env.LLM.Endpoint != "" {
 		llmClient, err = llm.NewClient(env.LLM)
@@ -329,8 +399,8 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 		}
 	}
 
-	// 11. Create engine and run
-	eng := engine.NewEngine(g, registry, executor, envConfig).
+	// 12. Create engine and run
+	eng := engine.NewEngine(g, registry, router).
 		WithMode(effectiveMode).
 		WithDomain(kb).
 		WithLLM(llmClient).
@@ -342,8 +412,14 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	// Print human-readable summary (suppressed in quiet mode via out=Discard)
 	printRunSummary(result, out)
 
-	// Write archive
-	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir)
+	// Write archive (merge plan secrets for redaction)
+	secrets := env.CollectSecrets()
+	if p.Auth != nil {
+		for k, v := range config.CollectAuthSecrets(p.Auth) {
+			secrets[k] = v
+		}
+	}
+	archivePath, archiveErr := writeRunArchiveWithSecrets(result, p, env, g, args.OutputDir, secrets)
 	if archiveErr != nil {
 		logf("aat: warning: %s\n", archiveErr)
 	} else {
@@ -537,4 +613,36 @@ func errString(err error) string {
 		return err.Error()
 	}
 	return ""
+}
+
+// parseOverrideFlag parses "nodeName=http://url" into (name, url, error).
+func parseOverrideFlag(flag string) (string, string, error) {
+	idx := strings.Index(flag, "=")
+	if idx < 1 {
+		return "", "", fmt.Errorf("invalid override %q: expected nodeName=url", flag)
+	}
+	name := flag[:idx]
+	url := flag[idx+1:]
+	if url == "" {
+		return "", "", fmt.Errorf("invalid override %q: URL is empty", flag)
+	}
+	return name, url, nil
+}
+
+// addResolvedOverride adds a config.ResolvedOverride to the executor router.
+func addResolvedOverride(router *engine.ExecutorRouter, ov config.ResolvedOverride) {
+	overrideExec := adapter.NewHTTPExecutor(ov.APIConfig.BaseURL)
+	overrideCfg := &adapter.EnvironmentConfig{
+		BaseURL: ov.APIConfig.BaseURL,
+		Headers: ov.APIConfig.Headers,
+		Values:  ov.APIConfig.Values,
+	}
+	var rewrite *adapter.PathRewrite
+	if ov.PathRewrite != nil {
+		rewrite = &adapter.PathRewrite{
+			Strip:  ov.PathRewrite.Strip,
+			Prefix: ov.PathRewrite.Prefix,
+		}
+	}
+	router.AddOverride(ov.Pattern, overrideExec, overrideCfg, rewrite)
 }

@@ -264,6 +264,7 @@ Archive: runs/run-20260211-143022-a1b2c3d4/archive.json
 
 - [Workflow Templates](workflow-templates.md) -- pre-built plan skeletons for reliable plan generation
 - [Plan Authoring](plan-authoring.md) -- plan YAML schema for understanding/editing generated plans
+- [Plan-Level Auth & Headers](plan-auth.md) -- adding credentials to saved/adjusted plans
 - [Running Tests](running.md) -- executing saved plans with `aat run`
 - [Domain Knowledge](domain-knowledge.md) -- improving plan generation with business context
 - [Environments](environments.md#llm-configuration) -- LLM endpoint setup

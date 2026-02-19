@@ -32,7 +32,7 @@ AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API w
 Dependencies flow in one direction. No cycles. No lateral imports within a tier.
 
 **Leaf packages** (zero aat imports): `config`, `graph`, `domain`, `llm`
-**Mid-tier**: `adapter` → config; `plan` → graph; `archive` → plan; `validate` → llm
+**Mid-tier**: `adapter` → config; `plan` → graph, config; `archive` → plan; `validate` → llm
 **Orchestrators**: `engine` → graph, adapter, plan, domain, llm, validate, archive, config
 **Entry points**: `intent` → graph, domain, plan, llm; `mcp` → all packages; `server` → engine, archive, plan, config
 **Binaries**: `cmd/aat` → engine, server, intent, mcp, archive, config
@@ -45,7 +45,8 @@ Cross-package dependencies use direct struct fields and function parameters — 
 
 ```go
 // Production: construct with NewEngine + builder methods
-eng := engine.NewEngine(g, registry, executor, envConfig).
+router := engine.NewExecutorRouter(executor, envConfig)
+eng := engine.NewEngine(g, registry, router).
     WithMode(config.ModeLean).
     WithLLM(llmClient).
     WithDomain(kb)
@@ -57,7 +58,8 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 
 // Tests: construct with test implementations
 func TestRun(t *testing.T) {
-    eng := engine.NewEngine(g, &fakeRegistry{}, executor, envConfig).
+    router := engine.NewExecutorRouter(executor, envConfig)
+    eng := engine.NewEngine(g, &fakeRegistry{}, router).
         WithMode(config.ModeStrict)
     result := eng.Run(ctx, testPlan)
     // assert
@@ -138,6 +140,8 @@ go build -o aat ./cmd/aat/
 #   --output DIR       archive output directory (default: runs/)
 #   --json             machine-readable JSON summary to stdout
 #   --quiet            suppress progress, show final line only
+#   --override NODE=URL  route a node to a different URL (repeatable)
+#   --env-overlay FILE   path to overlay YAML with additional overrides
 ```
 
 **Travelport config files:**

@@ -3,6 +3,7 @@ package plan
 import (
 	"testing"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -2651,4 +2652,79 @@ func TestValidate_StepAliasing(t *testing.T) {
 		s3 := Step{ID: "", Node: "searchFlights"}
 		assert.Equal(t, "searchFlights", s3.StepID())
 	})
+}
+
+// --- Plan-level auth validation ---
+
+func TestValidate_PlanAuth_Valid(t *testing.T) {
+	g := loadTravelportGraph(t)
+	p := &Plan{
+		Auth: &config.AuthConfig{
+			Type: "bearer",
+			Credentials: map[string]config.SecretRef{
+				"token": {Source: "literal", Value: "my-token"},
+			},
+		},
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin":        {Default: "DEN"},
+						"destination":   {Default: "SFO"},
+						"departureDate": {Default: "2026-03-15"},
+					},
+				},
+			},
+		},
+	}
+	err := Validate(p, g)
+	assert.NoError(t, err)
+}
+
+func TestValidate_PlanAuth_Invalid(t *testing.T) {
+	g := loadTravelportGraph(t)
+	p := &Plan{
+		Auth: &config.AuthConfig{
+			Type: "oauth2",
+			// Missing tokenUrl and credentials
+		},
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin":        {Default: "DEN"},
+						"destination":   {Default: "SFO"},
+						"departureDate": {Default: "2026-03-15"},
+					},
+				},
+			},
+		},
+	}
+	err := Validate(p, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plan auth: auth.tokenUrl is required")
+	assert.Contains(t, err.Error(), "plan auth: auth.credentials.username")
+}
+
+func TestValidate_PlanAuth_Nil(t *testing.T) {
+	// No plan auth → no auth validation errors
+	g := loadTravelportGraph(t)
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin":        {Default: "DEN"},
+						"destination":   {Default: "SFO"},
+						"departureDate": {Default: "2026-03-15"},
+					},
+				},
+			},
+		},
+	}
+	err := Validate(p, g)
+	assert.NoError(t, err)
 }

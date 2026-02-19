@@ -62,8 +62,14 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(fmt.Sprintf("plan validation failed:\n%v", err)), nil
 	}
 
+	// Determine effective auth: plan auth overrides env auth
+	effectiveAuth := s.ctx.Environment.Auth
+	if p.Auth != nil {
+		effectiveAuth = *p.Auth
+	}
+
 	// Authenticate (fresh each call — tokens expire)
-	apiConfig, err := s.ctx.Environment.BuildAPIConfig(ctx)
+	apiConfig, err := s.ctx.Environment.BuildAPIConfigFromAuth(ctx, effectiveAuth, p.Headers)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("authentication failed: %v", err)), nil
 	}
@@ -74,6 +80,31 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		BaseURL: apiConfig.BaseURL,
 		Headers: apiConfig.Headers,
 		Values:  apiConfig.Values,
+	}
+	router := engine.NewExecutorRouter(executor, envConfig)
+
+	// Apply env-file overrides (inherit plan auth if present)
+	if len(s.ctx.Environment.Overrides) > 0 {
+		resolvedOverrides, err := s.ctx.Environment.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("building overrides: %v", err)), nil
+		}
+		for _, ov := range resolvedOverrides {
+			ovExec := adapter.NewHTTPExecutor(ov.APIConfig.BaseURL)
+			ovCfg := &adapter.EnvironmentConfig{
+				BaseURL: ov.APIConfig.BaseURL,
+				Headers: ov.APIConfig.Headers,
+				Values:  ov.APIConfig.Values,
+			}
+			var rewrite *adapter.PathRewrite
+			if ov.PathRewrite != nil {
+				rewrite = &adapter.PathRewrite{
+					Strip:  ov.PathRewrite.Strip,
+					Prefix: ov.PathRewrite.Prefix,
+				}
+			}
+			router.AddOverride(ov.Pattern, ovExec, ovCfg, rewrite)
+		}
 	}
 
 	// Determine execution mode
@@ -104,7 +135,7 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	// Build and run engine
-	eng := engine.NewEngine(s.ctx.Graph, s.ctx.Registry, executor, envConfig).
+	eng := engine.NewEngine(s.ctx.Graph, s.ctx.Registry, router).
 		WithMode(effectiveMode).
 		WithDomain(s.ctx.KB).
 		WithLLM(llmClient).
@@ -124,6 +155,11 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		ToolVersion:  "0.1.0",
 	}
 	secrets := s.ctx.Environment.CollectSecrets()
+	if p.Auth != nil {
+		for k, v := range config.CollectAuthSecrets(p.Auth) {
+			secrets[k] = v
+		}
+	}
 	arc := engine.ToArchive(result, meta, s.ctx.Environment.APIBaseURL, secrets)
 	archivePath := filepath.Join(s.ctx.ArchiveDir, runID, "archive.json")
 	if err := archive.Write(arc, archivePath); err != nil {

@@ -237,6 +237,30 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 
 // executePlan loads templates, creates the engine, runs the plan, and writes an archive.
 func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, apiConfig *config.APIConfig, env *config.Environment, kb *domain.KnowledgeBase, llmClient llm.Client) error {
+	// If the plan has its own auth (e.g., user manually edited after --save), re-authenticate
+	if p.Auth != nil {
+		effectiveAuth := *p.Auth
+		fmt.Printf("aat: plan has its own auth (%s), re-authenticating...\n", effectiveAuth.Type)
+		var err error
+		apiConfig, err = env.BuildAPIConfigFromAuth(ctx, effectiveAuth, p.Headers)
+		if err != nil {
+			return fmt.Errorf("building API config from plan auth: %w", err)
+		}
+	} else if len(p.Headers) > 0 {
+		// Plan has extra headers but no auth override — rebuild with plan headers merged
+		var err error
+		apiConfig, err = env.BuildAPIConfigFromAuth(ctx, env.Auth, p.Headers)
+		if err != nil {
+			return fmt.Errorf("building API config with plan headers: %w", err)
+		}
+	}
+
+	// Determine effective auth for override inheritance
+	effectiveAuth := env.Auth
+	if p.Auth != nil {
+		effectiveAuth = *p.Auth
+	}
+
 	// Load templates
 	registry := adapter.NewRegistry()
 	count, err := adapter.LoadTemplates(args.TemplatesPath, registry)
@@ -252,6 +276,18 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		Headers: apiConfig.Headers,
 		Values:  apiConfig.Values,
 	}
+	router := engine.NewExecutorRouter(executor, envConfig)
+
+	// Apply env-file overrides (inherit plan auth if present)
+	if len(env.Overrides) > 0 {
+		resolvedOverrides, err := env.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		if err != nil {
+			return fmt.Errorf("building overrides: %w", err)
+		}
+		for _, ov := range resolvedOverrides {
+			addResolvedOverride(router, ov)
+		}
+	}
 
 	// Determine execution mode: prompt command always has LLM, default to lean
 	effectiveMode := env.LLM.Mode
@@ -260,7 +296,7 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	}
 
 	// Create engine and run
-	eng := engine.NewEngine(g, registry, executor, envConfig).
+	eng := engine.NewEngine(g, registry, router).
 		WithMode(effectiveMode).
 		WithDomain(kb).
 		WithLLM(llmClient).
@@ -348,8 +384,19 @@ func adjustPlan(p *plan.Plan, g *graph.Graph, reader io.Reader) (*plan.Plan, err
 }
 
 // writeRunArchive creates a run archive in the output directory and returns
-// the archive path. It no longer prints the path itself; callers handle output.
+// the archive path. It collects secrets from the environment for redaction.
 func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string) (string, error) {
+	secrets := env.CollectSecrets()
+	if p.Auth != nil {
+		for k, v := range config.CollectAuthSecrets(p.Auth) {
+			secrets[k] = v
+		}
+	}
+	return writeRunArchiveWithSecrets(result, p, env, g, outputDir, secrets)
+}
+
+// writeRunArchiveWithSecrets creates a run archive using a pre-built secrets set.
+func writeRunArchiveWithSecrets(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string, secrets map[string]bool) (string, error) {
 	runID := archive.GenerateRunID()
 	meta := archive.ArchiveMetadata{
 		Version:      "1.0.0",
@@ -360,7 +407,6 @@ func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environ
 		GraphVersion: g.Version,
 		ToolVersion:  "0.1.0",
 	}
-	secrets := env.CollectSecrets()
 	arc := engine.ToArchive(result, meta, env.APIBaseURL, secrets)
 	archivePath := filepath.Join(outputDir, runID, "archive.json")
 	if err := archive.Write(arc, archivePath); err != nil {

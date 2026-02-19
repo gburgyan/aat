@@ -565,3 +565,465 @@ func TestCollectSecrets_UnresolvableRefsIgnored(t *testing.T) {
 	secrets := env.CollectSecrets()
 	assert.Empty(t, secrets)
 }
+
+// --- Override tests ---
+
+func TestOverrides_ParseFromYAML(t *testing.T) {
+	yaml := `
+environment: test
+apiBaseUrl: https://api.example.com
+auth:
+  type: none
+overrides:
+  - match: searchFlights
+    baseUrl: http://localhost:8080
+    auth:
+      type: none
+    pathRewrite:
+      strip: /11
+      prefix: /api/v2
+  - match: "price*"
+    baseUrl: https://api.stg.example.com
+`
+	tmpFile := t.TempDir() + "/overrides.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
+
+	env, err := LoadEnvironment(tmpFile)
+	require.NoError(t, err)
+	require.Len(t, env.Overrides, 2)
+
+	assert.Equal(t, "searchFlights", env.Overrides[0].Match)
+	assert.Equal(t, "http://localhost:8080", env.Overrides[0].BaseURL)
+	require.NotNil(t, env.Overrides[0].Auth)
+	assert.Equal(t, "none", env.Overrides[0].Auth.Type)
+	require.NotNil(t, env.Overrides[0].PathRewrite)
+	assert.Equal(t, "/11", env.Overrides[0].PathRewrite.Strip)
+	assert.Equal(t, "/api/v2", env.Overrides[0].PathRewrite.Prefix)
+
+	assert.Equal(t, "price*", env.Overrides[1].Match)
+	assert.Equal(t, "https://api.stg.example.com", env.Overrides[1].BaseURL)
+	assert.Nil(t, env.Overrides[1].Auth)
+}
+
+func TestOverrides_Validation_EmptyMatch(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Overrides: []HostOverride{
+			{Match: ""}, // invalid
+		},
+	}
+	err := ValidateEnvironment(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "match is required")
+}
+
+func TestOverrides_Validation_InvalidAuth(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Overrides: []HostOverride{
+			{Match: "node1", Auth: &AuthConfig{Type: "magic"}},
+		},
+	}
+	err := ValidateEnvironment(env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown auth type")
+}
+
+func TestBuildOverrideConfigs_InheritAuth(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type: "bearer",
+			Credentials: map[string]SecretRef{
+				"token": {Source: "literal", Value: "my-token"},
+			},
+		},
+		Overrides: []HostOverride{
+			{Match: "node1", BaseURL: "http://localhost:8080"},
+			// Auth omitted → inherits top-level bearer auth
+		},
+	}
+
+	baseHeaders := map[string]string{"Accept": "application/json"}
+	resolved, err := env.BuildOverrideConfigs(context.Background(), baseHeaders)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+
+	assert.Equal(t, "node1", resolved[0].Pattern)
+	assert.Equal(t, "http://localhost:8080", resolved[0].APIConfig.BaseURL)
+	assert.Equal(t, "Bearer my-token", resolved[0].APIConfig.Headers["Authorization"])
+	assert.Equal(t, "application/json", resolved[0].APIConfig.Headers["Accept"])
+}
+
+func TestBuildOverrideConfigs_ExplicitNone(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type: "bearer",
+			Credentials: map[string]SecretRef{
+				"token": {Source: "literal", Value: "my-token"},
+			},
+		},
+		Overrides: []HostOverride{
+			{Match: "node1", BaseURL: "http://localhost:8080", Auth: &AuthConfig{Type: "none"}},
+		},
+	}
+
+	baseHeaders := map[string]string{
+		"Accept":        "application/json",
+		"Authorization": "Bearer my-token",
+	}
+	resolved, err := env.BuildOverrideConfigs(context.Background(), baseHeaders)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+
+	// Auth should be stripped
+	_, hasAuth := resolved[0].APIConfig.Headers["Authorization"]
+	assert.False(t, hasAuth)
+	assert.Equal(t, "application/json", resolved[0].APIConfig.Headers["Accept"])
+}
+
+func TestBuildOverrideConfigs_HeaderMerge(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Overrides: []HostOverride{
+			{
+				Match:   "node1",
+				BaseURL: "http://localhost:8080",
+				Headers: map[string]string{
+					"X-Custom": "override-value",
+					"X-New":    "new-value",
+				},
+			},
+		},
+	}
+
+	baseHeaders := map[string]string{
+		"Accept":   "application/json",
+		"X-Custom": "base-value",
+	}
+	resolved, err := env.BuildOverrideConfigs(context.Background(), baseHeaders)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+
+	// Override headers win on conflict
+	assert.Equal(t, "override-value", resolved[0].APIConfig.Headers["X-Custom"])
+	assert.Equal(t, "new-value", resolved[0].APIConfig.Headers["X-New"])
+	assert.Equal(t, "application/json", resolved[0].APIConfig.Headers["Accept"])
+}
+
+func TestBuildOverrideConfigs_InheritBaseURL(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Overrides: []HostOverride{
+			{Match: "node1"}, // no baseUrl → inherits top-level
+		},
+	}
+
+	resolved, err := env.BuildOverrideConfigs(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, "https://api.example.com", resolved[0].APIConfig.BaseURL)
+}
+
+func TestBuildOverrideConfigs_PathRewrite(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Overrides: []HostOverride{
+			{
+				Match:   "node1",
+				BaseURL: "http://localhost:8080",
+				PathRewrite: &PathRewrite{
+					Strip:  "/11",
+					Prefix: "/api/v2",
+				},
+			},
+		},
+	}
+
+	resolved, err := env.BuildOverrideConfigs(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	require.NotNil(t, resolved[0].PathRewrite)
+	assert.Equal(t, "/11", resolved[0].PathRewrite.Strip)
+	assert.Equal(t, "/api/v2", resolved[0].PathRewrite.Prefix)
+}
+
+func TestBuildOverrideConfigs_Empty(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+	}
+
+	resolved, err := env.BuildOverrideConfigs(context.Background(), nil)
+	require.NoError(t, err)
+	assert.Nil(t, resolved)
+}
+
+func TestLoadOverlayFile(t *testing.T) {
+	yaml := `
+overrides:
+  - match: searchFlights
+    baseUrl: http://localhost:8080
+    auth:
+      type: none
+    pathRewrite:
+      strip: /11
+      prefix: /api/v2
+`
+	tmpFile := t.TempDir() + "/overlay.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
+
+	overrides, err := LoadOverlayFile(tmpFile)
+	require.NoError(t, err)
+	require.Len(t, overrides, 1)
+	assert.Equal(t, "searchFlights", overrides[0].Match)
+	assert.Equal(t, "http://localhost:8080", overrides[0].BaseURL)
+}
+
+func TestLoadOverlayFile_EmptyMatch(t *testing.T) {
+	yaml := `
+overrides:
+  - baseUrl: http://localhost:8080
+`
+	tmpFile := t.TempDir() + "/overlay.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
+
+	_, err := LoadOverlayFile(tmpFile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "match is required")
+}
+
+func TestMergeOverrides(t *testing.T) {
+	base := []HostOverride{
+		{Match: "node1", BaseURL: "http://base:8080"},
+	}
+	overlay := []HostOverride{
+		{Match: "node2", BaseURL: "http://overlay:9090"},
+	}
+
+	merged := MergeOverrides(base, overlay)
+	require.Len(t, merged, 2)
+	assert.Equal(t, "node1", merged[0].Match)
+	assert.Equal(t, "node2", merged[1].Match)
+}
+
+func TestMergeOverrides_EmptyOverlay(t *testing.T) {
+	base := []HostOverride{
+		{Match: "node1", BaseURL: "http://base:8080"},
+	}
+
+	merged := MergeOverrides(base, nil)
+	assert.Equal(t, base, merged)
+}
+
+func TestOverrides_BackwardsCompatible(t *testing.T) {
+	// Ensure env files without overrides still parse correctly
+	env, err := LoadEnvironment("testdata/environments/minimal.yaml")
+	require.NoError(t, err)
+	assert.Empty(t, env.Overrides)
+}
+
+// --- ValidateAuth (exported) tests ---
+
+func TestValidateAuth_Exported(t *testing.T) {
+	// Verify the exported function works the same as the old unexported one
+	auth := &AuthConfig{Type: "oauth2", TokenURL: "https://auth.example.com/token",
+		Credentials: map[string]SecretRef{
+			"username":     {Source: "literal", Value: "u"},
+			"password":     {Source: "literal", Value: "p"},
+			"clientId":     {Source: "literal", Value: "c"},
+			"clientSecret": {Source: "literal", Value: "s"},
+		},
+	}
+	errs := ValidateAuth(auth)
+	assert.Empty(t, errs)
+}
+
+func TestValidateAuth_Exported_Invalid(t *testing.T) {
+	auth := &AuthConfig{Type: "oauth2"} // missing tokenUrl and credentials
+	errs := ValidateAuth(auth)
+	assert.NotEmpty(t, errs)
+	found := false
+	for _, e := range errs {
+		if e == "auth.tokenUrl is required for oauth2" {
+			found = true
+		}
+	}
+	assert.True(t, found, "expected tokenUrl error")
+}
+
+// --- BuildAPIConfigFromAuth tests ---
+
+func TestBuildAPIConfigFromAuth_DifferentAuth(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Headers:    map[string]string{"X-Env": "env-value"},
+	}
+
+	planAuth := AuthConfig{
+		Type: "bearer",
+		Credentials: map[string]SecretRef{
+			"token": {Source: "literal", Value: "plan-token"},
+		},
+	}
+	extraHeaders := map[string]string{"X-Plan": "plan-value"}
+
+	cfg, err := env.BuildAPIConfigFromAuth(context.Background(), planAuth, extraHeaders)
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer plan-token", cfg.Headers["Authorization"])
+	assert.Equal(t, "env-value", cfg.Headers["X-Env"])
+	assert.Equal(t, "plan-value", cfg.Headers["X-Plan"])
+}
+
+func TestBuildAPIConfigFromAuth_NilExtraHeaders(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Headers:    map[string]string{"X-Env": "env-value"},
+	}
+
+	cfg, err := env.BuildAPIConfigFromAuth(context.Background(), AuthConfig{Type: "none"}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "env-value", cfg.Headers["X-Env"])
+	assert.Len(t, cfg.Headers, 1)
+}
+
+func TestBuildAPIConfigFromAuth_PlanHeadersOverrideEnv(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth:       AuthConfig{Type: "none"},
+		Headers:    map[string]string{"X-Shared": "env-value", "X-Env-Only": "stays"},
+	}
+
+	extraHeaders := map[string]string{"X-Shared": "plan-value", "X-Plan-Only": "new"}
+
+	cfg, err := env.BuildAPIConfigFromAuth(context.Background(), AuthConfig{Type: "none"}, extraHeaders)
+	require.NoError(t, err)
+	assert.Equal(t, "plan-value", cfg.Headers["X-Shared"])
+	assert.Equal(t, "stays", cfg.Headers["X-Env-Only"])
+	assert.Equal(t, "new", cfg.Headers["X-Plan-Only"])
+}
+
+func TestBuildAPIConfigFromAuth_DelegateFromBuildAPIConfig(t *testing.T) {
+	// Verify BuildAPIConfig still works (delegates to BuildAPIConfigFromAuth)
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type: "bearer",
+			Credentials: map[string]SecretRef{
+				"token": {Source: "literal", Value: "env-token"},
+			},
+		},
+		Headers: map[string]string{"X-Env": "val"},
+	}
+
+	cfg, err := env.BuildAPIConfig(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, "Bearer env-token", cfg.Headers["Authorization"])
+	assert.Equal(t, "val", cfg.Headers["X-Env"])
+}
+
+// --- BuildOverrideConfigsWithAuth tests ---
+
+func TestBuildOverrideConfigsWithAuth_InheritProvidedAuth(t *testing.T) {
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type: "bearer",
+			Credentials: map[string]SecretRef{
+				"token": {Source: "literal", Value: "env-token"},
+			},
+		},
+		Overrides: []HostOverride{
+			{Match: "node1", BaseURL: "http://localhost:8080"},
+		},
+	}
+
+	// Override with a different default auth
+	planAuth := AuthConfig{
+		Type: "bearer",
+		Credentials: map[string]SecretRef{
+			"token": {Source: "literal", Value: "plan-token"},
+		},
+	}
+
+	resolved, err := env.BuildOverrideConfigsWithAuth(context.Background(), nil, planAuth)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	// Override inherits plan auth, not env auth
+	assert.Equal(t, "Bearer plan-token", resolved[0].APIConfig.Headers["Authorization"])
+}
+
+func TestBuildOverrideConfigsWithAuth_DelegateFromBuildOverrideConfigs(t *testing.T) {
+	// Verify BuildOverrideConfigs delegates correctly
+	env := &Environment{
+		Name:       "test",
+		APIBaseURL: "https://api.example.com",
+		Auth: AuthConfig{
+			Type: "bearer",
+			Credentials: map[string]SecretRef{
+				"token": {Source: "literal", Value: "env-token"},
+			},
+		},
+		Overrides: []HostOverride{
+			{Match: "node1"},
+		},
+	}
+
+	resolved, err := env.BuildOverrideConfigs(context.Background(), nil)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, "Bearer env-token", resolved[0].APIConfig.Headers["Authorization"])
+}
+
+// --- CollectAuthSecrets tests ---
+
+func TestCollectAuthSecrets(t *testing.T) {
+	auth := &AuthConfig{
+		Credentials: map[string]SecretRef{
+			"username": {Source: "literal", Value: "user-val"},
+			"password": {Source: "literal", Value: "pass-val"},
+		},
+	}
+
+	secrets := CollectAuthSecrets(auth)
+	assert.True(t, secrets["user-val"])
+	assert.True(t, secrets["pass-val"])
+	assert.Len(t, secrets, 2)
+}
+
+func TestCollectAuthSecrets_Nil(t *testing.T) {
+	secrets := CollectAuthSecrets(nil)
+	assert.Empty(t, secrets)
+}
+
+func TestCollectAuthSecrets_UnresolvableIgnored(t *testing.T) {
+	auth := &AuthConfig{
+		Credentials: map[string]SecretRef{
+			"key": {Source: "env", Var: "DEFINITELY_NOT_SET_98765"},
+		},
+	}
+
+	secrets := CollectAuthSecrets(auth)
+	assert.Empty(t, secrets)
+}

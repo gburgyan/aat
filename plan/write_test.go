@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -310,6 +311,71 @@ func TestMarshalRoundTrip_StepAliasing(t *testing.T) {
 	assert.Equal(t, "searchFlights", parsed.Execution.Steps[1].Node)
 	assert.Equal(t, "search_leg2", parsed.Execution.Steps[1].StepID())
 	assert.Equal(t, []string{"search_leg1"}, parsed.Execution.Steps[1].DependsOn)
+}
+
+func TestMarshalRoundTrip_WithAuth(t *testing.T) {
+	original := &Plan{
+		Auth: &config.AuthConfig{
+			Type:     "oauth2",
+			TokenURL: "https://auth.example.com/token",
+			Credentials: map[string]config.SecretRef{
+				"username":     {Source: "literal", Value: "user1"},
+				"password":     {Source: "literal", Value: "pass1"},
+				"clientId":     {Source: "literal", Value: "cid"},
+				"clientSecret": {Source: "literal", Value: "csec"},
+			},
+		},
+		Headers: map[string]string{
+			"X-Custom":         "custom-value",
+			"Content-Version":  "2.0",
+		},
+		Execution: Execution{
+			Steps: []Step{
+				{Node: "test", Values: map[string]StepValue{"key": {Default: "val"}}},
+			},
+		},
+	}
+
+	data, err := Marshal(original)
+	require.NoError(t, err)
+
+	yaml := string(data)
+	assert.Contains(t, yaml, "type: oauth2")
+	assert.Contains(t, yaml, "tokenUrl: https://auth.example.com/token")
+	assert.Contains(t, yaml, "X-Custom: custom-value")
+	assert.Contains(t, yaml, "Content-Version: \"2.0\"")
+
+	// Round-trip
+	parsed, err := Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, parsed.Auth)
+	assert.Equal(t, "oauth2", parsed.Auth.Type)
+	assert.Equal(t, "https://auth.example.com/token", parsed.Auth.TokenURL)
+	assert.Equal(t, "user1", parsed.Auth.Credentials["username"].Value)
+	assert.Equal(t, "custom-value", parsed.Headers["X-Custom"])
+	assert.Equal(t, "2.0", parsed.Headers["Content-Version"])
+}
+
+func TestMarshal_WithoutAuth(t *testing.T) {
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{Node: "test", Values: map[string]StepValue{"key": {Default: "val"}}},
+			},
+		},
+	}
+
+	data, err := Marshal(p)
+	require.NoError(t, err)
+
+	yaml := string(data)
+	assert.NotContains(t, yaml, "auth:")
+	assert.NotContains(t, yaml, "headers:")
+
+	parsed, err := Parse(data)
+	require.NoError(t, err)
+	assert.Nil(t, parsed.Auth)
+	assert.Empty(t, parsed.Headers)
 }
 
 func TestMarshal_StepWithoutID(t *testing.T) {

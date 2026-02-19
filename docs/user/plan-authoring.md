@@ -36,7 +36,7 @@ execution:
 
 ## Schema Overview
 
-A plan has four top-level sections:
+A plan has six top-level sections:
 
 ```yaml
 metadata:        # optional — provenance information
@@ -45,6 +45,13 @@ metadata:        # optional — provenance information
   graphVersion: ...
 
 graph: ...       # optional — path to graph file (informational)
+
+auth:            # optional — override environment auth (see plan-auth.md)
+  type: bearer
+  credentials: ...
+
+headers:         # optional — merge on top of environment headers (see plan-auth.md)
+  X-Custom: value
 
 intent:          # optional — goal and constraints
   goal: ...
@@ -727,6 +734,7 @@ Each step executes the same `addItem` graph node with different inputs. Downstre
 
 ## See Also
 
+- [Plan-Level Auth & Headers](plan-auth.md) -- embedding credentials and custom headers in plans
 - [Value Flow](value-flow.md) -- expressions, constraint resolution, selection strategies in depth
 - [Running Tests](running.md) -- executing plans with `aat run`
 - [LLM-Assisted Planning](prompt-workflow.md) -- generating plans from prompts with `aat prompt`

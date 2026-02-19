@@ -37,6 +37,44 @@ func LoadEnvironmentFromDir(dir, name string) (*Environment, error) {
 	return LoadEnvironment(path)
 }
 
+// OverlayFile is a sparse YAML structure containing only overrides.
+type OverlayFile struct {
+	Overrides []HostOverride `yaml:"overrides"`
+}
+
+// LoadOverlayFile reads a YAML overlay file and returns its overrides.
+func LoadOverlayFile(path string) ([]HostOverride, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading overlay file: %w", err)
+	}
+
+	var overlay OverlayFile
+	if err := yaml.Unmarshal(data, &overlay); err != nil {
+		return nil, fmt.Errorf("parsing overlay YAML: %w", err)
+	}
+
+	for i, ov := range overlay.Overrides {
+		if ov.Match == "" {
+			return nil, fmt.Errorf("overlay override %d: match is required", i)
+		}
+	}
+
+	return overlay.Overrides, nil
+}
+
+// MergeOverrides appends overlay overrides to base overrides.
+// Later entries win on conflict for the same match pattern.
+func MergeOverrides(base, overlay []HostOverride) []HostOverride {
+	if len(overlay) == 0 {
+		return base
+	}
+	result := make([]HostOverride, 0, len(base)+len(overlay))
+	result = append(result, base...)
+	result = append(result, overlay...)
+	return result
+}
+
 func applyDefaults(env *Environment) {
 	if env.LLM.Mode == "" {
 		env.LLM.Mode = ModeLean
@@ -66,9 +104,10 @@ func ValidateEnvironment(env *Environment) error {
 		errs = append(errs, "apiBaseUrl is required")
 	}
 
-	errs = append(errs, validateAuth(&env.Auth)...)
+	errs = append(errs, ValidateAuth(&env.Auth)...)
 	errs = append(errs, validateLLM(&env.LLM)...)
 	errs = append(errs, validateSettings(&env.Settings)...)
+	errs = append(errs, validateOverrides(env.Overrides)...)
 
 	if len(errs) > 0 {
 		return fmt.Errorf("environment validation failed:\n- %s", strings.Join(errs, "\n- "))
@@ -76,7 +115,8 @@ func ValidateEnvironment(env *Environment) error {
 	return nil
 }
 
-func validateAuth(auth *AuthConfig) []string {
+// ValidateAuth checks that an AuthConfig has valid type and required fields.
+func ValidateAuth(auth *AuthConfig) []string {
 	var errs []string
 
 	switch auth.Type {
@@ -121,6 +161,21 @@ func validateLLM(llm *LLMConfig) []string {
 		}
 	}
 
+	return errs
+}
+
+func validateOverrides(overrides []HostOverride) []string {
+	var errs []string
+	for i, ov := range overrides {
+		if ov.Match == "" {
+			errs = append(errs, fmt.Sprintf("overrides[%d]: match is required", i))
+		}
+		if ov.Auth != nil {
+			for _, e := range ValidateAuth(ov.Auth) {
+				errs = append(errs, fmt.Sprintf("overrides[%d]: %s", i, e))
+			}
+		}
+	}
 	return errs
 }
 

@@ -37,6 +37,8 @@ aat run \
 | `--domain` | no | | Path to domain knowledge YAML file |
 | `--json` | no | `false` | Output machine-readable JSON summary to stdout |
 | `--quiet` | no | `false` | Suppress progress messages, show only final result |
+| `--override` | no | | Route a node to a different URL: `nodeName=http://url` (repeatable) |
+| `--env-overlay` | no | | Path to an overlay file with additional overrides |
 
 **Auto-resolved flags:** `--env`, `--graph`, and `--templates` are resolved automatically when an `aat-project.yaml` manifest is found (see [Project Discovery](#project-discovery)). Explicit flags always take priority.
 
@@ -513,6 +515,111 @@ aat run --mode lean --plan plan.yaml --env env.yaml --graph graph.yaml --templat
 aat run --mode adaptive --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
 ```
 
+## Multi-Host Routing
+
+By default, every API call goes to the single `apiBaseUrl` from your environment file. When you need to route specific nodes to different servers, AAT provides three mechanisms (from quickest to most structured):
+
+### CLI `--override` flag
+
+The fastest way to reroute a node -- no file editing required:
+
+```bash
+# Route searchFlights to localhost
+aat run --plan plan.yaml --env env.yaml \
+  --override searchFlights=http://localhost:8080
+
+# Multiple overrides
+aat run --plan plan.yaml --env env.yaml \
+  --override searchFlights=http://localhost:8080 \
+  --override priceOffer=http://localhost:8081
+```
+
+CLI overrides use `auth: none` (the common case for local development servers). For overrides that need authentication, use the environment file or an overlay file.
+
+### Environment file `overrides` section
+
+For persistent, version-controlled overrides, add an `overrides` section to your environment YAML. See [environments.md](environments.md#overrides-multi-host-routing) for full documentation.
+
+```yaml
+overrides:
+  - match: searchFlights
+    baseUrl: http://localhost:8080
+    auth: { type: none }
+    pathRewrite:
+      strip: /11
+      prefix: /api/v2
+```
+
+### Overlay files (`--env-overlay`)
+
+For override sets that you want to share or swap without editing the base environment:
+
+```bash
+aat run --plan plan.yaml --env env.yaml --env-overlay local-dev.yaml
+```
+
+Where `local-dev.yaml` contains just overrides:
+
+```yaml
+overrides:
+  - match: searchFlights
+    baseUrl: http://localhost:8080
+    auth: { type: none }
+```
+
+Overlay overrides are appended to any overrides in the base environment file. See [environments.md](environments.md#overlay-files) for details.
+
+### Practical examples
+
+**Debug a single service locally:**
+
+You're debugging why `searchFlights` returns unexpected results. Run it locally while the rest of the workflow hits the real staging environment:
+
+```bash
+# Start your local service on port 8080, then:
+aat run --plan plans/booking_flow.yaml --env staging.yaml \
+  --override searchFlights=http://localhost:8080
+```
+
+**Compare staging vs. production for one operation:**
+
+Route pricing calls to staging while everything else hits production:
+
+```bash
+aat run --plan plans/booking_flow.yaml --env production.yaml \
+  --env-overlay staging-pricing.yaml
+```
+
+Where `staging-pricing.yaml`:
+
+```yaml
+overrides:
+  - match: "price*"
+    baseUrl: https://api.staging.example.com
+    # auth inherited from production
+```
+
+**Handle local path differences:**
+
+Your production API uses `/11/air/search` but your local service uses `/api/v2/air/search`:
+
+```bash
+aat run --plan plans/search_test.yaml --env production.yaml \
+  --env-overlay local-search.yaml
+```
+
+Where `local-search.yaml`:
+
+```yaml
+overrides:
+  - match: searchFlights
+    baseUrl: http://localhost:8080
+    auth: { type: none }
+    pathRewrite:
+      strip: /11
+      prefix: /api/v2
+```
+
 ## Building
 
 ```
@@ -560,3 +667,10 @@ The environment (`--env`) configures the target: base URL, authentication, custo
 ### Domain Knowledge
 
 Optional domain knowledge (`--domain`) provides the LLM with context about your API's concepts, types, and valid value pools. Only used in `lean` and `adaptive` modes.
+
+## See Also
+
+- [Plan Authoring](plan-authoring.md) -- plan YAML schema reference
+- [Plan-Level Auth & Headers](plan-auth.md) -- embedding per-plan credentials and custom headers
+- [Environments](environments.md) -- environment config, auth types, overrides
+- [LLM-Assisted Planning](prompt-workflow.md) -- generating plans with `aat prompt`

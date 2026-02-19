@@ -349,6 +349,96 @@ execution:
 
 func strPtr(s string) *string { return &s }
 
+// --- Plan-level auth and headers tests ---
+
+func TestParse_WithAuth(t *testing.T) {
+	data := []byte(`
+auth:
+  type: bearer
+  credentials:
+    token:
+      source: literal
+      value: my-token
+execution:
+  steps:
+    - node: test
+      values:
+        key: val
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, p.Auth)
+	assert.Equal(t, "bearer", p.Auth.Type)
+	assert.Equal(t, "literal", p.Auth.Credentials["token"].Source)
+	assert.Equal(t, "my-token", p.Auth.Credentials["token"].Value)
+}
+
+func TestParse_WithHeaders(t *testing.T) {
+	data := []byte(`
+headers:
+  Content-Version: "2.0"
+  X-Test-Customer: customer-x
+execution:
+  steps:
+    - node: test
+      values:
+        key: val
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	require.Len(t, p.Headers, 2)
+	assert.Equal(t, "2.0", p.Headers["Content-Version"])
+	assert.Equal(t, "customer-x", p.Headers["X-Test-Customer"])
+}
+
+func TestParse_WithAuthAndHeaders(t *testing.T) {
+	data := []byte(`
+auth:
+  type: oauth2
+  tokenUrl: https://auth.example.com/token
+  credentials:
+    username:
+      source: literal
+      value: user1
+    password:
+      source: literal
+      value: pass1
+    clientId:
+      source: literal
+      value: cid
+    clientSecret:
+      source: literal
+      value: csec
+headers:
+  X-Custom: custom-value
+execution:
+  steps:
+    - node: test
+      values:
+        key: val
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	require.NotNil(t, p.Auth)
+	assert.Equal(t, "oauth2", p.Auth.Type)
+	assert.Equal(t, "https://auth.example.com/token", p.Auth.TokenURL)
+	assert.Equal(t, "custom-value", p.Headers["X-Custom"])
+}
+
+func TestParse_WithoutAuthOrHeaders(t *testing.T) {
+	data := []byte(`
+execution:
+  steps:
+    - node: test
+      values:
+        key: val
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	assert.Nil(t, p.Auth)
+	assert.Empty(t, p.Headers)
+}
+
 func TestStepValue_FromSelectionNoWholeElement(t *testing.T) {
 	data := []byte(`
 execution:

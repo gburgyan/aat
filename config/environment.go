@@ -98,6 +98,28 @@ type RuntimeSettings struct {
 	ArchiveFormat      ArchiveFormat `yaml:"archiveFormat"`
 }
 
+// PathRewrite controls URL path rewriting for overrides.
+type PathRewrite struct {
+	Strip  string `yaml:"strip,omitempty"`  // prefix to remove from the template path
+	Prefix string `yaml:"prefix,omitempty"` // prefix to add after stripping
+}
+
+// HostOverride maps a node/adapter name pattern to alternate API configuration.
+type HostOverride struct {
+	Match       string            `yaml:"match"`                 // node name or glob pattern
+	BaseURL     string            `yaml:"baseUrl,omitempty"`     // override base URL
+	Auth        *AuthConfig       `yaml:"auth,omitempty"`        // nil = inherit top-level auth
+	Headers     map[string]string `yaml:"headers,omitempty"`     // merged with env-level headers
+	PathRewrite *PathRewrite      `yaml:"pathRewrite,omitempty"` // URL path rewriting
+}
+
+// ResolvedOverride is a HostOverride after authentication and header merging.
+type ResolvedOverride struct {
+	Pattern     string
+	APIConfig   APIConfig
+	PathRewrite *PathRewrite
+}
+
 // Environment is the top-level configuration loaded from a YAML file.
 type Environment struct {
 	Name       string            `yaml:"environment"`
@@ -107,6 +129,77 @@ type Environment struct {
 	LLM        LLMConfig         `yaml:"llm"`
 	Settings   RuntimeSettings   `yaml:"settings"`
 	Notes      string            `yaml:"notes,omitempty"`
+	Overrides  []HostOverride    `yaml:"overrides,omitempty"` // per-node routing overrides
+}
+
+// BuildOverrideConfigs authenticates and resolves each HostOverride into a
+// ResolvedOverride with merged headers. Overrides that omit Auth inherit the
+// top-level auth; overrides that omit BaseURL inherit the top-level apiBaseUrl.
+func (env *Environment) BuildOverrideConfigs(ctx context.Context, baseHeaders map[string]string) ([]ResolvedOverride, error) {
+	return env.BuildOverrideConfigsWithAuth(ctx, baseHeaders, env.Auth)
+}
+
+// BuildOverrideConfigsWithAuth is like BuildOverrideConfigs but overrides that
+// omit their own auth inherit defaultAuth instead of the environment auth.
+// This is used when a plan provides its own auth that should cascade to overrides.
+func (env *Environment) BuildOverrideConfigsWithAuth(ctx context.Context, baseHeaders map[string]string, defaultAuth AuthConfig) ([]ResolvedOverride, error) {
+	if len(env.Overrides) == 0 {
+		return nil, nil
+	}
+
+	resolved := make([]ResolvedOverride, 0, len(env.Overrides))
+	for i, ov := range env.Overrides {
+		// Determine auth: inherit defaultAuth when override omits auth
+		auth := defaultAuth
+		if ov.Auth != nil {
+			auth = *ov.Auth
+		}
+
+		// Authenticate
+		token, err := Authenticate(ctx, auth)
+		if err != nil {
+			return nil, fmt.Errorf("authenticating override %d (%s): %w", i, ov.Match, err)
+		}
+
+		// Merge headers: start with base, overlay override-specific, then auth
+		headers := make(map[string]string)
+		for k, v := range baseHeaders {
+			headers[k] = v
+		}
+		for k, v := range ov.Headers {
+			headers[k] = v
+		}
+		if token != nil {
+			switch auth.Type {
+			case "apikey":
+				headers[auth.HeaderName] = token.AccessToken
+			default:
+				headers["Authorization"] = "Bearer " + token.AccessToken
+			}
+		} else {
+			// auth type "none" — remove any inherited auth header
+			if ov.Auth != nil && (ov.Auth.Type == "none" || ov.Auth.Type == "") {
+				delete(headers, "Authorization")
+			}
+		}
+
+		baseURL := ov.BaseURL
+		if baseURL == "" {
+			baseURL = env.APIBaseURL
+		}
+
+		resolved = append(resolved, ResolvedOverride{
+			Pattern: ov.Match,
+			APIConfig: APIConfig{
+				BaseURL: baseURL,
+				Headers: headers,
+				Values:  make(map[string]string),
+			},
+			PathRewrite: ov.PathRewrite,
+		})
+	}
+
+	return resolved, nil
 }
 
 // CollectSecrets resolves all SecretRef values from the environment and returns
@@ -132,6 +225,22 @@ func (env *Environment) CollectSecrets() map[string]bool {
 	return secrets
 }
 
+// CollectAuthSecrets resolves all SecretRef values from an AuthConfig and returns
+// them as a set. This is used to merge plan-level auth secrets for redaction.
+// Resolution errors are silently ignored.
+func CollectAuthSecrets(auth *AuthConfig) map[string]bool {
+	secrets := make(map[string]bool)
+	if auth == nil {
+		return secrets
+	}
+	for _, ref := range auth.Credentials {
+		if val, err := ref.Resolve(); err == nil && val != "" {
+			secrets[val] = true
+		}
+	}
+	return secrets
+}
+
 // APIConfig is a flat output structure for bridging to adapter.EnvironmentConfig.
 type APIConfig struct {
 	BaseURL string
@@ -142,23 +251,35 @@ type APIConfig struct {
 // BuildAPIConfig authenticates and returns a flat APIConfig ready for use.
 // Custom headers from the environment are included first; auth headers override.
 func (env *Environment) BuildAPIConfig(ctx context.Context) (*APIConfig, error) {
-	token, err := Authenticate(ctx, env.Auth)
+	return env.BuildAPIConfigFromAuth(ctx, env.Auth, nil)
+}
+
+// BuildAPIConfigFromAuth authenticates using the provided auth config and returns
+// a flat APIConfig. Header merge order: env headers → extraHeaders → auth headers.
+// extraHeaders may be nil.
+func (env *Environment) BuildAPIConfigFromAuth(ctx context.Context, auth AuthConfig, extraHeaders map[string]string) (*APIConfig, error) {
+	token, err := Authenticate(ctx, auth)
 	if err != nil {
 		return nil, fmt.Errorf("authenticating: %w", err)
 	}
 
 	headers := make(map[string]string)
 
-	// Custom static headers first
+	// 1. Environment static headers (base)
 	for k, v := range env.Headers {
 		headers[k] = v
 	}
 
-	// Auth headers override custom headers
+	// 2. Extra headers (e.g., plan-level headers) override env headers
+	for k, v := range extraHeaders {
+		headers[k] = v
+	}
+
+	// 3. Auth headers override everything
 	if token != nil {
-		switch env.Auth.Type {
+		switch auth.Type {
 		case "apikey":
-			headers[env.Auth.HeaderName] = token.AccessToken
+			headers[auth.HeaderName] = token.AccessToken
 		default:
 			headers["Authorization"] = "Bearer " + token.AccessToken
 		}

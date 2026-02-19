@@ -562,6 +562,183 @@ func TestToStepSummary_NoDisplayOutputs(t *testing.T) {
 	assert.NotContains(t, string(data), "display_outputs")
 }
 
+// --- Override flag parsing tests ---
+
+func TestParseOverrideFlag_Valid(t *testing.T) {
+	name, url, err := parseOverrideFlag("searchFlights=http://localhost:8080")
+	require.NoError(t, err)
+	assert.Equal(t, "searchFlights", name)
+	assert.Equal(t, "http://localhost:8080", url)
+}
+
+func TestParseOverrideFlag_WithEqualInURL(t *testing.T) {
+	name, url, err := parseOverrideFlag("node=http://localhost:8080/path?key=value")
+	require.NoError(t, err)
+	assert.Equal(t, "node", name)
+	assert.Equal(t, "http://localhost:8080/path?key=value", url)
+}
+
+func TestParseOverrideFlag_InvalidNoEquals(t *testing.T) {
+	_, _, err := parseOverrideFlag("searchFlights")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected nodeName=url")
+}
+
+func TestParseOverrideFlag_EmptyURL(t *testing.T) {
+	_, _, err := parseOverrideFlag("searchFlights=")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "URL is empty")
+}
+
+func TestParseOverrideFlag_EmptyName(t *testing.T) {
+	_, _, err := parseOverrideFlag("=http://localhost:8080")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "expected nodeName=url")
+}
+
+// --- Plan-level auth tests ---
+
+func TestRunCommand_PlanAuth_OverridesEnvAuth(t *testing.T) {
+	var receivedAuth string
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+	}))
+	defer apiServer.Close()
+
+	// Env has auth: none
+	envFile := writeTestEnv(t, "none", apiServer.URL)
+
+	// Plan has bearer auth
+	planContent := `
+auth:
+  type: bearer
+  credentials:
+    token:
+      source: literal
+      value: plan-token-123
+execution:
+  steps:
+    - node: testNode
+      values:
+        input1: test-value
+`
+	planFile := filepath.Join(t.TempDir(), "plan_auth.yaml")
+	require.NoError(t, os.WriteFile(planFile, []byte(planContent), 0644))
+
+	outputDir := filepath.Join(t.TempDir(), "runs")
+	res := runCommand(context.Background(), &runArgs{
+		PlanPath:      planFile,
+		EnvPath:       envFile,
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+		OutputDir:     outputDir,
+	}, io.Discard)
+
+	require.NoError(t, res.err)
+	assert.Equal(t, "Bearer plan-token-123", receivedAuth)
+}
+
+func TestRunCommand_PlanHeaders_MergeWithEnv(t *testing.T) {
+	var receivedHeaders http.Header
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+	}))
+	defer apiServer.Close()
+
+	// Env with a custom header
+	envContent := "environment: test\napiBaseUrl: " + apiServer.URL + "\nauth:\n  type: none\nheaders:\n  X-Env-Header: env-value\n  X-Shared: env-val\n"
+	envFile := filepath.Join(t.TempDir(), "env.yaml")
+	require.NoError(t, os.WriteFile(envFile, []byte(envContent), 0644))
+
+	// Plan with headers that partially overlap env headers
+	planContent := `
+headers:
+  X-Plan-Header: plan-value
+  X-Shared: plan-val
+execution:
+  steps:
+    - node: testNode
+      values:
+        input1: test-value
+`
+	planFile := filepath.Join(t.TempDir(), "plan_headers.yaml")
+	require.NoError(t, os.WriteFile(planFile, []byte(planContent), 0644))
+
+	outputDir := filepath.Join(t.TempDir(), "runs")
+	res := runCommand(context.Background(), &runArgs{
+		PlanPath:      planFile,
+		EnvPath:       envFile,
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+		OutputDir:     outputDir,
+	}, io.Discard)
+
+	require.NoError(t, res.err)
+	assert.Equal(t, "env-value", receivedHeaders.Get("X-Env-Header"))
+	assert.Equal(t, "plan-value", receivedHeaders.Get("X-Plan-Header"))
+	assert.Equal(t, "plan-val", receivedHeaders.Get("X-Shared")) // plan wins on conflict
+}
+
+func TestRunCommand_NoPlanAuth_UsesEnvAuth(t *testing.T) {
+	var receivedAuth string
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+	}))
+	defer apiServer.Close()
+
+	// Env with bearer auth
+	envContent := "environment: test\napiBaseUrl: " + apiServer.URL + "\nauth:\n  type: bearer\n  credentials:\n    token:\n      source: literal\n      value: env-token-456\n"
+	envFile := filepath.Join(t.TempDir(), "env.yaml")
+	require.NoError(t, os.WriteFile(envFile, []byte(envContent), 0644))
+
+	// Plan with NO auth block
+	outputDir := filepath.Join(t.TempDir(), "runs")
+	res := runCommand(context.Background(), &runArgs{
+		PlanPath:      "testdata/test_plan.yaml",
+		EnvPath:       envFile,
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+		OutputDir:     outputDir,
+	}, io.Discard)
+
+	require.NoError(t, res.err)
+	assert.Equal(t, "Bearer env-token-456", receivedAuth)
+}
+
+func TestRunCommand_PlanAuth_InvalidCaught(t *testing.T) {
+	// Plan with invalid auth should fail at validation
+	planContent := `
+auth:
+  type: oauth2
+execution:
+  steps:
+    - node: testNode
+      values:
+        input1: test-value
+`
+	planFile := filepath.Join(t.TempDir(), "plan_bad_auth.yaml")
+	require.NoError(t, os.WriteFile(planFile, []byte(planContent), 0644))
+
+	envFile := writeTestEnv(t, "none", "https://api.example.com")
+	res := runCommand(context.Background(), &runArgs{
+		PlanPath:      planFile,
+		EnvPath:       envFile,
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+		OutputDir:     filepath.Join(t.TempDir(), "runs"),
+	}, io.Discard)
+
+	require.Error(t, res.err)
+	assert.Contains(t, res.err.Error(), "plan validation")
+	assert.Contains(t, res.err.Error(), "plan auth")
+}
+
 // --- Helpers ---
 
 func writeTestEnv(t *testing.T, authType, baseURL string) string {

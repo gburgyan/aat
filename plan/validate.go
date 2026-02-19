@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/graph"
 )
 
@@ -20,6 +21,13 @@ func (e *ValidationError) Error() string {
 // It returns a *ValidationError collecting all problems found, or nil if valid.
 func Validate(p *Plan, g *graph.Graph) error {
 	var errs []string
+
+	// Validate plan-level auth if present
+	if p.Auth != nil {
+		for _, e := range config.ValidateAuth(p.Auth) {
+			errs = append(errs, fmt.Sprintf("plan auth: %s", e))
+		}
+	}
 
 	// Build step ID set for uniqueness and reference validation.
 	// stepIDs: stepID → true (for dependency and reference checks)

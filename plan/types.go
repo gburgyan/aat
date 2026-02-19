@@ -3,16 +3,20 @@ package plan
 import (
 	"strings"
 	"time"
+
+	"github.com/gburgyan/aat/config"
 )
 
 // Plan is the top-level execution plan parsed from YAML.
 // It describes what steps to execute, their input values,
 // and optional metadata about the intent and graph context.
 type Plan struct {
-	Metadata  Metadata  `yaml:"metadata,omitempty" json:"metadata,omitempty"`
-	Graph     string    `yaml:"graph,omitempty" json:"graph,omitempty"`
-	Intent    Intent    `yaml:"intent,omitempty" json:"intent,omitempty"`
-	Execution Execution `yaml:"execution" json:"execution"`
+	Metadata  Metadata           `yaml:"metadata,omitempty" json:"metadata,omitempty"`
+	Graph     string             `yaml:"graph,omitempty" json:"graph,omitempty"`
+	Auth      *config.AuthConfig `yaml:"auth,omitempty" json:"auth,omitempty"`
+	Headers   map[string]string  `yaml:"headers,omitempty" json:"headers,omitempty"`
+	Intent    Intent             `yaml:"intent,omitempty" json:"intent,omitempty"`
+	Execution Execution          `yaml:"execution" json:"execution"`
 }
 
 // Metadata captures provenance information about when and why a plan was created.
