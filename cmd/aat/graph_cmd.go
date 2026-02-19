@@ -1,32 +1,72 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/gburgyan/aat/adapter"
+	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/intent"
+	"github.com/spf13/cobra"
 )
 
-// graphMain dispatches to graph subcommands.
-func graphMain(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: aat graph <subcommand>")
-		fmt.Fprintln(os.Stderr, "subcommands: validate")
-		return 1
-	}
-	switch args[0] {
-	case "validate":
-		return graphValidateMain(args[1:])
-	default:
-		fmt.Fprintf(os.Stderr, "unknown graph subcommand: %s\n", args[0])
-		return 1
-	}
+// graphCmd is the parent Cobra command for graph subcommands.
+var graphCmd = &cobra.Command{
+	Use:   "graph",
+	Short: "Graph inspection and validation commands",
+}
+
+// graphValidateCmd is the Cobra command for graph validation.
+var graphValidateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate a graph definition",
+	Long:  "Validate graph structure, OAS spec consistency, adapter outputs, and workflow compatibility.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
+		// Build overrides from explicitly-set flags only
+		overrides := config.ProjectPaths{}
+		if cmd.Flags().Changed("graph") {
+			overrides.GraphPath, _ = cmd.Flags().GetString("graph")
+		}
+		if cmd.Flags().Changed("templates") {
+			overrides.TemplatesPath, _ = cmd.Flags().GetString("templates")
+		}
+
+		resolved, err := config.ResolveProjectPaths(overrides)
+		if err != nil {
+			return err
+		}
+
+		oasPath, _ := cmd.Flags().GetString("oas")
+		strict, _ := cmd.Flags().GetBool("strict")
+
+		ga := &graphValidateArgs{
+			GraphPath:     resolved.GraphPath,
+			OASPath:       oasPath,
+			TemplatesPath: resolved.TemplatesPath,
+			Strict:        strict,
+		}
+
+		code := graphValidateCommand(ga)
+		if code != 0 {
+			return &exitError{Code: code}
+		}
+		return nil
+	},
+}
+
+func init() {
+	graphCmd.AddCommand(graphValidateCmd)
+
+	graphValidateCmd.Flags().String("graph", "", "path to graph YAML file")
+	graphValidateCmd.Flags().String("oas", "", "path to OAS spec file (overrides graph-level oas)")
+	graphValidateCmd.Flags().String("templates", "", "path to templates directory (validates outputs match extracts)")
+	graphValidateCmd.Flags().Bool("strict", false, "treat warnings as errors")
 }
 
 // graphValidateArgs holds parsed CLI flags for graph validate.
@@ -35,22 +75,6 @@ type graphValidateArgs struct {
 	OASPath       string
 	TemplatesPath string
 	Strict        bool
-}
-
-// graphValidateMain parses flags and runs graph validation.
-func graphValidateMain(args []string) int {
-	fs := flag.NewFlagSet("graph validate", flag.ContinueOnError)
-	ga := &graphValidateArgs{}
-	fs.StringVar(&ga.GraphPath, "graph", "", "path to graph YAML file (required)")
-	fs.StringVar(&ga.OASPath, "oas", "", "path to OAS spec file (overrides graph-level oas)")
-	fs.StringVar(&ga.TemplatesPath, "templates", "", "path to templates directory (validates outputs match extracts)")
-	fs.BoolVar(&ga.Strict, "strict", false, "treat warnings as errors")
-
-	if err := fs.Parse(args); err != nil {
-		return 1
-	}
-
-	return graphValidateCommand(ga)
 }
 
 // graphValidateCommand runs structural, OAS, and adapter output validation.

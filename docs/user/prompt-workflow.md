@@ -19,6 +19,14 @@ Both OpenAI and Anthropic endpoints are supported. AAT auto-detects the provider
 
 ## Quick Start
 
+With an `aat-project.yaml` manifest (see [Running Tests: Project Discovery](running.md#project-discovery)):
+
+```bash
+aat prompt "Create a pet and verify it exists"
+```
+
+Or with explicit paths:
+
 ```bash
 aat prompt "Create a pet and verify it exists" \
   --env env.yaml \
@@ -38,15 +46,17 @@ AAT will:
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
 | (positional) | yes | -- | The prompt text (first positional argument) |
-| `--env` | yes | -- | Path to environment YAML file |
-| `--graph` | yes | -- | Path to graph YAML file |
-| `--templates` | yes | -- | Path to templates directory |
+| `--env` | auto | -- | Path to environment YAML file |
+| `--graph` | auto | -- | Path to graph YAML file |
+| `--templates` | auto | -- | Path to templates directory |
 | `--domain` | no | -- | Path to domain knowledge YAML file |
 | `--output` | no | `runs` | Directory for archive output |
 | `--save` | no | -- | Save the generated plan to this file path |
 | `--yes` | no | `false` | Skip confirmation and execute immediately |
 | `--trace` | no | `false` | Capture planning pipeline trace for debugging |
 | `--trace-dir` | no | `traces` | Directory for trace output |
+
+**Auto-resolved flags:** `--env`, `--graph`, and `--templates` are resolved automatically when an `aat-project.yaml` manifest is found. See [Running Tests: Project Discovery](running.md#project-discovery).
 
 ## The Interactive Flow
 

@@ -184,27 +184,6 @@ func TestAdjustPlan_InvalidEditReturnsError(t *testing.T) {
 	_ = tmpDir
 }
 
-func TestPromptMain_FlagParsing(t *testing.T) {
-	// Test that promptMain properly returns non-zero for missing required args
-	code := promptMain([]string{})
-	assert.Equal(t, 1, code, "missing prompt should exit 1")
-}
-
-func TestPromptMain_TraceFlags(t *testing.T) {
-	// Verify --trace and --trace-dir are accepted by the flag parser.
-	// The command will fail on missing env, but the flags should parse.
-	code := promptMain([]string{
-		"--trace",
-		"--trace-dir", "custom-traces",
-		"--env", "x",
-		"--graph", "x",
-		"--templates", "x",
-		"test prompt",
-	})
-	// Will fail because env file "x" doesn't exist, but flags were parsed.
-	assert.Equal(t, 1, code)
-}
-
 func TestPromptArgs_TraceDefaults(t *testing.T) {
 	// Verify that TracePlan defaults to false and TraceDir defaults to "traces".
 	pa := &promptArgs{}

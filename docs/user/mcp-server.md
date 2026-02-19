@@ -43,7 +43,7 @@ Add to your `.mcp.json`:
 
 ## Project Manifest
 
-The `aat-project.yaml` file tells the MCP server where to find project artifacts. The server searches for it starting from the current directory and walking up to parent directories.
+The `aat-project.yaml` file tells the MCP server (and the CLI — see [Running Tests: Project Discovery](running.md#project-discovery)) where to find project artifacts. The server searches for it starting from the current directory and walking up to parent directories.
 
 | Field | Required | Description |
 |-------|----------|-------------|

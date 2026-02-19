@@ -6,18 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestGraphMain_NoSubcommand(t *testing.T) {
-	code := graphMain(nil)
-	assert.Equal(t, 1, code)
-}
-
-func TestGraphMain_UnknownSubcommand(t *testing.T) {
-	code := graphMain([]string{"unknown"})
-	assert.Equal(t, 1, code)
-}
-
 func TestGraphValidate_MissingGraphFlag(t *testing.T) {
-	code := graphValidateMain([]string{})
+	code := graphValidateCommand(&graphValidateArgs{})
 	assert.Equal(t, 1, code)
 }
 
@@ -80,14 +70,6 @@ func TestGraphValidate_OASFlagBadPath(t *testing.T) {
 	assert.Equal(t, 1, code)
 }
 
-func TestGraphValidateMain_FlagParsing(t *testing.T) {
-	code := graphValidateMain([]string{
-		"--graph", "testdata/test_graph.yaml",
-		"--strict",
-	})
-	assert.Equal(t, 0, code)
-}
-
 func TestGraphValidate_WithTemplates_OK(t *testing.T) {
 	code := graphValidateCommand(&graphValidateArgs{
 		GraphPath:     "testdata/test_graph.yaml",
@@ -110,12 +92,4 @@ func TestGraphValidate_WithTemplates_BadPath(t *testing.T) {
 		TemplatesPath: "testdata/nonexistent_dir",
 	})
 	assert.Equal(t, 1, code)
-}
-
-func TestGraphValidateMain_TemplatesFlag(t *testing.T) {
-	code := graphValidateMain([]string{
-		"--graph", "testdata/test_graph.yaml",
-		"--templates", "testdata/templates",
-	})
-	assert.Equal(t, 0, code)
 }

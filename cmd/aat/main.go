@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -16,42 +15,79 @@ import (
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
+	"github.com/spf13/cobra"
 )
 
-func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: aat <command> [options]")
-		fmt.Fprintln(os.Stderr, "commands: run, prompt, graph, plan, generate, docs, mcp")
-		os.Exit(1)
-	}
+// runCmd is the Cobra command for executing a pre-written plan.
+var runCmd = &cobra.Command{
+	Use:   "run",
+	Short: "Execute a pre-written test plan",
+	Long:  "Execute an API test plan against a configured environment.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true // suppress usage on business-logic errors
 
-	switch os.Args[1] {
-	case "run":
-		code := runMain(os.Args[2:])
-		os.Exit(code)
-	case "prompt":
-		code := promptMain(os.Args[2:])
-		os.Exit(code)
-	case "graph":
-		code := graphMain(os.Args[2:])
-		os.Exit(code)
-	case "plan":
-		code := planMain(os.Args[2:])
-		os.Exit(code)
-	case "generate":
-		code := generateMain(os.Args[2:])
-		os.Exit(code)
-	case "docs":
-		code := docsMain(os.Args[2:])
-		os.Exit(code)
-	case "mcp":
-		code := mcpMain(os.Args[2:])
-		os.Exit(code)
-	default:
-		fmt.Fprintf(os.Stderr, "unknown command: %s\n", os.Args[1])
-		fmt.Fprintln(os.Stderr, "commands: run, prompt, graph, plan, generate, docs, mcp")
-		os.Exit(1)
-	}
+		// Build overrides from explicitly-set flags only
+		overrides := config.ProjectPaths{}
+		if cmd.Flags().Changed("graph") {
+			overrides.GraphPath, _ = cmd.Flags().GetString("graph")
+		}
+		if cmd.Flags().Changed("env") {
+			overrides.EnvPath, _ = cmd.Flags().GetString("env")
+		}
+		if cmd.Flags().Changed("templates") {
+			overrides.TemplatesPath, _ = cmd.Flags().GetString("templates")
+		}
+		if cmd.Flags().Changed("domain") {
+			overrides.DomainPath, _ = cmd.Flags().GetString("domain")
+		}
+
+		resolved, err := config.ResolveProjectPaths(overrides)
+		if err != nil {
+			return err
+		}
+
+		planPath, _ := cmd.Flags().GetString("plan")
+		mode, _ := cmd.Flags().GetString("mode")
+		jsonFlag, _ := cmd.Flags().GetBool("json")
+		quiet, _ := cmd.Flags().GetBool("quiet")
+
+		outputDir := "runs"
+		if cmd.Flags().Changed("output") {
+			outputDir, _ = cmd.Flags().GetString("output")
+		} else if resolved.ArchiveDir != "" {
+			outputDir = resolved.ArchiveDir
+		}
+
+		ra := &runArgs{
+			PlanPath:      planPath,
+			EnvPath:       resolved.EnvPath,
+			GraphPath:     resolved.GraphPath,
+			TemplatesPath: resolved.TemplatesPath,
+			OutputDir:     outputDir,
+			Mode:          mode,
+			DomainPath:    resolved.DomainPath,
+			JSON:          jsonFlag,
+			Quiet:         quiet,
+		}
+
+		code := executeRun(ra)
+		if code != 0 {
+			return &exitError{Code: code}
+		}
+		return nil
+	},
+}
+
+func init() {
+	runCmd.Flags().String("plan", "", "path to plan YAML file (required)")
+	runCmd.Flags().String("env", "", "path to environment YAML file")
+	runCmd.Flags().String("graph", "", "path to graph YAML file")
+	runCmd.Flags().String("templates", "", "path to templates directory")
+	runCmd.Flags().String("output", "runs", "directory for archive output")
+	runCmd.Flags().String("mode", "", "execution mode: strict, lean, adaptive (overrides env config)")
+	runCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
+	runCmd.Flags().Bool("json", false, "output machine-readable JSON summary to stdout")
+	runCmd.Flags().Bool("quiet", false, "suppress progress messages, show only final summary")
 }
 
 // runArgs holds parsed CLI flags for the run command.
@@ -79,16 +115,16 @@ type RunSummary struct {
 
 // StepSummary is a per-step entry in the JSON summary.
 type StepSummary struct {
-	Name             string                `json:"name"`
-	Node             string                `json:"node"`
-	Status           int                   `json:"status"`
-	DurationMs       int64                 `json:"duration_ms"`
-	Passed           bool                  `json:"passed"`
-	Error            string                `json:"error,omitempty"`
-	Retries          int                   `json:"retries"`
-	AssertionsPassed int                   `json:"assertions_passed"`
-	AssertionsFailed int                   `json:"assertions_failed"`
-	DisplayOutputs   []DisplayOutputEntry  `json:"display_outputs,omitempty"`
+	Name             string               `json:"name"`
+	Node             string               `json:"node"`
+	Status           int                  `json:"status"`
+	DurationMs       int64                `json:"duration_ms"`
+	Passed           bool                 `json:"passed"`
+	Error            string               `json:"error,omitempty"`
+	Retries          int                  `json:"retries"`
+	AssertionsPassed int                  `json:"assertions_passed"`
+	AssertionsFailed int                  `json:"assertions_failed"`
+	DisplayOutputs   []DisplayOutputEntry `json:"display_outputs,omitempty"`
 }
 
 // DisplayOutputEntry is a display-tagged output in the JSON summary.
@@ -106,7 +142,7 @@ type SummaryStats struct {
 	DurationMs  int64 `json:"duration_ms"`
 }
 
-// runResult is the internal result from runCommand, used by runMain
+// runResult is the internal result from runCommand, used by executeRun
 // to determine exit codes and output format.
 type runResult struct {
 	outcome     engine.Outcome
@@ -119,24 +155,9 @@ type runResult struct {
 // exitCodeInfra is the exit code for infrastructure/config errors.
 const exitCodeInfra = 2
 
-// runMain parses flags and delegates to runCommand.
-func runMain(args []string) int {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	ra := &runArgs{}
-	fs.StringVar(&ra.PlanPath, "plan", "", "path to plan YAML file (required)")
-	fs.StringVar(&ra.EnvPath, "env", "", "path to environment YAML file (required)")
-	fs.StringVar(&ra.GraphPath, "graph", "", "path to graph YAML file (required)")
-	fs.StringVar(&ra.TemplatesPath, "templates", "", "path to templates directory (required)")
-	fs.StringVar(&ra.OutputDir, "output", "runs", "directory for archive output")
-	fs.StringVar(&ra.Mode, "mode", "", "execution mode: strict, lean, adaptive (overrides env config)")
-	fs.StringVar(&ra.DomainPath, "domain", "", "path to domain knowledge YAML file")
-	fs.BoolVar(&ra.JSON, "json", false, "output machine-readable JSON summary to stdout")
-	fs.BoolVar(&ra.Quiet, "quiet", false, "suppress progress messages, show only final summary")
-
-	if err := fs.Parse(args); err != nil {
-		return exitCodeInfra
-	}
-
+// executeRun handles output modes (JSON/quiet/normal) and returns an exit code.
+// This is the entry point called by the Cobra RunE and by tests.
+func executeRun(ra *runArgs) int {
 	// --json implies --quiet
 	if ra.JSON {
 		ra.Quiet = true

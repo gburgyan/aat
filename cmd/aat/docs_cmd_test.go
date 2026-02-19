@@ -10,26 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDocsMain_NoSubcommand(t *testing.T) {
-	code := docsMain([]string{})
-	assert.Equal(t, 1, code)
-}
-
-func TestDocsMain_UnknownSubcommand(t *testing.T) {
-	code := docsMain([]string{"unknown"})
-	assert.Equal(t, 1, code)
-}
-
-func TestDocsGenerateMain_MissingGraph(t *testing.T) {
-	code := docsGenerateMain([]string{})
-	assert.Equal(t, 1, code)
-}
-
-func TestDocsGenerateMain_SplitWithStdout(t *testing.T) {
-	code := docsGenerateMain([]string{"--graph", "some.yaml", "--split", "--output", "-"})
-	assert.Equal(t, 1, code)
-}
-
 func TestDocsGenerateCommand_SingleFile(t *testing.T) {
 	tmp := t.TempDir()
 	outputPath := filepath.Join(tmp, "workflow.md")

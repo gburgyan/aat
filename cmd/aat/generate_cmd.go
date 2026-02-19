@@ -1,44 +1,52 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/gburgyan/aat/graph/oas"
+	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
+
+// generateCmd is the Cobra command for scaffolding from an OAS spec.
+var generateCmd = &cobra.Command{
+	Use:   "generate",
+	Short: "Generate graph and templates from an OAS spec",
+	Long:  "Scaffold a graph definition and request templates from an OpenAPI specification.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
+		oasPath, _ := cmd.Flags().GetString("oas")
+		outputGraph, _ := cmd.Flags().GetString("output-graph")
+		outputTemplates, _ := cmd.Flags().GetString("output-templates")
+
+		if oasPath == "" {
+			return fmt.Errorf("--oas is required")
+		}
+
+		ga := &generateArgs{
+			OASPath:         oasPath,
+			OutputGraph:     outputGraph,
+			OutputTemplates: outputTemplates,
+		}
+
+		return generateCommand(ga)
+	},
+}
+
+func init() {
+	generateCmd.Flags().String("oas", "", "path to OAS spec file (required)")
+	generateCmd.Flags().String("output-graph", "graph.yaml", "output path for graph YAML (\"-\" for stdout)")
+	generateCmd.Flags().String("output-templates", "templates", "output directory for template YAML files")
+}
 
 // generateArgs holds parsed CLI flags for the generate command.
 type generateArgs struct {
 	OASPath         string
 	OutputGraph     string
 	OutputTemplates string
-}
-
-// generateMain parses flags and delegates to generateCommand.
-func generateMain(args []string) int {
-	fs := flag.NewFlagSet("generate", flag.ContinueOnError)
-	ga := &generateArgs{}
-	fs.StringVar(&ga.OASPath, "oas", "", "path to OAS spec file (required)")
-	fs.StringVar(&ga.OutputGraph, "output-graph", "graph.yaml", "output path for graph YAML (\"-\" for stdout)")
-	fs.StringVar(&ga.OutputTemplates, "output-templates", "templates", "output directory for template YAML files")
-
-	if err := fs.Parse(args); err != nil {
-		return 1
-	}
-
-	if ga.OASPath == "" {
-		fmt.Fprintln(os.Stderr, "aat generate: --oas is required")
-		return 1
-	}
-
-	if err := generateCommand(ga); err != nil {
-		fmt.Fprintf(os.Stderr, "aat generate: %s\n", err)
-		return 1
-	}
-	return 0
 }
 
 // generateCommand runs the scaffold generation pipeline. Extracted for testability.

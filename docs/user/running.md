@@ -4,6 +4,14 @@ AAT executes API test plans against a live environment. A single `aat run` comma
 
 ## Quick Start
 
+If your project has an `aat-project.yaml` manifest (see [Project Discovery](#project-discovery)):
+
+```
+aat run --plan plans/booking_flow.yaml
+```
+
+Or specify paths explicitly:
+
 ```
 aat run \
   --plan plans/booking_flow.yaml \
@@ -21,14 +29,16 @@ aat run \
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
 | `--plan` | yes | | Path to the plan YAML file |
-| `--env` | yes | | Path to the environment YAML file |
-| `--graph` | yes | | Path to the graph YAML file |
-| `--templates` | yes | | Path to the templates directory |
+| `--env` | auto | | Path to the environment YAML file |
+| `--graph` | auto | | Path to the graph YAML file |
+| `--templates` | auto | | Path to the templates directory |
 | `--output` | no | `./runs` | Directory for archive output |
 | `--mode` | no | env config or `strict` | Execution mode: `strict`, `lean`, `adaptive` |
 | `--domain` | no | | Path to domain knowledge YAML file |
 | `--json` | no | `false` | Output machine-readable JSON summary to stdout |
 | `--quiet` | no | `false` | Suppress progress messages, show only final result |
+
+**Auto-resolved flags:** `--env`, `--graph`, and `--templates` are resolved automatically when an `aat-project.yaml` manifest is found (see [Project Discovery](#project-discovery)). Explicit flags always take priority.
 
 ### What Happens
 
@@ -422,6 +432,63 @@ aat run --json ... | jq '[.steps[] | .assertions_failed] | add'
 # Get the archive path for further inspection
 aat run --json ... | jq -r '.archive_path'
 ```
+
+## Project Discovery
+
+AAT can automatically resolve `--env`, `--graph`, `--templates`, and `--domain` from a project manifest, so you only need `--plan` on each invocation.
+
+### How it works
+
+AAT looks for an `aat-project.yaml` file using a 4-level priority chain (later sources override earlier ones):
+
+1. **User config** — A `default_project` path in `~/.config/aat/config.yaml` (or platform equivalent)
+2. **`AAT_PROJECT` env var** — Points to a directory containing `aat-project.yaml`, or directly to a `.yaml` manifest file
+3. **CWD walk-up** — Starting from the current directory, walks up parent directories looking for `aat-project.yaml`
+4. **Explicit flags** — `--graph`, `--env`, `--templates`, `--domain` always win
+
+### Setting up a project manifest
+
+Create `aat-project.yaml` in your project root:
+
+```yaml
+name: my-api
+description: "My API test project"
+graph: graph.yaml
+templates: templates/
+environment: env.yaml
+domain: domain.yaml     # optional
+plans: plans/            # optional
+archives: runs/          # optional
+```
+
+All paths are relative to the manifest file. With this in place:
+
+```bash
+# Before: every flag required
+aat run --plan plans/test.yaml --env env.yaml --graph graph.yaml --templates templates/
+
+# After: only the plan is needed
+aat run --plan plans/test.yaml
+```
+
+### Using `AAT_PROJECT`
+
+Set the env var to point to your project directory (or manifest file):
+
+```bash
+export AAT_PROJECT=~/projects/my-api
+aat run --plan plans/test.yaml
+```
+
+### User-level default project
+
+Create `~/.config/aat/config.yaml` (Linux/Mac) or `%AppData%/aat/config.yaml` (Windows):
+
+```yaml
+default_project: /home/user/projects/my-api
+```
+
+This is the lowest-priority source — any manifest found via CWD, `AAT_PROJECT`, or explicit flags overrides it.
 
 ## Execution Modes
 

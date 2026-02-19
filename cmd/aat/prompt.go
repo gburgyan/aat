@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -20,7 +19,83 @@ import (
 	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
+	"github.com/spf13/cobra"
 )
+
+// promptCmd is the Cobra command for LLM-generated plan execution.
+var promptCmd = &cobra.Command{
+	Use:   "prompt [text]",
+	Short: "Generate and execute a test plan from a natural language prompt",
+	Long:  "Use an LLM to generate a test plan from a natural language prompt, then optionally execute it.",
+	Args:  cobra.MaximumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
+		// Build overrides from explicitly-set flags only
+		overrides := config.ProjectPaths{}
+		if cmd.Flags().Changed("graph") {
+			overrides.GraphPath, _ = cmd.Flags().GetString("graph")
+		}
+		if cmd.Flags().Changed("env") {
+			overrides.EnvPath, _ = cmd.Flags().GetString("env")
+		}
+		if cmd.Flags().Changed("templates") {
+			overrides.TemplatesPath, _ = cmd.Flags().GetString("templates")
+		}
+		if cmd.Flags().Changed("domain") {
+			overrides.DomainPath, _ = cmd.Flags().GetString("domain")
+		}
+
+		resolved, err := config.ResolveProjectPaths(overrides)
+		if err != nil {
+			return err
+		}
+
+		savePlan, _ := cmd.Flags().GetString("save")
+		autoConfirm, _ := cmd.Flags().GetBool("yes")
+		tracePlan, _ := cmd.Flags().GetBool("trace")
+		traceDir, _ := cmd.Flags().GetString("trace-dir")
+
+		outputDir := "runs"
+		if cmd.Flags().Changed("output") {
+			outputDir, _ = cmd.Flags().GetString("output")
+		} else if resolved.ArchiveDir != "" {
+			outputDir = resolved.ArchiveDir
+		}
+
+		var promptText string
+		if len(args) > 0 {
+			promptText = args[0]
+		}
+
+		pa := &promptArgs{
+			Prompt:        promptText,
+			EnvPath:       resolved.EnvPath,
+			GraphPath:     resolved.GraphPath,
+			TemplatesPath: resolved.TemplatesPath,
+			DomainPath:    resolved.DomainPath,
+			OutputDir:     outputDir,
+			SavePlan:      savePlan,
+			AutoConfirm:   autoConfirm,
+			TracePlan:     tracePlan,
+			TraceDir:      traceDir,
+		}
+
+		return promptCommand(context.Background(), pa, os.Stdin)
+	},
+}
+
+func init() {
+	promptCmd.Flags().String("env", "", "path to environment YAML file")
+	promptCmd.Flags().String("graph", "", "path to graph YAML file")
+	promptCmd.Flags().String("templates", "", "path to templates directory")
+	promptCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
+	promptCmd.Flags().String("output", "runs", "directory for archive output")
+	promptCmd.Flags().String("save", "", "save generated plan to this file path")
+	promptCmd.Flags().Bool("yes", false, "skip confirmation prompt")
+	promptCmd.Flags().Bool("trace", false, "capture planning pipeline trace for debugging")
+	promptCmd.Flags().String("trace-dir", "traces", "directory for plan trace output")
+}
 
 // promptArgs holds parsed CLI flags for the prompt command.
 type promptArgs struct {
@@ -34,36 +109,6 @@ type promptArgs struct {
 	AutoConfirm   bool
 	TracePlan     bool
 	TraceDir      string
-}
-
-// promptMain parses flags and delegates to promptCommand.
-func promptMain(args []string) int {
-	fs := flag.NewFlagSet("prompt", flag.ContinueOnError)
-	pa := &promptArgs{}
-	fs.StringVar(&pa.EnvPath, "env", "", "path to environment YAML file (required)")
-	fs.StringVar(&pa.GraphPath, "graph", "", "path to graph YAML file (required)")
-	fs.StringVar(&pa.TemplatesPath, "templates", "", "path to templates directory (required)")
-	fs.StringVar(&pa.DomainPath, "domain", "", "path to domain knowledge YAML file (optional)")
-	fs.StringVar(&pa.OutputDir, "output", "runs", "directory for archive output")
-	fs.StringVar(&pa.SavePlan, "save", "", "save generated plan to this file path")
-	fs.BoolVar(&pa.AutoConfirm, "yes", false, "skip confirmation prompt")
-	fs.BoolVar(&pa.TracePlan, "trace", false, "capture planning pipeline trace for debugging")
-	fs.StringVar(&pa.TraceDir, "trace-dir", "traces", "directory for plan trace output")
-
-	if err := fs.Parse(args); err != nil {
-		return 1
-	}
-
-	// First positional argument is the prompt
-	if fs.NArg() > 0 {
-		pa.Prompt = fs.Arg(0)
-	}
-
-	if err := promptCommand(context.Background(), pa, os.Stdin); err != nil {
-		fmt.Fprintf(os.Stderr, "aat: %s\n", err)
-		return 1
-	}
-	return 0
 }
 
 // promptCommand executes the full prompt-to-execution pipeline.

@@ -239,16 +239,18 @@ Even without MCP, you can share your graph YAML and API documentation with any L
 Run structural and OAS validation after each round of edits:
 
 ```bash
-aat graph validate --graph graph.yaml
+aat graph validate
 ```
+
+If `--graph` is not specified, AAT resolves it from the project manifest (see [Running Tests: Project Discovery](running.md#project-discovery)).
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--graph` | Path to graph YAML file (required) |
+| `--graph` | Path to graph YAML file (auto-resolved from manifest) |
 | `--oas` | Override OAS spec path (replaces graph-level `oas` field) |
-| `--templates` | Path to templates directory (cross-validates outputs vs extract keys) |
+| `--templates` | Path to templates directory (cross-validates outputs vs extract keys; auto-resolved from manifest) |
 | `--strict` | Treat warnings as errors |
 
 ### Structural validation

@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// --- Existing tests (updated for new runCommand signature) ---
+// --- Existing tests (call runCommand directly — unchanged) ---
 
 func TestRunCommand_MissingPlan(t *testing.T) {
 	res := runCommand(context.Background(), &runArgs{
@@ -370,7 +370,7 @@ func TestQuiet_SuppressesProgressMessages(t *testing.T) {
 
 	require.NoError(t, res.err)
 	// In quiet mode, the caller passes io.Discard. Here we passed a buffer
-	// to verify behavior. With Quiet=true in runMain, io.Discard is used.
+	// to verify behavior. With Quiet=true in executeRun, io.Discard is used.
 	// For this test, we verify that when we explicitly pass Discard, nothing
 	// is written.
 	var discardBuf bytes.Buffer
@@ -439,7 +439,9 @@ func TestRunSummary_ArchivePath(t *testing.T) {
 	assert.Equal(t, res.archivePath, res.summary.ArchivePath)
 }
 
-func TestRunMain_JSONOutput(t *testing.T) {
+// --- executeRun tests (replaced runMain tests) ---
+
+func TestExecuteRun_JSONOutput(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
@@ -454,13 +456,13 @@ func TestRunMain_JSONOutput(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	code := runMain([]string{
-		"--plan", "testdata/test_plan.yaml",
-		"--env", envFile,
-		"--graph", "testdata/test_graph.yaml",
-		"--templates", "testdata/templates",
-		"--output", outputDir,
-		"--json",
+	code := executeRun(&runArgs{
+		PlanPath:      "testdata/test_plan.yaml",
+		EnvPath:       envFile,
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+		OutputDir:     outputDir,
+		JSON:          true,
 	})
 
 	w.Close()
@@ -475,11 +477,6 @@ func TestRunMain_JSONOutput(t *testing.T) {
 	var summary RunSummary
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &summary), "stdout should be valid JSON: %s", buf.String())
 	assert.Equal(t, "passed", summary.Outcome)
-}
-
-func TestRunMain_FlagParseError(t *testing.T) {
-	code := runMain([]string{"--unknown-flag"})
-	assert.Equal(t, exitCodeInfra, code)
 }
 
 // --- Display outputs tests ---

@@ -1,101 +1,14 @@
 package mcp
 
-import (
-	"fmt"
-	"os"
-	"path/filepath"
+import "github.com/gburgyan/aat/config"
 
-	"gopkg.in/yaml.v3"
-)
+// ProjectManifest is a type alias for config.ProjectManifest.
+// The canonical definition lives in the config package; this alias
+// preserves backward compatibility for existing MCP code.
+type ProjectManifest = config.ProjectManifest
 
-// ProjectManifest describes where a project's artifacts live.
-// Paths are resolved relative to the manifest file's directory.
-type ProjectManifest struct {
-	Name          string   `yaml:"name"`
-	Description   string   `yaml:"description,omitempty"`
-	Tags          []string `yaml:"tags,omitempty"`
-	GraphPath     string   `yaml:"graph"`
-	TemplatesPath string   `yaml:"templates"`
-	DomainPath    string   `yaml:"domain,omitempty"`
-	DocsDir       string   `yaml:"docs,omitempty"`
-	PlansDir      string   `yaml:"plans,omitempty"`
-	ArchiveDir    string   `yaml:"archives,omitempty"`
-	EnvPath       string   `yaml:"environment,omitempty"`
-}
+// LoadManifest delegates to config.LoadManifest.
+func LoadManifest(path string) (*ProjectManifest, error) { return config.LoadManifest(path) }
 
-// LoadManifest reads and parses an aat-project.yaml file. Paths in the manifest
-// are resolved relative to the manifest file's directory.
-func LoadManifest(path string) (*ProjectManifest, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading manifest: %w", err)
-	}
-
-	var m ProjectManifest
-	if err := yaml.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("parsing manifest: %w", err)
-	}
-
-	// Validate required fields
-	if m.GraphPath == "" {
-		return nil, fmt.Errorf("manifest missing required field: graph")
-	}
-	if m.TemplatesPath == "" {
-		return nil, fmt.Errorf("manifest missing required field: templates")
-	}
-
-	// Resolve paths relative to manifest directory
-	baseDir := filepath.Dir(path)
-	m.GraphPath = resolvePath(baseDir, m.GraphPath)
-	m.TemplatesPath = resolvePath(baseDir, m.TemplatesPath)
-	if m.DomainPath != "" {
-		m.DomainPath = resolvePath(baseDir, m.DomainPath)
-	}
-	if m.DocsDir != "" {
-		m.DocsDir = resolvePath(baseDir, m.DocsDir)
-	}
-	if m.PlansDir != "" {
-		m.PlansDir = resolvePath(baseDir, m.PlansDir)
-	}
-	if m.ArchiveDir != "" {
-		m.ArchiveDir = resolvePath(baseDir, m.ArchiveDir)
-	}
-	if m.EnvPath != "" {
-		m.EnvPath = resolvePath(baseDir, m.EnvPath)
-	}
-
-	return &m, nil
-}
-
-// FindManifest searches for aat-project.yaml starting from the current working
-// directory and walking up to parent directories. Returns the path to the first
-// manifest found, or an error if none is found.
-func FindManifest() (string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("getting working directory: %w", err)
-	}
-
-	for {
-		candidate := filepath.Join(dir, "aat-project.yaml")
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			// Reached filesystem root
-			return "", fmt.Errorf("aat-project.yaml not found (searched from working directory to filesystem root)")
-		}
-		dir = parent
-	}
-}
-
-// resolvePath resolves a path relative to baseDir. If path is already absolute,
-// it is returned unchanged.
-func resolvePath(baseDir, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(baseDir, path)
-}
+// FindManifest delegates to config.FindManifest.
+func FindManifest() (string, error) { return config.FindManifest() }

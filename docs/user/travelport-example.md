@@ -15,19 +15,34 @@ This walks through the included Travelport booking flow — a real end-to-end AP
 
 ```
 go build -o aat ./cmd/aat/
+```
+
+The travelport directory has an `aat-project.yaml` manifest, so from inside it you only need `--plan`:
+
+```bash
+cd travelport
 
 # Run a pre-written plan
-./aat run \
-  --plan travelport/plans/oneway-fullpayload.yaml \
-  --env environments/travelport-pp.yaml \
-  --graph travelport/graph.yaml \
-  --templates travelport/templates/
+aat run --plan plans/oneway-fullpayload.yaml
 
 # Or generate a plan from a prompt (requires LLM config in env)
-./aat prompt "Book a one-way flight from Denver to San Francisco" \
-  --env environments/travelport-pp.yaml \
+aat prompt "Book a one-way flight from Denver to San Francisco"
+```
+
+You can also run from the repo root with explicit paths:
+
+```
+./aat run \
+  --plan travelport/plans/oneway-fullpayload.yaml \
+  --env travelport/env.yaml \
   --graph travelport/graph.yaml \
   --templates travelport/templates/
+```
+
+Or point `AAT_PROJECT` at the travelport directory:
+
+```
+AAT_PROJECT=./travelport aat run --plan travelport/plans/oneway-fullpayload.yaml
 ```
 
 ## Booking Flow

@@ -2,15 +2,81 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/spf13/cobra"
 )
+
+// docsCmd is the parent Cobra command for docs subcommands.
+var docsCmd = &cobra.Command{
+	Use:   "docs",
+	Short: "Documentation generation commands",
+}
+
+// docsGenerateCmd is the Cobra command for generating documentation.
+var docsGenerateCmd = &cobra.Command{
+	Use:   "generate",
+	Short: "Generate Markdown documentation from a graph definition",
+	Long:  "Generate Markdown + Mermaid documentation from graph definitions, optionally enriched with domain knowledge.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
+		// Build overrides from explicitly-set flags only
+		overrides := config.ProjectPaths{}
+		if cmd.Flags().Changed("graph") {
+			overrides.GraphPath, _ = cmd.Flags().GetString("graph")
+		}
+		if cmd.Flags().Changed("domain") {
+			overrides.DomainPath, _ = cmd.Flags().GetString("domain")
+		}
+
+		resolved, err := config.ResolveProjectPaths(overrides)
+		if err != nil {
+			return err
+		}
+
+		nodeDocsDir, _ := cmd.Flags().GetString("node-docs")
+		outputPath, _ := cmd.Flags().GetString("output")
+		title, _ := cmd.Flags().GetString("title")
+		split, _ := cmd.Flags().GetBool("split")
+
+		if resolved.GraphPath == "" {
+			return fmt.Errorf("--graph is required")
+		}
+
+		if split && outputPath == "-" {
+			return fmt.Errorf("--split is incompatible with --output \"-\"")
+		}
+
+		da := &docsArgs{
+			GraphPath:   resolved.GraphPath,
+			DomainPath:  resolved.DomainPath,
+			NodeDocsDir: nodeDocsDir,
+			OutputPath:  outputPath,
+			Title:       title,
+			Split:       split,
+		}
+
+		return docsGenerateCommand(da)
+	},
+}
+
+func init() {
+	docsCmd.AddCommand(docsGenerateCmd)
+
+	docsGenerateCmd.Flags().String("graph", "", "path to graph YAML file")
+	docsGenerateCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
+	docsGenerateCmd.Flags().String("node-docs", "docs/nodes", "directory with per-node Markdown files")
+	docsGenerateCmd.Flags().String("output", "workflow.md", "output file (\"-\" for stdout) or directory (with --split)")
+	docsGenerateCmd.Flags().String("title", "", "document title (default: derived from graph)")
+	docsGenerateCmd.Flags().Bool("split", false, "generate directory with index.md + per-node files")
+}
 
 // docsArgs holds parsed CLI flags for the docs generate command.
 type docsArgs struct {
@@ -20,54 +86,6 @@ type docsArgs struct {
 	OutputPath  string
 	Title       string
 	Split       bool
-}
-
-// docsMain dispatches to docs subcommands.
-func docsMain(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: aat docs <subcommand>")
-		fmt.Fprintln(os.Stderr, "subcommands: generate")
-		return 1
-	}
-	switch args[0] {
-	case "generate":
-		return docsGenerateMain(args[1:])
-	default:
-		fmt.Fprintf(os.Stderr, "unknown docs subcommand: %s\n", args[0])
-		return 1
-	}
-}
-
-// docsGenerateMain parses flags and delegates to docsGenerateCommand.
-func docsGenerateMain(args []string) int {
-	fs := flag.NewFlagSet("docs generate", flag.ContinueOnError)
-	da := &docsArgs{}
-	fs.StringVar(&da.GraphPath, "graph", "", "path to graph YAML file (required)")
-	fs.StringVar(&da.DomainPath, "domain", "", "path to domain knowledge YAML file")
-	fs.StringVar(&da.NodeDocsDir, "node-docs", "docs/nodes", "directory with per-node Markdown files")
-	fs.StringVar(&da.OutputPath, "output", "workflow.md", "output file (\"-\" for stdout) or directory (with --split)")
-	fs.StringVar(&da.Title, "title", "", "document title (default: derived from graph)")
-	fs.BoolVar(&da.Split, "split", false, "generate directory with index.md + per-node files")
-
-	if err := fs.Parse(args); err != nil {
-		return 1
-	}
-
-	if da.GraphPath == "" {
-		fmt.Fprintln(os.Stderr, "aat docs generate: --graph is required")
-		return 1
-	}
-
-	if da.Split && da.OutputPath == "-" {
-		fmt.Fprintln(os.Stderr, "aat docs generate: --split is incompatible with --output \"-\"")
-		return 1
-	}
-
-	if err := docsGenerateCommand(da); err != nil {
-		fmt.Fprintf(os.Stderr, "aat docs generate: %s\n", err)
-		return 1
-	}
-	return 0
 }
 
 // docsGenerateCommand runs the documentation generation pipeline.

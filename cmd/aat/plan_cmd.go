@@ -1,30 +1,65 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/plan"
+	"github.com/spf13/cobra"
 )
 
-// planMain dispatches to plan subcommands.
-func planMain(args []string) int {
-	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: aat plan <subcommand>")
-		fmt.Fprintln(os.Stderr, "subcommands: validate")
-		return 1
-	}
-	switch args[0] {
-	case "validate":
-		return planValidateMain(args[1:])
-	default:
-		fmt.Fprintf(os.Stderr, "unknown plan subcommand: %s\n", args[0])
-		return 1
-	}
+// planCmd is the parent Cobra command for plan subcommands.
+var planCmd = &cobra.Command{
+	Use:   "plan",
+	Short: "Plan inspection and validation commands",
+}
+
+// planValidateCmd is the Cobra command for plan validation.
+var planValidateCmd = &cobra.Command{
+	Use:   "validate",
+	Short: "Validate a plan against a graph",
+	Long:  "Validate a single plan file or all workflow templates against a graph definition.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
+		// Build overrides from explicitly-set flags only
+		overrides := config.ProjectPaths{}
+		if cmd.Flags().Changed("graph") {
+			overrides.GraphPath, _ = cmd.Flags().GetString("graph")
+		}
+
+		resolved, err := config.ResolveProjectPaths(overrides)
+		if err != nil {
+			return err
+		}
+
+		planPath, _ := cmd.Flags().GetString("plan")
+		unfed, _ := cmd.Flags().GetBool("unfed")
+
+		pa := &planValidateArgs{
+			GraphPath: resolved.GraphPath,
+			PlanPath:  planPath,
+			Unfed:     unfed,
+		}
+
+		code := planValidateCommand(pa)
+		if code != 0 {
+			return &exitError{Code: code}
+		}
+		return nil
+	},
+}
+
+func init() {
+	planCmd.AddCommand(planValidateCmd)
+
+	planValidateCmd.Flags().String("graph", "", "path to graph YAML file")
+	planValidateCmd.Flags().String("plan", "", "path to plan YAML file (single plan mode)")
+	planValidateCmd.Flags().Bool("unfed", false, "show unfed inputs for each plan/template")
 }
 
 // planValidateArgs holds parsed CLI flags for plan validate.
@@ -32,21 +67,6 @@ type planValidateArgs struct {
 	GraphPath string
 	PlanPath  string
 	Unfed     bool
-}
-
-// planValidateMain parses flags and runs plan validation.
-func planValidateMain(args []string) int {
-	fs := flag.NewFlagSet("plan validate", flag.ContinueOnError)
-	pa := &planValidateArgs{}
-	fs.StringVar(&pa.GraphPath, "graph", "", "path to graph YAML file (required)")
-	fs.StringVar(&pa.PlanPath, "plan", "", "path to plan YAML file (single plan mode)")
-	fs.BoolVar(&pa.Unfed, "unfed", false, "show unfed inputs for each plan/template")
-
-	if err := fs.Parse(args); err != nil {
-		return 1
-	}
-
-	return planValidateCommand(pa)
 }
 
 // planValidateCommand runs plan validation against a graph.

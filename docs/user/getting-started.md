@@ -53,6 +53,7 @@ A typical project looks like:
 
 ```
 my-api-tests/
+  aat-project.yaml          # project manifest (optional but recommended)
   graph.yaml
   templates/
     createUser.yaml
@@ -65,6 +66,8 @@ my-api-tests/
 ```
 
 The graph and templates describe your API's structure. The environment tells AAT how to connect. Plans describe what to test. You write each once (except plans — you'll write many).
+
+The optional `aat-project.yaml` manifest lets AAT auto-discover your project files, so you don't need `--env`, `--graph`, and `--templates` on every command. See [Running Tests: Project Discovery](running.md#project-discovery) for setup.
 
 ## 4. Define Your API Graph
 
@@ -385,6 +388,12 @@ Notice that `getUser` doesn't specify a `userId` value. AAT resolves it automati
 If you have an LLM configured in your environment, you can generate plans from natural language:
 
 ```bash
+aat prompt "create a user named Alice and verify it exists"
+```
+
+If you don't have an `aat-project.yaml` yet, pass paths explicitly:
+
+```bash
 aat prompt "create a user named Alice and verify it exists" \
   --env env.yaml \
   --graph graph.yaml \
@@ -394,6 +403,14 @@ aat prompt "create a user named Alice and verify it exists" \
 AAT shows the generated plan for review before executing. Use `--save plans/my-test.yaml` to save it for reuse. See [LLM-Assisted Planning](prompt-workflow.md) for details.
 
 ## 7. Run It
+
+With an `aat-project.yaml` manifest:
+
+```bash
+aat run --plan plans/create-and-verify.yaml
+```
+
+Or with explicit paths:
 
 ```bash
 aat run \
@@ -439,7 +456,7 @@ AAT includes an MCP server that gives AI tools structured access to your project
 
 **Step 1: Create a project manifest**
 
-Create `aat-project.yaml` in your project root:
+If you followed Step 3, you may already have `aat-project.yaml` in your project root. If not, create one:
 
 ```yaml
 name: my-api
@@ -451,7 +468,7 @@ plans: plans/
 archives: runs/
 ```
 
-All paths are relative to the manifest file.
+All paths are relative to the manifest file. This same file also enables CLI project discovery (see [Running Tests: Project Discovery](running.md#project-discovery)).
 
 **Step 2: Configure your IDE**
 

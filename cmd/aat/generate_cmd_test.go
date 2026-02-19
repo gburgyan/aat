@@ -9,14 +9,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGenerateMain_MissingOASFlag(t *testing.T) {
-	code := generateMain([]string{})
-	assert.Equal(t, 1, code)
+func TestGenerateCommand_MissingOAS(t *testing.T) {
+	err := generateCommand(&generateArgs{})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "loading spec")
 }
 
-func TestGenerateMain_InvalidPath(t *testing.T) {
-	code := generateMain([]string{"--oas", "nonexistent.yaml"})
-	assert.Equal(t, 1, code)
+func TestGenerateCommand_InvalidPath(t *testing.T) {
+	err := generateCommand(&generateArgs{
+		OASPath:         "nonexistent.yaml",
+		OutputGraph:     "-",
+		OutputTemplates: t.TempDir(),
+	})
+	assert.Error(t, err)
 }
 
 func TestGenerateCommand_Petstore(t *testing.T) {
@@ -80,23 +85,4 @@ func TestGenerateCommand_Stdout(t *testing.T) {
 
 	assert.Contains(t, output, "listPets")
 	assert.Contains(t, output, "version:")
-}
-
-func TestGenerateMain_FlagParsing(t *testing.T) {
-	tmpDir := t.TempDir()
-	graphOut := filepath.Join(tmpDir, "graph.yaml")
-	templatesOut := filepath.Join(tmpDir, "templates")
-
-	code := generateMain([]string{
-		"--oas", "testdata/oas/petstore.yaml",
-		"--output-graph", graphOut,
-		"--output-templates", templatesOut,
-	})
-	assert.Equal(t, 0, code)
-
-	// Verify files were created
-	_, err := os.Stat(graphOut)
-	assert.NoError(t, err)
-	_, err = os.Stat(templatesOut)
-	assert.NoError(t, err)
 }

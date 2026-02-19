@@ -38,7 +38,13 @@ valuePools:
       - Luna
 ```
 
-Use it:
+Use it (with `aat-project.yaml`, only `--domain` is needed if not in the manifest):
+
+```bash
+aat prompt "Create a pet and verify it exists" --domain domain.yaml
+```
+
+Or with explicit paths:
 
 ```bash
 aat prompt "Create a pet and verify it exists" \
@@ -49,8 +55,7 @@ aat prompt "Create a pet and verify it exists" \
 Or with `aat run` in lean/adaptive mode:
 
 ```bash
-aat run --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/ \
-  --domain domain.yaml --mode lean
+aat run --plan plan.yaml --domain domain.yaml --mode lean
 ```
 
 ## Schema Reference

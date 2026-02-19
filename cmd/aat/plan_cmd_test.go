@@ -7,18 +7,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPlanMain_NoSubcommand(t *testing.T) {
-	code := planMain(nil)
-	assert.Equal(t, 1, code)
-}
-
-func TestPlanMain_UnknownSubcommand(t *testing.T) {
-	code := planMain([]string{"unknown"})
-	assert.Equal(t, 1, code)
-}
-
 func TestPlanValidate_MissingGraphFlag(t *testing.T) {
-	code := planValidateMain([]string{})
+	code := planValidateCommand(&planValidateArgs{})
 	assert.Equal(t, 1, code)
 }
 
@@ -89,15 +79,6 @@ func TestPlanValidate_AllTemplates_WithUnfed(t *testing.T) {
 	code := planValidateCommand(&planValidateArgs{
 		GraphPath: "testdata/test_graph_with_workflows.yaml",
 		Unfed:     true,
-	})
-	assert.Equal(t, 0, code)
-}
-
-func TestPlanValidateMain_FlagParsing(t *testing.T) {
-	code := planValidateMain([]string{
-		"--graph", "testdata/test_graph.yaml",
-		"--plan", "testdata/test_plan.yaml",
-		"--unfed",
 	})
 	assert.Equal(t, 0, code)
 }
