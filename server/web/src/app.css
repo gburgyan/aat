@@ -84,6 +84,9 @@ p {
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
   margin-bottom: 1.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 100;
 }
 
 .nav-brand {

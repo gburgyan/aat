@@ -68,7 +68,7 @@
         <span class="meta-value">
           <span class="steps-passed">{run.passedCount}</span>
           {#if run.failedCount > 0}<span class="steps-separator"> / </span><span class="steps-failed">{run.failedCount}</span>{/if}
-          <span class="steps-separator"> of </span>{run.stepCount}
+          <span class="steps-separator">of&nbsp;</span>{run.stepCount}
         </span>
       </div>
       {#if run.environment}

@@ -24,7 +24,7 @@
 
 <p style="margin-bottom: 0.75rem; font-size: 0.85rem;">
   <span class="steps-passed">{passedCount}</span>
-  <span class="steps-separator"> of </span>
+  <span class="steps-separator">of&nbsp;</span>
   {totalCount} assertions passed
 </p>
 
