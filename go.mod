@@ -3,6 +3,7 @@ module github.com/gburgyan/aat
 go 1.24.0
 
 require (
+	github.com/go-chi/chi/v5 v5.2.5
 	github.com/mark3labs/mcp-go v0.43.2
 	github.com/pb33f/libopenapi v0.33.7
 	github.com/spf13/cobra v1.10.2
