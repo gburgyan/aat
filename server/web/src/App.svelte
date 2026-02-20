@@ -3,6 +3,7 @@
   import Nav from './components/Nav.svelte';
   import RunList from './routes/RunList.svelte';
   import RunDetail from './routes/RunDetail.svelte';
+  import StepDetail from './routes/StepDetail.svelte';
 
   let path = $state(window.location.pathname);
   let route = $derived(parseRoute(path));
@@ -24,6 +25,6 @@
   {:else if route.view === 'run-detail'}
     <RunDetail runId={route.runId} />
   {:else if route.view === 'step-detail'}
-    <div class="empty-state"><p>Step detail view coming soon: {route.runId} / {route.stepId}</p></div>
+    <StepDetail runId={route.runId} stepId={route.stepId} />
   {/if}
 </main>
