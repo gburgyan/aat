@@ -250,19 +250,25 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 
 	// 6. Plans validation
 	if m.PlansDir != "" {
-		planErrors := validatePlans(m.PlansDir, g)
-		planFiles := countYAMLFiles(m.PlansDir)
-		if len(planErrors) > 0 {
+		graphDir := filepath.Dir(m.GraphPath)
+		wfTemplates := workflowTemplatePaths(g, graphDir)
+		pvr := validatePlans(m.PlansDir, g, wfTemplates)
+		if len(pvr.Errors) > 0 {
 			sections = append(sections, sectionResult{
 				Name:   "Plans",
 				Status: "FAILED",
-				Errors: planErrors,
+				Errors: pvr.Errors,
 			})
-		} else if planFiles > 0 {
+		} else if pvr.Total > 0 {
+			detail := fmt.Sprintf("(%d files", pvr.Total)
+			if pvr.Templates > 0 {
+				detail += fmt.Sprintf(", %d templates", pvr.Templates)
+			}
+			detail += ")"
 			sections = append(sections, sectionResult{
 				Name:   "Plans",
 				Status: "OK",
-				Detail: fmt.Sprintf("(%d files)", planFiles),
+				Detail: detail,
 			})
 		}
 	}
@@ -286,12 +292,22 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 	return 0
 }
 
+// planValidationResult holds counts from plan validation for the detail string.
+type planValidationResult struct {
+	Errors    []string
+	Total     int
+	Templates int
+}
+
 // validatePlans walks the plans directory and validates each .yaml file.
-func validatePlans(plansDir string, g *graph.Graph) []string {
-	var errors []string
+// Files referenced as workflow templates are only parsed (structural check),
+// not graph-validated, since their missing inputs get wired at composition time.
+func validatePlans(plansDir string, g *graph.Graph, workflowTemplates map[string]bool) planValidationResult {
+	var result planValidationResult
 	entries, err := os.ReadDir(plansDir)
 	if err != nil {
-		return []string{fmt.Sprintf("reading plans directory: %s", err)}
+		result.Errors = []string{fmt.Sprintf("reading plans directory: %s", err)}
+		return result
 	}
 
 	for _, entry := range entries {
@@ -302,34 +318,47 @@ func validatePlans(plansDir string, g *graph.Graph) []string {
 			continue
 		}
 
+		result.Total++
 		planPath := filepath.Join(plansDir, entry.Name())
 		p, err := plan.ParseFile(planPath)
 		if err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %s", entry.Name(), err))
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name(), err))
+			continue
+		}
+
+		// Skip graph validation for workflow templates — they are intentionally
+		// incomplete and get their missing inputs wired by ComposeWithAddons.
+		abs, err := filepath.Abs(planPath)
+		if err == nil && workflowTemplates[abs] {
+			result.Templates++
 			continue
 		}
 
 		if err := plan.Validate(p, g); err != nil {
-			errors = append(errors, fmt.Sprintf("%s: %s", entry.Name(), err))
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name(), err))
 		}
 	}
 
-	return errors
+	return result
 }
 
-// countYAMLFiles counts .yaml/.yml files in a directory.
-func countYAMLFiles(dir string) int {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	count := 0
-	for _, entry := range entries {
-		if !entry.IsDir() && (strings.HasSuffix(entry.Name(), ".yaml") || strings.HasSuffix(entry.Name(), ".yml")) {
-			count++
+// workflowTemplatePaths collects absolute file paths for all workflow templates
+// referenced in the graph, resolved relative to graphDir.
+func workflowTemplatePaths(g *graph.Graph, graphDir string) map[string]bool {
+	paths := make(map[string]bool)
+	for _, wf := range g.Workflows {
+		if wf.Template == "" {
+			continue
+		}
+		resolved := wf.Template
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(graphDir, resolved)
+		}
+		if abs, err := filepath.Abs(resolved); err == nil {
+			paths[abs] = true
 		}
 	}
-	return count
+	return paths
 }
 
 // printSections prints the validation sections in aligned columns.

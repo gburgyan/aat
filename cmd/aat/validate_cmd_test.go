@@ -322,3 +322,209 @@ templates: templates/
 	assert.Contains(t, output, "(1 templates)")
 	assert.Contains(t, output, "Project validation: PASSED")
 }
+
+func TestValidate_WorkflowTemplateSkipsGraphValidation(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create graph with a workflow referencing a template
+	graphContent := `version: "1.0.0"
+workflows:
+  - name: book-flight
+    description: Book a flight
+    template: plans/booking.yaml
+  - name: add-seat
+    kind: addon
+    description: Add a seat
+    template: plans/seat-addon.yaml
+    after: CreateReservation
+nodes:
+  SearchAir:
+    description: search
+    adapter: search.adapter
+    inputs:
+      - name: origin
+        type: string
+    outputs:
+      - name: offerId
+        type: string
+  CreateReservation:
+    description: reserve
+    adapter: reserve.adapter
+    inputs:
+      - name: offerId
+        type: string
+        from: SearchAir.offerId
+    outputs:
+      - name: reservationId
+        type: string
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "graph.yaml"), []byte(graphContent), 0644))
+
+	// Create templates dir with outputs matching the graph
+	templatesDir := filepath.Join(dir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "search.adapter.yaml"), []byte(`adapter: search.adapter
+protocol: http
+request:
+  method: POST
+  path: /search
+  body: "{}"
+response:
+  extract:
+    offerId: "$.offerId"
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "reserve.adapter.yaml"), []byte(`adapter: reserve.adapter
+protocol: http
+request:
+  method: POST
+  path: /reserve
+  body: "{}"
+response:
+  extract:
+    reservationId: "$.reservationId"
+`), 0644))
+
+	// Create plans dir with workflow templates that have missing inputs
+	// (offerId is not provided — it would be wired by ComposeWithAddons)
+	plansDir := filepath.Join(dir, "plans")
+	require.NoError(t, os.MkdirAll(plansDir, 0755))
+
+	// seat-addon.yaml: workflow template — intentionally missing offerId
+	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "seat-addon.yaml"), []byte(`execution:
+  steps:
+    - node: CreateReservation
+      values:
+        offerId: "AUTOWIRE"
+`), 0644))
+
+	// booking.yaml: base workflow template
+	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "booking.yaml"), []byte(`execution:
+  steps:
+    - node: SearchAir
+      values:
+        origin: "JFK"
+    - node: CreateReservation
+      dependsOn: [SearchAir]
+      values:
+        offerId:
+          from: SearchAir.offerId
+`), 0644))
+
+	// Create manifest
+	manifestContent := `
+name: test-project
+graph: graph.yaml
+templates: templates/
+plans: plans/
+`
+	manifestPath := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0644))
+
+	var buf bytes.Buffer
+	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
+	output := buf.String()
+	assert.Equal(t, 0, code, "output: %s", output)
+	assert.Contains(t, output, "Plans")
+	assert.Contains(t, output, "2 templates")
+	assert.Contains(t, output, "PASSED")
+}
+
+func TestValidate_NonTemplatePlanStillValidated(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create graph with a workflow referencing only one template
+	graphContent := `version: "1.0.0"
+workflows:
+  - name: book-flight
+    description: Book a flight
+    template: plans/booking.yaml
+nodes:
+  SearchAir:
+    description: search
+    adapter: search.adapter
+    inputs:
+      - name: origin
+        type: string
+    outputs:
+      - name: offerId
+        type: string
+  CreateReservation:
+    description: reserve
+    adapter: reserve.adapter
+    inputs:
+      - name: offerId
+        type: string
+        from: SearchAir.offerId
+    outputs:
+      - name: reservationId
+        type: string
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "graph.yaml"), []byte(graphContent), 0644))
+
+	// Create templates dir with outputs matching the graph
+	templatesDir := filepath.Join(dir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "search.adapter.yaml"), []byte(`adapter: search.adapter
+protocol: http
+request:
+  method: POST
+  path: /search
+  body: "{}"
+response:
+  extract:
+    offerId: "$.offerId"
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "reserve.adapter.yaml"), []byte(`adapter: reserve.adapter
+protocol: http
+request:
+  method: POST
+  path: /reserve
+  body: "{}"
+response:
+  extract:
+    reservationId: "$.reservationId"
+`), 0644))
+
+	// Create plans dir
+	plansDir := filepath.Join(dir, "plans")
+	require.NoError(t, os.MkdirAll(plansDir, 0755))
+
+	// booking.yaml: referenced as workflow template — skipped for graph validation
+	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "booking.yaml"), []byte(`execution:
+  steps:
+    - node: SearchAir
+      values:
+        origin: "JFK"
+    - node: CreateReservation
+      dependsOn: [SearchAir]
+      values:
+        offerId:
+          from: SearchAir.offerId
+`), 0644))
+
+	// bad-standalone.yaml: NOT referenced by any workflow — should be graph-validated and fail
+	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "bad-standalone.yaml"), []byte(`execution:
+  steps:
+    - node: NonexistentNode
+      values:
+        foo: "bar"
+`), 0644))
+
+	// Create manifest
+	manifestContent := `
+name: test-project
+graph: graph.yaml
+templates: templates/
+plans: plans/
+`
+	manifestPath := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0644))
+
+	var buf bytes.Buffer
+	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
+	output := buf.String()
+	assert.Equal(t, 1, code, "output: %s", output)
+	assert.Contains(t, output, "Plans")
+	assert.Contains(t, output, "FAILED")
+	assert.Contains(t, output, "bad-standalone.yaml")
+}
