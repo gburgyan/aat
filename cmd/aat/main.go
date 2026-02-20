@@ -54,7 +54,7 @@ var runCmd = &cobra.Command{
 		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
 		envOverlay, _ := cmd.Flags().GetString("env-overlay")
 
-		outputDir := "runs"
+		outputDir := "_output/runs"
 		if cmd.Flags().Changed("output") {
 			outputDir, _ = cmd.Flags().GetString("output")
 		} else if resolved.ArchiveDir != "" {
@@ -88,7 +88,7 @@ func init() {
 	runCmd.Flags().String("env", "", "path to environment YAML file")
 	runCmd.Flags().String("graph", "", "path to graph YAML file")
 	runCmd.Flags().String("templates", "", "path to templates directory")
-	runCmd.Flags().String("output", "runs", "directory for archive output")
+	runCmd.Flags().String("output", "_output/runs", "directory for archive output")
 	runCmd.Flags().String("mode", "", "execution mode: strict, lean, adaptive (overrides env config)")
 	runCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
 	runCmd.Flags().Bool("json", false, "output machine-readable JSON summary to stdout")

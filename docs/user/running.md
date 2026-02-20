@@ -32,7 +32,7 @@ aat run \
 | `--env` | auto | | Path to the environment YAML file |
 | `--graph` | auto | | Path to the graph YAML file |
 | `--templates` | auto | | Path to the templates directory |
-| `--output` | no | `./runs` | Directory for archive output |
+| `--output` | no | `_output/runs` | Directory for archive output |
 | `--mode` | no | env config or `strict` | Execution mode: `strict`, `lean`, `adaptive` |
 | `--domain` | no | | Path to domain knowledge YAML file |
 | `--json` | no | `false` | Output machine-readable JSON summary to stdout |
@@ -82,7 +82,7 @@ aat: executing plan (6 steps, mode=strict)...
     ignoreWorkbench        400  167ms
 
 PASSED (6/6 steps, 5.5s)
-Archive: runs/run-20260210-143022-a1b2c3d4/archive.json
+Archive: _output/runs/run-20260210-143022-a1b2c3d4/archive.json
 ```
 
 When a step fails:
@@ -96,7 +96,7 @@ When a step fails:
     ignoreWorkbench        204  167ms
 
 FAILED: step "addOffer" returned status 400
-Archive: runs/run-20260210-143048-e5f6a7b8/archive.json
+Archive: _output/runs/run-20260210-143048-e5f6a7b8/archive.json
 ```
 
 When retries are exhausted:
@@ -119,7 +119,7 @@ Quiet mode suppresses all progress messages and the step-by-step breakdown. Only
 $ aat run --quiet --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
 
 PASSED (6/6 steps)
-Archive: runs/run-20260210-143022-a1b2c3d4/archive.json
+Archive: _output/runs/run-20260210-143022-a1b2c3d4/archive.json
 ```
 
 On failure:
@@ -128,7 +128,7 @@ On failure:
 $ aat run --quiet --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
 
 FAILED: step "addOffer" returned status 400
-Archive: runs/run-20260210-143048-e5f6a7b8/archive.json
+Archive: _output/runs/run-20260210-143048-e5f6a7b8/archive.json
 ```
 
 On infrastructure error (e.g., invalid plan):
@@ -208,7 +208,7 @@ $ aat run --json --plan plan.yaml --env env.yaml --graph graph.yaml --templates 
     "failed_steps": 0,
     "duration_ms": 2387
   },
-  "archive_path": "runs/run-20260210-143022-a1b2c3d4/archive.json"
+  "archive_path": "_output/runs/run-20260210-143022-a1b2c3d4/archive.json"
 }
 ```
 
@@ -249,7 +249,7 @@ $ aat run --json --plan plan.yaml --env env.yaml --graph graph.yaml --templates 
     "failed_steps": 1,
     "duration_ms": 955
   },
-  "archive_path": "runs/run-20260210-143048-e5f6a7b8/archive.json"
+  "archive_path": "_output/runs/run-20260210-143048-e5f6a7b8/archive.json"
 }
 ```
 
@@ -458,9 +458,10 @@ description: "My API test project"
 graph: graph.yaml
 templates: templates/
 environment: env.yaml
-domain: domain.yaml     # optional
-plans: plans/            # optional
-archives: runs/          # optional
+domain: domain.yaml         # optional
+plans: plans/               # optional
+archives: _output/runs      # optional
+traces: _output/traces      # optional
 ```
 
 All paths are relative to the manifest file. With this in place:
@@ -628,7 +629,7 @@ go build -o aat ./cmd/aat/
 
 ## Archives
 
-Every run produces a JSON archive in the output directory (default `./runs/`). The archive contains:
+Every run produces a JSON archive in the output directory (default `_output/runs/`). The archive contains:
 
 - Full plan snapshot
 - Per-step: request (method, URL, headers, body), response (status, headers, body), extracted outputs, selection decisions, value resolutions, timing, error classification
@@ -674,3 +675,4 @@ Optional domain knowledge (`--domain`) provides the LLM with context about your 
 - [Plan-Level Auth & Headers](plan-auth.md) -- embedding per-plan credentials and custom headers
 - [Environments](environments.md) -- environment config, auth types, overrides
 - [LLM-Assisted Planning](prompt-workflow.md) -- generating plans with `aat prompt`
+- [Project Validation](project-validation.md) -- validating the full project with `aat validate`

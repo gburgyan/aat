@@ -18,6 +18,7 @@ domain: domain.yaml
 environment: env.yaml
 plans: plans/
 archives: runs/
+traces: traces/
 `
 	path := filepath.Join(dir, "aat-project.yaml")
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
@@ -60,6 +61,7 @@ func TestResolveProjectPaths_CWDManifest(t *testing.T) {
 	assert.Equal(t, filepath.Join(dir, "domain.yaml"), result.DomainPath)
 	assert.Equal(t, filepath.Join(dir, "plans"), result.PlansDir)
 	assert.Equal(t, filepath.Join(dir, "runs"), result.ArchiveDir)
+	assert.Equal(t, filepath.Join(dir, "traces"), result.TracesDir)
 	assert.Equal(t, filepath.Join(dir, "aat-project.yaml"), result.ManifestPath)
 }
 

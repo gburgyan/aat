@@ -50,11 +50,11 @@ AAT will:
 | `--graph` | auto | -- | Path to graph YAML file |
 | `--templates` | auto | -- | Path to templates directory |
 | `--domain` | no | -- | Path to domain knowledge YAML file |
-| `--output` | no | `runs` | Directory for archive output |
+| `--output` | no | `_output/runs` | Directory for archive output |
 | `--save` | no | -- | Save the generated plan to this file path |
 | `--yes` | no | `false` | Skip confirmation and execute immediately |
 | `--trace` | no | `false` | Capture planning pipeline trace for debugging |
-| `--trace-dir` | no | `traces` | Directory for trace output |
+| `--trace-dir` | no | `_output/traces` | Directory for trace output |
 
 **Auto-resolved flags:** `--env`, `--graph`, and `--templates` are resolved automatically when an `aat-project.yaml` manifest is found. See [Running Tests: Project Discovery](running.md#project-discovery).
 
@@ -153,10 +153,10 @@ When plans don't come out right, use `--trace` to capture the full LLM planning 
 ```bash
 aat prompt "Order a product" \
   --env env.yaml --graph graph.yaml --templates templates/ \
-  --trace --trace-dir traces/
+  --trace
 ```
 
-This produces a trace file at `traces/trace-YYYYMMDD-HHMMSS-XXXXXXXX/plan-trace.json` containing:
+This produces a trace file at `_output/traces/trace-YYYYMMDD-HHMMSS-XXXXXXXX/plan-trace.json` containing:
 
 | Section | Contents |
 |---------|----------|
@@ -257,7 +257,7 @@ aat: executing plan (2 steps, mode=lean)...
     deletePet              200  45ms
 
 PASSED (2/2 steps, 446ms)
-Archive: runs/run-20260211-143022-a1b2c3d4/archive.json
+Archive: _output/runs/run-20260211-143022-a1b2c3d4/archive.json
 ```
 
 ## See Also

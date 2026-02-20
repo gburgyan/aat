@@ -21,6 +21,7 @@ domain: domain.yaml
 docs: docs/
 plans: plans/
 archives: runs/
+traces: traces/
 environment: env.yaml
 `
 	path := filepath.Join(dir, "aat-project.yaml")
@@ -40,6 +41,7 @@ environment: env.yaml
 	assert.Equal(t, filepath.Join(dir, "docs"), m.DocsDir)
 	assert.Equal(t, filepath.Join(dir, "plans"), m.PlansDir)
 	assert.Equal(t, filepath.Join(dir, "runs"), m.ArchiveDir)
+	assert.Equal(t, filepath.Join(dir, "traces"), m.TracesDir)
 	assert.Equal(t, filepath.Join(dir, "env.yaml"), m.EnvPath)
 }
 
@@ -61,6 +63,7 @@ templates: templates/
 	assert.Empty(t, m.DocsDir)
 	assert.Empty(t, m.PlansDir)
 	assert.Empty(t, m.ArchiveDir)
+	assert.Empty(t, m.TracesDir)
 	assert.Empty(t, m.EnvPath)
 }
 

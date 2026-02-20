@@ -13,8 +13,10 @@
 .DS_Store
 Thumbs.db
 
-# Run output
+# Run output (generated)
+_output/
 runs/
+traces/
 
 # SQLite
 *.db

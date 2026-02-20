@@ -15,6 +15,7 @@ type ProjectPaths struct {
 	DomainPath    string
 	PlansDir      string
 	ArchiveDir    string
+	TracesDir     string
 	ManifestPath  string // path to aat-project.yaml if found
 }
 
@@ -65,6 +66,9 @@ func ResolveProjectPaths(overrides ProjectPaths) (*ProjectPaths, error) {
 	if overrides.ArchiveDir != "" {
 		result.ArchiveDir = overrides.ArchiveDir
 	}
+	if overrides.TracesDir != "" {
+		result.TracesDir = overrides.TracesDir
+	}
 	// ManifestPath is only set from discovery, not from overrides.
 
 	return result, nil
@@ -102,6 +106,9 @@ func applyManifest(result *ProjectPaths, pathOrDir string) {
 	}
 	if m.ArchiveDir != "" {
 		result.ArchiveDir = m.ArchiveDir
+	}
+	if m.TracesDir != "" {
+		result.TracesDir = m.TracesDir
 	}
 }
 

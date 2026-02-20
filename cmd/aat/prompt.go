@@ -54,13 +54,19 @@ var promptCmd = &cobra.Command{
 		savePlan, _ := cmd.Flags().GetString("save")
 		autoConfirm, _ := cmd.Flags().GetBool("yes")
 		tracePlan, _ := cmd.Flags().GetBool("trace")
-		traceDir, _ := cmd.Flags().GetString("trace-dir")
 
-		outputDir := "runs"
+		outputDir := "_output/runs"
 		if cmd.Flags().Changed("output") {
 			outputDir, _ = cmd.Flags().GetString("output")
 		} else if resolved.ArchiveDir != "" {
 			outputDir = resolved.ArchiveDir
+		}
+
+		traceDir := "_output/traces"
+		if cmd.Flags().Changed("trace-dir") {
+			traceDir, _ = cmd.Flags().GetString("trace-dir")
+		} else if resolved.TracesDir != "" {
+			traceDir = resolved.TracesDir
 		}
 
 		var promptText string
@@ -90,11 +96,11 @@ func init() {
 	promptCmd.Flags().String("graph", "", "path to graph YAML file")
 	promptCmd.Flags().String("templates", "", "path to templates directory")
 	promptCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
-	promptCmd.Flags().String("output", "runs", "directory for archive output")
+	promptCmd.Flags().String("output", "_output/runs", "directory for archive output")
 	promptCmd.Flags().String("save", "", "save generated plan to this file path")
 	promptCmd.Flags().Bool("yes", false, "skip confirmation prompt")
 	promptCmd.Flags().Bool("trace", false, "capture planning pipeline trace for debugging")
-	promptCmd.Flags().String("trace-dir", "traces", "directory for plan trace output")
+	promptCmd.Flags().String("trace-dir", "_output/traces", "directory for plan trace output")
 }
 
 // promptArgs holds parsed CLI flags for the prompt command.

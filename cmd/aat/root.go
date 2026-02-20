@@ -37,6 +37,7 @@ func init() {
 	rootCmd.AddCommand(generateCmd)
 	rootCmd.AddCommand(docsCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(validateCmd)
 }
 
 func main() {

@@ -427,7 +427,7 @@ Step 1/2: createUser ... PASSED
 Step 2/2: getUser ... PASSED
 
 Result: PASSED (2/2 steps passed)
-Archive: runs/run-20260211-143022-a1b2c3d4/archive.json
+Archive: _output/runs/run-20260211-143022-a1b2c3d4/archive.json
 ```
 
 **What failure looks like:**
@@ -438,7 +438,7 @@ Step 2/2: getUser ... FAILED
   Assertion failed: fieldEquals path="email" expected="alice@example.com" actual="alice@Example.com"
 
 Result: FAILED (1/2 steps passed)
-Archive: runs/run-20260211-143022-a1b2c3d4/archive.json
+Archive: _output/runs/run-20260211-143022-a1b2c3d4/archive.json
 ```
 
 **When something goes wrong, check:**
@@ -448,7 +448,7 @@ Archive: runs/run-20260211-143022-a1b2c3d4/archive.json
 3. **Extract paths** — verify gjson paths in `response.extract` match the actual API response structure
 4. **Environment** — confirm `apiBaseUrl` is correct and reachable
 
-The `--output` flag controls where archives are written (default: `runs/`).
+The `--output` flag controls where archives are written (default: `_output/runs/`).
 
 ## 8. Using AI to Help (Claude Code / Agentic AI)
 
@@ -465,7 +465,8 @@ graph: graph.yaml
 templates: templates/
 environment: env.yaml
 plans: plans/
-archives: runs/
+archives: _output/runs
+traces: _output/traces
 ```
 
 All paths are relative to the manifest file. This same file also enables CLI project discovery (see [Running Tests: Project Discovery](running.md#project-discovery)).

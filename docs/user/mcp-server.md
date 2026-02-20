@@ -15,7 +15,8 @@ domain: domain.yaml        # optional
 docs: docs/                 # optional — per-node Markdown docs
 environment: env.yaml       # optional
 plans: plans/               # optional
-archives: runs/             # optional
+archives: _output/runs      # optional
+traces: _output/traces      # optional
 ```
 
 2. Start the MCP server:
