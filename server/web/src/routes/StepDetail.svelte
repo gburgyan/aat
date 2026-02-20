@@ -56,6 +56,8 @@
     if (step.response) t.push({ id: 'response', label: 'Response' });
     if (step.extractions && step.extractions.length > 0)
       t.push({ id: 'extractions', label: `Extractions (${step.extractions.length})` });
+    if (step.transformScript && step.outputs)
+      t.push({ id: 'lua-output', label: 'Lua Output' });
     if (step.validation)
       t.push({
         id: 'assertions',
@@ -251,6 +253,10 @@
 
       {#if activeTab === 'extractions' && step.extractions}
         <ExtractionsTable extractions={step.extractions} {runId} />
+      {/if}
+
+      {#if activeTab === 'lua-output' && step.outputs}
+        <JsonViewer data={step.outputs} />
       {/if}
 
       {#if activeTab === 'assertions' && step.validation}

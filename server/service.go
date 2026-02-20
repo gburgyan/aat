@@ -289,6 +289,7 @@ func toStepSummary(s archive.StepRecord, isCleanup bool) StepSummary {
 		HasSelections:        len(s.Selections) > 0,
 		HasResolutions:       len(s.Resolutions) > 0,
 		HasLLMCalls:          hasLLMCalls(s),
+		HasTransform:         s.TransformScript != "",
 		RetryCount:           s.RetryCount,
 	}
 }
@@ -341,6 +342,7 @@ func toStepDetail(s archive.StepRecord, isCleanup bool, nodeSteps map[string]str
 		ErrorClassification:  toErrorClassDetail(s.ErrorClass),
 		ExpectFailure:        toExpectFailureDetail(s.ExpectFailure),
 		ResponseBodyError:    toResponseBodyErrorDetail(s.ResponseBodyError),
+		TransformScript:      s.TransformScript,
 	}
 }
 

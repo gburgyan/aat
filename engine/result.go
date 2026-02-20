@@ -47,7 +47,8 @@ type StepResult struct {
 	Inputs        map[string]any
 	Request       *adapter.Request
 	Response      *adapter.Response
-	Outputs       map[string]any
+	Outputs        map[string]any
+	TransformScript string
 	Selections    []SelectionDecision
 	Resolutions   []ValueResolution
 	StatusCode    int

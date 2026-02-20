@@ -35,7 +35,8 @@ type StepRecord struct {
 	Inputs      map[string]any            `json:"inputs"`
 	Request     *RequestRecord            `json:"request,omitempty"`
 	Response    *ResponseRecord           `json:"response,omitempty"`
-	Outputs     map[string]any            `json:"outputs,omitempty"`
+	Outputs        map[string]any            `json:"outputs,omitempty"`
+	TransformScript string                   `json:"transformScript,omitempty"`
 	Validation  *ValidationRecord         `json:"validation,omitempty"`
 	Selections  []SelectionRecord         `json:"selections,omitempty"`
 	Resolutions []ValueResolutionRecord   `json:"resolutions,omitempty"`

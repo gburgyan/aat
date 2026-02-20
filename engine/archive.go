@@ -45,7 +45,8 @@ func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) ar
 		StartTime:  s.StartTime,
 		DurationMs: s.Duration.Milliseconds(),
 		Inputs:     archive.RedactMap(s.Inputs, secrets),
-		Outputs:    s.Outputs,
+		Outputs:         s.Outputs,
+		TransformScript: s.TransformScript,
 		Error:      errString(s.Error),
 		RetryCount: s.RetryCount,
 	}

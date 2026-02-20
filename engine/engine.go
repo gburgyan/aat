@@ -366,6 +366,11 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		}
 		result.Outputs = outputs
 
+		// Record transform script if present
+		if tmpl, ok := e.registry.GetTemplate(node.Adapter); ok && tmpl.HasTransform() {
+			result.TransformScript = tmpl.Response.Transform
+		}
+
 		// Collect outputs tagged for display
 		for _, out := range node.Outputs {
 			if out.Display != "" {

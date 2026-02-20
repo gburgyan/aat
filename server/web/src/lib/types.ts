@@ -49,6 +49,7 @@ export interface StepSummary {
   hasSelections?: boolean;
   hasResolutions?: boolean;
   hasLLMCalls?: boolean;
+  hasTransform?: boolean;
   retryCount?: number;
 }
 
@@ -80,6 +81,7 @@ export interface StepDetail {
   errorClassification?: ErrorClassDetail;
   expectFailure?: ExpectFailureDetail;
   responseBodyError?: ResponseBodyErrorDetail;
+  transformScript?: string;
   extractions?: ExtractionDetail[];
   planStepYaml?: string;
   prevStepId?: string;

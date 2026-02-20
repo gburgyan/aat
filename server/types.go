@@ -59,6 +59,7 @@ type StepSummary struct {
 	HasSelections       bool            `json:"hasSelections,omitempty"`
 	HasResolutions      bool            `json:"hasResolutions,omitempty"`
 	HasLLMCalls         bool            `json:"hasLLMCalls,omitempty"`
+	HasTransform        bool            `json:"hasTransform,omitempty"`
 	RetryCount          int             `json:"retryCount,omitempty"`
 }
 
@@ -91,6 +92,7 @@ type StepDetail struct {
 	ErrorClassification  *ErrorClassDetail       `json:"errorClassification,omitempty"`
 	ExpectFailure        *ExpectFailureDetail    `json:"expectFailure,omitempty"`
 	ResponseBodyError    *ResponseBodyErrorDetail `json:"responseBodyError,omitempty"`
+	TransformScript      string                  `json:"transformScript,omitempty"`
 	Extractions          []ExtractionDetail      `json:"extractions,omitempty"`
 	PlanStepYAML         string                  `json:"planStepYaml,omitempty"`
 	PrevStepID           string                  `json:"prevStepId,omitempty"`
