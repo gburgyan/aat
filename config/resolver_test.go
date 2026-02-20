@@ -134,6 +134,96 @@ func TestResolveProjectPaths_ExplicitOverridesManifest(t *testing.T) {
 	assert.Equal(t, filepath.Join(dir, "env.yaml"), result.EnvPath)
 }
 
+func TestResolveProjectPaths_ExplicitManifest(t *testing.T) {
+	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	writeManifest(t, dir)
+
+	// chdir away so CWD discovery doesn't find it
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(origDir)
+	tmpEmpty := t.TempDir()
+	require.NoError(t, os.Chdir(tmpEmpty))
+	t.Setenv("AAT_PROJECT", "")
+
+	result, err := ResolveProjectPaths(ProjectPaths{
+		ExplicitManifest: dir,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "graph.yaml"), result.GraphPath)
+	assert.Equal(t, filepath.Join(dir, "templates"), result.TemplatesPath)
+	assert.Equal(t, filepath.Join(dir, "env.yaml"), result.EnvPath)
+	assert.Equal(t, filepath.Join(dir, "domain.yaml"), result.DomainPath)
+	assert.Equal(t, filepath.Join(dir, "plans"), result.PlansDir)
+	assert.Equal(t, filepath.Join(dir, "runs"), result.ArchiveDir)
+	assert.Equal(t, filepath.Join(dir, "traces"), result.TracesDir)
+	assert.Equal(t, filepath.Join(dir, "aat-project.yaml"), result.ManifestPath)
+}
+
+func TestResolveProjectPaths_ExplicitManifestOverriddenByFields(t *testing.T) {
+	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	writeManifest(t, dir)
+
+	// chdir away so CWD discovery doesn't find it
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(origDir)
+	tmpEmpty := t.TempDir()
+	require.NoError(t, os.Chdir(tmpEmpty))
+	t.Setenv("AAT_PROJECT", "")
+
+	result, err := ResolveProjectPaths(ProjectPaths{
+		ExplicitManifest: dir,
+		GraphPath:        "/override/graph.yaml",
+	})
+	require.NoError(t, err)
+	// Explicit field override wins over manifest
+	assert.Equal(t, "/override/graph.yaml", result.GraphPath)
+	// Other fields still from manifest
+	assert.Equal(t, filepath.Join(dir, "templates"), result.TemplatesPath)
+	assert.Equal(t, filepath.Join(dir, "env.yaml"), result.EnvPath)
+}
+
+func TestResolveProjectPaths_ExplicitManifestOverridesCWD(t *testing.T) {
+	// Create two manifest directories
+	cwdDir := t.TempDir()
+	cwdDir, err := filepath.EvalSymlinks(cwdDir)
+	require.NoError(t, err)
+	writeManifest(t, cwdDir)
+
+	explicitDir := t.TempDir()
+	explicitDir, err = filepath.EvalSymlinks(explicitDir)
+	require.NoError(t, err)
+	// Write a different manifest in explicit dir
+	content := `name: explicit
+graph: explicit-graph.yaml
+templates: explicit-templates/
+environment: explicit-env.yaml
+`
+	require.NoError(t, os.WriteFile(filepath.Join(explicitDir, "aat-project.yaml"), []byte(content), 0644))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(origDir)
+	require.NoError(t, os.Chdir(cwdDir))
+	t.Setenv("AAT_PROJECT", "")
+
+	result, err := ResolveProjectPaths(ProjectPaths{
+		ExplicitManifest: explicitDir,
+	})
+	require.NoError(t, err)
+	// Explicit manifest wins over CWD manifest
+	assert.Equal(t, filepath.Join(explicitDir, "explicit-graph.yaml"), result.GraphPath)
+	assert.Equal(t, filepath.Join(explicitDir, "explicit-templates"), result.TemplatesPath)
+	assert.Equal(t, filepath.Join(explicitDir, "explicit-env.yaml"), result.EnvPath)
+}
+
 func TestResolveProjectPaths_NothingFound(t *testing.T) {
 	origDir, err := os.Getwd()
 	require.NoError(t, err)

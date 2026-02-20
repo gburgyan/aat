@@ -33,6 +33,9 @@ var promptCmd = &cobra.Command{
 
 		// Build overrides from explicitly-set flags only
 		overrides := config.ProjectPaths{}
+		if cmd.Flags().Changed("manifest") {
+			overrides.ExplicitManifest, _ = cmd.Flags().GetString("manifest")
+		}
 		if cmd.Flags().Changed("graph") {
 			overrides.GraphPath, _ = cmd.Flags().GetString("graph")
 		}
@@ -92,6 +95,7 @@ var promptCmd = &cobra.Command{
 }
 
 func init() {
+	promptCmd.Flags().String("manifest", "", "path to aat-project.yaml or project directory")
 	promptCmd.Flags().String("env", "", "path to environment YAML file")
 	promptCmd.Flags().String("graph", "", "path to graph YAML file")
 	promptCmd.Flags().String("templates", "", "path to templates directory")

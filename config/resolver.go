@@ -17,6 +17,8 @@ type ProjectPaths struct {
 	ArchiveDir    string
 	TracesDir     string
 	ManifestPath  string // path to aat-project.yaml if found
+
+	ExplicitManifest string // --manifest flag value; takes priority over auto-discovery
 }
 
 // ResolveProjectPaths resolves project artifact paths using a 4-level priority
@@ -45,6 +47,11 @@ func ResolveProjectPaths(overrides ProjectPaths) (*ProjectPaths, error) {
 	// 3. CWD manifest discovery
 	if found, err := FindManifest(); err == nil {
 		applyManifest(result, found)
+	}
+
+	// 3.5. Explicit --manifest flag (overrides auto-discovery)
+	if overrides.ExplicitManifest != "" {
+		applyManifest(result, overrides.ExplicitManifest)
 	}
 
 	// 4. Explicit overrides (highest priority)
