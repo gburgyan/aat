@@ -118,14 +118,19 @@ Rules:
 	var ub strings.Builder
 
 	// Separate required vs pool vs auto-wired vs configurable inputs.
+	// Priority: auto-wired > pool > configurable > required.
+	// An input that is both configurable and pool-backed should land in
+	// the pool section so the LLM gets the "omit unless user specifies"
+	// guard-rail. Similarly, auto-wired inputs keep their wiring even
+	// when configurable.
 	var requiredInputs, poolInputs, autoWiredInputs, configurableInputs []InputContext
 	for _, ic := range inputContexts {
-		if ic.IsConfigurable {
-			configurableInputs = append(configurableInputs, ic)
-		} else if ic.FromResolved != "" {
+		if ic.FromResolved != "" {
 			autoWiredInputs = append(autoWiredInputs, ic)
 		} else if ic.IsPoolInput {
 			poolInputs = append(poolInputs, ic)
+		} else if ic.IsConfigurable {
+			configurableInputs = append(configurableInputs, ic)
 		} else {
 			requiredInputs = append(requiredInputs, ic)
 		}
