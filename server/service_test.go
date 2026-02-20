@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -37,6 +38,70 @@ func makeStep(node string, status int, durationMs int64) archive.StepRecord {
 		Response: &archive.ResponseRecord{
 			Status: status,
 			Body:   json.RawMessage(`{"result":"ok"}`),
+		},
+	}
+}
+
+func makeStepWithID(stepID, node string, status int, durationMs int64) archive.StepRecord {
+	s := makeStep(node, status, durationMs)
+	s.StepID = stepID
+	return s
+}
+
+func makeStepFull(node string, status int) archive.StepRecord {
+	trueVal := true
+	return archive.StepRecord{
+		Node:       node,
+		StartTime:  time.Date(2026, 2, 10, 14, 30, 5, 0, time.UTC),
+		DurationMs: 450,
+		Inputs:     map[string]any{"origin": "JFK", "destination": "LAX"},
+		Outputs:    map[string]any{"bookingRef": "ABC123"},
+		Request: &archive.RequestRecord{
+			Method:  "POST",
+			URL:     "https://api.example.com/search",
+			Headers: map[string]string{"Content-Type": "application/json", "Authorization": "Bearer ***"},
+			Body:    json.RawMessage(`{"from":"JFK","to":"LAX"}`),
+		},
+		Response: &archive.ResponseRecord{
+			Status:  status,
+			Headers: map[string]string{"X-Request-Id": "req-123", "Content-Type": "application/json"},
+			Body:    json.RawMessage(`{"id":"offer-1","price":299}`),
+		},
+		Validation: &archive.ValidationRecord{
+			Passed: true,
+			Results: []archive.AssertionRecord{
+				{Type: "status", Passed: true, Message: "status 200"},
+				{Type: "fieldExists", Passed: true, Message: "field id exists", Path: "id"},
+				{Type: "predicate", Passed: false, Message: "price < 100", Expr: "price < 100"},
+			},
+		},
+		Selections: []archive.SelectionRecord{
+			{
+				InputName:     "offeringId",
+				SourceNode:    "SearchOffers",
+				SourceField:   "offerings",
+				SourceSize:    10,
+				FilterExpr:    "price < 500",
+				FilteredSize:  3,
+				Strategy:      "first",
+				SelectedIndex: 0,
+				SelectionName: "cheapest",
+			},
+		},
+		Resolutions: []archive.ValueResolutionRecord{
+			{
+				InputName:    "origin",
+				Source:       "pool",
+				RawValue:     "JFK",
+				FinalValue:   "JFK",
+				Constraint:   "len >= 3",
+				ConstraintOK: &trueVal,
+				PoolIndex:    0,
+				PoolSize:     5,
+			},
+		},
+		DisplayOutputs: []archive.DisplayOutputRecord{
+			{Label: "Booking Ref", Name: "bookingRef", Value: "ABC123"},
 		},
 	}
 }
@@ -398,6 +463,638 @@ func TestExtractPlanName(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.expected, extractPlanName(tt.archive))
+		})
+	}
+}
+
+// --- GetRun ---
+
+func TestGetRun_BasicFields(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed",
+		makeStep("search", 200, 100),
+		makeStep("book", 200, 200),
+		makeStep("confirm", 200, 150),
+	)
+	a.Result.Error = ""
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+
+	assert.Equal(t, "run-20260101-100000-aaaa0001", run.RunID)
+	assert.Equal(t, "passed", run.Outcome)
+	assert.Equal(t, int64(450), run.DurationMs)
+	assert.Equal(t, 3, run.StepCount)
+	assert.Equal(t, 3, run.PassedCount)
+	assert.Equal(t, 0, run.FailedCount)
+}
+
+func TestGetRun_MetadataFields(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	a.Metadata.Environment = "staging"
+	a.Metadata.GraphVersion = "v2.1"
+	a.Metadata.ToolVersion = "0.5.0"
+	a.Metadata.Plan = &plan.Plan{
+		Metadata: plan.Metadata{Prompt: "test prompt"},
+	}
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+
+	assert.Equal(t, "staging", run.Environment)
+	assert.Equal(t, "v2.1", run.GraphVersion)
+	assert.Equal(t, "0.5.0", run.ToolVersion)
+	assert.Equal(t, "test prompt", run.PlanName)
+}
+
+func TestGetRun_StepSummaries(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed",
+		makeStepWithID("step-search", "SearchOffers", 200, 100),
+		makeStep("BookOffer", 200, 200),
+	)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+	require.Len(t, run.Steps, 2)
+
+	assert.Equal(t, "step-search", run.Steps[0].StepID)
+	assert.Equal(t, "SearchOffers", run.Steps[0].Node)
+	assert.Equal(t, 200, run.Steps[0].Status)
+	assert.True(t, run.Steps[0].Passed)
+
+	assert.Equal(t, "BookOffer", run.Steps[1].StepID) // falls back to Node
+	assert.Equal(t, "BookOffer", run.Steps[1].Node)
+}
+
+func TestGetRun_StepSummary_AssertionCounts(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStep("node", 200, 100)
+	step.Validation = &archive.ValidationRecord{
+		Passed: false,
+		Results: []archive.AssertionRecord{
+			{Type: "status", Passed: true, Message: "status 200"},
+			{Type: "fieldExists", Passed: true, Message: "field id exists"},
+			{Type: "predicate", Passed: false, Message: "price < 100"},
+		},
+	}
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "failed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+	require.Len(t, run.Steps, 1)
+
+	assert.Equal(t, 3, run.Steps[0].AssertionCount)
+	assert.Equal(t, 2, run.Steps[0].AssertionPassedCount)
+	assert.False(t, run.Steps[0].Passed)
+}
+
+func TestGetRun_StepSummary_DisplayOutputs(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStep("node", 200, 100)
+	step.DisplayOutputs = []archive.DisplayOutputRecord{
+		{Label: "Booking Ref", Name: "bookingRef", Value: "ABC123"},
+	}
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+	require.Len(t, run.Steps[0].DisplayOutputs, 1)
+
+	assert.Equal(t, "Booking Ref", run.Steps[0].DisplayOutputs[0].Label)
+	assert.Equal(t, "bookingRef", run.Steps[0].DisplayOutputs[0].Name)
+	assert.Equal(t, "ABC123", run.Steps[0].DisplayOutputs[0].Value)
+}
+
+func TestGetRun_StepSummary_HasFlags(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStep("node", 200, 100)
+	step.Selections = []archive.SelectionRecord{{InputName: "offeringId", Strategy: "first"}}
+	step.Resolutions = []archive.ValueResolutionRecord{{InputName: "origin", Source: "pool"}}
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+
+	assert.True(t, run.Steps[0].HasSelections)
+	assert.True(t, run.Steps[0].HasResolutions)
+	assert.False(t, run.Steps[0].HasLLMCalls)
+}
+
+func TestGetRun_CleanupSteps(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("search", 200, 100))
+	a.Cleanup = []archive.StepRecord{makeStep("cleanup-cancel", 200, 50)}
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+
+	require.Len(t, run.Steps, 1)
+	require.Len(t, run.Cleanup, 1)
+	assert.True(t, run.Cleanup[0].IsCleanup)
+	assert.Equal(t, "cleanup-cancel", run.Cleanup[0].Node)
+}
+
+func TestGetRun_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewArchiveService(dir)
+
+	_, err := svc.GetRun("run-nonexistent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+func TestGetRun_DurationDisplay(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed",
+		makeStep("search", 200, 1500),
+	)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+
+	assert.Equal(t, "1.5s", run.DurationDisplay)
+	assert.Equal(t, "1.5s", run.Steps[0].DurationDisplay)
+}
+
+// --- GetStep ---
+
+func TestGetStep_ByNode(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStep("SearchOffers", 200, 100)
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "SearchOffers")
+	require.NoError(t, err)
+
+	assert.Equal(t, "SearchOffers", detail.StepID)
+	assert.Equal(t, "SearchOffers", detail.Node)
+	assert.Equal(t, 200, detail.Status)
+	assert.True(t, detail.Passed)
+	assert.False(t, detail.IsCleanup)
+}
+
+func TestGetStep_ByStepID(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStepWithID("step-search", "SearchOffers", 200, 100)
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "step-search")
+	require.NoError(t, err)
+
+	assert.Equal(t, "step-search", detail.StepID)
+	assert.Equal(t, "SearchOffers", detail.Node)
+}
+
+func TestGetStep_FullRequest(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStepFull("SearchOffers", 200)
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "SearchOffers")
+	require.NoError(t, err)
+
+	require.NotNil(t, detail.Request)
+	assert.Equal(t, "POST", detail.Request.Method)
+	assert.Equal(t, "https://api.example.com/search", detail.Request.URL)
+	assert.NotEmpty(t, detail.Request.Body)
+
+	// Headers are sorted
+	require.Len(t, detail.Request.Headers, 2)
+	assert.Equal(t, "Authorization", detail.Request.Headers[0].Name)
+	assert.Equal(t, "Content-Type", detail.Request.Headers[1].Name)
+}
+
+func TestGetStep_FullResponse(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStepFull("SearchOffers", 200)
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "SearchOffers")
+	require.NoError(t, err)
+
+	require.NotNil(t, detail.Response)
+	assert.Equal(t, 200, detail.Response.Status)
+	assert.NotEmpty(t, detail.Response.Body)
+
+	// Headers are sorted
+	require.Len(t, detail.Response.Headers, 2)
+	assert.Equal(t, "Content-Type", detail.Response.Headers[0].Name)
+	assert.Equal(t, "X-Request-Id", detail.Response.Headers[1].Name)
+}
+
+func TestGetStep_Validation(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStepFull("SearchOffers", 200)
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "SearchOffers")
+	require.NoError(t, err)
+
+	require.NotNil(t, detail.Validation)
+	assert.True(t, detail.Validation.Passed)
+	require.Len(t, detail.Validation.Results, 3)
+	assert.Equal(t, "status", detail.Validation.Results[0].Type)
+	assert.True(t, detail.Validation.Results[0].Passed)
+	assert.Equal(t, "predicate", detail.Validation.Results[2].Type)
+	assert.False(t, detail.Validation.Results[2].Passed)
+	assert.Equal(t, "price < 100", detail.Validation.Results[2].Expr)
+}
+
+func TestGetStep_Selections(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStepFull("SearchOffers", 200)
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "SearchOffers")
+	require.NoError(t, err)
+
+	require.Len(t, detail.Selections, 1)
+	sel := detail.Selections[0]
+	assert.Equal(t, "offeringId", sel.InputName)
+	assert.Equal(t, "SearchOffers", sel.SourceNode)
+	assert.Equal(t, "offerings", sel.SourceField)
+	assert.Equal(t, 10, sel.SourceSize)
+	assert.Equal(t, "price < 500", sel.FilterExpr)
+	assert.Equal(t, 3, sel.FilteredSize)
+	assert.Equal(t, "first", sel.Strategy)
+	assert.Equal(t, 0, sel.SelectedIndex)
+	assert.Equal(t, "cheapest", sel.SelectionName)
+}
+
+func TestGetStep_Resolutions(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStepFull("SearchOffers", 200)
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "SearchOffers")
+	require.NoError(t, err)
+
+	require.Len(t, detail.Resolutions, 1)
+	res := detail.Resolutions[0]
+	assert.Equal(t, "origin", res.InputName)
+	assert.Equal(t, "pool", res.Source)
+	assert.Equal(t, "JFK", res.RawValue)
+	assert.Equal(t, "JFK", res.FinalValue)
+	assert.Equal(t, "len >= 3", res.Constraint)
+	require.NotNil(t, res.ConstraintOK)
+	assert.True(t, *res.ConstraintOK)
+	assert.Equal(t, 0, res.PoolIndex)
+	assert.Equal(t, 5, res.PoolSize)
+}
+
+func TestGetStep_LLMCall(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStep("node", 200, 100)
+	step.Resolutions = []archive.ValueResolutionRecord{
+		{
+			InputName: "origin",
+			Source:    "llm",
+			LLMCall: &archive.LLMCallRecord{
+				Messages: []archive.LLMMessageRecord{
+					{Role: "system", Content: "You are a travel expert"},
+					{Role: "user", Content: "Pick an airport"},
+				},
+				Model:        "gpt-4",
+				Response:     "JFK",
+				InputTokens:  50,
+				OutputTokens: 5,
+				DurationMs:   800,
+				FinishReason: "stop",
+			},
+		},
+	}
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "node")
+	require.NoError(t, err)
+
+	require.Len(t, detail.Resolutions, 1)
+	require.NotNil(t, detail.Resolutions[0].LLMCall)
+	llm := detail.Resolutions[0].LLMCall
+	assert.Equal(t, "gpt-4", llm.Model)
+	assert.Equal(t, "JFK", llm.Response)
+	assert.Equal(t, 50, llm.InputTokens)
+	assert.Equal(t, 5, llm.OutputTokens)
+	assert.Equal(t, int64(800), llm.DurationMs)
+	assert.Equal(t, "stop", llm.FinishReason)
+	require.Len(t, llm.Messages, 2)
+	assert.Equal(t, "system", llm.Messages[0].Role)
+	assert.Equal(t, "user", llm.Messages[1].Role)
+}
+
+func TestGetStep_ErrorClassification(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStep("node", 500, 100)
+	step.Error = "server error"
+	step.ErrorClass = &archive.ErrorClassRecord{
+		Category:     "server",
+		Detail:       "internal server error",
+		Action:       "retry",
+		RetryAttempt: 2,
+	}
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "failed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "node")
+	require.NoError(t, err)
+
+	require.NotNil(t, detail.ErrorClassification)
+	assert.Equal(t, "server", detail.ErrorClassification.Category)
+	assert.Equal(t, "internal server error", detail.ErrorClassification.Detail)
+	assert.Equal(t, "retry", detail.ErrorClassification.Action)
+	assert.Equal(t, 2, detail.ErrorClassification.RetryAttempt)
+}
+
+func TestGetStep_ExpectFailure(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStep("node", 404, 100)
+	step.ExpectFailure = &archive.ExpectFailureRecord{
+		Expected: []int{404, 410},
+		Actual:   404,
+		Passed:   true,
+	}
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "node")
+	require.NoError(t, err)
+
+	require.NotNil(t, detail.ExpectFailure)
+	assert.Equal(t, []int{404, 410}, detail.ExpectFailure.Expected)
+	assert.Equal(t, 404, detail.ExpectFailure.Actual)
+	assert.True(t, detail.ExpectFailure.Passed)
+}
+
+func TestGetStep_ResponseBodyError(t *testing.T) {
+	dir := t.TempDir()
+
+	step := makeStep("node", 200, 100)
+	step.ResponseBodyError = &archive.ResponseBodyErrorRecord{
+		RulePath: "Errors.0",
+		Rule:     "errorDetection",
+		Message:  "booking failed",
+		Code:     "ERR-001",
+		Category: "business",
+	}
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "failed", step)
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "node")
+	require.NoError(t, err)
+
+	require.NotNil(t, detail.ResponseBodyError)
+	assert.Equal(t, "Errors.0", detail.ResponseBodyError.RulePath)
+	assert.Equal(t, "errorDetection", detail.ResponseBodyError.Rule)
+	assert.Equal(t, "booking failed", detail.ResponseBodyError.Message)
+	assert.Equal(t, "ERR-001", detail.ResponseBodyError.Code)
+	assert.Equal(t, "business", detail.ResponseBodyError.Category)
+}
+
+func TestGetStep_CleanupStep(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("search", 200, 100))
+	a.Cleanup = []archive.StepRecord{makeStep("cancel", 200, 50)}
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "cancel")
+	require.NoError(t, err)
+
+	assert.Equal(t, "cancel", detail.Node)
+	assert.True(t, detail.IsCleanup)
+}
+
+func TestGetStep_StepNotFound(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("search", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	_, err := svc.GetStep("run-20260101-100000-aaaa0001", "nonexistent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrStepNotFound))
+}
+
+func TestGetStep_RunNotFound(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewArchiveService(dir)
+
+	_, err := svc.GetStep("run-nonexistent", "step1")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+// --- helper tests ---
+
+func TestEffectiveStepID(t *testing.T) {
+	tests := []struct {
+		name     string
+		step     archive.StepRecord
+		expected string
+	}{
+		{
+			name:     "explicit StepID",
+			step:     archive.StepRecord{StepID: "step-1", Node: "SearchOffers"},
+			expected: "step-1",
+		},
+		{
+			name:     "fallback to Node",
+			step:     archive.StepRecord{Node: "SearchOffers"},
+			expected: "SearchOffers",
+		},
+		{
+			name:     "empty StepID falls back",
+			step:     archive.StepRecord{StepID: "", Node: "BookOffer"},
+			expected: "BookOffer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, effectiveStepID(tt.step))
+		})
+	}
+}
+
+func TestToHeaderEntries(t *testing.T) {
+	tests := []struct {
+		name     string
+		headers  map[string]string
+		expected []HeaderEntry
+	}{
+		{
+			name:     "nil map",
+			headers:  nil,
+			expected: nil,
+		},
+		{
+			name:     "empty map",
+			headers:  map[string]string{},
+			expected: nil,
+		},
+		{
+			name: "sorted output",
+			headers: map[string]string{
+				"X-Request-Id":  "123",
+				"Content-Type":  "application/json",
+				"Authorization": "Bearer ***",
+			},
+			expected: []HeaderEntry{
+				{Name: "Authorization", Value: "Bearer ***"},
+				{Name: "Content-Type", Value: "application/json"},
+				{Name: "X-Request-Id", Value: "123"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := toHeaderEntries(tt.headers)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestFormatDuration(t *testing.T) {
+	tests := []struct {
+		ms       int64
+		expected string
+	}{
+		{0, "0ms"},
+		{450, "450ms"},
+		{999, "999ms"},
+		{1000, "1s"},
+		{1500, "1.5s"},
+		{2000, "2s"},
+		{59999, "60.0s"},
+		{60000, "1m"},
+		{61000, "1m 1s"},
+		{125000, "2m 5s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.expected, func(t *testing.T) {
+			assert.Equal(t, tt.expected, formatDuration(tt.ms))
+		})
+	}
+}
+
+func TestHasLLMCalls(t *testing.T) {
+	tests := []struct {
+		name     string
+		step     archive.StepRecord
+		expected bool
+	}{
+		{
+			name:     "no selections or resolutions",
+			step:     archive.StepRecord{Node: "node"},
+			expected: false,
+		},
+		{
+			name: "selection without LLM",
+			step: archive.StepRecord{
+				Node:       "node",
+				Selections: []archive.SelectionRecord{{Strategy: "first"}},
+			},
+			expected: false,
+		},
+		{
+			name: "selection with LLM",
+			step: archive.StepRecord{
+				Node: "node",
+				Selections: []archive.SelectionRecord{
+					{Strategy: "llm", LLMCall: &archive.LLMCallRecord{Model: "gpt-4"}},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "resolution without LLM",
+			step: archive.StepRecord{
+				Node:        "node",
+				Resolutions: []archive.ValueResolutionRecord{{Source: "pool"}},
+			},
+			expected: false,
+		},
+		{
+			name: "resolution with LLM",
+			step: archive.StepRecord{
+				Node: "node",
+				Resolutions: []archive.ValueResolutionRecord{
+					{Source: "llm", LLMCall: &archive.LLMCallRecord{Model: "gpt-4"}},
+				},
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, hasLLMCalls(tt.step))
 		})
 	}
 }
