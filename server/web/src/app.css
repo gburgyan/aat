@@ -624,6 +624,39 @@ p {
   gap: 0.15rem;
 }
 
+/* --- Step Navigation --- */
+.step-nav {
+  display: flex;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.step-nav-btn {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.step-nav-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.step-nav-disabled {
+  opacity: 0.35;
+  cursor: default;
+  pointer-events: none;
+}
+
 /* --- Detail Tables (shared) --- */
 .detail-table {
   width: 100%;
@@ -752,6 +785,28 @@ p {
   margin-top: 0;
 }
 
+.collapsible-heading {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.collapsible-heading::before {
+  content: "\25B6";
+  display: inline-block;
+  margin-right: 0.4rem;
+  font-size: 0.65em;
+  transition: transform 0.15s;
+}
+
+details[open] > .collapsible-heading::before {
+  transform: rotate(90deg);
+}
+
+.collapsible-heading::-webkit-details-marker {
+  display: none;
+}
+
 /* --- Additional Badges --- */
 .badge-muted {
   color: var(--color-text-muted);
@@ -860,6 +915,17 @@ p {
 .error-detail-label {
   color: var(--color-text-muted);
   font-weight: 500;
+}
+
+/* --- Step Links --- */
+.step-link {
+  color: var(--color-primary);
+  text-decoration: none;
+}
+
+.step-link:hover {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
 }
 
 /* --- Collapsible details --- */

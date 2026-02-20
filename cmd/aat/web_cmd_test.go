@@ -26,25 +26,25 @@ func TestBuildViewURL(t *testing.T) {
 			name: "latest",
 			port: 9119,
 			ref:  "latest",
-			want: "http://localhost:9119/api/runs/latest",
+			want: "http://localhost:9119/runs/latest",
 		},
 		{
 			name: "specific run ID",
 			port: 9119,
 			ref:  "run-20260220-143022-abc12345",
-			want: "http://localhost:9119/api/runs/run-20260220-143022-abc12345",
+			want: "http://localhost:9119/runs/run-20260220-143022-abc12345",
 		},
 		{
 			name: "custom port",
 			port: 8080,
 			ref:  "latest",
-			want: "http://localhost:8080/api/runs/latest",
+			want: "http://localhost:8080/runs/latest",
 		},
 		{
 			name: "custom port with run ID",
 			port: 3000,
 			ref:  "my-run",
-			want: "http://localhost:3000/api/runs/my-run",
+			want: "http://localhost:3000/runs/my-run",
 		},
 	}
 
@@ -116,7 +116,7 @@ func TestWebViewCommand_ServerAlreadyRunning(t *testing.T) {
 	// Should open immediately without starting a new server.
 	err := webViewCommand(19223, "latest", t.TempDir())
 	require.NoError(t, err)
-	assert.Equal(t, "http://localhost:19223/api/runs/latest", opened)
+	assert.Equal(t, "http://localhost:19223/runs/latest", opened)
 }
 
 func TestWebViewCommand_StartsEphemeralServer(t *testing.T) {
@@ -146,7 +146,7 @@ func TestWebViewCommand_StartsEphemeralServer(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	assert.Equal(t, "http://localhost:19224/api/runs/latest", opened, "should have opened the ref URL")
+	assert.Equal(t, "http://localhost:19224/runs/latest", opened, "should have opened the ref URL")
 
 	// Verify the server is actually serving.
 	resp, err := http.Get("http://localhost:19224/health")
@@ -272,11 +272,11 @@ func TestWebViewCommand_OpensCorrectURL(t *testing.T) {
 	url := buildViewURL(portInt, "latest")
 	err := openURLFunc(url)
 	require.NoError(t, err)
-	assert.Equal(t, fmt.Sprintf("http://localhost:%d/api/runs/latest", portInt), opened)
+	assert.Equal(t, fmt.Sprintf("http://localhost:%d/runs/latest", portInt), opened)
 
 	// Also verify with a specific run ID.
 	url = buildViewURL(portInt, "run-abc123")
 	err = openURLFunc(url)
 	require.NoError(t, err)
-	assert.Equal(t, fmt.Sprintf("http://localhost:%d/api/runs/run-abc123", portInt), opened)
+	assert.Equal(t, fmt.Sprintf("http://localhost:%d/runs/run-abc123", portInt), opened)
 }

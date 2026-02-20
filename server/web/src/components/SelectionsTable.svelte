@@ -1,12 +1,19 @@
 <script lang="ts">
   import type { SelectionDetail } from '../lib/types';
+  import { navigate } from '../lib/router';
   import LlmCallPanel from './LlmCallPanel.svelte';
 
   interface Props {
     selections: SelectionDetail[];
+    runId: string;
   }
 
-  let { selections }: Props = $props();
+  let { selections, runId }: Props = $props();
+
+  function goToStep(e: MouseEvent, stepId: string) {
+    e.preventDefault();
+    navigate(`/runs/${runId}/steps/${stepId}`);
+  }
 
   function strategyBadgeClass(strategy: string): string {
     switch (strategy) {
@@ -39,7 +46,13 @@
     {#each selections as s, i (i)}
       <tr>
         <td class="dt-mono" style="font-weight: 600;">{s.inputName}</td>
-        <td class="dt-mono dt-muted">{s.sourceNode}.{s.sourceField}</td>
+        <td class="dt-mono dt-muted">
+          {#if s.sourceStep}
+            <a href="/runs/{runId}/steps/{s.sourceStep}" class="step-link" onclick={(e: MouseEvent) => goToStep(e, s.sourceStep!)}>{s.sourceNode}</a>.{s.sourceField}
+          {:else}
+            {s.sourceNode}.{s.sourceField}
+          {/if}
+        </td>
         <td>{s.sourceSize}</td>
         <td class="dt-mono dt-muted">
           {s.filterExpr ?? ''}

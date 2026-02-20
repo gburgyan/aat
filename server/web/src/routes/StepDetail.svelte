@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { StepDetail, LLMCallDetail } from '../lib/types';
   import { fetchStep } from '../lib/api';
+  import { navigate } from '../lib/router';
   import { formatDuration, httpStatusCategory } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
   import Tabs from '../components/Tabs.svelte';
@@ -105,6 +106,18 @@
   });
 
   let statusCat = $derived(httpStatusCategory(step?.status));
+
+  function readPref(key: string, fallback: boolean): boolean {
+    try {
+      const v = localStorage.getItem(`aat:${key}`);
+      return v === null ? fallback : v === '1';
+    } catch { return fallback; }
+  }
+
+  function savePref(key: string, e: Event) {
+    const open = (e.currentTarget as HTMLDetailsElement).open;
+    try { localStorage.setItem(`aat:${key}`, open ? '1' : '0'); } catch {}
+  }
 </script>
 
 {#if loading}
@@ -122,6 +135,18 @@
       {#if step.isCleanup}
         <span class="badge badge-sm badge-muted">CLEANUP</span>
       {/if}
+      <div class="step-nav">
+        {#if step.prevStepId}
+          <a href="/runs/{runId}/steps/{step.prevStepId}" class="step-nav-btn" title="{step.prevStepId}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/runs/${runId}/steps/${step.prevStepId}`); }}>&larr; Prev</a>
+        {:else}
+          <span class="step-nav-btn step-nav-disabled">&larr; Prev</span>
+        {/if}
+        {#if step.nextStepId}
+          <a href="/runs/{runId}/steps/{step.nextStepId}" class="step-nav-btn" title="{step.nextStepId}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/runs/${runId}/steps/${step.nextStepId}`); }}>Next &rarr;</a>
+        {:else}
+          <span class="step-nav-btn step-nav-disabled">Next &rarr;</span>
+        {/if}
+      </div>
     </div>
 
     {#if step.error}
@@ -189,8 +214,10 @@
           <span class="http-url">{step.request.url}</span>
         </div>
         {#if step.request.headers && step.request.headers.length > 0}
-          <h4 class="section-heading">Headers</h4>
-          <HeadersTable headers={step.request.headers} />
+          <details open={readPref('reqHeadersOpen', true)} ontoggle={(e: Event) => savePref('reqHeadersOpen', e)}>
+            <summary class="section-heading collapsible-heading">Headers ({step.request.headers.length})</summary>
+            <HeadersTable headers={step.request.headers} />
+          </details>
         {/if}
         {#if step.request.body !== undefined && step.request.body !== null}
           <h4 class="section-heading">Body</h4>
@@ -205,8 +232,10 @@
           </span>
         </div>
         {#if step.response.headers && step.response.headers.length > 0}
-          <h4 class="section-heading">Headers</h4>
-          <HeadersTable headers={step.response.headers} />
+          <details open={readPref('resHeadersOpen', true)} ontoggle={(e: Event) => savePref('resHeadersOpen', e)}>
+            <summary class="section-heading collapsible-heading">Headers ({step.response.headers.length})</summary>
+            <HeadersTable headers={step.response.headers} />
+          </details>
         {/if}
         {#if step.response.body !== undefined && step.response.body !== null}
           <h4 class="section-heading">Body</h4>
@@ -223,7 +252,7 @@
       {/if}
 
       {#if activeTab === 'selections' && step.selections}
-        <SelectionsTable selections={step.selections} />
+        <SelectionsTable selections={step.selections} {runId} />
       {/if}
 
       {#if activeTab === 'llm'}

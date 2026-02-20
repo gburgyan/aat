@@ -80,6 +80,8 @@ export interface StepDetail {
   errorClassification?: ErrorClassDetail;
   expectFailure?: ExpectFailureDetail;
   responseBodyError?: ResponseBodyErrorDetail;
+  prevStepId?: string;
+  nextStepId?: string;
 }
 
 export interface HeaderEntry {
@@ -122,6 +124,7 @@ export interface AssertionDetail {
 
 export interface SelectionDetail {
   inputName: string;
+  sourceStep?: string;
   sourceNode: string;
   sourceField: string;
   sourceSize: number;

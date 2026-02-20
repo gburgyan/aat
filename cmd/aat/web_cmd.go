@@ -178,12 +178,9 @@ func webViewCommand(port int, ref string, archiveDir string) error {
 	})
 }
 
-// buildViewURL constructs the URL for viewing a run.
+// buildViewURL constructs the URL for viewing a run in the frontend.
 func buildViewURL(port int, ref string) string {
-	if ref == "latest" {
-		return fmt.Sprintf("http://localhost:%d/api/runs/latest", port)
-	}
-	return fmt.Sprintf("http://localhost:%d/api/runs/%s", port, ref)
+	return fmt.Sprintf("http://localhost:%d/runs/%s", port, ref)
 }
 
 // checkServerHealth checks if the server is reachable via its health endpoint.

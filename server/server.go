@@ -64,6 +64,9 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/runs/{id}/steps/{stepId}", s.handleGetStep)
 	})
 
+	// Resolve /runs/latest to the actual run ID so the SPA has a real ID in the URL.
+	r.Get("/runs/latest", s.handleLatestRunRedirect)
+
 	// Catch-all: serve frontend (dev proxy or embedded SPA).
 	if s.opts.DevMode {
 		r.NotFound(s.devProxy())

@@ -91,6 +91,8 @@ type StepDetail struct {
 	ErrorClassification  *ErrorClassDetail       `json:"errorClassification,omitempty"`
 	ExpectFailure        *ExpectFailureDetail    `json:"expectFailure,omitempty"`
 	ResponseBodyError    *ResponseBodyErrorDetail `json:"responseBodyError,omitempty"`
+	PrevStepID           string                  `json:"prevStepId,omitempty"`
+	NextStepID           string                  `json:"nextStepId,omitempty"`
 }
 
 // HeaderEntry is a single HTTP header name-value pair.
@@ -140,6 +142,7 @@ type AssertionDetail struct {
 // SelectionDetail captures how an array selection was resolved.
 type SelectionDetail struct {
 	InputName     string         `json:"inputName"`
+	SourceStep    string         `json:"sourceStep,omitempty"`
 	SourceNode    string         `json:"sourceNode"`
 	SourceField   string         `json:"sourceField"`
 	SourceSize    int            `json:"sourceSize"`

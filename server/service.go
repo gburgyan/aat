@@ -98,7 +98,29 @@ func (s *ArchiveService) GetStep(runID, stepID string) (*StepDetail, error) {
 	if !found {
 		return nil, fmt.Errorf("step %q in run %q: %w", stepID, runID, ErrStepNotFound)
 	}
-	return toStepDetail(rec, isCleanup), nil
+	detail := toStepDetail(rec, isCleanup, nodeToStepMap(a))
+
+	// Compute prev/next across all steps (steps then cleanup in order).
+	allSteps := make([]string, 0, len(a.Steps)+len(a.Cleanup))
+	for _, s := range a.Steps {
+		allSteps = append(allSteps, effectiveStepID(s))
+	}
+	for _, s := range a.Cleanup {
+		allSteps = append(allSteps, effectiveStepID(s))
+	}
+	for i, id := range allSteps {
+		if id == stepID {
+			if i > 0 {
+				detail.PrevStepID = allSteps[i-1]
+			}
+			if i < len(allSteps)-1 {
+				detail.NextStepID = allSteps[i+1]
+			}
+			break
+		}
+	}
+
+	return detail, nil
 }
 
 // loadArchive reads an archive by run ID. Returns ErrRunNotFound if the
@@ -267,7 +289,19 @@ func toStepSummary(s archive.StepRecord, isCleanup bool) StepSummary {
 	}
 }
 
-func toStepDetail(s archive.StepRecord, isCleanup bool) *StepDetail {
+// nodeToStepMap builds a mapping from node name to effective step ID across all steps.
+func nodeToStepMap(a *archive.Archive) map[string]string {
+	m := make(map[string]string)
+	for _, s := range a.Steps {
+		m[s.Node] = effectiveStepID(s)
+	}
+	for _, s := range a.Cleanup {
+		m[s.Node] = effectiveStepID(s)
+	}
+	return m
+}
+
+func toStepDetail(s archive.StepRecord, isCleanup bool, nodeSteps map[string]string) *StepDetail {
 	status := 0
 	if s.Response != nil {
 		status = s.Response.Status
@@ -297,7 +331,7 @@ func toStepDetail(s archive.StepRecord, isCleanup bool) *StepDetail {
 		Request:              toRequestDetail(s.Request),
 		Response:             toResponseDetail(s.Response),
 		Validation:           toValidationDetail(s.Validation),
-		Selections:           toSelectionDetails(s.Selections),
+		Selections:           toSelectionDetails(s.Selections, nodeSteps),
 		Resolutions:          toResolutionDetails(s.Resolutions),
 		Relaxations:          toRelaxationDetails(s.Relaxations),
 		ErrorClassification:  toErrorClassDetail(s.ErrorClass),
@@ -395,7 +429,7 @@ func toValidationDetail(v *archive.ValidationRecord) *ValidationDetail {
 	}
 }
 
-func toSelectionDetails(recs []archive.SelectionRecord) []SelectionDetail {
+func toSelectionDetails(recs []archive.SelectionRecord, nodeSteps map[string]string) []SelectionDetail {
 	if len(recs) == 0 {
 		return nil
 	}
@@ -403,6 +437,7 @@ func toSelectionDetails(recs []archive.SelectionRecord) []SelectionDetail {
 	for i, r := range recs {
 		out[i] = SelectionDetail{
 			InputName:     r.InputName,
+			SourceStep:    nodeSteps[r.SourceNode],
 			SourceNode:    r.SourceNode,
 			SourceField:   r.SourceField,
 			SourceSize:    r.SourceSize,
