@@ -31,3 +31,16 @@ export function timeAgo(date: string): string {
 export function formatTimestamp(date: string): string {
   return new Date(date).toLocaleString();
 }
+
+/** Map an HTTP status code to a semantic category for CSS class selection. */
+export function httpStatusCategory(
+  status: number | undefined,
+): 'success' | 'client-error' | 'server-error' | 'redirect' | 'info' | 'unknown' {
+  if (status === undefined) return 'unknown';
+  if (status >= 200 && status < 300) return 'success';
+  if (status >= 400 && status < 500) return 'client-error';
+  if (status >= 500) return 'server-error';
+  if (status >= 300 && status < 400) return 'redirect';
+  if (status >= 100 && status < 200) return 'info';
+  return 'unknown';
+}
