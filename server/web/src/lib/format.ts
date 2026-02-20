@@ -1,0 +1,33 @@
+/** Render a millisecond duration as a human-readable string (mirrors Go's formatDuration). */
+export function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) {
+    if (ms % 1000 === 0) return `${ms / 1000}s`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+  const mins = Math.floor(ms / 60000);
+  const remainMs = ms % 60000;
+  if (remainMs === 0) return `${mins}m`;
+  const secs = Math.floor(remainMs / 1000);
+  return `${mins}m ${secs}s`;
+}
+
+/** Relative time label: "just now", "N minutes ago", etc. */
+export function timeAgo(date: string): string {
+  const now = Date.now();
+  const then = new Date(date).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? '' : 's'} ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
+}
+
+/** Locale-formatted timestamp. */
+export function formatTimestamp(date: string): string {
+  return new Date(date).toLocaleString();
+}

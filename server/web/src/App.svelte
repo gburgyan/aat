@@ -1,20 +1,28 @@
 <script lang="ts">
-  let status = $state("...");
+  import { parseRoute } from './lib/router';
+  import Nav from './components/Nav.svelte';
+  import RunList from './routes/RunList.svelte';
 
-  async function checkHealth() {
-    try {
-      const res = await fetch("/health");
-      const data = await res.json();
-      status = data.status ?? "unknown";
-    } catch {
-      status = "unreachable";
+  let path = $state(window.location.pathname);
+  let route = $derived(parseRoute(path));
+
+  $effect(() => {
+    function onPopState() {
+      path = window.location.pathname;
     }
-  }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  });
 </script>
 
+<Nav {route} />
+
 <main>
-  <h1>AAT</h1>
-  <p>Adaptive API Testing</p>
-  <button onclick={checkHealth}>Check health</button>
-  <p>Status: <code>{status}</code></p>
+  {#if route.view === 'run-list'}
+    <RunList />
+  {:else if route.view === 'run-detail'}
+    <div class="empty-state"><p>Run detail view coming soon: {route.runId}</p></div>
+  {:else if route.view === 'step-detail'}
+    <div class="empty-state"><p>Step detail view coming soon: {route.runId} / {route.stepId}</p></div>
+  {/if}
 </main>
