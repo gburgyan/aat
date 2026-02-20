@@ -248,7 +248,7 @@
       {/if}
 
       {#if activeTab === 'resolutions' && step.resolutions}
-        <ResolutionsTable resolutions={step.resolutions} />
+        <ResolutionsTable resolutions={step.resolutions} {runId} />
       {/if}
 
       {#if activeTab === 'selections' && step.selections}

@@ -1,12 +1,19 @@
 <script lang="ts">
   import type { ResolutionDetail } from '../lib/types';
+  import { navigate } from '../lib/router';
   import LlmCallPanel from './LlmCallPanel.svelte';
 
   interface Props {
     resolutions: ResolutionDetail[];
+    runId: string;
   }
 
-  let { resolutions }: Props = $props();
+  let { resolutions, runId }: Props = $props();
+
+  function goToStep(e: MouseEvent, stepId: string) {
+    e.preventDefault();
+    navigate(`/runs/${runId}/steps/${stepId}`);
+  }
 
   function sourceBadgeClass(source: string): string {
     switch (source) {
@@ -66,7 +73,7 @@
         <td class="dt-mono">{formatValue(r.finalValue ?? r.rawValue)}</td>
         <td class="dt-mono dt-muted">
           {#if r.fromStep && r.fromOutput}
-            {r.fromStep}.{r.fromOutput}
+            <a href="/runs/{runId}/steps/{r.fromStep}" class="step-link" onclick={(e: MouseEvent) => goToStep(e, r.fromStep!)}>{r.fromStep}</a>.{r.fromOutput}
           {:else if r.expression}
             {r.expression}
           {/if}
