@@ -132,8 +132,24 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 			}
 
 			// For configurable inputs, also show graph-level default.
-			if ic.CurrentDefault == "" && inp.Default != nil {
-				ic.CurrentDefault = fmt.Sprintf("%v", inp.Default)
+			if ic.CurrentDefault == "" && inp.Default != nil && inp.Default.EffectiveValue() != nil {
+				ic.CurrentDefault = fmt.Sprintf("%v", inp.Default.EffectiveValue())
+			}
+
+			// Populate pool values from graph-level pool defaults.
+			if !ic.HasTemplatePool && inp.Default != nil && len(inp.Default.Pool) > 0 {
+				var poolStrs []string
+				for _, v := range inp.Default.Pool {
+					poolStrs = append(poolStrs, fmt.Sprintf("%v", v))
+				}
+				if len(poolStrs) > 8 {
+					poolStrs = poolStrs[:8]
+				}
+				ic.PoolValues = poolStrs
+				ic.HasTemplatePool = true
+				if ic.CurrentDefault == "" {
+					ic.IsPoolInput = true
+				}
 			}
 
 			// Check for date type.

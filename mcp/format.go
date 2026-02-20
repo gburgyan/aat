@@ -152,8 +152,8 @@ func formatInputTable(inputs []graph.Input) string {
 			required = "no"
 		}
 		def := ""
-		if inp.Default != nil {
-			def = fmt.Sprintf("%v", inp.Default)
+		if inp.Default != nil && inp.Default.HasValue() {
+			def = formatGraphDefault(inp.Default)
 		}
 		desc := inp.Description
 		if hasConstraints {
@@ -165,6 +165,30 @@ func formatInputTable(inputs []graph.Input) string {
 		}
 	}
 	return b.String()
+}
+
+// formatGraphDefault renders a graph InputDefault as a compact display string.
+func formatGraphDefault(d *graph.InputDefault) string {
+	if d == nil {
+		return ""
+	}
+	if d.Value != nil {
+		return fmt.Sprintf("%v", d.Value)
+	}
+	if len(d.Pool) > 0 {
+		var items []string
+		for _, v := range d.Pool {
+			items = append(items, fmt.Sprintf("%v", v))
+		}
+		if len(items) > 3 {
+			items = append(items[:3], "...")
+		}
+		return "[" + strings.Join(items, ", ") + "]"
+	}
+	if d.From != "" {
+		return "from: " + d.From
+	}
+	return ""
 }
 
 // formatConstraintCell formats constraints for a Markdown table cell.

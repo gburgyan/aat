@@ -207,7 +207,7 @@ func TestFormatGraph_ConfigurableAnnotation(t *testing.T) {
 					{Name: "origin", Type: "string"},
 					{Name: "carrier", Type: "string", Optional: true, Configurable: true},
 					{Name: "cabin", Type: "string", Optional: true},
-					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: 1},
+					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: graph.LiteralDefault(1)},
 				},
 				Outputs: []graph.Output{{Name: "results", Type: "string"}},
 			},

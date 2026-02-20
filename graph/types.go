@@ -3,6 +3,8 @@ package graph
 import (
 	"fmt"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Graph is the top-level API graph model parsed from YAML.
@@ -64,13 +66,133 @@ type OASRef struct {
 
 // Input describes a single input parameter for a node.
 type Input struct {
-	Name         string      `yaml:"name"`
-	Type         string      `yaml:"type"`
-	Description  string      `yaml:"description,omitempty"`
-	Optional     bool        `yaml:"optional,omitempty"`
-	Configurable bool        `yaml:"configurable,omitempty"`
-	Default      any         `yaml:"default,omitempty"`
-	Constraints  *Constraint `yaml:"constraints,omitempty"`
+	Name         string        `yaml:"name"`
+	Type         string        `yaml:"type"`
+	Description  string        `yaml:"description,omitempty"`
+	Optional     bool          `yaml:"optional,omitempty"`
+	Configurable bool          `yaml:"configurable,omitempty"`
+	Default      *InputDefault `yaml:"default,omitempty"`
+	Constraints  *Constraint   `yaml:"constraints,omitempty"`
+}
+
+// InputDefault describes a default value specification for a graph input.
+// It supports literal values, pools, from references, and selection configs.
+// Custom UnmarshalYAML/MarshalYAML preserves backward compatibility with
+// `default: "literal"` syntax.
+type InputDefault struct {
+	Value        any                 `yaml:"value,omitempty"`
+	Pool         []any               `yaml:"pool,omitempty"`
+	PoolStrategy *string             `yaml:"poolStrategy,omitempty"`
+	Constraint   string              `yaml:"constraint,omitempty"`
+	From         string              `yaml:"from,omitempty"`
+	FromResolved string              `yaml:"fromResolved,omitempty"`
+	Select       *InputDefaultSelect `yaml:"select,omitempty"`
+}
+
+// InputDefaultSelect describes an array selection within a graph input default.
+// It mirrors plan.SelectionConfig to keep graph as a leaf package.
+type InputDefaultSelect struct {
+	Strategy  string `yaml:"strategy"`
+	Field     string `yaml:"field,omitempty"`
+	Filter    string `yaml:"filter,omitempty"`
+	Index     int    `yaml:"index,omitempty"`
+	SortField string `yaml:"sortField,omitempty"`
+	Prompt    string `yaml:"prompt,omitempty"`
+}
+
+// HasValue reports whether this InputDefault carries any meaningful value.
+func (d *InputDefault) HasValue() bool {
+	if d == nil {
+		return false
+	}
+	return d.Value != nil || len(d.Pool) > 0 || d.From != "" || d.FromResolved != ""
+}
+
+// IsLiteralOnly reports whether this InputDefault is a simple literal value
+// with no pool, from, constraint, or selection.
+func (d *InputDefault) IsLiteralOnly() bool {
+	if d == nil {
+		return false
+	}
+	return d.Value != nil && len(d.Pool) == 0 && d.From == "" && d.FromResolved == "" && d.Select == nil && d.Constraint == ""
+}
+
+// EffectiveValue returns the literal value if this is a literal-only default,
+// or nil otherwise.
+func (d *InputDefault) EffectiveValue() any {
+	if d == nil {
+		return nil
+	}
+	if d.IsLiteralOnly() {
+		return d.Value
+	}
+	return nil
+}
+
+// LiteralDefault creates an InputDefault with a simple literal value.
+// This is a convenience constructor for code that previously assigned
+// `input.Default = someValue`.
+func LiteralDefault(v any) *InputDefault {
+	if v == nil {
+		return nil
+	}
+	return &InputDefault{Value: v}
+}
+
+// UnmarshalYAML handles both scalar literals (`default: "ADT"`) and rich
+// map syntax (`default: {pool: [...], constraint: "..."}`).
+func (d *InputDefault) UnmarshalYAML(value *yaml.Node) error {
+	// Scalar or simple value (string, int, float, bool)
+	if value.Kind == yaml.ScalarNode {
+		var v any
+		if err := value.Decode(&v); err != nil {
+			return err
+		}
+		d.Value = v
+		return nil
+	}
+
+	// Sequence node → treat as pool shorthand
+	if value.Kind == yaml.SequenceNode {
+		var items []any
+		if err := value.Decode(&items); err != nil {
+			return err
+		}
+		d.Pool = items
+		return nil
+	}
+
+	// Map node → try rich struct first
+	if value.Kind == yaml.MappingNode {
+		// Decode into the struct fields using an alias to avoid recursion
+		type inputDefaultAlias InputDefault
+		var alias inputDefaultAlias
+		if err := value.Decode(&alias); err != nil {
+			return err
+		}
+		*d = InputDefault(alias)
+		return nil
+	}
+
+	// Fallback: decode as any
+	var v any
+	if err := value.Decode(&v); err != nil {
+		return err
+	}
+	d.Value = v
+	return nil
+}
+
+// MarshalYAML emits a bare scalar for literal-only defaults, preserving
+// backward-compatible `default: "ADT"` syntax. Rich defaults emit the
+// full map structure.
+func (d InputDefault) MarshalYAML() (interface{}, error) {
+	if d.IsLiteralOnly() {
+		return d.Value, nil
+	}
+	// Use alias to avoid infinite recursion
+	type inputDefaultAlias InputDefault
+	return inputDefaultAlias(d), nil
 }
 
 // Constraint captures validation rules for an input value.

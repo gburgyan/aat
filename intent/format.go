@@ -100,8 +100,8 @@ func FormatGraph(g *graph.Graph) string {
 					opt = " (optional)"
 				}
 				def := ""
-				if inp.Default != nil {
-					def = fmt.Sprintf(" [default: %v]", inp.Default)
+				if inp.Default != nil && inp.Default.HasValue() {
+					def = formatInputDefault(inp.Default)
 				}
 				desc := ""
 				if inp.Description != "" {
@@ -255,6 +255,35 @@ func FormatWorkflowMenu(g *graph.Graph) string {
 	}
 
 	return b.String()
+}
+
+// formatInputDefault renders a graph InputDefault as a compact annotation
+// for LLM prompts. Literal values show as [default: v], pools as [pool: v1, v2, ...],
+// from refs as [from: node.field].
+func formatInputDefault(d *graph.InputDefault) string {
+	if d == nil {
+		return ""
+	}
+	if d.Value != nil {
+		return fmt.Sprintf(" [default: %v]", d.Value)
+	}
+	if len(d.Pool) > 0 {
+		var items []string
+		for _, v := range d.Pool {
+			items = append(items, fmt.Sprintf("%v", v))
+		}
+		if len(items) > 5 {
+			items = append(items[:5], "...")
+		}
+		return fmt.Sprintf(" [pool: %s]", strings.Join(items, ", "))
+	}
+	if d.From != "" {
+		return fmt.Sprintf(" [from: %s]", d.From)
+	}
+	if d.FromResolved != "" {
+		return fmt.Sprintf(" [fromResolved: %s]", d.FromResolved)
+	}
+	return ""
 }
 
 // sortedNodeNames returns graph node names in sorted order.

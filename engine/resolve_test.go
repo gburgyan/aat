@@ -78,7 +78,7 @@ func TestResolveInputs_GraphNodeDefault(t *testing.T) {
 			"target": {
 				Name: "target",
 				Inputs: []graph.Input{
-					{Name: "passengers", Type: "integer", Default: 1},
+					{Name: "passengers", Type: "integer", Default: graph.LiteralDefault(1)},
 				},
 			},
 		},
@@ -198,7 +198,7 @@ func TestResolveInputs_EmptyStepValue_FallsBackToGraphDefault(t *testing.T) {
 			"target": {
 				Name: "target",
 				Inputs: []graph.Input{
-					{Name: "contentSource", Type: "string", Default: "GDS"},
+					{Name: "contentSource", Type: "string", Default: graph.LiteralDefault("GDS")},
 				},
 			},
 		},
@@ -1433,7 +1433,7 @@ func TestResolution_GraphDefault(t *testing.T) {
 		Nodes: map[string]*graph.Node{
 			"target": {
 				Name:   "target",
-				Inputs: []graph.Input{{Name: "count", Type: "integer", Default: 1}},
+				Inputs: []graph.Input{{Name: "count", Type: "integer", Default: graph.LiteralDefault(1)}},
 			},
 		},
 	}

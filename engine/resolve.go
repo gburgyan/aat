@@ -254,14 +254,15 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 			}
 			return nil, nil, res, nil
 		}
-		if input.Default != nil {
+		if input.Default != nil && input.Default.HasValue() {
+			val := input.Default.EffectiveValue()
 			res := &ValueResolution{
 				InputName:  input.Name,
 				Source:     "graph_default",
-				FinalValue: input.Default,
+				FinalValue: val,
 				PoolIndex:  -1,
 			}
-			return input.Default, nil, res, nil
+			return val, nil, res, nil
 		}
 		return nil, nil, nil, fmt.Errorf("required input has no value (empty step value)")
 	}
@@ -391,14 +392,8 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 	}
 
 	// 4. Graph node Input.Default
-	if input.Default != nil {
-		res := &ValueResolution{
-			InputName:  input.Name,
-			Source:     "graph_default",
-			FinalValue: input.Default,
-			PoolIndex:  -1,
-		}
-		return input.Default, nil, res, nil
+	if input.Default != nil && input.Default.HasValue() {
+		return resolveGraphDefault(ctx, input, step, g, state, dedupCache, rctx, ectx, resolvedInputs)
 	}
 
 	// 5. Optional → skip (not included in result)

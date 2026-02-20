@@ -432,7 +432,7 @@ func TestBuildInputContexts_ConfigurableGraphDefault(t *testing.T) {
 				Adapter: "a",
 				Inputs: []graph.Input{
 					{Name: "origin", Type: "string"},
-					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: 1},
+					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: graph.LiteralDefault(1)},
 					{Name: "carrier", Type: "string", Optional: true, Configurable: true},
 				},
 			},

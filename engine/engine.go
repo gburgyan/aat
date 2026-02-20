@@ -83,12 +83,15 @@ func (e *Engine) WithMaxRelaxationDepth(n int) *Engine {
 // Run executes a plan: validates, sorts steps topologically, runs each in order,
 // and executes cleanup on completion.
 func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
-	// 1. Validate plan against graph
+	// 1. Inject implicit dependencies from graph-level default from-refs
+	InjectGraphDefaultDeps(p, e.graph)
+
+	// 2. Validate plan against graph
 	if err := plan.Validate(p, e.graph); err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
-	// 2. Topological sort
+	// 3. Topological sort
 	sorted, err := TopologicalSort(p.Execution.Steps)
 	if err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err}

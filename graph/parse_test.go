@@ -50,7 +50,7 @@ func TestParse_TravelFlow(t *testing.T) {
 	// Check default value
 	cabinClass := search.Inputs[4]
 	assert.Equal(t, "cabinClass", cabinClass.Name)
-	assert.Equal(t, "economy", cabinClass.Default)
+	assert.Equal(t, "economy", cabinClass.Default.EffectiveValue())
 
 	// Check array output with elementFields
 	flights := search.Outputs[0]
@@ -91,11 +91,11 @@ func TestParse_OptionalInputs(t *testing.T) {
 
 	// currency: optional with default
 	assert.True(t, node.Inputs[1].Optional)
-	assert.Equal(t, "USD", node.Inputs[1].Default)
+	assert.Equal(t, "USD", node.Inputs[1].Default.EffectiveValue())
 
 	// priority: optional enum with default
 	assert.True(t, node.Inputs[2].Optional)
-	assert.Equal(t, "normal", node.Inputs[2].Default)
+	assert.Equal(t, "normal", node.Inputs[2].Default.EffectiveValue())
 
 	// notes: optional without default
 	assert.True(t, node.Inputs[3].Optional)
@@ -150,11 +150,11 @@ func TestParse_TravelportBooking(t *testing.T) {
 	assert.Nil(t, search.Inputs[3].Default)
 	assert.Equal(t, "passengers", search.Inputs[4].Name)
 	assert.True(t, search.Inputs[4].Optional)
-	assert.Equal(t, 1, search.Inputs[4].Default)
+	assert.Equal(t, 1, search.Inputs[4].Default.EffectiveValue())
 	assert.Equal(t, "cabinPreference", search.Inputs[5].Name)
 	assert.Equal(t, "enum[economy, premiumEconomy, business, first]", search.Inputs[5].Type)
 	assert.True(t, search.Inputs[5].Optional)
-	assert.Equal(t, "economy", search.Inputs[5].Default)
+	assert.Equal(t, "economy", search.Inputs[5].Default.EffectiveValue())
 
 	// Array output with elementFields
 	offerings := search.Outputs[0]
@@ -237,7 +237,7 @@ func TestParse_TravelportBooking(t *testing.T) {
 	assert.False(t, trav.Inputs[4].Optional)
 	assert.Equal(t, "passengerTypeCode", trav.Inputs[5].Name)
 	assert.True(t, trav.Inputs[5].Optional)
-	assert.Equal(t, "ADT", trav.Inputs[5].Default)
+	assert.Equal(t, "ADT", trav.Inputs[5].Default.EffectiveValue())
 	assert.Len(t, trav.Outputs, 1)
 	assert.Equal(t, "travelerId", trav.Outputs[0].Name)
 

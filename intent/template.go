@@ -175,7 +175,7 @@ func isInputFed(step plan.Step, inp graph.Input) bool {
 	if inp.Configurable {
 		return false
 	}
-	if inp.Optional || inp.Default != nil {
+	if inp.Optional || (inp.Default != nil && inp.Default.HasValue()) {
 		return true
 	}
 	return false

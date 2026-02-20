@@ -476,7 +476,7 @@ func TestUnfedInputsFromTemplate_GraphDefaultSkipped(t *testing.T) {
 				Name: "search",
 				Inputs: []graph.Input{
 					{Name: "origin", Type: "string"},
-					{Name: "passengers", Type: "integer", Default: 1},
+					{Name: "passengers", Type: "integer", Default: graph.LiteralDefault(1)},
 				},
 			},
 		},
@@ -598,7 +598,7 @@ func TestIsInputFed_ConfigurableWithDefault(t *testing.T) {
 				Name: "search",
 				Inputs: []graph.Input{
 					{Name: "origin", Type: "string"},
-					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: 1},
+					{Name: "passengers", Type: "integer", Optional: true, Configurable: true, Default: graph.LiteralDefault(1)},
 				},
 			},
 		},

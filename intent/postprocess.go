@@ -110,6 +110,21 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 			}
 		}
 
+		// 2b. Dependencies from graph-level default from references.
+		// If a step input has no plan value but the graph input has a default
+		// with a from reference, that creates an implicit dependency.
+		node := g.Nodes[step.Node]
+		if node != nil {
+			for _, inp := range node.Inputs {
+				if _, hasPlanValue := step.Values[inp.Name]; hasPlanValue {
+					continue
+				}
+				if inp.Default != nil && inp.Default.From != "" {
+					addStepDeps(required, splitNodeName(inp.Default.From), stepID)
+				}
+			}
+		}
+
 		// 3. Requires/satisfies token deps (ordering constraints).
 		for depNode := range tokenDeps[step.Node] {
 			addStepDeps(required, depNode, stepID)

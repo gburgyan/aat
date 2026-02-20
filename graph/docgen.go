@@ -252,8 +252,8 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 				required = "no"
 			}
 			def := ""
-			if inp.Default != nil {
-				def = fmt.Sprintf("%v", inp.Default)
+			if inp.Default != nil && inp.Default.HasValue() {
+				def = formatDocDefault(inp.Default)
 			}
 			fmt.Fprintf(b, "| %s | %s | %s | %s | %s",
 				inp.Name, inp.Type, required, def, inp.Description)
@@ -385,6 +385,33 @@ func writeCleanupTable(b *strings.Builder, g *Graph) {
 		fmt.Fprintf(b, "| %s | %s | %s |\n", e.node, e.cleansUp, e.desc)
 	}
 	b.WriteString("\n")
+}
+
+// formatDocDefault renders an InputDefault as a compact display string for docs.
+func formatDocDefault(d *InputDefault) string {
+	if d == nil {
+		return ""
+	}
+	if d.Value != nil {
+		return fmt.Sprintf("%v", d.Value)
+	}
+	if len(d.Pool) > 0 {
+		var items []string
+		for _, v := range d.Pool {
+			items = append(items, fmt.Sprintf("%v", v))
+		}
+		if len(items) > 3 {
+			items = append(items[:3], "...")
+		}
+		return "[" + strings.Join(items, ", ") + "]"
+	}
+	if d.From != "" {
+		return "from: " + d.From
+	}
+	if d.FromResolved != "" {
+		return "fromResolved: " + d.FromResolved
+	}
+	return ""
 }
 
 // findEntryNodes returns nodes with no requires tokens (in-degree 0 in the

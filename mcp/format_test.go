@@ -74,7 +74,7 @@ func TestFormatInputTable(t *testing.T) {
 			name: "multiple with optional and default",
 			inputs: []graph.Input{
 				{Name: "origin", Type: "string"},
-				{Name: "maxResults", Type: "integer", Optional: true, Default: 10, Description: "Max results"},
+				{Name: "maxResults", Type: "integer", Optional: true, Default: graph.LiteralDefault(10), Description: "Max results"},
 			},
 			want: "| Name | Type | Required | Default | Description |\n" +
 				"|------|------|----------|---------|-------------|\n" +
