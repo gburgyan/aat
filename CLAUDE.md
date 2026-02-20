@@ -109,8 +109,11 @@ When making design decisions or completing stage milestones, add entries to `doc
 Build the binary and use the travelport config files in `travelport/`:
 
 ```bash
-# Build
-go build -o aat ./cmd/aat/
+# Build (injects version/commit/date automatically)
+make build
+
+# Or without make:
+# go build -o aat ./cmd/aat/
 
 # LLM-generated plan from natural language prompt
 ./aat prompt \

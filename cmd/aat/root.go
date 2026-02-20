@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/gburgyan/aat/internal/version"
 	"github.com/spf13/cobra"
 )
 
@@ -24,9 +25,10 @@ func (e *exitError) Error() string {
 func (e *exitError) Unwrap() error { return e.Err }
 
 var rootCmd = &cobra.Command{
-	Use:   "aat",
-	Short: "Adaptive API Testing",
-	Long:  "AAT is a CLI tool that uses LLM-assisted planning and execution to test API workflows end-to-end.",
+	Use:     "aat",
+	Short:   "Adaptive API Testing",
+	Long:    "AAT is a CLI tool that uses LLM-assisted planning and execution to test API workflows end-to-end.",
+	Version: fmt.Sprintf("%s (commit: %s, built: %s)", version.Version, version.GitCommit, version.BuildDate),
 }
 
 func init() {
