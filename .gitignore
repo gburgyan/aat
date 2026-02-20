@@ -23,6 +23,10 @@ traces/
 *.db-shm
 *.db-wal
 
+# Frontend
+server/web/node_modules/
+server/web/dist/assets/
+
 # Secrets
 .env
 .env.*

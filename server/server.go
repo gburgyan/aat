@@ -17,6 +17,7 @@ type ServerOptions struct {
 	Port       int
 	ArchiveDir string
 	DevMode    bool
+	ViteURL    string // Vite dev server URL for dev proxy (default http://localhost:5173)
 }
 
 // Server is the AAT web API server.
@@ -62,6 +63,13 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/runs/{id}", s.handleGetRun)
 		r.Get("/runs/{id}/steps/{stepId}", s.handleGetStep)
 	})
+
+	// Catch-all: serve frontend (dev proxy or embedded SPA).
+	if s.opts.DevMode {
+		r.NotFound(s.devProxy())
+	} else {
+		r.NotFound(spaFileServer().ServeHTTP)
+	}
 
 	return r
 }

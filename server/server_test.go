@@ -97,6 +97,95 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.Equal(t, "ok", health["status"])
 }
 
+// --- static serving & SPA fallback ---
+
+func TestStaticFileServing(t *testing.T) {
+	s := newTestServer(t.TempDir())
+	rec := serveRequest(s, "GET", "/")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "<html")
+}
+
+func TestSPAFallback(t *testing.T) {
+	s := newTestServer(t.TempDir())
+	rec := serveRequest(s, "GET", "/runs/some-id")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "<html")
+}
+
+func TestAPINotCaughtBySPA(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100)))
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+}
+
+func TestHealthNotCaughtBySPA(t *testing.T) {
+	s := newTestServer(t.TempDir())
+	rec := serveRequest(s, "GET", "/health")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+}
+
+// --- dev proxy ---
+
+func TestDevProxy_NoVite(t *testing.T) {
+	s := NewServer(ServerOptions{
+		ArchiveDir: t.TempDir(),
+		DevMode:    true,
+		ViteURL:    "http://127.0.0.1:1", // unreachable port
+	})
+	rec := serveRequest(s, "GET", "/")
+
+	assert.Equal(t, http.StatusBadGateway, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Vite dev server")
+}
+
+func TestDevProxy_WithMockVite(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><body>vite page</body></html>"))
+	}))
+	defer mock.Close()
+
+	s := NewServer(ServerOptions{
+		ArchiveDir: t.TempDir(),
+		DevMode:    true,
+		ViteURL:    mock.URL,
+	})
+	rec := serveRequest(s, "GET", "/")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "vite page")
+}
+
+func TestDevProxy_APINotProxied(t *testing.T) {
+	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("from vite"))
+	}))
+	defer mock.Close()
+
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100)))
+	s := NewServer(ServerOptions{
+		ArchiveDir: dir,
+		DevMode:    true,
+		ViteURL:    mock.URL,
+	})
+	rec := serveRequest(s, "GET", "/api/runs")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+}
+
+// --- integration ---
+
 func TestIntegration_ListenAndShutdown(t *testing.T) {
 	dir := t.TempDir()
 	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100)))
