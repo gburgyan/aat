@@ -1099,6 +1099,202 @@ func TestHasLLMCalls(t *testing.T) {
 	}
 }
 
+// --- buildExtractions ---
+
+func TestBuildExtractions_NoOutputs(t *testing.T) {
+	a := makeArchive("run-1", "passed", makeStep("node", 200, 100))
+	nodeSteps := nodeToStepMap(a)
+	result := buildExtractions("node", nil, a, nodeSteps)
+	assert.Nil(t, result)
+}
+
+func TestBuildExtractions_OutputsNoConsumers(t *testing.T) {
+	a := makeArchive("run-1", "passed", makeStep("node", 200, 100))
+	nodeSteps := nodeToStepMap(a)
+	outputs := map[string]any{"bookingRef": "ABC123"}
+	result := buildExtractions("node", outputs, a, nodeSteps)
+
+	require.Len(t, result, 1)
+	assert.Equal(t, "bookingRef", result[0].Name)
+	assert.Equal(t, "ABC123", result[0].Value)
+	assert.Nil(t, result[0].Consumers)
+}
+
+func TestBuildExtractions_ResolutionConsumers(t *testing.T) {
+	step1 := makeStepWithID("search", "SearchOffers", 200, 100)
+	step1.Outputs = map[string]any{"offerId": "offer-1"}
+
+	step2 := makeStepWithID("book", "BookOffer", 200, 200)
+	step2.Resolutions = []archive.ValueResolutionRecord{
+		{InputName: "offeringId", Source: "plan_from", FromStep: "search", FromOutput: "offerId"},
+	}
+
+	a := makeArchive("run-1", "passed", step1, step2)
+	nodeSteps := nodeToStepMap(a)
+	result := buildExtractions("search", step1.Outputs, a, nodeSteps)
+
+	require.Len(t, result, 1)
+	assert.Equal(t, "offerId", result[0].Name)
+	require.Len(t, result[0].Consumers, 1)
+	assert.Equal(t, "book", result[0].Consumers[0].StepID)
+	assert.Equal(t, "offeringId", result[0].Consumers[0].InputName)
+	assert.Equal(t, "resolution", result[0].Consumers[0].Via)
+}
+
+func TestBuildExtractions_SelectionConsumers(t *testing.T) {
+	step1 := makeStepWithID("search", "SearchOffers", 200, 100)
+	step1.Outputs = map[string]any{"offerings": []any{"a", "b"}}
+
+	step2 := makeStepWithID("book", "BookOffer", 200, 200)
+	step2.Selections = []archive.SelectionRecord{
+		{InputName: "offeringId", SourceNode: "SearchOffers", SourceField: "offerings", Strategy: "first"},
+	}
+
+	a := makeArchive("run-1", "passed", step1, step2)
+	nodeSteps := nodeToStepMap(a)
+	result := buildExtractions("search", step1.Outputs, a, nodeSteps)
+
+	require.Len(t, result, 1)
+	assert.Equal(t, "offerings", result[0].Name)
+	require.Len(t, result[0].Consumers, 1)
+	assert.Equal(t, "book", result[0].Consumers[0].StepID)
+	assert.Equal(t, "offeringId", result[0].Consumers[0].InputName)
+	assert.Equal(t, "selection", result[0].Consumers[0].Via)
+}
+
+func TestBuildExtractions_MixedConsumers(t *testing.T) {
+	step1 := makeStepWithID("search", "SearchOffers", 200, 100)
+	step1.Outputs = map[string]any{"offerId": "offer-1", "offerings": []any{"a"}}
+
+	step2 := makeStepWithID("book", "BookOffer", 200, 200)
+	step2.Resolutions = []archive.ValueResolutionRecord{
+		{InputName: "offeringId", Source: "plan_from", FromStep: "search", FromOutput: "offerId"},
+	}
+	step2.Selections = []archive.SelectionRecord{
+		{InputName: "productRef", SourceNode: "SearchOffers", SourceField: "offerings", Strategy: "first"},
+	}
+
+	a := makeArchive("run-1", "passed", step1, step2)
+	nodeSteps := nodeToStepMap(a)
+	result := buildExtractions("search", step1.Outputs, a, nodeSteps)
+
+	// Sorted alphabetically: offerId, offerings
+	require.Len(t, result, 2)
+	assert.Equal(t, "offerId", result[0].Name)
+	require.Len(t, result[0].Consumers, 1)
+	assert.Equal(t, "resolution", result[0].Consumers[0].Via)
+
+	assert.Equal(t, "offerings", result[1].Name)
+	require.Len(t, result[1].Consumers, 1)
+	assert.Equal(t, "selection", result[1].Consumers[0].Via)
+}
+
+// --- findPlanStepYAML ---
+
+func TestFindPlanStepYAML_NilPlan(t *testing.T) {
+	a := makeArchive("run-1", "passed", makeStep("node", 200, 100))
+	result := findPlanStepYAML(a, "node", "node", false)
+	assert.Equal(t, "", result)
+}
+
+func TestFindPlanStepYAML_MatchMainStep(t *testing.T) {
+	a := makeArchive("run-1", "passed", makeStep("SearchOffers", 200, 100))
+	a.Metadata.Plan = &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "SearchOffers", Description: "Search for flights"},
+			},
+		},
+	}
+	result := findPlanStepYAML(a, "SearchOffers", "SearchOffers", false)
+	assert.Contains(t, result, "node: SearchOffers")
+	assert.Contains(t, result, "description: Search for flights")
+}
+
+func TestFindPlanStepYAML_MatchStepWithID(t *testing.T) {
+	a := makeArchive("run-1", "passed", makeStepWithID("search_leg1", "SearchOffers", 200, 100))
+	a.Metadata.Plan = &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{ID: "search_leg1", Node: "SearchOffers", Description: "Leg 1"},
+			},
+		},
+	}
+	result := findPlanStepYAML(a, "search_leg1", "SearchOffers", false)
+	assert.Contains(t, result, "id: search_leg1")
+	assert.Contains(t, result, "node: SearchOffers")
+}
+
+func TestFindPlanStepYAML_MatchCleanupStep(t *testing.T) {
+	a := makeArchive("run-1", "passed", makeStep("search", 200, 100))
+	a.Cleanup = []archive.StepRecord{makeStep("cancelWorkbench", 200, 50)}
+	a.Metadata.Plan = &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search"},
+			},
+			Cleanup: []plan.CleanupStep{
+				{Node: "cancelWorkbench", RunOn: "always"},
+			},
+		},
+	}
+	result := findPlanStepYAML(a, "cancelWorkbench", "cancelWorkbench", true)
+	assert.Contains(t, result, "node: cancelWorkbench")
+	assert.Contains(t, result, "runOn: always")
+}
+
+func TestFindPlanStepYAML_NoMatch(t *testing.T) {
+	a := makeArchive("run-1", "passed", makeStep("node", 200, 100))
+	a.Metadata.Plan = &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "OtherNode"},
+			},
+		},
+	}
+	result := findPlanStepYAML(a, "node", "node", false)
+	assert.Equal(t, "", result)
+}
+
+// --- GetStep integration: extractions + plan YAML ---
+
+func TestGetStep_ExtractionsAndPlanYAML(t *testing.T) {
+	dir := t.TempDir()
+
+	step1 := makeStepWithID("search", "SearchOffers", 200, 100)
+	step1.Outputs = map[string]any{"offerId": "offer-1"}
+
+	step2 := makeStepWithID("book", "BookOffer", 200, 200)
+	step2.Resolutions = []archive.ValueResolutionRecord{
+		{InputName: "offeringId", Source: "plan_from", FromStep: "search", FromOutput: "offerId"},
+	}
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step1, step2)
+	a.Metadata.Plan = &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{ID: "search", Node: "SearchOffers", Description: "Search"},
+				{ID: "book", Node: "BookOffer", Description: "Book"},
+			},
+		},
+	}
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "search")
+	require.NoError(t, err)
+
+	// Extractions populated
+	require.Len(t, detail.Extractions, 1)
+	assert.Equal(t, "offerId", detail.Extractions[0].Name)
+	assert.Equal(t, "offer-1", detail.Extractions[0].Value)
+	require.Len(t, detail.Extractions[0].Consumers, 1)
+	assert.Equal(t, "book", detail.Extractions[0].Consumers[0].StepID)
+
+	// Plan YAML populated
+	assert.Contains(t, detail.PlanStepYAML, "node: SearchOffers")
+}
+
 // --- file helpers ---
 
 func createDir(path string) error {

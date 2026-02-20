@@ -80,8 +80,22 @@ export interface StepDetail {
   errorClassification?: ErrorClassDetail;
   expectFailure?: ExpectFailureDetail;
   responseBodyError?: ResponseBodyErrorDetail;
+  extractions?: ExtractionDetail[];
+  planStepYaml?: string;
   prevStepId?: string;
   nextStepId?: string;
+}
+
+export interface ExtractionDetail {
+  name: string;
+  value?: unknown;
+  consumers?: OutputConsumer[];
+}
+
+export interface OutputConsumer {
+  stepId: string;
+  inputName: string;
+  via: string; // "resolution" or "selection"
 }
 
 export interface HeaderEntry {

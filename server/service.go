@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gburgyan/aat/archive"
+	"gopkg.in/yaml.v3"
 )
 
 // ArchiveService provides read access to run archives for the web API.
@@ -98,7 +99,10 @@ func (s *ArchiveService) GetStep(runID, stepID string) (*StepDetail, error) {
 	if !found {
 		return nil, fmt.Errorf("step %q in run %q: %w", stepID, runID, ErrStepNotFound)
 	}
-	detail := toStepDetail(rec, isCleanup, nodeToStepMap(a))
+	nodeSteps := nodeToStepMap(a)
+	detail := toStepDetail(rec, isCleanup, nodeSteps)
+	detail.Extractions = buildExtractions(stepID, rec.Outputs, a, nodeSteps)
+	detail.PlanStepYAML = findPlanStepYAML(a, stepID, rec.Node, isCleanup)
 
 	// Compute prev/next across all steps (steps then cleanup in order).
 	allSteps := make([]string, 0, len(a.Steps)+len(a.Cleanup))
@@ -556,6 +560,111 @@ func toResponseBodyErrorDetail(r *archive.ResponseBodyErrorRecord) *ResponseBody
 		Code:     r.Code,
 		Category: r.Category,
 	}
+}
+
+// --- extraction + plan step helpers ---
+
+// buildExtractions builds a reverse index from a step's outputs to downstream consumers.
+// For each output, it scans all steps' resolutions (FromStep match) and selections
+// (SourceNode match via nodeSteps) to find consumers.
+func buildExtractions(stepID string, outputs map[string]any, a *archive.Archive, nodeSteps map[string]string) []ExtractionDetail {
+	if len(outputs) == 0 {
+		return nil
+	}
+
+	// Collect all steps (main + cleanup) for scanning.
+	allSteps := make([]archive.StepRecord, 0, len(a.Steps)+len(a.Cleanup))
+	allSteps = append(allSteps, a.Steps...)
+	allSteps = append(allSteps, a.Cleanup...)
+
+	// Build output names sorted for deterministic order.
+	outputNames := make([]string, 0, len(outputs))
+	for name := range outputs {
+		outputNames = append(outputNames, name)
+	}
+	sort.Strings(outputNames)
+
+	var extractions []ExtractionDetail
+	for _, name := range outputNames {
+		val := outputs[name]
+		var consumers []OutputConsumer
+
+		for _, other := range allSteps {
+			otherID := effectiveStepID(other)
+
+			// Check resolutions: FromStep matches this step's ID and FromOutput matches output name.
+			for _, res := range other.Resolutions {
+				if res.FromStep == stepID && res.FromOutput == name {
+					consumers = append(consumers, OutputConsumer{
+						StepID:    otherID,
+						InputName: res.InputName,
+						Via:       "resolution",
+					})
+				}
+			}
+
+			// Check selections: SourceNode matches this step's node (via nodeSteps mapping).
+			for _, sel := range other.Selections {
+				if nodeSteps[sel.SourceNode] == stepID && sel.SourceField == name {
+					consumers = append(consumers, OutputConsumer{
+						StepID:    otherID,
+						InputName: sel.InputName,
+						Via:       "selection",
+					})
+				}
+			}
+		}
+
+		extractions = append(extractions, ExtractionDetail{
+			Name:      name,
+			Value:     val,
+			Consumers: consumers,
+		})
+	}
+
+	return extractions
+}
+
+// findPlanStepYAML marshals the plan step matching the given step ID to YAML.
+// Returns empty string if the archive has no plan or no matching step is found.
+func findPlanStepYAML(a *archive.Archive, stepID, nodeName string, isCleanup bool) string {
+	if a.Metadata.Plan == nil {
+		return ""
+	}
+
+	// Search main execution steps by StepID().
+	for _, s := range a.Metadata.Plan.Execution.Steps {
+		if s.StepID() == stepID {
+			return marshalStepYAML(s)
+		}
+	}
+
+	// Search cleanup steps by node name.
+	if isCleanup {
+		for _, c := range a.Metadata.Plan.Execution.Cleanup {
+			if c.Node == nodeName {
+				return marshalStepYAML(c)
+			}
+		}
+	}
+
+	// Search verification steps by node name.
+	for _, v := range a.Metadata.Plan.Execution.Verification {
+		if v.Node == nodeName {
+			return marshalStepYAML(v)
+		}
+	}
+
+	return ""
+}
+
+// marshalStepYAML marshals any step-like value to YAML, returning empty string on error.
+func marshalStepYAML(v any) string {
+	data, err := yaml.Marshal(v)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
 
 // --- existing helpers ---

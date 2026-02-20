@@ -91,8 +91,24 @@ type StepDetail struct {
 	ErrorClassification  *ErrorClassDetail       `json:"errorClassification,omitempty"`
 	ExpectFailure        *ExpectFailureDetail    `json:"expectFailure,omitempty"`
 	ResponseBodyError    *ResponseBodyErrorDetail `json:"responseBodyError,omitempty"`
+	Extractions          []ExtractionDetail      `json:"extractions,omitempty"`
+	PlanStepYAML         string                  `json:"planStepYaml,omitempty"`
 	PrevStepID           string                  `json:"prevStepId,omitempty"`
 	NextStepID           string                  `json:"nextStepId,omitempty"`
+}
+
+// ExtractionDetail captures a single output value and which downstream steps consumed it.
+type ExtractionDetail struct {
+	Name      string           `json:"name"`
+	Value     any              `json:"value,omitempty"`
+	Consumers []OutputConsumer `json:"consumers,omitempty"`
+}
+
+// OutputConsumer identifies a downstream step that consumed an extracted output.
+type OutputConsumer struct {
+	StepID    string `json:"stepId"`
+	InputName string `json:"inputName"`
+	Via       string `json:"via"` // "resolution" or "selection"
 }
 
 // HeaderEntry is a single HTTP header name-value pair.

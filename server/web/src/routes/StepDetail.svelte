@@ -10,6 +10,8 @@
   import AssertionsTable from '../components/AssertionsTable.svelte';
   import ResolutionsTable from '../components/ResolutionsTable.svelte';
   import SelectionsTable from '../components/SelectionsTable.svelte';
+  import ExtractionsTable from '../components/ExtractionsTable.svelte';
+  import YamlViewer from '../components/YamlViewer.svelte';
   import LlmCallPanel from '../components/LlmCallPanel.svelte';
   import ErrorPanel from '../components/ErrorPanel.svelte';
 
@@ -52,6 +54,8 @@
     const t: TabDef[] = [];
     if (step.request) t.push({ id: 'request', label: 'Request' });
     if (step.response) t.push({ id: 'response', label: 'Response' });
+    if (step.extractions && step.extractions.length > 0)
+      t.push({ id: 'extractions', label: `Extractions (${step.extractions.length})` });
     if (step.validation)
       t.push({
         id: 'assertions',
@@ -65,6 +69,8 @@
       t.push({ id: 'llm', label: `LLM (${llmCalls.length})` });
     if (hasErrors)
       t.push({ id: 'errors', label: 'Errors' });
+    if (step.planStepYaml)
+      t.push({ id: 'plan', label: 'Plan' });
     return t;
   });
 
@@ -243,6 +249,10 @@
         {/if}
       {/if}
 
+      {#if activeTab === 'extractions' && step.extractions}
+        <ExtractionsTable extractions={step.extractions} {runId} />
+      {/if}
+
       {#if activeTab === 'assertions' && step.validation}
         <AssertionsTable validation={step.validation} />
       {/if}
@@ -269,6 +279,10 @@
           responseBodyError={step.responseBodyError}
           relaxations={step.relaxations}
         />
+      {/if}
+
+      {#if activeTab === 'plan' && step.planStepYaml}
+        <YamlViewer content={step.planStepYaml} />
       {/if}
     </div>
   {/if}
