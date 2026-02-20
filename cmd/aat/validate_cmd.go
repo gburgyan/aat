@@ -221,7 +221,21 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		})
 	}
 
-	// 5. Workflow compatibility
+	// 5. Template inputs — check required placeholders vs optional graph inputs
+	if err := engine.ValidateTemplateInputs(g, registry); err != nil {
+		sections = append(sections, sectionResult{
+			Name:   "Template inputs",
+			Status: "FAILED",
+			Errors: []string{err.Error()},
+		})
+	} else {
+		sections = append(sections, sectionResult{
+			Name:   "Template inputs",
+			Status: "OK",
+		})
+	}
+
+	// 6. Workflow compatibility
 	if len(g.Workflows) > 0 {
 		graphDir := filepath.Dir(m.GraphPath)
 		compatResult := intent.ValidateWorkflowCompat(g, graphDir)
@@ -248,7 +262,7 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		}
 	}
 
-	// 6. Plans validation
+	// 7. Plans validation
 	if m.PlansDir != "" {
 		graphDir := filepath.Dir(m.GraphPath)
 		wfTemplates := workflowTemplatePaths(g, graphDir)

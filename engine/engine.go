@@ -102,6 +102,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
+	// 3b. Validate template required placeholders vs optional graph inputs
+	if err := ValidateTemplateInputsForPlan(e.graph, e.registry, p); err != nil {
+		return &RunResult{Outcome: OutcomeError, Error: err}
+	}
+
 	// 4. Set plan for constraint-aware resolution
 	e.plan = p
 	defer func() {
