@@ -531,7 +531,7 @@ func TestComposeWorkflowTemplate_WithAddon(t *testing.T) {
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Wire: map[string]string{
 				"specialInput": "MANUAL",
 			},
@@ -597,13 +597,13 @@ func TestComposeWorkflowTemplate_AddonAfterNotInBase(t *testing.T) {
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "nonexistentNode",
+			After:    graph.AfterSpec{"nonexistentNode"},
 		},
 	}
 
 	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found in base plan steps")
+	assert.Contains(t, err.Error(), "found in base plan steps")
 }
 
 func TestComposeWorkflowTemplate_AddonNoTemplate(t *testing.T) {
@@ -617,7 +617,7 @@ func TestComposeWorkflowTemplate_AddonNoTemplate(t *testing.T) {
 		{
 			Name:  "BadAddon",
 			Kind:  "addon",
-			After: "book",
+			After: graph.AfterSpec{"book"},
 			// No Template
 		},
 	}
@@ -691,13 +691,13 @@ func TestComposeWorkflowTemplate_AutoChainSameAfterNode(t *testing.T) {
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 		{
 			Name:     "Addon2",
 			Kind:     "addon",
 			Template: "testdata/compose/addon2.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -739,13 +739,13 @@ func TestComposeWorkflowTemplate_DifferentAfterNodesNotChained(t *testing.T) {
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 		{
 			Name:     "Addon2",
 			Kind:     "addon",
 			Template: "testdata/compose/addon2.yaml",
-			After:    "search",
+			After:    graph.AfterSpec{"search"},
 		},
 	}
 
@@ -785,19 +785,19 @@ func TestComposeWorkflowTemplate_ThreeAddonsChained(t *testing.T) {
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 		{
 			Name:     "Addon2",
 			Kind:     "addon",
 			Template: "testdata/compose/addon2.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 		{
 			Name:     "Addon3",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -840,14 +840,14 @@ func TestComposeWorkflowTemplate_PrioritySortsAddons(t *testing.T) {
 			Name:     "Addon2",
 			Kind:     "addon",
 			Template: "testdata/compose/addon2.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Priority: 90,
 		},
 		{
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Priority: 20,
 		},
 	}
@@ -891,14 +891,14 @@ func TestComposeWorkflowTemplate_EqualPriorityPreservesOrder(t *testing.T) {
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Priority: 10,
 		},
 		{
 			Name:     "Addon2",
 			Kind:     "addon",
 			Template: "testdata/compose/addon2.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Priority: 10,
 		},
 	}
@@ -934,13 +934,13 @@ func TestComposeWorkflowTemplate_ZeroPriorityDefault(t *testing.T) {
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 		{
 			Name:     "Addon2",
 			Kind:     "addon",
 			Template: "testdata/compose/addon2.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -974,14 +974,14 @@ func TestComposeWorkflowTemplate_DoesNotMutateCallerSlice(t *testing.T) {
 			Name:     "Addon2",
 			Kind:     "addon",
 			Template: "testdata/compose/addon2.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Priority: 90,
 		},
 		{
 			Name:     "Addon",
 			Kind:     "addon",
 			Template: "testdata/compose/addon.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Priority: 20,
 		},
 	}
@@ -998,6 +998,159 @@ func TestComposeWorkflowTemplate_DoesNotMutateCallerSlice(t *testing.T) {
 	assert.Equal(t, originalSecond, addons[1].Name)
 }
 
+// --- resolveAfterWire ---
+
+func TestResolveAfterWire(t *testing.T) {
+	tests := []struct {
+		name         string
+		wire         map[string]string
+		matchedAfter string
+		expected     map[string]string
+	}{
+		{
+			name:         "nil wire",
+			wire:         nil,
+			matchedAfter: "book",
+			expected:     nil,
+		},
+		{
+			name:         "no $after refs",
+			wire:         map[string]string{"workbenchId": "book.workbenchId"},
+			matchedAfter: "priceOffer",
+			expected:     map[string]string{"workbenchId": "book.workbenchId"},
+		},
+		{
+			name:         "$after substitution",
+			wire:         map[string]string{"offerListIdentifier": "$after.offerIdentifierValue"},
+			matchedAfter: "priceOfferReference",
+			expected:     map[string]string{"offerListIdentifier": "priceOfferReference.offerIdentifierValue"},
+		},
+		{
+			name:         "mixed $after and regular",
+			wire:         map[string]string{"a": "$after.x", "b": "explicit.y", "c": "MANUAL"},
+			matchedAfter: "nodeA",
+			expected:     map[string]string{"a": "nodeA.x", "b": "explicit.y", "c": "MANUAL"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := resolveAfterWire(tt.wire, tt.matchedAfter)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+// --- Multi-After composition tests ---
+
+func TestComposeWorkflowTemplate_MultiAfterFirstMatch(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+	// Addon with multi-after: [search, book] — search is first and present in base.
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    graph.AfterSpec{"search", "book"},
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+
+	// Should splice after "search" (first match).
+	require.Len(t, p.Execution.Steps, 5)
+	assert.Equal(t, "search", p.Execution.Steps[0].Node)
+	assert.Equal(t, "addon1", p.Execution.Steps[1].Node)
+	assert.Contains(t, p.Execution.Steps[1].DependsOn, "search")
+}
+
+func TestComposeWorkflowTemplate_MultiAfterSecondMatch(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+	// Addon with multi-after: [nonexistent, book] — only book is present.
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    graph.AfterSpec{"nonexistent", "book"},
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+
+	// Should splice after "book" (second match).
+	require.Len(t, p.Execution.Steps, 5)
+	assert.Equal(t, "book", p.Execution.Steps[1].Node)
+	assert.Equal(t, "addon1", p.Execution.Steps[2].Node)
+	assert.Contains(t, p.Execution.Steps[2].DependsOn, "book")
+}
+
+func TestComposeWorkflowTemplate_MultiAfterNoneFound(t *testing.T) {
+	g := buildComposeTestGraph()
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    graph.AfterSpec{"missing1", "missing2"},
+		},
+	}
+
+	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "found in base plan steps")
+}
+
+func TestComposeWorkflowTemplate_AfterWireSubstitution(t *testing.T) {
+	g := buildComposeTestGraph()
+	// Add an offerIdentifierValue output to the book node for wire testing.
+	g.Nodes["book"].Outputs = append(g.Nodes["book"].Outputs,
+		graph.Output{Name: "offerIdentifierValue", Type: "string"})
+
+	base := graph.Workflow{
+		Name:     "Base",
+		Template: "testdata/compose/parent.yaml",
+	}
+	addons := []graph.Workflow{
+		{
+			Name:     "Addon",
+			Kind:     "addon",
+			Template: "testdata/compose/addon.yaml",
+			After:    graph.AfterSpec{"book"},
+			Wire: map[string]string{
+				"workbenchId":  "$after.offerIdentifierValue",
+				"specialInput": "MANUAL",
+			},
+		},
+	}
+
+	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	require.NoError(t, err)
+
+	addon1 := p.Execution.Steps[2]
+	// $after.offerIdentifierValue resolved to book.offerIdentifierValue.
+	assert.Equal(t, "book.offerIdentifierValue", addon1.Values["workbenchId"].From)
+	// MANUAL should still clear the value.
+	assert.Nil(t, addon1.Values["specialInput"].Default)
+	assert.Empty(t, addon1.Values["specialInput"].From)
+}
+
 // buildComposeTestGraph creates a synthetic graph for composition tests.
 func buildComposeTestGraph() *graph.Graph {
 	return &graph.Graph{
@@ -1007,13 +1160,13 @@ func buildComposeTestGraph() *graph.Graph {
 				Name:     "Addon",
 				Kind:     "addon",
 				Template: "testdata/compose/addon.yaml",
-				After:    "book",
+				After:    graph.AfterSpec{"book"},
 			},
 			{
 				Name:     "Addon2",
 				Kind:     "addon",
 				Template: "testdata/compose/addon2.yaml",
-				After:    "book",
+				After:    graph.AfterSpec{"book"},
 			},
 		},
 		Nodes: map[string]*graph.Node{

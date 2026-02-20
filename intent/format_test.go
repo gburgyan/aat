@@ -241,7 +241,7 @@ func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
 				Name:     "Seat Selection",
 				Kind:     "addon",
 				Template: "plans/seat.yaml",
-				After:    "book",
+				After:    graph.AfterSpec{"book"},
 			},
 		},
 		Nodes: map[string]*graph.Node{},
@@ -306,8 +306,8 @@ func TestFormatWorkflowMenu_AddonsShowAfter(t *testing.T) {
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
 			{Name: "Main", Template: "plans/main.yaml", Description: "Main flow"},
-			{Name: "Seat Selection", Kind: "addon", Template: "plans/seat.yaml", After: "commitBooking", Description: "Add seat preferences"},
-			{Name: "Ancillary", Kind: "addon", Template: "plans/anc.yaml", After: "addTraveler", Description: "Add ancillaries"},
+			{Name: "Seat Selection", Kind: "addon", Template: "plans/seat.yaml", After: graph.AfterSpec{"commitBooking"}, Description: "Add seat preferences"},
+			{Name: "Ancillary", Kind: "addon", Template: "plans/anc.yaml", After: graph.AfterSpec{"addTraveler"}, Description: "Add ancillaries"},
 		},
 		Nodes: map[string]*graph.Node{},
 	}

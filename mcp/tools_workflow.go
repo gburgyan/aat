@@ -74,8 +74,8 @@ func (s *Server) handleListWorkflows(_ context.Context, _ mcp.CallToolRequest) (
 		if wf.Template != "" {
 			fmt.Fprintf(&b, "- Template: `%s`\n", wf.Template)
 		}
-		if wf.After != "" {
-			fmt.Fprintf(&b, "- After: `%s`\n", wf.After)
+		if wf.After.IsSet() {
+			fmt.Fprintf(&b, "- After: `%s`\n", wf.After.String())
 		}
 		if wf.Priority != 0 {
 			fmt.Fprintf(&b, "- Priority: %d\n", wf.Priority)

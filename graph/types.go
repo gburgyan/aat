@@ -25,13 +25,80 @@ type Graph struct {
 	SatisfiersByToken map[string][]string `yaml:"-"` // requirement token → node names that satisfy it
 }
 
+// AfterSpec holds one or more node names that an addon can splice after.
+// YAML accepts both scalar ("nodeA") and list (["nodeA", "nodeB"]) forms.
+// During composition the first matching node in the base plan wins.
+type AfterSpec []string
+
+// UnmarshalYAML accepts both scalar and list forms.
+func (a *AfterSpec) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind == yaml.ScalarNode {
+		var s string
+		if err := value.Decode(&s); err != nil {
+			return err
+		}
+		if s != "" {
+			*a = AfterSpec{s}
+		}
+		return nil
+	}
+	if value.Kind == yaml.SequenceNode {
+		var items []string
+		if err := value.Decode(&items); err != nil {
+			return err
+		}
+		*a = AfterSpec(items)
+		return nil
+	}
+	return fmt.Errorf("after: expected string or list, got %v", value.Kind)
+}
+
+// MarshalYAML emits a scalar for single value, list for multiple.
+func (a AfterSpec) MarshalYAML() (interface{}, error) {
+	if len(a) == 1 {
+		return a[0], nil
+	}
+	return []string(a), nil
+}
+
+// First returns the first value or empty string.
+func (a AfterSpec) First() string {
+	if len(a) == 0 {
+		return ""
+	}
+	return a[0]
+}
+
+// IsSet returns true if at least one value is present.
+func (a AfterSpec) IsSet() bool {
+	return len(a) > 0
+}
+
+// Contains returns true if nodeName is in the spec.
+func (a AfterSpec) Contains(nodeName string) bool {
+	for _, v := range a {
+		if v == nodeName {
+			return true
+		}
+	}
+	return false
+}
+
+// String returns a human-readable representation.
+func (a AfterSpec) String() string {
+	if len(a) == 1 {
+		return a[0]
+	}
+	return strings.Join([]string(a), ", ")
+}
+
 // Workflow describes a named workflow (sequence of operations) within the graph.
 type Workflow struct {
 	Name        string            `yaml:"name"`
 	Description string            `yaml:"description,omitempty"`
 	Kind        string            `yaml:"kind,omitempty"`     // "addon" for sub-workflows that compose into main workflows
 	Template    string            `yaml:"template,omitempty"` // path to plan template YAML (relative to graph file)
-	After       string            `yaml:"after,omitempty"`    // addon: node to splice after in the base workflow
+	After       AfterSpec         `yaml:"after,omitempty"`    // addon: node(s) to splice after in the base workflow
 	Wire        map[string]string `yaml:"wire,omitempty"`     // addon: default AUTOWIRE overrides
 	Priority    int               `yaml:"priority,omitempty"` // addon: composition ordering (lower = earlier, default 0)
 }

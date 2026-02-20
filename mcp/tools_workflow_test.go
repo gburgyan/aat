@@ -23,7 +23,7 @@ func workflowTestGraph() *graph.Graph {
 				Kind:        "addon",
 				Description: "Select a seat",
 				Template:    "plans/seat.yaml",
-				After:       "book",
+				After:       graph.AfterSpec{"book"},
 				Wire:        map[string]string{"workbenchId": "book.workbenchId"},
 			},
 		},

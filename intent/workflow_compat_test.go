@@ -102,8 +102,17 @@ func validateCompatInMemory(g *graph.Graph, plans map[string]*plan.Plan) *Workfl
 				continue
 			}
 
-			if addon.After != "" && findStepByNode(basePlan, addon.After) == "" {
-				continue
+			if addon.After.IsSet() {
+				found := false
+				for _, afterNode := range addon.After {
+					if findStepByNode(basePlan, afterNode) != "" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue
+				}
 			}
 
 			outputMap := buildOutputMap(basePlan, g)
@@ -136,7 +145,7 @@ func TestValidateWorkflowCompat_AllSatisfied(t *testing.T) {
 			Name:     "AddonWired",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_wired.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -153,7 +162,7 @@ func TestValidateWorkflowCompat_UnfedStructuralInput(t *testing.T) {
 			Name:     "AddonUnfed",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_unfed.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -180,7 +189,7 @@ func TestValidateWorkflowCompat_ValueInputNotFlagged(t *testing.T) {
 			Name:     "AddonValue",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_value_input.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -207,7 +216,7 @@ func TestValidateWorkflowCompat_ElementFieldProducible(t *testing.T) {
 			Name:     "AddonEF",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_elementfield.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -226,7 +235,7 @@ func TestValidateWorkflowCompat_WireOverrideSatisfied(t *testing.T) {
 			Name:     "AddonWired",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_unfed.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Wire: map[string]string{
 				"specialInput": "search.token",
 			},
@@ -245,7 +254,7 @@ func TestValidateWorkflowCompat_ManualWireNotFlagged(t *testing.T) {
 			Name:     "AddonManual",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_unfed.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 			Wire: map[string]string{
 				"specialInput": "MANUAL",
 			},
@@ -264,7 +273,7 @@ func TestValidateWorkflowCompat_AddonNotInBase(t *testing.T) {
 			Name:     "AddonWired",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_wired.yaml",
-			After:    "book", // book is NOT in base_partial
+			After:    graph.AfterSpec{"book"}, // book is NOT in base_partial
 		},
 	}
 
@@ -281,7 +290,7 @@ func TestValidateWorkflowCompat_MultipleBasesPartialCompat(t *testing.T) {
 			Name:     "AddonWired",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_wired.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -299,7 +308,7 @@ func TestValidateWorkflowCompat_TemplateLoadError(t *testing.T) {
 			Name:     "AddonWired",
 			Kind:     "addon",
 			Template: "testdata/compat/addon_wired.yaml",
-			After:    "book",
+			After:    graph.AfterSpec{"book"},
 		},
 	}
 
@@ -330,7 +339,7 @@ func TestValidateWorkflowCompat_NoAddons(t *testing.T) {
 func TestValidateWorkflowCompat_NoBases(t *testing.T) {
 	g := buildCompatTestGraph()
 	g.Workflows = []graph.Workflow{
-		{Name: "Addon", Kind: "addon", Template: "testdata/compat/addon_wired.yaml", After: "book"},
+		{Name: "Addon", Kind: "addon", Template: "testdata/compat/addon_wired.yaml", After: graph.AfterSpec{"book"}},
 	}
 
 	result := ValidateWorkflowCompat(g, ".")
@@ -463,7 +472,7 @@ func TestValidateWorkflowCompat_InMemory_AllSatisfied(t *testing.T) {
 	g := buildCompatTestGraph()
 	g.Workflows = []graph.Workflow{
 		{Name: "Base", Template: "base"},
-		{Name: "Addon", Kind: "addon", Template: "addon", After: "book"},
+		{Name: "Addon", Kind: "addon", Template: "addon", After: graph.AfterSpec{"book"}},
 	}
 
 	plans := map[string]*plan.Plan{
@@ -494,7 +503,7 @@ func TestValidateWorkflowCompat_InMemory_UnfedStructural(t *testing.T) {
 	g := buildCompatTestGraph()
 	g.Workflows = []graph.Workflow{
 		{Name: "Base", Template: "base"},
-		{Name: "Addon", Kind: "addon", Template: "addon", After: "search"},
+		{Name: "Addon", Kind: "addon", Template: "addon", After: graph.AfterSpec{"search"}},
 	}
 
 	plans := map[string]*plan.Plan{
@@ -532,7 +541,7 @@ func TestValidateWorkflowCompat_InMemory_ValueInputFiltered(t *testing.T) {
 	g := buildCompatTestGraph()
 	g.Workflows = []graph.Workflow{
 		{Name: "Base", Template: "base"},
-		{Name: "Addon", Kind: "addon", Template: "addon", After: "book"},
+		{Name: "Addon", Kind: "addon", Template: "addon", After: graph.AfterSpec{"book"}},
 	}
 
 	plans := map[string]*plan.Plan{

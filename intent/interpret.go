@@ -265,13 +265,12 @@ func buildAndFillPlan(
 
 	if len(ws.Addons) > 0 {
 		composed, composeErr := ComposeWithAddons(wf, ws.Addons, req.Graph, req.GraphDir)
-		if composeErr == nil {
-			tpl = composed
-			templatePath = wf.Template
+		if composeErr != nil {
+			return nil, nil, fmt.Errorf("intent: composing addons for %q: %w", ws.Workflow, composeErr)
 		}
-	}
-
-	if tpl == nil {
+		tpl = composed
+		templatePath = wf.Template
+	} else {
 		loaded, loadErr := LoadWorkflowTemplate(wf.Template, req.GraphDir, req.Graph)
 		if loadErr != nil {
 			return nil, nil, fmt.Errorf("intent: loading template for %q: %w", ws.Workflow, loadErr)

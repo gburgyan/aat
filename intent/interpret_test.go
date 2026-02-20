@@ -851,7 +851,7 @@ func TestValidateWorkflowSelection_DuplicateAddon(t *testing.T) {
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
 			{Name: "Main", Template: "plans/main.yaml"},
-			{Name: "Seat", Kind: "addon", Template: "plans/seat.yaml", After: "book"},
+			{Name: "Seat", Kind: "addon", Template: "plans/seat.yaml", After: graph.AfterSpec{"book"}},
 		},
 		Nodes: map[string]*graph.Node{},
 	}
@@ -871,7 +871,7 @@ func TestValidateWorkflowSelection_AddonSelectedAsBase(t *testing.T) {
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
 			{Name: "Main", Template: "plans/main.yaml"},
-			{Name: "Seat", Kind: "addon", Template: "plans/seat.yaml", After: "book"},
+			{Name: "Seat", Kind: "addon", Template: "plans/seat.yaml", After: graph.AfterSpec{"book"}},
 		},
 		Nodes: map[string]*graph.Node{},
 	}

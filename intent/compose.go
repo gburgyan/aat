@@ -54,16 +54,25 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 			return nil, fmt.Errorf("compose: addon workflow %q has no template", addon.Name)
 		}
 
-		// Find the insertion point. If a previous addon used the same after
-		// node, chain after that addon's last step instead.
+		// Find the insertion point. Try each After value; use first match.
+		// If a previous addon used the same after node, chain after that
+		// addon's last step instead.
 		var afterStep string
-		if lastStep, ok := lastStepByAfter[addon.After]; ok {
-			afterStep = lastStep
-		} else {
-			afterStep = findStepByNode(parent, addon.After)
+		var matchedAfter string
+		for _, afterNode := range addon.After {
+			if lastStep, ok := lastStepByAfter[afterNode]; ok {
+				afterStep = lastStep
+				matchedAfter = afterNode
+				break
+			}
+			if step := findStepByNode(parent, afterNode); step != "" {
+				afterStep = step
+				matchedAfter = afterNode
+				break
+			}
 		}
 		if afterStep == "" {
-			return nil, fmt.Errorf("compose: addon %q: after node %q not found in base plan steps", addon.Name, addon.After)
+			return nil, fmt.Errorf("compose: addon %q: none of after nodes %v found in base plan steps", addon.Name, []string(addon.After))
 		}
 
 		sub, err := LoadWorkflowTemplate(addon.Template, graphDir, g)
@@ -77,8 +86,11 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 		// Prefix sub-workflow step IDs and rewrite internal references.
 		prefixStepRefs(sub, prefix)
 
+		// Resolve $after. wire references to the matched node name.
+		resolvedWire := resolveAfterWire(addon.Wire, matchedAfter)
+
 		// Auto-wire AUTOWIRE values in sub-workflow steps using addon's Wire.
-		autoWirePlaceholders(sub, outputMap, addon.Wire, g)
+		autoWirePlaceholders(sub, outputMap, resolvedWire, g)
 
 		// Add insertion-point dependency to sub-workflow root steps.
 		addInsertionDeps(sub, afterStep)
@@ -94,7 +106,7 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 
 		// Record the last step of this addon for auto-chaining.
 		lastAddonStep := sub.Execution.Steps[len(sub.Execution.Steps)-1].StepID()
-		lastStepByAfter[addon.After] = lastAddonStep
+		lastStepByAfter[matchedAfter] = lastAddonStep
 	}
 
 	return parent, nil
@@ -112,7 +124,7 @@ func ComposeWithAddons(base graph.Workflow, addonNames []string, g *graph.Graph,
 		if !addon.IsAddon() {
 			return nil, fmt.Errorf("compose: workflow %q is not an addon", name)
 		}
-		if addon.After == "" {
+		if !addon.After.IsSet() {
 			return nil, fmt.Errorf("compose: addon %q has no after field", name)
 		}
 		addons = append(addons, addon)
@@ -380,6 +392,26 @@ func fixFromDependencies(sub *plan.Plan) {
 			}
 		}
 	}
+}
+
+// resolveAfterWire creates a copy of the wire map with $after. prefixes replaced
+// by the actual matched node name. For example, if matchedAfter is "priceOfferReference"
+// and wire has {"offerListIdentifier": "$after.offerIdentifierValue"}, the result
+// will have {"offerListIdentifier": "priceOfferReference.offerIdentifierValue"}.
+// Non-$after entries are passed through unchanged.
+func resolveAfterWire(wire map[string]string, matchedAfter string) map[string]string {
+	if len(wire) == 0 {
+		return wire
+	}
+	resolved := make(map[string]string, len(wire))
+	for k, v := range wire {
+		if strings.HasPrefix(v, "$after.") {
+			resolved[k] = matchedAfter + v[len("$after"):]
+		} else {
+			resolved[k] = v
+		}
+	}
+	return resolved
 }
 
 // ResolveWorkflowDir returns the absolute directory containing the graph file,

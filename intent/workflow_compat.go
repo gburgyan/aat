@@ -188,9 +188,18 @@ func ValidateWorkflowCompat(g *graph.Graph, graphDir string) *WorkflowCompatResu
 				continue // template failed to load
 			}
 
-			// Check if this addon's After node exists in the base plan.
-			if addon.After != "" && findStepByNode(basePlan, addon.After) == "" {
-				continue // addon not compatible with this base
+			// Check if any of this addon's After nodes exist in the base plan.
+			if addon.After.IsSet() {
+				found := false
+				for _, afterNode := range addon.After {
+					if findStepByNode(basePlan, afterNode) != "" {
+						found = true
+						break
+					}
+				}
+				if !found {
+					continue // addon not compatible with this base
+				}
 			}
 
 			// Build output map from base plan.

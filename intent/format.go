@@ -41,8 +41,8 @@ func FormatGraph(g *graph.Graph) string {
 				fmt.Fprintf(&b, ": %s", wf.Description)
 			}
 			b.WriteString("\n")
-			if wf.After != "" {
-				fmt.Fprintf(&b, "  After: %s\n", wf.After)
+			if wf.After.IsSet() {
+				fmt.Fprintf(&b, "  After: %s\n", wf.After.String())
 			}
 			if len(wf.Wire) > 0 {
 				b.WriteString("  Wire:")
@@ -241,7 +241,7 @@ func FormatWorkflowMenu(g *graph.Graph) string {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(&b, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After, desc)
+		fmt.Fprintf(&b, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After.String(), desc)
 	}
 	if hasAddon {
 		b.WriteString("\n")

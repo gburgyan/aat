@@ -210,12 +210,14 @@ func ValidateWarnings(g *Graph) []string {
 		}
 
 		// Validate After field
-		if wf.After != "" {
+		if wf.After.IsSet() {
 			if !wf.IsAddon() {
 				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): after is set but kind is not \"addon\"", i, wf.Name))
 			}
-			if g.Nodes[wf.After] == nil {
-				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): after references unknown node %q", i, wf.Name, wf.After))
+			for _, afterNode := range wf.After {
+				if g.Nodes[afterNode] == nil {
+					warnings = append(warnings, fmt.Sprintf("workflow %d (%q): after references unknown node %q", i, wf.Name, afterNode))
+				}
 			}
 		}
 	}

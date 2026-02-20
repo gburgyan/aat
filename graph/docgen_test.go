@@ -325,7 +325,7 @@ func TestGenerateDocs_WithWorkflows(t *testing.T) {
 			{
 				Name:        "Addon Flow",
 				Kind:        "addon",
-				After:       "createUser",
+				After:       AfterSpec{"createUser"},
 				Description: "Addon that splices after createUser",
 			},
 		},

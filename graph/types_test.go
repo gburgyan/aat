@@ -309,6 +309,74 @@ func TestInputDefault_HelperMethods(t *testing.T) {
 	})
 }
 
+// --- AfterSpec ---
+
+func TestAfterSpec_UnmarshalYAML_Scalar(t *testing.T) {
+	var wf Workflow
+	err := yaml.Unmarshal([]byte("name: test\nafter: book\n"), &wf)
+	require.NoError(t, err)
+	assert.Equal(t, AfterSpec{"book"}, wf.After)
+}
+
+func TestAfterSpec_UnmarshalYAML_List(t *testing.T) {
+	var wf Workflow
+	err := yaml.Unmarshal([]byte("name: test\nafter: [priceOfferFullPayload, priceOfferReference]\n"), &wf)
+	require.NoError(t, err)
+	assert.Equal(t, AfterSpec{"priceOfferFullPayload", "priceOfferReference"}, wf.After)
+}
+
+func TestAfterSpec_UnmarshalYAML_Empty(t *testing.T) {
+	var wf Workflow
+	err := yaml.Unmarshal([]byte("name: test\n"), &wf)
+	require.NoError(t, err)
+	assert.False(t, wf.After.IsSet())
+}
+
+func TestAfterSpec_MarshalYAML_Scalar(t *testing.T) {
+	wf := Workflow{Name: "test", After: AfterSpec{"book"}}
+	data, err := yaml.Marshal(&wf)
+	require.NoError(t, err)
+
+	var got Workflow
+	err = yaml.Unmarshal(data, &got)
+	require.NoError(t, err)
+	assert.Equal(t, AfterSpec{"book"}, got.After)
+}
+
+func TestAfterSpec_MarshalYAML_List(t *testing.T) {
+	wf := Workflow{Name: "test", After: AfterSpec{"nodeA", "nodeB"}}
+	data, err := yaml.Marshal(&wf)
+	require.NoError(t, err)
+
+	var got Workflow
+	err = yaml.Unmarshal(data, &got)
+	require.NoError(t, err)
+	assert.Equal(t, AfterSpec{"nodeA", "nodeB"}, got.After)
+}
+
+func TestAfterSpec_Helpers(t *testing.T) {
+	empty := AfterSpec{}
+	single := AfterSpec{"book"}
+	multi := AfterSpec{"priceOfferFullPayload", "priceOfferReference"}
+
+	assert.False(t, empty.IsSet())
+	assert.True(t, single.IsSet())
+	assert.True(t, multi.IsSet())
+
+	assert.Equal(t, "", empty.First())
+	assert.Equal(t, "book", single.First())
+	assert.Equal(t, "priceOfferFullPayload", multi.First())
+
+	assert.False(t, empty.Contains("book"))
+	assert.True(t, single.Contains("book"))
+	assert.False(t, single.Contains("other"))
+	assert.True(t, multi.Contains("priceOfferReference"))
+	assert.False(t, multi.Contains("book"))
+
+	assert.Equal(t, "book", single.String())
+	assert.Equal(t, "priceOfferFullPayload, priceOfferReference", multi.String())
+}
+
 func TestInputDefault_RoundTrip(t *testing.T) {
 	tests := []struct {
 		name    string

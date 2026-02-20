@@ -57,8 +57,8 @@ func GenerateDocs(g *Graph, opts *DocGenOptions) string {
 			if wf.Description != "" {
 				fmt.Fprintf(&b, "%s\n\n", wf.Description)
 			}
-			if wf.IsAddon() && wf.After != "" {
-				fmt.Fprintf(&b, "**Addon:** splices after `%s`\n\n", wf.After)
+			if wf.IsAddon() && wf.After.IsSet() {
+				fmt.Fprintf(&b, "**Addon:** splices after `%s`\n\n", wf.After.String())
 			}
 		}
 	}
@@ -145,8 +145,8 @@ func GenerateDocsSplit(g *Graph, opts *DocGenOptions) map[string]string {
 			if wf.Description != "" {
 				fmt.Fprintf(&idx, "%s\n\n", wf.Description)
 			}
-			if wf.IsAddon() && wf.After != "" {
-				fmt.Fprintf(&idx, "**Addon:** splices after `%s`\n\n", wf.After)
+			if wf.IsAddon() && wf.After.IsSet() {
+				fmt.Fprintf(&idx, "**Addon:** splices after `%s`\n\n", wf.After.String())
 			}
 		}
 	}

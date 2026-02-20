@@ -225,7 +225,7 @@ func TestValidateWarnings_AddonWithValidAfter(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Workflows: []Workflow{
-			{Name: "Addon", Kind: "addon", After: "n1", Template: "plans/addon.yaml"},
+			{Name: "Addon", Kind: "addon", After: AfterSpec{"n1"}, Template: "plans/addon.yaml"},
 		},
 		Nodes: map[string]*Node{
 			"n1": {Name: "n1", Adapter: "a"},
@@ -239,7 +239,7 @@ func TestValidateWarnings_AddonAfterUnknownNode(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Workflows: []Workflow{
-			{Name: "Addon", Kind: "addon", After: "missing", Template: "plans/addon.yaml"},
+			{Name: "Addon", Kind: "addon", After: AfterSpec{"missing"}, Template: "plans/addon.yaml"},
 		},
 		Nodes: map[string]*Node{
 			"n1": {Name: "n1", Adapter: "a"},
@@ -255,7 +255,7 @@ func TestValidateWarnings_AfterOnNonAddon(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Workflows: []Workflow{
-			{Name: "Main", After: "n1", Template: "plans/main.yaml"},
+			{Name: "Main", After: AfterSpec{"n1"}, Template: "plans/main.yaml"},
 		},
 		Nodes: map[string]*Node{
 			"n1": {Name: "n1", Adapter: "a"},
@@ -600,7 +600,7 @@ func TestValidateWarnings_NegativePriority(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Workflows: []Workflow{
-			{Name: "Bad", Kind: "addon", Priority: -1, After: "a", Template: "plans/bad.yaml"},
+			{Name: "Bad", Kind: "addon", Priority: -1, After: AfterSpec{"a"}, Template: "plans/bad.yaml"},
 		},
 		Nodes: map[string]*Node{
 			"a": {Name: "a", Adapter: "a"},
@@ -615,7 +615,7 @@ func TestValidateWarnings_ZeroPriorityNoWarning(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Workflows: []Workflow{
-			{Name: "OK", Kind: "addon", Priority: 0, After: "a", Template: "plans/ok.yaml"},
+			{Name: "OK", Kind: "addon", Priority: 0, After: AfterSpec{"a"}, Template: "plans/ok.yaml"},
 		},
 		Nodes: map[string]*Node{
 			"a": {Name: "a", Adapter: "a"},
@@ -644,7 +644,7 @@ func TestParse_WorkflowWithAfterWire(t *testing.T) {
 	addon := g.Workflows[1]
 	assert.Equal(t, "addon", addon.Kind)
 	assert.True(t, addon.IsAddon())
-	assert.Equal(t, "book", addon.After)
+	assert.Equal(t, AfterSpec{"book"}, addon.After)
 	assert.Equal(t, "book.workbenchId", addon.Wire["workbenchId"])
 }
 
