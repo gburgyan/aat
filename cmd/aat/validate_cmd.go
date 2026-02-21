@@ -114,6 +114,11 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 			manifestErrors = append(manifestErrors, fmt.Sprintf("workflows dir not found: %s", m.WorkflowsDir))
 		}
 	}
+	for _, pd := range m.PlanDirs {
+		if _, err := os.Stat(pd); err != nil {
+			manifestErrors = append(manifestErrors, fmt.Sprintf("plans dir not found: %s", pd))
+		}
+	}
 
 	if len(manifestErrors) > 0 {
 		sections = append(sections, sectionResult{
@@ -287,6 +292,24 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		}
 	}
 
+	// 8. Plans validation
+	if len(m.PlanDirs) > 0 {
+		pvr := validatePlans([]string(m.PlanDirs), g)
+		if len(pvr.Errors) > 0 {
+			sections = append(sections, sectionResult{
+				Name:   "Plans",
+				Status: "FAILED",
+				Errors: pvr.Errors,
+			})
+		} else if pvr.Total > 0 {
+			sections = append(sections, sectionResult{
+				Name:   "Plans",
+				Status: "OK",
+				Detail: fmt.Sprintf("(%d files)", pvr.Total),
+			})
+		}
+	}
+
 	printSections(out, sections)
 
 	// Determine overall result
@@ -373,6 +396,37 @@ func workflowTemplatePaths(g *graph.Graph, graphDir string) map[string]bool {
 		}
 	}
 	return paths
+}
+
+// planValidationResult holds counts from plan validation.
+type planValidationResult struct {
+	Errors []string
+	Total  int
+}
+
+// validatePlans walks all plan directories and validates each plan file.
+func validatePlans(planDirs []string, g *graph.Graph) planValidationResult {
+	var result planValidationResult
+
+	entries, err := config.ListPlans(planDirs)
+	if err != nil {
+		result.Errors = []string{fmt.Sprintf("listing plans: %s", err)}
+		return result
+	}
+
+	for _, entry := range entries {
+		result.Total++
+		p, err := plan.ParseFile(entry.FullPath)
+		if err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name, err))
+			continue
+		}
+		if _, err := plan.InstantiateAndValidate(p, g); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name, err))
+		}
+	}
+
+	return result
 }
 
 // printSections prints the validation sections in aligned columns.

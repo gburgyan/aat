@@ -55,6 +55,9 @@ var promptCmd = &cobra.Command{
 		}
 
 		savePlan, _ := cmd.Flags().GetString("save")
+		if savePlan != "" {
+			savePlan = resolveSavePlan(savePlan, resolved.PlanDirs)
+		}
 		autoConfirm, _ := cmd.Flags().GetBool("yes")
 		tracePlan, _ := cmd.Flags().GetBool("trace")
 
@@ -101,7 +104,7 @@ func init() {
 	promptCmd.Flags().String("templates", "", "path to templates directory")
 	promptCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
 	promptCmd.Flags().String("output", "_output/runs", "directory for archive output")
-	promptCmd.Flags().String("save", "", "save generated plan to this file path")
+	promptCmd.Flags().String("save", "", "save generated plan (name resolved via plans dir, or literal path)")
 	promptCmd.Flags().Bool("yes", false, "skip confirmation prompt")
 	promptCmd.Flags().Bool("trace", false, "capture planning pipeline trace for debugging")
 	promptCmd.Flags().String("trace-dir", "_output/traces", "directory for plan trace output")
@@ -391,6 +394,32 @@ func adjustPlan(p *plan.Plan, g *graph.Graph, reader io.Reader) (*plan.Plan, err
 
 	fmt.Println("aat: edited plan loaded and validated.")
 	return edited, nil
+}
+
+// resolveSavePlan resolves the --save flag value to a file path.
+// If planDirs are configured and the name is not an absolute path or a literal
+// path with a recognized extension, it resolves through the plan directories.
+func resolveSavePlan(name string, planDirs []string) string {
+	// Absolute paths are used as-is
+	if filepath.IsAbs(name) {
+		return name
+	}
+
+	// Paths with recognized extensions are treated as literal (backward compat)
+	ext := filepath.Ext(name)
+	if ext == ".yaml" || ext == ".yml" {
+		return name
+	}
+
+	// Resolve through plan dirs if configured
+	if len(planDirs) > 0 {
+		if resolved, err := config.ResolvePlanWritePath(planDirs, name); err == nil {
+			return resolved
+		}
+	}
+
+	// CWD fallback: just append .yaml
+	return name + ".yaml"
 }
 
 // writeRunArchive creates a run archive in the output directory and returns

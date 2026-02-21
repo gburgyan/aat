@@ -24,7 +24,7 @@ func TestHandleExecutePlan_MissingName(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "missing required parameter")
 }
 
-func TestHandleExecutePlan_NoWorkflowsDirConfigured(t *testing.T) {
+func TestHandleExecutePlan_NoPlansDirConfigured(t *testing.T) {
 	g := twoNodeGraph()
 	ctx := &ServerContext{
 		Graph:       g,
@@ -37,7 +37,7 @@ func TestHandleExecutePlan_NoWorkflowsDirConfigured(t *testing.T) {
 
 	result := callTool(t, srv.handleExecutePlan, map[string]any{"name": "test"})
 	assert.True(t, result.IsError)
-	assert.Contains(t, resultText(t, result), "workflows directory not configured")
+	assert.Contains(t, resultText(t, result), "plans directory not configured")
 }
 
 func TestHandleExecutePlan_NoEnvironmentConfigured(t *testing.T) {

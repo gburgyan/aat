@@ -14,6 +14,7 @@ type ProjectPaths struct {
 	EnvPath       string
 	DomainPath    string
 	WorkflowsDir  string
+	PlanDirs      []string
 	ArchiveDir    string
 	TracesDir     string
 	ManifestPath  string // path to aat-project.yaml if found
@@ -70,6 +71,9 @@ func ResolveProjectPaths(overrides ProjectPaths) (*ProjectPaths, error) {
 	if overrides.WorkflowsDir != "" {
 		result.WorkflowsDir = overrides.WorkflowsDir
 	}
+	if len(overrides.PlanDirs) > 0 {
+		result.PlanDirs = overrides.PlanDirs
+	}
 	if overrides.ArchiveDir != "" {
 		result.ArchiveDir = overrides.ArchiveDir
 	}
@@ -110,6 +114,9 @@ func applyManifest(result *ProjectPaths, pathOrDir string) {
 	}
 	if m.WorkflowsDir != "" {
 		result.WorkflowsDir = m.WorkflowsDir
+	}
+	if len(m.PlanDirs) > 0 {
+		result.PlanDirs = []string(m.PlanDirs)
 	}
 	if m.ArchiveDir != "" {
 		result.ArchiveDir = m.ArchiveDir

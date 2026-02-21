@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -51,6 +52,16 @@ var runCmd = &cobra.Command{
 		}
 
 		planPath, _ := cmd.Flags().GetString("plan")
+		// Search plan dirs when the path doesn't exist as a direct file
+		if planPath != "" && !filepath.IsAbs(planPath) {
+			if _, err := os.Stat(planPath); err != nil {
+				if len(resolved.PlanDirs) > 0 {
+					if found, findErr := config.FindPlan(resolved.PlanDirs, planPath); findErr == nil {
+						planPath = found
+					}
+				}
+			}
+		}
 		mode, _ := cmd.Flags().GetString("mode")
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 		quiet, _ := cmd.Flags().GetBool("quiet")

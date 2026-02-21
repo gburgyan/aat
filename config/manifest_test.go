@@ -171,6 +171,58 @@ func TestFindManifest_InCurrentDir(t *testing.T) {
 	assert.Equal(t, manifestPath, found)
 }
 
+func TestLoadManifest_PlanDirsScalar(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+graph: graph.yaml
+templates: templates/
+plans: plans/
+`
+	path := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+
+	require.Len(t, m.PlanDirs, 1)
+	assert.Equal(t, filepath.Join(dir, "plans"), m.PlanDirs[0])
+}
+
+func TestLoadManifest_PlanDirsList(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+graph: graph.yaml
+templates: templates/
+plans:
+  - plans/
+  - /ext/plans
+`
+	path := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+
+	require.Len(t, m.PlanDirs, 2)
+	assert.Equal(t, filepath.Join(dir, "plans"), m.PlanDirs[0])
+	assert.Equal(t, "/ext/plans", m.PlanDirs[1]) // absolute path unchanged
+}
+
+func TestLoadManifest_PlanDirsOmitted(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+graph: graph.yaml
+templates: templates/
+`
+	path := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+
+	assert.Empty(t, m.PlanDirs)
+}
+
 func TestResolvePath(t *testing.T) {
 	tests := []struct {
 		name     string

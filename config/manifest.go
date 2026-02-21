@@ -8,20 +8,46 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// StringOrList is a YAML type that accepts either a single string or a list of strings.
+// This allows manifest fields to be written as either:
+//
+//	plans: plans/
+//	plans: [plans/, /ext/plans]
+type StringOrList []string
+
+// UnmarshalYAML implements custom YAML unmarshalling for StringOrList.
+func (s *StringOrList) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// Try single string first
+	var single string
+	if err := unmarshal(&single); err == nil {
+		*s = StringOrList{single}
+		return nil
+	}
+
+	// Try list of strings
+	var list []string
+	if err := unmarshal(&list); err != nil {
+		return err
+	}
+	*s = StringOrList(list)
+	return nil
+}
+
 // ProjectManifest describes where a project's artifacts live.
 // Paths are resolved relative to the manifest file's directory.
 type ProjectManifest struct {
-	Name          string   `yaml:"name"`
-	Description   string   `yaml:"description,omitempty"`
-	Tags          []string `yaml:"tags,omitempty"`
-	GraphPath     string   `yaml:"graph"`
-	TemplatesPath string   `yaml:"templates"`
-	DomainPath    string   `yaml:"domain,omitempty"`
-	DocsDir       string   `yaml:"docs,omitempty"`
-	WorkflowsDir  string   `yaml:"workflows,omitempty"`
-	ArchiveDir    string   `yaml:"archives,omitempty"`
-	TracesDir     string   `yaml:"traces,omitempty"`
-	EnvPath       string   `yaml:"environment,omitempty"`
+	Name          string       `yaml:"name"`
+	Description   string       `yaml:"description,omitempty"`
+	Tags          []string     `yaml:"tags,omitempty"`
+	GraphPath     string       `yaml:"graph"`
+	TemplatesPath string       `yaml:"templates"`
+	DomainPath    string       `yaml:"domain,omitempty"`
+	DocsDir       string       `yaml:"docs,omitempty"`
+	WorkflowsDir  string       `yaml:"workflows,omitempty"`
+	PlanDirs      StringOrList `yaml:"plans,omitempty"`
+	ArchiveDir    string       `yaml:"archives,omitempty"`
+	TracesDir     string       `yaml:"traces,omitempty"`
+	EnvPath       string       `yaml:"environment,omitempty"`
 }
 
 // LoadManifest reads and parses an aat-project.yaml file. Paths in the manifest
@@ -57,6 +83,9 @@ func LoadManifest(path string) (*ProjectManifest, error) {
 	}
 	if m.WorkflowsDir != "" {
 		m.WorkflowsDir = resolvePath(baseDir, m.WorkflowsDir)
+	}
+	for i, dir := range m.PlanDirs {
+		m.PlanDirs[i] = resolvePath(baseDir, dir)
 	}
 	if m.ArchiveDir != "" {
 		m.ArchiveDir = resolvePath(baseDir, m.ArchiveDir)

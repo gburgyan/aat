@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
@@ -18,13 +18,13 @@ import (
 func (s *Server) registerPlanTools() {
 	s.mcp.AddTool(
 		mcp.NewTool("generate_plan",
-			mcp.WithDescription("Generate an execution plan from a natural language prompt using the LLM pipeline. Returns plan YAML and narrative. Optionally saves to the workflows directory."),
+			mcp.WithDescription("Generate an execution plan from a natural language prompt using the LLM pipeline. Returns plan YAML and narrative. Optionally saves to the plans directory."),
 			mcp.WithString("prompt",
 				mcp.Description("Natural language description of what to test"),
 				mcp.Required(),
 			),
 			mcp.WithString("save_as",
-				mcp.Description("Optional filename to save the plan to the workflows directory (e.g. 'booking-test.yaml')"),
+				mcp.Description("Optional filename to save the plan to the plans directory (e.g. 'booking-test.yaml'). Requires `plans` field in aat-project.yaml."),
 			),
 		),
 		s.handleGeneratePlan,
@@ -43,14 +43,14 @@ func (s *Server) registerPlanTools() {
 
 	s.mcp.AddTool(
 		mcp.NewTool("list_saved_plans",
-			mcp.WithDescription("List saved test plans from the workflows directory, showing name, goal, and step count for each."),
+			mcp.WithDescription("List saved test plans from the plans directory, showing name, goal, and step count for each. Requires `plans` field in aat-project.yaml."),
 		),
 		s.handleListSavedPlans,
 	)
 
 	s.mcp.AddTool(
 		mcp.NewTool("load_plan",
-			mcp.WithDescription("Load a saved plan from the workflows directory. Returns the plan YAML and a human-readable narrative."),
+			mcp.WithDescription("Load a saved plan from the plans directory. Returns the plan YAML and a human-readable narrative. Requires `plans` field in aat-project.yaml."),
 			mcp.WithString("name",
 				mcp.Description("Plan filename (e.g. 'booking-test' or 'booking-test.yaml')"),
 				mcp.Required(),
@@ -61,7 +61,7 @@ func (s *Server) registerPlanTools() {
 
 	s.mcp.AddTool(
 		mcp.NewTool("save_plan",
-			mcp.WithDescription("Validate and save a plan YAML string to the workflows directory."),
+			mcp.WithDescription("Validate and save a plan YAML string to the plans directory. Requires `plans` field in aat-project.yaml."),
 			mcp.WithString("name",
 				mcp.Description("Filename to save as (e.g. 'booking-test' or 'booking-test.yaml')"),
 				mcp.Required(),
@@ -112,10 +112,13 @@ func (s *Server) handleGeneratePlan(ctx context.Context, req mcp.CallToolRequest
 
 	// Optionally save
 	saveAs, _ := req.RequireString("save_as")
-	if saveAs != "" && s.ctx.WorkflowsDir != "" {
-		savePath := resolveWorkflowPath(s.ctx.WorkflowsDir, saveAs)
-		if err := os.MkdirAll(s.ctx.WorkflowsDir, 0o755); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("creating workflows directory: %v", err)), nil
+	if saveAs != "" && len(s.ctx.PlanDirs) > 0 {
+		savePath, err := config.ResolvePlanWritePath(s.ctx.PlanDirs, saveAs)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("resolving save path: %v", err)), nil
+		}
+		if err := os.MkdirAll(filepath.Dir(savePath), 0o755); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("creating plans directory: %v", err)), nil
 		}
 		if err := plan.WriteFile(result.Plan, savePath); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("saving plan: %v", err)), nil
@@ -132,10 +135,11 @@ func (s *Server) handleGeneratePlan(ctx context.Context, req mcp.CallToolRequest
 	b.WriteString(narrative)
 
 	if saveAs != "" {
-		if s.ctx.WorkflowsDir != "" {
-			fmt.Fprintf(&b, "\n\nSaved to: %s", resolveWorkflowPath(s.ctx.WorkflowsDir, saveAs))
+		if len(s.ctx.PlanDirs) > 0 {
+			savePath, _ := config.ResolvePlanWritePath(s.ctx.PlanDirs, saveAs)
+			fmt.Fprintf(&b, "\n\nSaved to: %s", savePath)
 		} else {
-			b.WriteString("\n\n*Note: workflows directory not configured — plan was not saved. Set the `workflows` field in aat-project.yaml.*")
+			b.WriteString("\n\n*Note: plans directory not configured — plan was not saved. Set the `plans` field in aat-project.yaml.*")
 		}
 	}
 
@@ -162,20 +166,17 @@ func (s *Server) handleValidatePlan(_ context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultText(summary), nil
 }
 
-// handleListSavedPlans scans the workflows directory for YAML files.
+// handleListSavedPlans scans the plans directories for YAML files.
 func (s *Server) handleListSavedPlans(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	if s.ctx.WorkflowsDir == "" {
+	if len(s.ctx.PlanDirs) == 0 {
 		return mcp.NewToolResultText(
-			"Workflows directory not configured. Set the `workflows` field in aat-project.yaml to enable plan management.",
+			"Plans directory not configured. Set the `plans` field in aat-project.yaml to enable plan management.",
 		), nil
 	}
 
-	entries, err := os.ReadDir(s.ctx.WorkflowsDir)
+	planEntries, err := config.ListPlans(s.ctx.PlanDirs)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return mcp.NewToolResultText("Workflows directory is empty (no plans saved yet)."), nil
-		}
-		return mcp.NewToolResultError(fmt.Sprintf("reading workflows directory: %v", err)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("listing plans: %v", err)), nil
 	}
 
 	type planInfo struct {
@@ -185,33 +186,22 @@ func (s *Server) handleListSavedPlans(_ context.Context, _ mcp.CallToolRequest) 
 	}
 
 	var plans []planInfo
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		if ext != ".yaml" && ext != ".yml" {
-			continue
-		}
-		path := filepath.Join(s.ctx.WorkflowsDir, entry.Name())
-		p, err := plan.ParseFile(path)
+	for _, entry := range planEntries {
+		p, err := plan.ParseFile(entry.FullPath)
 		if err != nil {
-			// Include the file but note it's unparseable
-			plans = append(plans, planInfo{name: entry.Name(), goal: "(parse error)", stepCount: 0})
+			plans = append(plans, planInfo{name: entry.Name, goal: "(parse error)", stepCount: 0})
 			continue
 		}
 		plans = append(plans, planInfo{
-			name:      entry.Name(),
+			name:      entry.Name,
 			goal:      p.Intent.Goal,
 			stepCount: len(p.Execution.Steps),
 		})
 	}
 
 	if len(plans) == 0 {
-		return mcp.NewToolResultText("No plans found in the workflows directory."), nil
+		return mcp.NewToolResultText("No plans found in the plans directory."), nil
 	}
-
-	sort.Slice(plans, func(i, j int) bool { return plans[i].name < plans[j].name })
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Found %d plan(s):\n\n", len(plans))
@@ -221,23 +211,24 @@ func (s *Server) handleListSavedPlans(_ context.Context, _ mcp.CallToolRequest) 
 	return mcp.NewToolResultText(b.String()), nil
 }
 
-// handleLoadPlan loads a plan from the workflows directory and returns YAML + narrative.
+// handleLoadPlan loads a plan from the plans directory and returns YAML + narrative.
 func (s *Server) handleLoadPlan(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name, err := req.RequireString("name")
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: name"), nil
 	}
 
-	if s.ctx.WorkflowsDir == "" {
-		return mcp.NewToolResultError("workflows directory not configured — set the `workflows` field in aat-project.yaml"), nil
+	if len(s.ctx.PlanDirs) == 0 {
+		return mcp.NewToolResultError("plans directory not configured — set the `plans` field in aat-project.yaml"), nil
 	}
 
-	path := resolveWorkflowPath(s.ctx.WorkflowsDir, name)
+	path, err := config.FindPlan(s.ctx.PlanDirs, name)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("plan %q not found", name)), nil
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return mcp.NewToolResultError(fmt.Sprintf("plan %q not found", name)), nil
-		}
 		return mcp.NewToolResultError(fmt.Sprintf("reading plan: %v", err)), nil
 	}
 
@@ -258,7 +249,7 @@ func (s *Server) handleLoadPlan(_ context.Context, req mcp.CallToolRequest) (*mc
 	return mcp.NewToolResultText(b.String()), nil
 }
 
-// handleSavePlan validates and saves a plan YAML to the workflows directory.
+// handleSavePlan validates and saves a plan YAML to the plans directory.
 func (s *Server) handleSavePlan(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name, err := req.RequireString("name")
 	if err != nil {
@@ -269,8 +260,8 @@ func (s *Server) handleSavePlan(_ context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError("missing required parameter: yaml"), nil
 	}
 
-	if s.ctx.WorkflowsDir == "" {
-		return mcp.NewToolResultError("workflows directory not configured — set the `workflows` field in aat-project.yaml"), nil
+	if len(s.ctx.PlanDirs) == 0 {
+		return mcp.NewToolResultError("plans directory not configured — set the `plans` field in aat-project.yaml"), nil
 	}
 
 	p, err := plan.Parse([]byte(yamlStr))
@@ -282,7 +273,13 @@ func (s *Server) handleSavePlan(_ context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError(fmt.Sprintf("Validation failed:\n%v", err)), nil
 	}
 
-	savePath := resolveWorkflowPath(s.ctx.WorkflowsDir, name)
+	savePath, err := config.ResolvePlanWritePath(s.ctx.PlanDirs, name)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("resolving save path: %v", err)), nil
+	}
+	if err := os.MkdirAll(filepath.Dir(savePath), 0o755); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("creating plans directory: %v", err)), nil
+	}
 	if err := plan.WriteFile(p, savePath); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("saving plan: %v", err)), nil
 	}

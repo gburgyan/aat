@@ -38,13 +38,17 @@ execution:
 `
 }
 
-// newTestServerWithWorkflows creates a Server with a WorkflowsDir for testing.
-func newTestServerWithWorkflows(g *graph.Graph, workflowsDir string) *Server {
+// newTestServerWithPlans creates a Server with PlanDirs for testing plan tools.
+func newTestServerWithPlans(g *graph.Graph, planDir string) *Server {
+	var planDirs []string
+	if planDir != "" {
+		planDirs = []string{planDir}
+	}
 	ctx := &ServerContext{
-		Graph:        g,
-		Registry:     adapter.NewRegistry(),
-		Manifest:     &ProjectManifest{Name: "test"},
-		WorkflowsDir: workflowsDir,
+		Graph:    g,
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+		PlanDirs: planDirs,
 	}
 	return NewServer(ctx)
 }
@@ -111,7 +115,7 @@ func TestHandleValidatePlan_MissingSteps(t *testing.T) {
 func TestHandleListSavedPlans_MultiplePlans(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	// Write two plans
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "alpha.yaml"), []byte(validPlanYAML()), 0o644))
@@ -129,7 +133,7 @@ func TestHandleListSavedPlans_MultiplePlans(t *testing.T) {
 func TestHandleListSavedPlans_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	result := callTool(t, srv.handleListSavedPlans, nil)
 	assert.False(t, result.IsError)
@@ -138,28 +142,28 @@ func TestHandleListSavedPlans_EmptyDir(t *testing.T) {
 
 func TestHandleListSavedPlans_NoPlansDirConfigured(t *testing.T) {
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, "")
+	srv := newTestServerWithPlans(g, "")
 
 	result := callTool(t, srv.handleListSavedPlans, nil)
 	assert.False(t, result.IsError)
 	text := resultText(t, result)
 	assert.Contains(t, text, "not configured")
-	assert.Contains(t, text, "aat-project.yaml")
+	assert.Contains(t, text, "plans")
 }
 
 func TestHandleListSavedPlans_NonexistentDir(t *testing.T) {
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, "/nonexistent/path/plans")
+	srv := newTestServerWithPlans(g, "/nonexistent/path/plans")
 
 	result := callTool(t, srv.handleListSavedPlans, nil)
 	assert.False(t, result.IsError)
-	assert.Contains(t, resultText(t, result), "empty")
+	assert.Contains(t, resultText(t, result), "No plans found")
 }
 
 func TestHandleListSavedPlans_IgnoresNonYAML(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "plan.yaml"), []byte(validPlanYAML()), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("not a plan"), 0o644))
@@ -173,7 +177,7 @@ func TestHandleListSavedPlans_IgnoresNonYAML(t *testing.T) {
 func TestHandleListSavedPlans_UnparseablePlan(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte("not: valid: ["), 0o644))
 
@@ -189,7 +193,7 @@ func TestHandleListSavedPlans_UnparseablePlan(t *testing.T) {
 func TestHandleLoadPlan_Existing(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.yaml"), []byte(validPlanYAML()), 0o644))
 
@@ -204,7 +208,7 @@ func TestHandleLoadPlan_Existing(t *testing.T) {
 func TestHandleLoadPlan_WithoutExtension(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "test.yaml"), []byte(validPlanYAML()), 0o644))
 
@@ -217,7 +221,7 @@ func TestHandleLoadPlan_WithoutExtension(t *testing.T) {
 func TestHandleLoadPlan_Missing(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	result := callTool(t, srv.handleLoadPlan, map[string]any{"name": "nonexistent"})
 	assert.True(t, result.IsError)
@@ -226,7 +230,7 @@ func TestHandleLoadPlan_Missing(t *testing.T) {
 
 func TestHandleLoadPlan_NoPlansDirConfigured(t *testing.T) {
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, "")
+	srv := newTestServerWithPlans(g, "")
 
 	result := callTool(t, srv.handleLoadPlan, map[string]any{"name": "test"})
 	assert.True(t, result.IsError)
@@ -247,7 +251,7 @@ func TestHandleLoadPlan_MissingParam(t *testing.T) {
 func TestHandleSavePlan_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	// Save
 	result := callTool(t, srv.handleSavePlan, map[string]any{
@@ -268,7 +272,7 @@ func TestHandleSavePlan_RoundTrip(t *testing.T) {
 func TestHandleSavePlan_InvalidYAMLRejected(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	result := callTool(t, srv.handleSavePlan, map[string]any{
 		"name": "bad",
@@ -285,7 +289,7 @@ func TestHandleSavePlan_InvalidYAMLRejected(t *testing.T) {
 func TestHandleSavePlan_ValidationErrorsRejected(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	badPlan := `execution:
   steps:
@@ -305,7 +309,7 @@ func TestHandleSavePlan_ValidationErrorsRejected(t *testing.T) {
 
 func TestHandleSavePlan_NoPlansDirConfigured(t *testing.T) {
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, "")
+	srv := newTestServerWithPlans(g, "")
 
 	result := callTool(t, srv.handleSavePlan, map[string]any{
 		"name": "test",
@@ -327,7 +331,7 @@ func TestHandleSavePlan_MissingNameParam(t *testing.T) {
 func TestHandleSavePlan_MissingYAMLParam(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	result := callTool(t, srv.handleSavePlan, map[string]any{"name": "test"})
 	assert.True(t, result.IsError)
@@ -338,7 +342,7 @@ func TestHandleSavePlan_CreatesDir(t *testing.T) {
 	base := t.TempDir()
 	plansDir := filepath.Join(base, "nested", "plans")
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, plansDir)
+	srv := newTestServerWithPlans(g, plansDir)
 
 	result := callTool(t, srv.handleSavePlan, map[string]any{
 		"name": "test",
@@ -354,7 +358,7 @@ func TestHandleSavePlan_CreatesDir(t *testing.T) {
 func TestHandleSavePlan_WithYMLExtension(t *testing.T) {
 	dir := t.TempDir()
 	g := twoNodeGraph()
-	srv := newTestServerWithWorkflows(g, dir)
+	srv := newTestServerWithPlans(g, dir)
 
 	result := callTool(t, srv.handleSavePlan, map[string]any{
 		"name": "test.yml",

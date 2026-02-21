@@ -41,8 +41,8 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	// Guard: required configuration
-	if s.ctx.WorkflowsDir == "" {
-		return mcp.NewToolResultError("workflows directory not configured — set the `workflows` field in aat-project.yaml"), nil
+	if len(s.ctx.PlanDirs) == 0 && s.ctx.WorkflowsDir == "" {
+		return mcp.NewToolResultError("plans directory not configured — set the `plans` field in aat-project.yaml"), nil
 	}
 	if s.ctx.Environment == nil {
 		return mcp.NewToolResultError("no environment configured — set the `environment` field in aat-project.yaml to enable execution"), nil
@@ -51,8 +51,19 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError("archive directory not configured — set the `archives` field in aat-project.yaml to store results"), nil
 	}
 
-	// Load and validate plan
-	planPath := resolveWorkflowPath(s.ctx.WorkflowsDir, name)
+	// Search PlanDirs first, then fall back to WorkflowsDir
+	var planPath string
+	if len(s.ctx.PlanDirs) > 0 {
+		if found, err := config.FindPlan(s.ctx.PlanDirs, name); err == nil {
+			planPath = found
+		}
+	}
+	if planPath == "" && s.ctx.WorkflowsDir != "" {
+		planPath = resolveWorkflowPath(s.ctx.WorkflowsDir, name)
+	}
+	if planPath == "" {
+		return mcp.NewToolResultError(fmt.Sprintf("plan %q not found", name)), nil
+	}
 	p, err := plan.ParseFile(planPath)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("loading plan: %v", err)), nil

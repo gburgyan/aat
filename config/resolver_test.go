@@ -224,6 +224,54 @@ environment: explicit-env.yaml
 	assert.Equal(t, filepath.Join(explicitDir, "explicit-env.yaml"), result.EnvPath)
 }
 
+func TestResolveProjectPaths_PlanDirsFromManifest(t *testing.T) {
+	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	content := `name: test
+graph: graph.yaml
+templates: templates/
+plans: plans/
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "aat-project.yaml"), []byte(content), 0644))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(origDir)
+	require.NoError(t, os.Chdir(dir))
+
+	result, err := ResolveProjectPaths(ProjectPaths{})
+	require.NoError(t, err)
+	require.Len(t, result.PlanDirs, 1)
+	assert.Equal(t, filepath.Join(dir, "plans"), result.PlanDirs[0])
+}
+
+func TestResolveProjectPaths_PlanDirsOverride(t *testing.T) {
+	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	content := `name: test
+graph: graph.yaml
+templates: templates/
+plans: plans/
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "aat-project.yaml"), []byte(content), 0644))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(origDir)
+	require.NoError(t, os.Chdir(dir))
+
+	result, err := ResolveProjectPaths(ProjectPaths{
+		PlanDirs: []string{"/override/plans"},
+	})
+	require.NoError(t, err)
+	require.Len(t, result.PlanDirs, 1)
+	assert.Equal(t, "/override/plans", result.PlanDirs[0])
+}
+
 func TestResolveProjectPaths_NothingFound(t *testing.T) {
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
