@@ -11,10 +11,12 @@ import (
 )
 
 func TestValidate_NoManifestFound(t *testing.T) {
-	// chdir to an empty directory so FindManifest fails
+	// chdir to an empty directory and clear env so no manifest is discovered
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
 	defer os.Chdir(origDir)
+
+	t.Setenv("AAT_PROJECT", "")
 
 	tmpDir := t.TempDir()
 	require.NoError(t, os.Chdir(tmpDir))
@@ -23,7 +25,7 @@ func TestValidate_NoManifestFound(t *testing.T) {
 	code := validateCommand(&validateArgs{}, &buf)
 	assert.Equal(t, 1, code)
 	assert.Contains(t, buf.String(), "FAILED")
-	assert.Contains(t, buf.String(), "aat-project.yaml not found")
+	assert.Contains(t, buf.String(), "no manifest found")
 }
 
 func TestValidate_ExplicitManifestNotFound(t *testing.T) {

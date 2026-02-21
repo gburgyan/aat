@@ -34,7 +34,6 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(promptCmd)
-	rootCmd.AddCommand(graphCmd)
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(generateCmd)
 	rootCmd.AddCommand(docsCmd)

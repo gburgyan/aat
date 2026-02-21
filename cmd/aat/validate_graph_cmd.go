@@ -14,15 +14,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// graphCmd is the parent Cobra command for graph subcommands.
-var graphCmd = &cobra.Command{
+// validateGraphCmd is the Cobra command for graph validation under "aat validate graph".
+var validateGraphCmd = &cobra.Command{
 	Use:   "graph",
-	Short: "Graph inspection and validation commands",
-}
-
-// graphValidateCmd is the Cobra command for graph validation.
-var graphValidateCmd = &cobra.Command{
-	Use:   "validate",
 	Short: "Validate a graph definition",
 	Long:  "Validate graph structure, OAS spec consistency, adapter outputs, and workflow compatibility.",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -61,12 +55,12 @@ var graphValidateCmd = &cobra.Command{
 }
 
 func init() {
-	graphCmd.AddCommand(graphValidateCmd)
+	validateCmd.AddCommand(validateGraphCmd)
 
-	graphValidateCmd.Flags().String("graph", "", "path to graph YAML file")
-	graphValidateCmd.Flags().String("oas", "", "path to OAS spec file (overrides graph-level oas)")
-	graphValidateCmd.Flags().String("templates", "", "path to templates directory (validates outputs match extracts)")
-	graphValidateCmd.Flags().Bool("strict", false, "treat warnings as errors")
+	validateGraphCmd.Flags().String("graph", "", "path to graph YAML file")
+	validateGraphCmd.Flags().String("oas", "", "path to OAS spec file (overrides graph-level oas)")
+	validateGraphCmd.Flags().String("templates", "", "path to templates directory (validates outputs match extracts)")
+	validateGraphCmd.Flags().Bool("strict", false, "treat warnings as errors")
 }
 
 // graphValidateArgs holds parsed CLI flags for graph validate.
@@ -81,7 +75,7 @@ type graphValidateArgs struct {
 // Extracted for testability.
 func graphValidateCommand(args *graphValidateArgs) int {
 	if args.GraphPath == "" {
-		fmt.Fprintln(os.Stderr, "aat graph validate: --graph is required")
+		fmt.Fprintln(os.Stderr, "aat validate graph: --graph is required")
 		return 1
 	}
 
@@ -90,7 +84,7 @@ func graphValidateCommand(args *graphValidateArgs) int {
 	// 1. Parse graph (runs structural validation)
 	g, err := graph.ParseFile(args.GraphPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "aat graph validate: %s\n", err)
+		fmt.Fprintf(os.Stderr, "aat validate graph: %s\n", err)
 		return 1
 	}
 	fmt.Printf("Graph structure: OK (%d nodes)\n", len(g.Nodes))
@@ -112,7 +106,7 @@ func graphValidateCommand(args *graphValidateArgs) int {
 				resolvedPath = filepath.Join(graphDir, sp)
 			}
 			if err := validator.LoadSpec(sp, resolvedPath); err != nil {
-				fmt.Fprintf(os.Stderr, "aat graph validate: loading OAS spec %q: %s\n", sp, err)
+				fmt.Fprintf(os.Stderr, "aat validate graph: loading OAS spec %q: %s\n", sp, err)
 				return 1
 			}
 		}
@@ -138,7 +132,7 @@ func graphValidateCommand(args *graphValidateArgs) int {
 		registry := adapter.NewRegistry()
 		n, err := adapter.LoadTemplates(args.TemplatesPath, registry)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "aat graph validate: loading templates: %s\n", err)
+			fmt.Fprintf(os.Stderr, "aat validate graph: loading templates: %s\n", err)
 			return 1
 		}
 

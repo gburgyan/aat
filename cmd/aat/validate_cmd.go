@@ -64,23 +64,28 @@ type sectionResult struct {
 func validateCommand(args *validateArgs, out io.Writer) int {
 	var sections []sectionResult
 
-	// 1. Discover and load manifest
-	manifestPath := args.ManifestPath
-	if manifestPath == "" {
-		found, err := config.FindManifest()
+	// 1. Discover manifest via ResolveProjectPaths (respects AAT_PROJECT env,
+	//    user home config, CWD walk-up, and --manifest flag).
+	overrides := config.ProjectPaths{}
+	if args.ManifestPath != "" {
+		overrides.ExplicitManifest = args.ManifestPath
+	}
+	resolved, err := config.ResolveProjectPaths(overrides)
+	if err != nil || resolved.ManifestPath == "" {
+		errMsg := "no manifest found (checked AAT_PROJECT, CWD walk-up, and user config)"
 		if err != nil {
-			sections = append(sections, sectionResult{
-				Name:   "Manifest",
-				Status: "FAILED",
-				Errors: []string{err.Error()},
-			})
-			printSections(out, sections)
-			return 1
+			errMsg = err.Error()
 		}
-		manifestPath = found
+		sections = append(sections, sectionResult{
+			Name:   "Manifest",
+			Status: "FAILED",
+			Errors: []string{errMsg},
+		})
+		printSections(out, sections)
+		return 1
 	}
 
-	m, err := config.LoadManifest(manifestPath)
+	m, err := config.LoadManifest(resolved.ManifestPath)
 	if err != nil {
 		sections = append(sections, sectionResult{
 			Name:   "Manifest",
