@@ -51,6 +51,7 @@ export interface StepSummary {
   hasLLMCalls?: boolean;
   hasTransform?: boolean;
   retryCount?: number;
+  offsetMs?: number;
 }
 
 export interface StepDetail {

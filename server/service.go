@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gburgyan/aat/archive"
 	"gopkg.in/yaml.v3"
@@ -226,11 +227,25 @@ func toRunListEntry(a *archive.Archive) RunListEntry {
 }
 
 func toRunDetail(a *archive.Archive) *RunDetail {
+	// Use the earliest step start time as the baseline for offset computation.
+	// The metadata timestamp may be set after execution completes.
+	var runStart time.Time
+	for _, s := range a.Steps {
+		if !s.StartTime.IsZero() && (runStart.IsZero() || s.StartTime.Before(runStart)) {
+			runStart = s.StartTime
+		}
+	}
+	for _, s := range a.Cleanup {
+		if !s.StartTime.IsZero() && (runStart.IsZero() || s.StartTime.Before(runStart)) {
+			runStart = s.StartTime
+		}
+	}
+
 	passed := 0
 	failed := 0
 	steps := make([]StepSummary, len(a.Steps))
 	for i, s := range a.Steps {
-		steps[i] = toStepSummary(s, false)
+		steps[i] = toStepSummary(s, false, runStart)
 		if stepPassed(s) {
 			passed++
 		} else {
@@ -242,7 +257,7 @@ func toRunDetail(a *archive.Archive) *RunDetail {
 	if len(a.Cleanup) > 0 {
 		cleanup = make([]StepSummary, len(a.Cleanup))
 		for i, s := range a.Cleanup {
-			cleanup[i] = toStepSummary(s, true)
+			cleanup[i] = toStepSummary(s, true, runStart)
 		}
 	}
 
@@ -266,13 +281,21 @@ func toRunDetail(a *archive.Archive) *RunDetail {
 	}
 }
 
-func toStepSummary(s archive.StepRecord, isCleanup bool) StepSummary {
+func toStepSummary(s archive.StepRecord, isCleanup bool, runStart time.Time) StepSummary {
 	status := 0
 	if s.Response != nil {
 		status = s.Response.Status
 	}
 
 	assertionCount, assertionPassed := countAssertions(s)
+
+	var offsetMs int64
+	if !s.StartTime.IsZero() && !runStart.IsZero() {
+		offsetMs = s.StartTime.Sub(runStart).Milliseconds()
+		if offsetMs < 0 {
+			offsetMs = 0
+		}
+	}
 
 	return StepSummary{
 		StepID:               effectiveStepID(s),
@@ -291,6 +314,7 @@ func toStepSummary(s archive.StepRecord, isCleanup bool) StepSummary {
 		HasLLMCalls:          hasLLMCalls(s),
 		HasTransform:         s.TransformScript != "",
 		RetryCount:           s.RetryCount,
+		OffsetMs:             offsetMs,
 	}
 }
 

@@ -126,6 +126,29 @@
     const open = (e.currentTarget as HTMLDetailsElement).open;
     try { localStorage.setItem(`aat:${key}`, open ? '1' : '0'); } catch {}
   }
+
+  // Keyboard shortcuts for step navigation
+  $effect(() => {
+    function handleKeydown(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (!step) return;
+
+      if (e.key === 'ArrowLeft' && step.prevStepId) {
+        e.preventDefault();
+        navigate(`/runs/${runId}/steps/${step.prevStepId}`);
+      } else if (e.key === 'ArrowRight' && step.nextStepId) {
+        e.preventDefault();
+        navigate(`/runs/${runId}/steps/${step.nextStepId}`);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        navigate(`/runs/${runId}`);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeydown);
+    return () => window.removeEventListener('keydown', handleKeydown);
+  });
 </script>
 
 {#if loading}

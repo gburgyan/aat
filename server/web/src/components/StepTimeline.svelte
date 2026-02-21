@@ -12,6 +12,16 @@
 
   let { steps, runId, sectionLabel, muted = false }: Props = $props();
 
+  // Total span = last step's (offset + duration), used for Gantt positioning
+  let totalSpanMs = $derived.by(() => {
+    let max = 1;
+    for (const s of steps) {
+      const end = (s.offsetMs ?? 0) + (s.durationMs ?? 0);
+      if (end > max) max = end;
+    }
+    return max;
+  });
+
   function goToStep(stepId: string) {
     navigate(`/runs/${runId}/steps/${stepId}`);
   }
@@ -79,6 +89,17 @@
 
         {#if step.error}
           <div class="step-error">{step.error}</div>
+        {/if}
+
+        {#if step.durationMs}
+          {@const leftPct = ((step.offsetMs ?? 0) / totalSpanMs) * 100}
+          {@const widthPct = Math.max((step.durationMs / totalSpanMs) * 100, 0.5)}
+          <div class="step-duration-bar-track">
+            <div
+              class="step-duration-bar"
+              style="margin-left: {leftPct}%; width: {widthPct}%"
+            ></div>
+          </div>
         {/if}
       </div>
     </div>

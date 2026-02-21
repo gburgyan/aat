@@ -45,7 +45,7 @@
           {#if isSimpleValue(ext.value)}
             <span class="dt-mono">{formatSimple(ext.value)}</span>
           {:else}
-            <JsonViewer data={ext.value} maxInitialLines={5} />
+            <JsonViewer data={ext.value} defaultDepth={1} />
           {/if}
         </td>
         <td>

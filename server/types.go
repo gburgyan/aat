@@ -61,6 +61,7 @@ type StepSummary struct {
 	HasLLMCalls         bool            `json:"hasLLMCalls,omitempty"`
 	HasTransform        bool            `json:"hasTransform,omitempty"`
 	RetryCount          int             `json:"retryCount,omitempty"`
+	OffsetMs            int64           `json:"offsetMs,omitempty"`
 }
 
 // StepDetail is the full audit view of a single step.
