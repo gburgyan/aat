@@ -55,6 +55,11 @@ func ResolveProjectPaths(overrides ProjectPaths) (*ProjectPaths, error) {
 		applyManifest(result, overrides.ExplicitManifest)
 	}
 
+	// Default TracesDir to traces/ relative to manifest when not explicitly set
+	if result.TracesDir == "" && result.ManifestPath != "" {
+		result.TracesDir = filepath.Join(filepath.Dir(result.ManifestPath), "traces")
+	}
+
 	// 4. Explicit overrides (highest priority)
 	if overrides.GraphPath != "" {
 		result.GraphPath = overrides.GraphPath

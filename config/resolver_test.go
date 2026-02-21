@@ -272,6 +272,34 @@ plans: plans/
 	assert.Equal(t, "/override/plans", result.PlanDirs[0])
 }
 
+func TestResolveProjectPaths_TracesDirDefaultsWhenManifestOmitsIt(t *testing.T) {
+	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	// Manifest without a traces: field
+	content := `name: test
+graph: graph.yaml
+templates: templates/
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "aat-project.yaml"), []byte(content), 0644))
+
+	// Isolate from user config and env
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(origDir)
+	tmpEmpty := t.TempDir()
+	require.NoError(t, os.Chdir(tmpEmpty))
+	t.Setenv("AAT_PROJECT", "")
+
+	result, err := ResolveProjectPaths(ProjectPaths{
+		ExplicitManifest: dir,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(dir, "traces"), result.TracesDir)
+	assert.Equal(t, filepath.Join(dir, "aat-project.yaml"), result.ManifestPath)
+}
+
 func TestResolveProjectPaths_NothingFound(t *testing.T) {
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
