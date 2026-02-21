@@ -4,6 +4,8 @@
   import RunList from './routes/RunList.svelte';
   import RunDetail from './routes/RunDetail.svelte';
   import StepDetail from './routes/StepDetail.svelte';
+  import TraceList from './routes/TraceList.svelte';
+  import TraceDetail from './routes/TraceDetail.svelte';
 
   let path = $state(window.location.pathname);
   let route = $derived(parseRoute(path));
@@ -26,5 +28,9 @@
     <RunDetail runId={route.runId} />
   {:else if route.view === 'step-detail'}
     <StepDetail runId={route.runId} stepId={route.stepId} />
+  {:else if route.view === 'trace-list'}
+    <TraceList />
+  {:else if route.view === 'trace-detail'}
+    <TraceDetail traceId={route.traceId} />
   {/if}
 </main>

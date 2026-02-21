@@ -1,10 +1,13 @@
 export type Route =
   | { view: 'run-list' }
   | { view: 'run-detail'; runId: string }
-  | { view: 'step-detail'; runId: string; stepId: string };
+  | { view: 'step-detail'; runId: string; stepId: string }
+  | { view: 'trace-list' }
+  | { view: 'trace-detail'; traceId: string };
 
 const runDetailRe = /^\/runs\/([^/]+)$/;
 const stepDetailRe = /^\/runs\/([^/]+)\/steps\/([^/]+)$/;
+const traceDetailRe = /^\/traces\/([^/]+)$/;
 
 export function parseRoute(path: string): Route {
   let m: RegExpMatchArray | null;
@@ -14,6 +17,11 @@ export function parseRoute(path: string): Route {
 
   m = path.match(runDetailRe);
   if (m) return { view: 'run-detail', runId: m[1] };
+
+  m = path.match(traceDetailRe);
+  if (m) return { view: 'trace-detail', traceId: m[1] };
+
+  if (path === '/traces') return { view: 'trace-list' };
 
   return { view: 'run-list' };
 }

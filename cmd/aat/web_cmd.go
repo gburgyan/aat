@@ -48,11 +48,17 @@ var webCmd = &cobra.Command{
 			outputDir = resolved.ArchiveDir
 		}
 
+		tracesDir := ""
+		if resolved.TracesDir != "" {
+			tracesDir = resolved.TracesDir
+		}
+
 		return webServeCommand(&webArgs{
 			Port:       port,
 			Open:       openFlag,
 			DevMode:    devMode,
 			ArchiveDir: outputDir,
+			TracesDir:  tracesDir,
 		})
 	},
 }
@@ -88,7 +94,12 @@ var webViewCmd = &cobra.Command{
 			outputDir = resolved.ArchiveDir
 		}
 
-		return webViewCommand(port, ref, outputDir)
+		tracesDir := ""
+		if resolved.TracesDir != "" {
+			tracesDir = resolved.TracesDir
+		}
+
+		return webViewCommand(port, ref, outputDir, tracesDir)
 	},
 }
 
@@ -112,6 +123,7 @@ type webArgs struct {
 	Open       bool
 	DevMode    bool
 	ArchiveDir string
+	TracesDir  string
 	OpenURL    string // specific URL to open; if empty and Open is true, opens the base URL
 }
 
@@ -120,6 +132,7 @@ func webServeCommand(args *webArgs) error {
 	srv := server.NewServer(server.ServerOptions{
 		Port:       args.Port,
 		ArchiveDir: args.ArchiveDir,
+		TracesDir:  args.TracesDir,
 		DevMode:    args.DevMode,
 	})
 
@@ -159,7 +172,7 @@ func webServeCommand(args *webArgs) error {
 
 // webViewCommand opens a run in the browser. If no server is running on the
 // given port, it starts a temporary one that serves until interrupted.
-func webViewCommand(port int, ref string, archiveDir string) error {
+func webViewCommand(port int, ref string, archiveDir string, tracesDir string) error {
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 
 	if err := checkServerHealth(baseURL); err == nil {
@@ -175,6 +188,7 @@ func webViewCommand(port int, ref string, archiveDir string) error {
 		Open:       true,
 		OpenURL:    buildViewURL(port, ref),
 		ArchiveDir: archiveDir,
+		TracesDir:  tracesDir,
 	})
 }
 

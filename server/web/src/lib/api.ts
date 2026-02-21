@@ -1,4 +1,4 @@
-import type { RunListEntry, RunDetail, StepDetail, ApiError } from './types';
+import type { RunListEntry, RunDetail, StepDetail, TraceListEntry, TraceDetail, ApiError } from './types';
 
 export class ApiRequestError extends Error {
   status: number;
@@ -41,4 +41,12 @@ export function fetchStep(runId: string, stepId: string): Promise<StepDetail> {
   return request<StepDetail>(
     `/api/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}`,
   );
+}
+
+export function fetchTraces(limit = 50): Promise<TraceListEntry[]> {
+  return request<TraceListEntry[]>(`/api/traces?limit=${limit}`);
+}
+
+export function fetchTrace(id: string): Promise<TraceDetail> {
+  return request<TraceDetail>(`/api/traces/${encodeURIComponent(id)}`);
 }

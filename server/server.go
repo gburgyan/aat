@@ -16,17 +16,19 @@ import (
 type ServerOptions struct {
 	Port       int
 	ArchiveDir string
+	TracesDir  string
 	DevMode    bool
 	ViteURL    string // Vite dev server URL for dev proxy (default http://localhost:5173)
 }
 
 // Server is the AAT web API server.
 type Server struct {
-	opts       ServerOptions
-	service    *ArchiveService
-	router     chi.Router
-	httpServer *http.Server
-	addr       string
+	opts         ServerOptions
+	service      *ArchiveService
+	traceService *TraceService
+	router       chi.Router
+	httpServer   *http.Server
+	addr         string
 }
 
 // NewServer creates a Server with the given options.
@@ -37,8 +39,9 @@ func NewServer(opts ServerOptions) *Server {
 	}
 
 	s := &Server{
-		opts:    opts,
-		service: NewArchiveService(opts.ArchiveDir),
+		opts:         opts,
+		service:      NewArchiveService(opts.ArchiveDir),
+		traceService: NewTraceService(opts.TracesDir),
 	}
 	s.router = s.buildRouter()
 	return s
@@ -62,6 +65,9 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/runs/latest", s.handleLatestRun)
 		r.Get("/runs/{id}", s.handleGetRun)
 		r.Get("/runs/{id}/steps/{stepId}", s.handleGetStep)
+
+		r.Get("/traces", s.handleListTraces)
+		r.Get("/traces/{id}", s.handleGetTrace)
 	})
 
 	// Resolve /runs/latest to the actual run ID so the SPA has a real ID in the URL.

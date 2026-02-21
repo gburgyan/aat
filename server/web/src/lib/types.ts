@@ -216,3 +216,47 @@ export interface ResponseBodyErrorDetail {
   code?: string;
   category?: string;
 }
+
+// --- Trace types ---
+
+export interface TraceListEntry {
+  traceId: string;
+  timestamp: string;
+  prompt: string;
+  workflowName?: string;
+  totalDurationMs: number;
+  hasError: boolean;
+  llmCallCount: number;
+}
+
+export interface TraceDetail {
+  traceId: string;
+  timestamp: string;
+  prompt: string;
+  selectionCall?: LLMCallDetail;
+  selectionRetryCall?: LLMCallDetail;
+  workflowSelection?: unknown;
+  skeleton?: SkeletonDetail;
+  planCall?: LLMCallDetail;
+  targetedResponse?: unknown;
+  mergedPlanYaml?: string;
+  finalPlanYaml?: string;
+  validationErr?: string;
+  retryCall?: LLMCallDetail;
+  retryValidationErr?: string;
+  totalDurationMs: number;
+  error?: string;
+  wrongPlanSignal?: unknown;
+  wrongPlanCall?: LLMCallDetail;
+  reselectionCall?: LLMCallDetail;
+  workflowName?: string;
+  templatePath?: string;
+  repetitions?: unknown;
+  templateExpandedYaml?: string;
+}
+
+export interface SkeletonDetail {
+  planYaml: string;
+  unfedInputs?: string[];
+  durationMs: number;
+}
