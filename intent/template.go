@@ -38,8 +38,11 @@ func LoadWorkflowTemplate(templatePath, graphDir string, g *graph.Graph) (*plan.
 		return nil, fmt.Errorf("loading workflow template %s: %w", templatePath, err)
 	}
 
-	// Validate all step nodes exist in the graph.
+	// Validate all step nodes exist in the graph (skip slot markers).
 	for _, step := range p.Execution.Steps {
+		if step.IsSlotMarker() {
+			continue
+		}
 		if g.Nodes[step.Node] == nil {
 			return nil, fmt.Errorf("workflow template references unknown node %q", step.Node)
 		}

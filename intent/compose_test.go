@@ -1151,6 +1151,438 @@ func TestComposeWorkflowTemplate_AfterWireSubstitution(t *testing.T) {
 	assert.Empty(t, addon1.Values["specialInput"].From)
 }
 
+// --- ComposeWithSlots tests ---
+
+func TestComposeWithSlots_BasicReplacement(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	p, err := ComposeWithSlots(base, map[string]string{
+		"trip-search": "OptionA",
+		"payment":     "CashPayment",
+	}, g, ".")
+	require.NoError(t, err)
+
+	// Base has: createWorkbench, [trip-search], addTraveler, [payment], finalStep
+	// OptionA contributes: search, book (2 steps)
+	// CashPayment contributes: addCashPayment (1 step)
+	// Total: 1 + 2 + 1 + 1 + 1 = 6
+	require.Len(t, p.Execution.Steps, 6)
+
+	// Verify step order.
+	assert.Equal(t, "createWorkbench", p.Execution.Steps[0].Node)
+	assert.Equal(t, "search", p.Execution.Steps[1].Node)
+	assert.Equal(t, "book", p.Execution.Steps[2].Node)
+	assert.Equal(t, "addTraveler", p.Execution.Steps[3].Node)
+	assert.Equal(t, "addCashPayment", p.Execution.Steps[4].Node)
+	assert.Equal(t, "finalStep", p.Execution.Steps[5].Node)
+}
+
+func TestComposeWithSlots_DependsOnRewriting(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	p, err := ComposeWithSlots(base, map[string]string{
+		"trip-search": "OptionA",
+		"payment":     "CashPayment",
+	}, g, ".")
+	require.NoError(t, err)
+
+	// addTraveler originally depends on "trip-search" slot → rewritten to "book" (last step of OptionA).
+	addTraveler := p.Execution.Steps[3]
+	assert.Equal(t, "addTraveler", addTraveler.Node)
+	assert.Contains(t, addTraveler.DependsOn, "book", "trip-search slot dep should be rewritten to last option step")
+	assert.NotContains(t, addTraveler.DependsOn, "trip-search", "slot name should be gone from dependsOn")
+
+	// payment marker depended on trip-search. addCashPayment (its replacement)
+	// should inherit that rewritten to "book".
+	addCashPayment := p.Execution.Steps[4]
+	assert.Equal(t, "addCashPayment", addCashPayment.Node)
+	assert.Contains(t, addCashPayment.DependsOn, "book", "payment root should inherit rewritten trip-search dep")
+
+	// finalStep depends on [addTraveler, payment]. "payment" should be rewritten to "addCashPayment".
+	finalStep := p.Execution.Steps[5]
+	assert.Equal(t, "finalStep", finalStep.Node)
+	assert.Contains(t, finalStep.DependsOn, "addTraveler")
+	assert.Contains(t, finalStep.DependsOn, "addCashPayment", "payment slot dep should be rewritten")
+	assert.NotContains(t, finalStep.DependsOn, "payment")
+}
+
+func TestComposeWithSlots_AutoWiring(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	p, err := ComposeWithSlots(base, map[string]string{
+		"trip-search": "OptionA",
+		"payment":     "CashPayment",
+	}, g, ".")
+	require.NoError(t, err)
+
+	// finalStep has amount: AUTOWIRE → should be wired to addCashPayment.amount
+	// (addCashPayment produces "amount" output).
+	finalStep := p.Execution.Steps[5]
+	assert.Equal(t, "addCashPayment.amount", finalStep.Values["amount"].From,
+		"AUTOWIRE should be resolved from slot option outputs")
+	assert.Nil(t, finalStep.Values["amount"].Default, "AUTOWIRE default should be cleared")
+}
+
+func TestComposeWithSlots_CrossSlotFromRef(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	p, err := ComposeWithSlots(base, map[string]string{
+		"trip-search": "CashPayment", // Intentionally wrong to use CashPayment as trip-search
+		"payment":     "CashPayment",
+	}, g, ".")
+	// CashPayment has a from: createWorkbench.workbenchId — this is a cross-slot
+	// ref to a base template step. fixFromDependencies should add createWorkbench
+	// to the step's dependsOn.
+	require.NoError(t, err)
+
+	// The first CashPayment step replaces trip-search slot.
+	cashStep := p.Execution.Steps[1]
+	assert.Equal(t, "addCashPayment", cashStep.Node)
+	assert.Contains(t, cashStep.DependsOn, "createWorkbench",
+		"cross-slot from ref should add dependency via fixFromDependencies")
+}
+
+func TestComposeWithSlots_OptionBMultiStep(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	p, err := ComposeWithSlots(base, map[string]string{
+		"trip-search": "OptionB",
+		"payment":     "CashPayment",
+	}, g, ".")
+	require.NoError(t, err)
+
+	// OptionB has 3 steps: search, searchLeg2, book
+	// Total: createWorkbench + (search, searchLeg2, book) + addTraveler + addCashPayment + finalStep = 7
+	require.Len(t, p.Execution.Steps, 7)
+
+	assert.Equal(t, "createWorkbench", p.Execution.Steps[0].Node)
+	assert.Equal(t, "search", p.Execution.Steps[1].Node)
+	assert.Equal(t, "searchLeg2", p.Execution.Steps[2].Node)
+	assert.Equal(t, "book", p.Execution.Steps[3].Node)
+	assert.Equal(t, "addTraveler", p.Execution.Steps[4].Node)
+	assert.Equal(t, "addCashPayment", p.Execution.Steps[5].Node)
+	assert.Equal(t, "finalStep", p.Execution.Steps[6].Node)
+
+	// addTraveler should depend on "book" (last step of OptionB, not "search").
+	assert.Contains(t, p.Execution.Steps[4].DependsOn, "book")
+}
+
+func TestComposeWithSlots_DefaultChoice(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	// Provide no choices — should use defaults.
+	p, err := ComposeWithSlots(base, nil, g, ".")
+	require.NoError(t, err)
+
+	// Default trip-search is OptionA (2 steps), default payment is CashPayment (1 step).
+	require.Len(t, p.Execution.Steps, 6)
+	assert.Equal(t, "search", p.Execution.Steps[1].Node)
+}
+
+func TestComposeWithSlots_PartialChoices(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	// Only specify trip-search — payment should default to CashPayment.
+	p, err := ComposeWithSlots(base, map[string]string{
+		"trip-search": "OptionB",
+	}, g, ".")
+	require.NoError(t, err)
+
+	// OptionB (3 steps) + CashPayment (1 step) + createWorkbench + addTraveler + finalStep = 7
+	require.Len(t, p.Execution.Steps, 7)
+}
+
+func TestComposeWithSlots_UnknownOption(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	_, err := ComposeWithSlots(base, map[string]string{
+		"trip-search": "NonExistent",
+	}, g, ".")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not found in graph")
+}
+
+func TestComposeWithSlots_NoDefaultNoChoice(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	// Add a slot with no default.
+	base := findSlotBaseWorkflow(g)
+	base.Slots = append(base.Slots, graph.SlotDef{
+		Name:    "extra",
+		Options: []string{"OptionA"},
+		// No Default
+	})
+
+	// Modify base template to include the slot marker. Instead of modifying the
+	// file, we skip the extra slot — ComposeWithSlots will fail at "marker not found"
+	// which is a different error. Let's test the "no choice and no default" by
+	// clearing the default of an existing slot.
+	base.Slots[0].Default = "" // trip-search has no default now
+
+	_, err := ComposeWithSlots(base, nil, g, ".")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no choice and no default")
+}
+
+func TestComposeWithSlots_NoSlots(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	// Use a workflow with no slots — should just load the template.
+	noSlotWF := graph.Workflow{
+		Name:     "NoSlots",
+		Template: "testdata/compose/parent.yaml",
+	}
+
+	p, err := ComposeWithSlots(noSlotWF, nil, g, ".")
+	require.NoError(t, err)
+	require.Len(t, p.Execution.Steps, 3) // parent.yaml has 3 steps
+}
+
+func TestComposeWithSlots_CleanupMerge(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	p, err := ComposeWithSlots(base, map[string]string{
+		"trip-search": "OptionA",
+		"payment":     "CashPayment",
+	}, g, ".")
+	require.NoError(t, err)
+
+	// Base has cleanup: commit (always). Options have no cleanup.
+	require.Len(t, p.Execution.Cleanup, 1)
+	assert.Equal(t, "commit", p.Execution.Cleanup[0].Node)
+}
+
+func TestComposeWithSlotsAndAddons_Success(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	p, err := ComposeWithSlotsAndAddons(base, map[string]string{
+		"trip-search": "OptionA",
+		"payment":     "CashPayment",
+	}, []string{"Addon"}, g, ".")
+	require.NoError(t, err)
+
+	// 6 from slot composition + 2 from addon = 8
+	require.Len(t, p.Execution.Steps, 8)
+
+	// Addon steps should be prefixed with inc0_.
+	stepIDs := make([]string, len(p.Execution.Steps))
+	for i, s := range p.Execution.Steps {
+		stepIDs[i] = s.StepID()
+	}
+	assert.Contains(t, stepIDs, "inc0_addon1")
+	assert.Contains(t, stepIDs, "inc0_addon2")
+}
+
+func TestComposeWithSlotsAndAddons_NoAddons(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	p, err := ComposeWithSlotsAndAddons(base, map[string]string{
+		"trip-search": "OptionA",
+		"payment":     "CashPayment",
+	}, nil, g, ".")
+	require.NoError(t, err)
+
+	// Same as ComposeWithSlots — 6 steps.
+	require.Len(t, p.Execution.Steps, 6)
+}
+
+func TestComposeWithSlotsAndAddons_BadAddon(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	base := findSlotBaseWorkflow(g)
+
+	_, err := ComposeWithSlotsAndAddons(base, map[string]string{
+		"trip-search": "OptionA",
+		"payment":     "CashPayment",
+	}, []string{"NonExistent"}, g, ".")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown addon")
+}
+
+// --- ensureFromDeps ---
+
+func TestEnsureFromDeps_AddsFromRefDeps(t *testing.T) {
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "createWorkbench"},
+				{
+					Node: "addOffer",
+					Values: map[string]plan.StepValue{
+						"workbenchId": {From: "createWorkbench.workbenchId"},
+					},
+				},
+				{
+					Node:      "commit",
+					DependsOn: []string{"addOffer"},
+					Values: map[string]plan.StepValue{
+						"workbenchId": {From: "createWorkbench.workbenchId"},
+					},
+				},
+			},
+		},
+	}
+
+	ensureFromDeps(p)
+
+	// addOffer should gain createWorkbench dep from from ref.
+	assert.Contains(t, p.Execution.Steps[1].DependsOn, "createWorkbench")
+
+	// commit should gain createWorkbench dep (not just addOffer).
+	assert.Contains(t, p.Execution.Steps[2].DependsOn, "createWorkbench")
+	assert.Contains(t, p.Execution.Steps[2].DependsOn, "addOffer")
+}
+
+func TestEnsureFromDeps_NoDuplicateDeps(t *testing.T) {
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "a"},
+				{
+					Node:      "b",
+					DependsOn: []string{"a"},
+					Values: map[string]plan.StepValue{
+						"input1": {From: "a.output1"},
+						"input2": {From: "a.output2"},
+					},
+				},
+			},
+		},
+	}
+
+	ensureFromDeps(p)
+
+	// "a" should appear only once in b's dependsOn.
+	count := 0
+	for _, dep := range p.Execution.Steps[1].DependsOn {
+		if dep == "a" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "dep 'a' should appear exactly once")
+}
+
+func TestEnsureFromDeps_SkipsSelfRef(t *testing.T) {
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "a",
+					Values: map[string]plan.StepValue{
+						"input": {From: "a.output"}, // self-ref (weird but shouldn't crash)
+					},
+				},
+			},
+		},
+	}
+
+	ensureFromDeps(p)
+	assert.Empty(t, p.Execution.Steps[0].DependsOn, "self-ref should not add self to dependsOn")
+}
+
+// findSlotBaseWorkflow returns the slot base workflow from the test graph.
+func findSlotBaseWorkflow(g *graph.Graph) graph.Workflow {
+	for _, wf := range g.Workflows {
+		if wf.Name == "SlotBase" {
+			return wf
+		}
+	}
+	panic("SlotBase workflow not found in test graph")
+}
+
+// buildSlotTestGraph creates a graph with slot-based workflows for testing.
+func buildSlotTestGraph() *graph.Graph {
+	g := buildComposeTestGraph()
+
+	// Add nodes used by slot templates.
+	g.Nodes["createWorkbench"] = &graph.Node{
+		Name: "createWorkbench", Adapter: "createWorkbench",
+		Outputs: []graph.Output{{Name: "workbenchId", Type: "string"}},
+	}
+	g.Nodes["addTraveler"] = &graph.Node{
+		Name: "addTraveler", Adapter: "addTraveler",
+		Inputs:  []graph.Input{{Name: "workbenchId", Type: "string"}},
+		Outputs: []graph.Output{{Name: "travelerId", Type: "string"}},
+	}
+	g.Nodes["finalStep"] = &graph.Node{
+		Name: "finalStep", Adapter: "finalStep",
+		Inputs: []graph.Input{
+			{Name: "workbenchId", Type: "string"},
+			{Name: "amount", Type: "string"},
+		},
+		Outputs: []graph.Output{{Name: "locator", Type: "string"}},
+	}
+	g.Nodes["addCashPayment"] = &graph.Node{
+		Name: "addCashPayment", Adapter: "addCashPayment",
+		Inputs:  []graph.Input{{Name: "workbenchId", Type: "string"}},
+		Outputs: []graph.Output{{Name: "amount", Type: "string"}},
+	}
+	g.Nodes["searchLeg2"] = &graph.Node{
+		Name: "searchLeg2", Adapter: "searchLeg2",
+		Inputs:  []graph.Input{{Name: "leg1Data", Type: "string"}},
+		Outputs: []graph.Output{{Name: "results", Type: "string"}},
+	}
+
+	// Add slot workflows.
+	g.Workflows = append(g.Workflows,
+		graph.Workflow{
+			Name:     "SlotBase",
+			Template: "testdata/compose/slot_base.yaml",
+			Slots: []graph.SlotDef{
+				{
+					Name:    "trip-search",
+					Options: []string{"OptionA", "OptionB", "CashPayment"},
+					Default: "OptionA",
+				},
+				{
+					Name:    "payment",
+					Options: []string{"CashPayment"},
+					Default: "CashPayment",
+				},
+			},
+		},
+		graph.Workflow{
+			Name:     "OptionA",
+			Kind:     "slot",
+			Template: "testdata/compose/slot_option_a.yaml",
+		},
+		graph.Workflow{
+			Name:     "OptionB",
+			Kind:     "slot",
+			Template: "testdata/compose/slot_option_b.yaml",
+		},
+		graph.Workflow{
+			Name:     "CashPayment",
+			Kind:     "slot",
+			Template: "testdata/compose/slot_payment_cash.yaml",
+		},
+	)
+
+	return g
+}
+
 // buildComposeTestGraph creates a synthetic graph for composition tests.
 func buildComposeTestGraph() *graph.Graph {
 	return &graph.Graph{

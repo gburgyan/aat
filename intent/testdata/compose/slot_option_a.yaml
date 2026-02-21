@@ -1,0 +1,9 @@
+execution:
+  steps:
+    - node: search
+      description: "Search for items"
+
+    - node: book
+      dependsOn: [search]
+      values:
+        flightId: {from: search.results, select: {strategy: first}}

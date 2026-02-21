@@ -198,10 +198,16 @@ func Validate(g *Graph) error {
 func ValidateWarnings(g *Graph) []string {
 	var warnings []string
 
+	// Build workflow name index for slot option validation.
+	workflowByName := make(map[string]Workflow, len(g.Workflows))
+	for _, wf := range g.Workflows {
+		workflowByName[wf.Name] = wf
+	}
+
 	for i, wf := range g.Workflows {
 		// Validate kind value
-		if wf.Kind != "" && wf.Kind != "addon" {
-			warnings = append(warnings, fmt.Sprintf("workflow %d (%q): unknown kind %q (expected \"addon\")", i, wf.Name, wf.Kind))
+		if wf.Kind != "" && wf.Kind != "addon" && wf.Kind != "slot" {
+			warnings = append(warnings, fmt.Sprintf("workflow %d (%q): unknown kind %q (expected \"addon\" or \"slot\")", i, wf.Name, wf.Kind))
 		}
 
 		// Validate Priority
@@ -217,6 +223,36 @@ func ValidateWarnings(g *Graph) []string {
 			for _, afterNode := range wf.After {
 				if g.Nodes[afterNode] == nil {
 					warnings = append(warnings, fmt.Sprintf("workflow %d (%q): after references unknown node %q", i, wf.Name, afterNode))
+				}
+			}
+		}
+
+		// Validate slot definitions
+		for j, sd := range wf.Slots {
+			if sd.Name == "" {
+				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): slot %d has no name", i, wf.Name, j))
+			}
+			if len(sd.Options) == 0 {
+				warnings = append(warnings, fmt.Sprintf("workflow %d (%q): slot %q has no options", i, wf.Name, sd.Name))
+			}
+			for _, optName := range sd.Options {
+				opt, optExists := workflowByName[optName]
+				if !optExists {
+					warnings = append(warnings, fmt.Sprintf("workflow %d (%q): slot %q references unknown option workflow %q", i, wf.Name, sd.Name, optName))
+				} else if !opt.IsSlot() {
+					warnings = append(warnings, fmt.Sprintf("workflow %d (%q): slot %q option %q is not kind \"slot\"", i, wf.Name, sd.Name, optName))
+				}
+			}
+			if sd.Default != "" {
+				found := false
+				for _, optName := range sd.Options {
+					if optName == sd.Default {
+						found = true
+						break
+					}
+				}
+				if !found {
+					warnings = append(warnings, fmt.Sprintf("workflow %d (%q): slot %q default %q is not in options list", i, wf.Name, sd.Name, sd.Default))
 				}
 			}
 		}

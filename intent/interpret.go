@@ -37,10 +37,11 @@ type InterpretResult struct {
 // WorkflowSelection captures the output of the first LLM call: which workflow
 // template to use and any addons to compose.
 type WorkflowSelection struct {
-	Workflow    string         `json:"workflow"`
-	Description string         `json:"description"`
-	Addons      []string       `json:"addons,omitempty"`
-	Repetitions map[string]int `json:"repetitions,omitempty"`
+	Workflow    string            `json:"workflow"`
+	Description string            `json:"description"`
+	Choices     map[string]string `json:"choices,omitempty"`     // slot name → option name
+	Addons      []string          `json:"addons,omitempty"`
+	Repetitions map[string]int    `json:"repetitions,omitempty"`
 }
 
 // GoalAnalysis captures the output of the first LLM call.
@@ -263,7 +264,18 @@ func buildAndFillPlan(
 	var tpl *plan.Plan
 	var templatePath string
 
-	if len(ws.Addons) > 0 {
+	hasSlots := len(wf.Slots) > 0
+	hasAddons := len(ws.Addons) > 0
+
+	if hasSlots {
+		// Workflow has slots — compose with slot choices (and optionally addons).
+		composed, composeErr := ComposeWithSlotsAndAddons(wf, ws.Choices, ws.Addons, req.Graph, req.GraphDir)
+		if composeErr != nil {
+			return nil, nil, fmt.Errorf("intent: composing slots for %q: %w", ws.Workflow, composeErr)
+		}
+		tpl = composed
+		templatePath = wf.Template
+	} else if hasAddons {
 		composed, composeErr := ComposeWithAddons(wf, ws.Addons, req.Graph, req.GraphDir)
 		if composeErr != nil {
 			return nil, nil, fmt.Errorf("intent: composing addons for %q: %w", ws.Workflow, composeErr)
@@ -620,6 +632,33 @@ func validateWorkflowSelection(ws *WorkflowSelection, g *graph.Graph) []string {
 		errs = append(errs, fmt.Sprintf("workflow %q is an addon, not a base workflow; select a base workflow instead", ws.Workflow))
 	}
 
+	// Validate slot choices if the workflow has slots.
+	if len(wf.Slots) > 0 && len(ws.Choices) > 0 {
+		slotDefs := make(map[string]graph.SlotDef, len(wf.Slots))
+		for _, sd := range wf.Slots {
+			slotDefs[sd.Name] = sd
+		}
+
+		for slotName, optionName := range ws.Choices {
+			sd, slotExists := slotDefs[slotName]
+			if !slotExists {
+				errs = append(errs, fmt.Sprintf("choices references unknown slot %q; available slots: %s", slotName, listSlotNames(wf)))
+				continue
+			}
+			// Check the option is in the slot's options list.
+			validOption := false
+			for _, opt := range sd.Options {
+				if strings.EqualFold(opt, optionName) {
+					validOption = true
+					break
+				}
+			}
+			if !validOption {
+				errs = append(errs, fmt.Sprintf("slot %q: %q is not a valid option; valid options: %s", slotName, optionName, strings.Join(sd.Options, ", ")))
+			}
+		}
+	}
+
 	// Check each addon exists and is actually an addon.
 	seen := map[string]bool{}
 	for _, addonName := range ws.Addons {
@@ -662,6 +701,15 @@ func stripJSONFencing(s string) string {
 		s = strings.TrimSpace(s)
 	}
 	return s
+}
+
+// listSlotNames returns a comma-separated list of slot names for error messages.
+func listSlotNames(wf graph.Workflow) string {
+	var names []string
+	for _, sd := range wf.Slots {
+		names = append(names, sd.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 // listWorkflowNames returns a comma-separated list of workflow names for error messages.

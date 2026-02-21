@@ -2,6 +2,7 @@ package graph
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -631,6 +632,104 @@ func TestWorkflow_IsAddon(t *testing.T) {
 	assert.True(t, Workflow{Kind: "addon"}.IsAddon())
 	assert.False(t, Workflow{}.IsAddon())
 	assert.False(t, Workflow{Kind: "other"}.IsAddon())
+}
+
+func TestWorkflow_IsSlot(t *testing.T) {
+	assert.True(t, Workflow{Kind: "slot"}.IsSlot())
+	assert.False(t, Workflow{}.IsSlot())
+	assert.False(t, Workflow{Kind: "addon"}.IsSlot())
+}
+
+func TestValidateWarnings_SlotKindAccepted(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{Name: "SlotOption", Kind: "slot", Template: "workflows/opt.yaml"},
+		},
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	for _, w := range warnings {
+		assert.NotContains(t, w, "unknown kind")
+	}
+}
+
+func TestValidateWarnings_SlotDefsValid(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{
+				Name:     "Base",
+				Template: "workflows/base.yaml",
+				Slots: []SlotDef{
+					{Name: "trip-search", Options: []string{"OneWay"}, Default: "OneWay"},
+				},
+			},
+			{Name: "OneWay", Kind: "slot", Template: "workflows/oneway.yaml"},
+		},
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	for _, w := range warnings {
+		assert.NotContains(t, w, "slot")
+	}
+}
+
+func TestValidateWarnings_SlotOptionNotFound(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{
+				Name:     "Base",
+				Template: "workflows/base.yaml",
+				Slots: []SlotDef{
+					{Name: "trip-search", Options: []string{"NonExistent"}, Default: "NonExistent"},
+				},
+			},
+		},
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "NonExistent") && strings.Contains(w, "unknown option") {
+			found = true
+		}
+	}
+	assert.True(t, found, "should warn about missing slot option: %v", warnings)
+}
+
+func TestValidateWarnings_SlotDefaultNotInOptions(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Workflows: []Workflow{
+			{
+				Name:     "Base",
+				Template: "workflows/base.yaml",
+				Slots: []SlotDef{
+					{Name: "trip-search", Options: []string{"OneWay"}, Default: "RoundTrip"},
+				},
+			},
+			{Name: "OneWay", Kind: "slot", Template: "workflows/oneway.yaml"},
+		},
+		Nodes: map[string]*Node{
+			"a": {Name: "a", Adapter: "a"},
+		},
+	}
+	warnings := ValidateWarnings(g)
+	found := false
+	for _, w := range warnings {
+		if strings.Contains(w, "default") && strings.Contains(w, "RoundTrip") {
+			found = true
+		}
+	}
+	assert.True(t, found, "should warn about default not in options: %v", warnings)
 }
 
 func TestParse_WorkflowWithAfterWire(t *testing.T) {

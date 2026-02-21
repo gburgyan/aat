@@ -30,18 +30,26 @@ func TestTravelportTemplates_AllValidate(t *testing.T) {
 			p, err := LoadWorkflowTemplate(wf.Template, tpGraphDir, g)
 			require.NoError(t, err, "failed to load template for workflow %q", wf.Name)
 
-			// Addon templates are fragments that can't validate standalone —
-			// they have intentionally unfed required inputs that the LLM fills
-			// at composition time. Only validate standalone workflows.
-			if !wf.IsAddon() {
+			// Addon and slot option templates are fragments that can't validate
+			// standalone — they have intentionally unfed required inputs or
+			// cross-template references. Base templates with slots have slot
+			// markers (empty node names). Only validate standalone workflows.
+			hasSlotMarkers := false
+			for _, step := range p.Execution.Steps {
+				if step.IsSlotMarker() {
+					hasSlotMarkers = true
+					break
+				}
+			}
+			if !wf.IsAddon() && !wf.IsSlot() && !hasSlotMarkers {
 				_, err = plan.InstantiateAndValidate(p, g)
 				assert.NoError(t, err, "template validation failed for workflow %q", wf.Name)
 			}
 		})
 	}
 
-	// Ensure we found all 33 templated workflows (10 standalone + 4 multi-city + 6 post-commit + 6 pre-commit addons + 7 post-commit addons).
-	assert.Equal(t, 33, templatedWorkflows, "expected 33 workflows with templates")
+	// 24 non-booking + 10 slot-based (Booking base + 8 trip-search slots + 1 payment slot).
+	assert.Equal(t, 34, templatedWorkflows, "expected 34 workflows with templates")
 }
 
 // TestTravelportTemplates_UnfedInputs verifies the unfed inputs for each
@@ -60,16 +68,6 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		contains []string // substrings that should appear in unfed list
 		exact    int      // exact expected count (-1 = don't check)
 	}{
-		{
-			workflow:  "Full-Payload Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination", "searchFlights.departureDate", "searchFlights.passengers", "searchFlights.contentSource"},
-			exact:     9, // 3 configurable (origin/dest/date) + 6 other configurable
-		},
-		{
-			workflow:  "1-Leg Reference Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination", "searchFlights.passengers", "searchFlights.carrierPreference"},
-			exact:     9, // 3 configurable (origin/dest/date) + 6 other configurable
-		},
 		{
 			workflow:  "Post-Commit Ticketing",
 			contains:  []string{"addPayment.amount", "addPayment.currencyCode"},
@@ -93,41 +91,6 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		{
 			workflow:  "Traveler Modification",
 			contains:  []string{"updateTraveler.updateValue"},
-			exact:     -1,
-		},
-		{
-			workflow:  "3-City Multi-City Booking",
-			contains:  []string{"searchFlights2Leg.leg1Origin", "searchFlights2Leg.leg1Destination", "searchFlights2Leg.passengers", "searchFlights2Leg.contentSource"},
-			exact:     11, // 6 leg inputs + 5 shared configurable
-		},
-		{
-			workflow:  "4-City Multi-City Booking",
-			contains:  []string{"searchFlights3Leg.leg1Origin", "searchFlights3Leg.leg3Destination", "searchFlights3Leg.passengers"},
-			exact:     14, // 9 leg inputs + 5 shared configurable
-		},
-		{
-			workflow:  "2-Leg Reference Booking",
-			contains:  []string{"searchFlights2Leg.leg1Origin", "searchFlights2Leg.leg2Destination", "searchFlights2Leg.carrierPreference"},
-			exact:     11, // 6 leg inputs + 5 shared configurable
-		},
-		{
-			workflow:  "3-Leg Reference Booking",
-			contains:  []string{"searchFlights3Leg.leg1Origin", "searchFlights3Leg.leg3DepartureDate", "searchFlights3Leg.cabinPreference"},
-			exact:     14, // 9 leg inputs + 5 shared configurable
-		},
-		{
-			workflow:  "4-Leg Reference Booking",
-			contains:  []string{"searchFlights4Leg.leg1Origin", "searchFlights4Leg.leg4Destination", "searchFlights4Leg.maxConnections"},
-			exact:     17, // 12 leg inputs + 5 shared configurable
-		},
-		{
-			workflow:  "Round-Trip Full-Payload Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination"},
-			exact:     -1,
-		},
-		{
-			workflow:  "Round-Trip Leg-Based Booking",
-			contains:  []string{"searchFlights.origin", "searchFlights.destination"},
 			exact:     -1,
 		},
 		{
@@ -182,8 +145,8 @@ func TestTravelportTemplates_UnfedInputs(t *testing.T) {
 		},
 		{
 			workflow:  "Primary Contact",
-			contains:  []string{"addPrimaryContact.workbenchId"},
-			exact:     1, // email and phoneNumber now have graph defaults
+			contains:  []string{"addPrimaryContact.workbenchId", "addPrimaryContact.travelerIdentifierValue"},
+			exact:     2, // workbenchId + travelerIdentifierValue (both AUTOWIRE, resolved at composition time)
 		},
 		{
 			workflow:  "Travel Agency",
@@ -226,23 +189,14 @@ func TestTravelportTemplates_GoalConsistency(t *testing.T) {
 
 	// Workflows that should have isGoal set on their final step.
 	goalWorkflows := map[string]string{
-		"Full-Payload Booking":           "commitReservation",
-		"1-Leg Reference Booking":        "commitReservation",
-		"Post-Commit Ticketing":          "commitTicket",
-		"Exchange":                        "commitExchangeTicket",
-		"Round-Trip Full-Payload Booking": "commitReservation",
-		"3-City Multi-City Booking":       "commitReservation",
-		"4-City Multi-City Booking":       "commitReservation",
-		"Round-Trip Leg-Based Booking":           "commitReservation",
-		"2-Leg Reference Booking":         "commitReservation",
-		"3-Leg Reference Booking":         "commitReservation",
-		"4-Leg Reference Booking":         "commitReservation",
-		"Post-Commit Seat Selection":            "commitReservation",
-		"Post-Commit Ancillary":           "commitReservation",
-		"Involuntary Schedule Change":     "commitReservation",
-		"Ticket Void":                     "voidTicket",
-		"Cancel Reservation":              "cancelReservation",
-		"Order Divide":                    "divideReservation",
+		"Post-Commit Ticketing":       "commitTicket",
+		"Exchange":                    "commitExchangeTicket",
+		"Post-Commit Seat Selection":  "commitReservation",
+		"Post-Commit Ancillary":       "commitReservation",
+		"Involuntary Schedule Change": "commitReservation",
+		"Ticket Void":                 "voidTicket",
+		"Cancel Reservation":          "cancelReservation",
+		"Order Divide":                "divideReservation",
 	}
 
 	for wfName, expectedGoal := range goalWorkflows {
@@ -315,17 +269,8 @@ func TestTravelportTemplates_CleanupPresent(t *testing.T) {
 
 	// Workflows that should have ignoreWorkbench cleanup.
 	workbenchWorkflows := []string{
-		"Full-Payload Booking",
-		"1-Leg Reference Booking",
 		"Post-Commit Ticketing",
 		"Exchange",
-		"Round-Trip Full-Payload Booking",
-		"3-City Multi-City Booking",
-		"4-City Multi-City Booking",
-		"Round-Trip Leg-Based Booking",
-		"2-Leg Reference Booking",
-		"3-Leg Reference Booking",
-		"4-Leg Reference Booking",
 		"Post-Commit Seat Selection",
 		"Post-Commit Ancillary",
 		"Involuntary Schedule Change",

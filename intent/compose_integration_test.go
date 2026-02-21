@@ -21,24 +21,30 @@ func loadTravelportForCompose(t *testing.T) *graph.Graph {
 	return g
 }
 
-// TestCompose_FullPayloadWithSeatSelection verifies that composing the
-// Full-Payload Booking with the Seat Selection addon produces a valid plan
-// with the seat steps spliced in at the right place.
-func TestCompose_FullPayloadWithSeatSelection(t *testing.T) {
-	g := loadTravelportForCompose(t)
-
-	// Find the base workflow.
-	var base graph.Workflow
+// findBookingWorkflow returns the slot-based "Booking" workflow.
+func findBookingWorkflow(t *testing.T, g *graph.Graph) graph.Workflow {
+	t.Helper()
 	for _, w := range g.Workflows {
-		if w.Name == "Full-Payload Booking" {
-			base = w
-			break
+		if w.Name == "Booking" {
+			return w
 		}
 	}
-	require.NotEmpty(t, base.Name, "base workflow not found in graph")
+	t.Fatal("Booking workflow not found in graph")
+	return graph.Workflow{}
+}
 
-	// Compose with Seat Selection addon.
-	p, err := ComposeWithAddons(base, []string{"Seat Selection"}, g, tpGraphDirCompose)
+// onewayChoices returns the default slot choices for a one-way booking.
+var onewayChoices = map[string]string{"trip-search": "One-Way", "payment": "Cash"}
+
+// TestCompose_BookingWithSeatSelection verifies that composing the
+// slot-based Booking (One-Way + Cash) with the Seat Selection addon
+// produces a valid plan with the seat steps spliced in at the right place.
+func TestCompose_BookingWithSeatSelection(t *testing.T) {
+	g := loadTravelportForCompose(t)
+	base := findBookingWorkflow(t, g)
+
+	// Compose with slots + Seat Selection addon.
+	p, err := ComposeWithSlotsAndAddons(base, onewayChoices, []string{"Seat Selection"}, g, tpGraphDirCompose)
 	require.NoError(t, err)
 
 	// Validate the composed plan against the graph.
@@ -51,10 +57,10 @@ func TestCompose_FullPayloadWithSeatSelection(t *testing.T) {
 		assert.Contains(t, errStr, "productId", "unexpected validation error")
 	}
 
-	// Check step count: parent has 8 steps, addon has 2 = 10 total.
+	// Check step count: parent has 8 steps (4 base + 3 one-way + 1 cash), addon has 2 = 10 total.
 	require.Len(t, p.Execution.Steps, 10, "expected 8 parent + 2 addon steps")
 
-	// Verify step order: seat steps should appear after priceOfferFullPayload
+	// Verify step order: seat steps should appear after priceOfferReference
 	// (that's the After node for Seat Selection).
 	stepIDs := make([]string, len(p.Execution.Steps))
 	for i, s := range p.Execution.Steps {
@@ -63,25 +69,25 @@ func TestCompose_FullPayloadWithSeatSelection(t *testing.T) {
 	t.Logf("Step order: %s", strings.Join(stepIDs, " → "))
 
 	// Find insertion point and seat step indices.
-	priceIdx := indexOf(stepIDs, "priceOfferFullPayload")
+	priceIdx := indexOf(stepIDs, "priceOfferReference")
 	seatSearchIdx := indexOf(stepIDs, "inc0_searchSeatMap")
 	seatAddIdx := indexOf(stepIDs, "inc0_addSeatOffer")
-	require.Greater(t, priceIdx, -1, "priceOfferFullPayload not found")
+	require.Greater(t, priceIdx, -1, "priceOfferReference not found")
 	require.Greater(t, seatSearchIdx, -1, "inc0_searchSeatMap not found")
 	require.Greater(t, seatAddIdx, -1, "inc0_addSeatOffer not found")
 
-	assert.Greater(t, seatSearchIdx, priceIdx, "seat search should be after priceOfferFullPayload")
+	assert.Greater(t, seatSearchIdx, priceIdx, "seat search should be after priceOfferReference")
 	assert.Greater(t, seatAddIdx, seatSearchIdx, "addSeat should be after seat search")
 
-	// Verify seat steps depend on priceOfferFullPayload.
+	// Verify seat steps depend on priceOfferReference.
 	seatSearch := p.Execution.Steps[seatSearchIdx]
-	assert.Contains(t, seatSearch.DependsOn, "priceOfferFullPayload", "seat search should depend on priceOfferFullPayload")
+	assert.Contains(t, seatSearch.DependsOn, "priceOfferReference", "seat search should depend on priceOfferReference")
 
 	// Verify explicit Wire override: offerListIdentifier should be wired
-	// from priceOfferFullPayload.offerIdentifierValue via the addon's Wire config.
+	// from priceOfferReference.offerIdentifierValue via the addon's Wire config.
 	oliValue, hasOLI := seatSearch.Values["offerListIdentifier"]
 	require.True(t, hasOLI, "offerListIdentifier should exist in seat search values")
-	assert.Equal(t, "priceOfferFullPayload.offerIdentifierValue", oliValue.From,
+	assert.Equal(t, "priceOfferReference.offerIdentifierValue", oliValue.From,
 		"offerListIdentifier should be wired via addon Wire config")
 
 	// Cleanup should still have ignoreWorkbench.
@@ -89,20 +95,12 @@ func TestCompose_FullPayloadWithSeatSelection(t *testing.T) {
 	assert.Equal(t, "ignoreWorkbench", p.Execution.Cleanup[0].Node)
 }
 
-// TestCompose_FullPayloadWithAncillaries verifies ancillary addon composition.
-func TestCompose_FullPayloadWithAncillaries(t *testing.T) {
+// TestCompose_BookingWithAncillaries verifies ancillary addon composition.
+func TestCompose_BookingWithAncillaries(t *testing.T) {
 	g := loadTravelportForCompose(t)
+	base := findBookingWorkflow(t, g)
 
-	var base graph.Workflow
-	for _, w := range g.Workflows {
-		if w.Name == "Full-Payload Booking" {
-			base = w
-			break
-		}
-	}
-	require.NotEmpty(t, base.Name)
-
-	p, err := ComposeWithAddons(base, []string{"Ancillary Booking"}, g, tpGraphDirCompose)
+	p, err := ComposeWithSlotsAndAddons(base, onewayChoices, []string{"Ancillary Booking"}, g, tpGraphDirCompose)
 	require.NoError(t, err)
 
 	_, err = plan.InstantiateAndValidate(p, g)
@@ -126,20 +124,12 @@ func TestCompose_FullPayloadWithAncillaries(t *testing.T) {
 	t.Logf("ancillary workbenchId wired to: %s", wbValue.From)
 }
 
-// TestCompose_FullPayloadWithSeatAndAncillaries verifies double-addon composition.
-func TestCompose_FullPayloadWithSeatAndAncillaries(t *testing.T) {
+// TestCompose_BookingWithSeatAndAncillaries verifies double-addon composition.
+func TestCompose_BookingWithSeatAndAncillaries(t *testing.T) {
 	g := loadTravelportForCompose(t)
+	base := findBookingWorkflow(t, g)
 
-	var base graph.Workflow
-	for _, w := range g.Workflows {
-		if w.Name == "Full-Payload Booking" {
-			base = w
-			break
-		}
-	}
-	require.NotEmpty(t, base.Name)
-
-	p, err := ComposeWithAddons(base, []string{"Seat Selection", "Ancillary Booking"}, g, tpGraphDirCompose)
+	p, err := ComposeWithSlotsAndAddons(base, onewayChoices, []string{"Seat Selection", "Ancillary Booking"}, g, tpGraphDirCompose)
 	require.NoError(t, err)
 
 	// Seat Selection addon has intentionally unfed value inputs.
@@ -163,22 +153,13 @@ func TestCompose_FullPayloadWithSeatAndAncillaries(t *testing.T) {
 	assert.Contains(t, stepIDs, "inc1_addAncillaryOffer")
 }
 
-// TestCompose_DynamicWithTravelerModification verifies dynamic composition.
-func TestCompose_DynamicWithTravelerModification(t *testing.T) {
+// TestCompose_BookingWithTravelerModification verifies dynamic composition.
+func TestCompose_BookingWithTravelerModification(t *testing.T) {
 	g := loadTravelportForCompose(t)
-
-	// Find base workflow.
-	var base graph.Workflow
-	for _, w := range g.Workflows {
-		if w.Name == "Full-Payload Booking" {
-			base = w
-			break
-		}
-	}
-	require.NotEmpty(t, base.Name)
+	base := findBookingWorkflow(t, g)
 
 	// Compose with Traveler Modification addon.
-	p, err := ComposeWithAddons(base, []string{"Traveler Modification"}, g, tpGraphDirCompose)
+	p, err := ComposeWithSlotsAndAddons(base, onewayChoices, []string{"Traveler Modification"}, g, tpGraphDirCompose)
 	require.NoError(t, err)
 
 	// Traveler Modification addon has intentionally unfed updateValue
@@ -201,17 +182,9 @@ func TestCompose_DynamicWithTravelerModification(t *testing.T) {
 // after auto-wiring.
 func TestCompose_UnfedInputsAfterComposition(t *testing.T) {
 	g := loadTravelportForCompose(t)
+	base := findBookingWorkflow(t, g)
 
-	var base graph.Workflow
-	for _, w := range g.Workflows {
-		if w.Name == "Full-Payload Booking" {
-			base = w
-			break
-		}
-	}
-	require.NotEmpty(t, base.Name)
-
-	p, err := ComposeWithAddons(base, []string{"Seat Selection"}, g, tpGraphDirCompose)
+	p, err := ComposeWithSlotsAndAddons(base, onewayChoices, []string{"Seat Selection"}, g, tpGraphDirCompose)
 	require.NoError(t, err)
 
 	unfed := UnfedInputsFromTemplate(p, g)
@@ -230,17 +203,9 @@ func TestCompose_UnfedInputsAfterComposition(t *testing.T) {
 // and re-parsed.
 func TestCompose_MarshalRoundTrip(t *testing.T) {
 	g := loadTravelportForCompose(t)
+	base := findBookingWorkflow(t, g)
 
-	var base graph.Workflow
-	for _, w := range g.Workflows {
-		if w.Name == "Full-Payload Booking" {
-			base = w
-			break
-		}
-	}
-	require.NotEmpty(t, base.Name)
-
-	p, err := ComposeWithAddons(base, []string{"Seat Selection"}, g, tpGraphDirCompose)
+	p, err := ComposeWithSlotsAndAddons(base, onewayChoices, []string{"Seat Selection"}, g, tpGraphDirCompose)
 	require.NoError(t, err)
 
 	// Marshal to YAML.

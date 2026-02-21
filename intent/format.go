@@ -33,6 +33,8 @@ func FormatGraph(g *graph.Graph) string {
 			fmt.Fprintf(&b, "- **%s**", wf.Name)
 			if wf.IsAddon() {
 				b.WriteString(" [addon]")
+			} else if wf.IsSlot() {
+				b.WriteString(" [slot]")
 			}
 			if wf.Template != "" {
 				b.WriteString(" [template]")
@@ -207,10 +209,10 @@ func FormatWorkflowMenu(g *graph.Graph) string {
 		b.WriteString("\n\n")
 	}
 
-	// Base workflows (non-addon, with templates).
+	// Base workflows (non-addon, non-slot, with templates).
 	var hasBase bool
 	for _, wf := range g.Workflows {
-		if wf.IsAddon() || wf.Template == "" {
+		if wf.IsAddon() || wf.IsSlot() || wf.Template == "" {
 			continue
 		}
 		if !hasBase {
@@ -222,6 +224,34 @@ func FormatWorkflowMenu(g *graph.Graph) string {
 			desc = "(no description)"
 		}
 		fmt.Fprintf(&b, "- **%s**: %s\n", wf.Name, desc)
+
+		// Render slot choices if any.
+		if len(wf.Slots) > 0 {
+			b.WriteString("  Choices:\n")
+			for _, sd := range wf.Slots {
+				sdDesc := sd.Description
+				if sdDesc == "" {
+					sdDesc = sd.Name
+				}
+				fmt.Fprintf(&b, "    - %s: %s\n", sd.Name, sdDesc)
+				for _, optName := range sd.Options {
+					optDesc := "(no description)"
+					for _, owf := range g.Workflows {
+						if strings.EqualFold(owf.Name, optName) {
+							if owf.Description != "" {
+								optDesc = owf.Description
+							}
+							break
+						}
+					}
+					defaultMarker := ""
+					if sd.Default != "" && strings.EqualFold(sd.Default, optName) {
+						defaultMarker = " (default)"
+					}
+					fmt.Fprintf(&b, "      - %s: %s%s\n", optName, optDesc, defaultMarker)
+				}
+			}
+		}
 	}
 	if hasBase {
 		b.WriteString("\n")

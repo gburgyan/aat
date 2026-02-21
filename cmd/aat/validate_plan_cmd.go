@@ -140,10 +140,18 @@ func validateAllTemplates(graphPath string, g *graph.Graph, showUnfed bool) int 
 			continue
 		}
 
-		// Addon templates are fragments with intentionally unfed required
-		// inputs (filled by LLM at composition time). Only validate
-		// standalone workflows structurally.
-		if !wf.IsAddon() {
+		// Addon and slot option templates are fragments that can't validate
+		// standalone — they have intentionally unfed required inputs or
+		// cross-template references. Base templates with slot markers have
+		// empty node names. Only validate standalone workflows.
+		hasSlotMarkers := false
+		for _, step := range p.Execution.Steps {
+			if step.IsSlotMarker() {
+				hasSlotMarkers = true
+				break
+			}
+		}
+		if !wf.IsAddon() && !wf.IsSlot() && !hasSlotMarkers {
 			if _, err := plan.InstantiateAndValidate(p, g); err != nil {
 				fmt.Printf("  %-40s FAIL\n", wf.Name)
 				fmt.Printf("    %s\n", err)

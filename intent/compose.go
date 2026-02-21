@@ -394,6 +394,50 @@ func fixFromDependencies(sub *plan.Plan) {
 	}
 }
 
+// ensureFromDeps scans all from references in the plan and ensures that
+// referenced steps are in the referencing step's dependsOn. Unlike
+// fixFromDependencies (which only adds deps for external refs), this adds
+// deps for ALL from references — needed after slot composition where all
+// steps are in the same flat plan.
+func ensureFromDeps(p *plan.Plan) {
+	// Build step ID set for validation.
+	stepIDs := make(map[string]bool, len(p.Execution.Steps))
+	for _, step := range p.Execution.Steps {
+		stepIDs[step.StepID()] = true
+	}
+
+	for i := range p.Execution.Steps {
+		step := &p.Execution.Steps[i]
+
+		depSet := make(map[string]bool)
+		for _, dep := range step.DependsOn {
+			depSet[dep] = true
+		}
+
+		// Collect all from-referenced step IDs.
+		var refs []string
+		for _, sv := range step.Values {
+			if sv.From != "" {
+				refs = append(refs, splitNodeName(sv.From))
+			}
+		}
+		for _, sel := range step.Selections {
+			if sel.From != "" {
+				refs = append(refs, splitNodeName(sel.From))
+			}
+		}
+
+		// Add missing dependencies — self-refs are excluded.
+		sid := step.StepID()
+		for _, ref := range refs {
+			if ref != sid && !depSet[ref] && stepIDs[ref] {
+				step.DependsOn = append(step.DependsOn, ref)
+				depSet[ref] = true
+			}
+		}
+	}
+}
+
 // resolveAfterWire creates a copy of the wire map with $after. prefixes replaced
 // by the actual matched node name. For example, if matchedAfter is "priceOfferReference"
 // and wire has {"offerListIdentifier": "$after.offerIdentifierValue"}, the result
@@ -412,6 +456,240 @@ func resolveAfterWire(wire map[string]string, matchedAfter string) map[string]st
 		}
 	}
 	return resolved
+}
+
+// ComposeWithSlots fills slot marker steps in a base workflow template with
+// the chosen slot option templates. For each slot marker in the base plan:
+//  1. Look up the chosen option (from choices map, falling back to slot default)
+//  2. Load the option's template
+//  3. Replace the marker step with the option's steps (unprefixed)
+//  4. Rewrite dependsOn: references to the slot name → last step of the option
+//
+// After all slots are filled, AUTOWIRE resolution and fixFromDependencies run
+// across the full plan. The result can then be passed to ComposeWithAddons
+// for addon composition.
+func ComposeWithSlots(base graph.Workflow, choices map[string]string, g *graph.Graph, graphDir string) (*plan.Plan, error) {
+	if base.Template == "" {
+		return nil, fmt.Errorf("compose: workflow %q has no template", base.Name)
+	}
+
+	parent, err := LoadWorkflowTemplate(base.Template, graphDir, g)
+	if err != nil {
+		return nil, fmt.Errorf("compose: loading base template: %w", err)
+	}
+
+	if len(base.Slots) == 0 {
+		return parent, nil
+	}
+
+	// Build slot definitions map for lookup.
+	slotDefs := make(map[string]graph.SlotDef, len(base.Slots))
+	for _, sd := range base.Slots {
+		slotDefs[sd.Name] = sd
+	}
+
+	// Track slot name → last step ID of the option (for dependsOn rewriting).
+	slotLastStep := make(map[string]string)
+
+	// Process slot markers in order. We rebuild the step list each iteration
+	// to handle index shifts from replacement.
+	for slotName, sd := range slotDefs {
+		// Determine chosen option.
+		optionName := sd.Default
+		if chosen, ok := choices[slotName]; ok && chosen != "" {
+			optionName = chosen
+		}
+		if optionName == "" {
+			return nil, fmt.Errorf("compose: slot %q has no choice and no default", slotName)
+		}
+
+		// Look up the option workflow.
+		optionWF, found := findWorkflowByName(g, optionName)
+		if !found {
+			return nil, fmt.Errorf("compose: slot %q option %q not found in graph", slotName, optionName)
+		}
+		if optionWF.Template == "" {
+			return nil, fmt.Errorf("compose: slot %q option %q has no template", slotName, optionName)
+		}
+
+		// Load the option template.
+		optionPlan, loadErr := LoadWorkflowTemplate(optionWF.Template, graphDir, g)
+		if loadErr != nil {
+			return nil, fmt.Errorf("compose: loading slot %q option %q: %w", slotName, optionName, loadErr)
+		}
+
+		if len(optionPlan.Execution.Steps) == 0 {
+			return nil, fmt.Errorf("compose: slot %q option %q has no steps", slotName, optionName)
+		}
+
+		// Find the slot marker in the parent plan.
+		markerIdx := -1
+		var markerDeps []string
+		for i, step := range parent.Execution.Steps {
+			if step.IsSlotMarker() && step.Slot == slotName {
+				markerIdx = i
+				markerDeps = step.DependsOn
+				break
+			}
+		}
+		if markerIdx < 0 {
+			return nil, fmt.Errorf("compose: slot %q marker not found in base template", slotName)
+		}
+
+		// Replace the marker with option steps.
+		// Option steps are NOT prefixed — only one option fills each slot.
+		newSteps := make([]plan.Step, 0, len(parent.Execution.Steps)-1+len(optionPlan.Execution.Steps))
+		newSteps = append(newSteps, parent.Execution.Steps[:markerIdx]...)
+		newSteps = append(newSteps, optionPlan.Execution.Steps...)
+		newSteps = append(newSteps, parent.Execution.Steps[markerIdx+1:]...)
+		parent.Execution.Steps = newSteps
+
+		// Add the marker's dependsOn to root steps of the option.
+		// A root step is one whose deps are all within the option itself.
+		optionStepIDs := make(map[string]bool, len(optionPlan.Execution.Steps))
+		for _, s := range optionPlan.Execution.Steps {
+			optionStepIDs[s.StepID()] = true
+		}
+		for i := markerIdx; i < markerIdx+len(optionPlan.Execution.Steps); i++ {
+			step := &parent.Execution.Steps[i]
+			isRoot := true
+			for _, dep := range step.DependsOn {
+				if optionStepIDs[dep] {
+					isRoot = false
+					break
+				}
+			}
+			if isRoot && len(markerDeps) > 0 {
+				step.DependsOn = append(step.DependsOn, markerDeps...)
+			}
+		}
+
+		// Record the last step of this slot option for dependsOn rewriting.
+		lastOptionStep := optionPlan.Execution.Steps[len(optionPlan.Execution.Steps)-1].StepID()
+		slotLastStep[slotName] = lastOptionStep
+
+		// Merge cleanup from option.
+		mergeCleanup(parent, optionPlan)
+	}
+
+	// Rewrite dependsOn references: any step depending on a slot name gets
+	// rewritten to that slot's last step.
+	for i := range parent.Execution.Steps {
+		step := &parent.Execution.Steps[i]
+		for j, dep := range step.DependsOn {
+			if lastStep, ok := slotLastStep[dep]; ok {
+				step.DependsOn[j] = lastStep
+			}
+		}
+	}
+
+	// Run AUTOWIRE resolution across the full plan.
+	outputMap := buildOutputMap(parent, g)
+	autoWirePlaceholders(parent, outputMap, nil, g)
+
+	// Ensure all from-referenced steps are in dependsOn.
+	// Use ensureFromDeps (not fixFromDependencies) because the full plan
+	// is one flat step list — fixFromDependencies only adds deps for
+	// steps outside the plan.
+	ensureFromDeps(parent)
+
+	return parent, nil
+}
+
+// ComposeWithSlotsAndAddons composes a workflow with both slot choices and addons.
+// It first fills slots, then delegates to ComposeWithAddons for addon composition.
+func ComposeWithSlotsAndAddons(base graph.Workflow, choices map[string]string, addonNames []string, g *graph.Graph, graphDir string) (*plan.Plan, error) {
+	slotPlan, err := ComposeWithSlots(base, choices, g, graphDir)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(addonNames) == 0 {
+		return slotPlan, nil
+	}
+
+	// Build addon list.
+	var addons []graph.Workflow
+	for _, name := range addonNames {
+		addon, found := findWorkflowByName(g, name)
+		if !found {
+			return nil, fmt.Errorf("compose: unknown addon workflow %q", name)
+		}
+		if !addon.IsAddon() {
+			return nil, fmt.Errorf("compose: workflow %q is not an addon", name)
+		}
+		if !addon.After.IsSet() {
+			return nil, fmt.Errorf("compose: addon %q has no after field", name)
+		}
+		addons = append(addons, addon)
+	}
+
+	// Use ComposeWorkflowTemplate with the slot-filled plan as the parent.
+	// We need to pass the slotPlan directly instead of loading from template.
+	return composeAddonsOnPlan(slotPlan, base, addons, graphDir, g)
+}
+
+// composeAddonsOnPlan applies addon composition to an already-loaded plan.
+// This is used when slot composition has already produced the base plan.
+func composeAddonsOnPlan(parent *plan.Plan, base graph.Workflow, addons []graph.Workflow, graphDir string, g *graph.Graph) (*plan.Plan, error) {
+	if len(addons) == 0 {
+		return parent, nil
+	}
+
+	// Sort addons by priority.
+	sorted := make([]graph.Workflow, len(addons))
+	copy(sorted, addons)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Priority < sorted[j].Priority
+	})
+	addons = sorted
+
+	lastStepByAfter := make(map[string]string)
+
+	for i, addon := range addons {
+		prefix := fmt.Sprintf("inc%d_", i)
+
+		if addon.Template == "" {
+			return nil, fmt.Errorf("compose: addon workflow %q has no template", addon.Name)
+		}
+
+		var afterStep string
+		var matchedAfter string
+		for _, afterNode := range addon.After {
+			if lastStep, ok := lastStepByAfter[afterNode]; ok {
+				afterStep = lastStep
+				matchedAfter = afterNode
+				break
+			}
+			if step := findStepByNode(parent, afterNode); step != "" {
+				afterStep = step
+				matchedAfter = afterNode
+				break
+			}
+		}
+		if afterStep == "" {
+			return nil, fmt.Errorf("compose: addon %q: none of after nodes %v found in base plan steps", addon.Name, []string(addon.After))
+		}
+
+		sub, err := LoadWorkflowTemplate(addon.Template, graphDir, g)
+		if err != nil {
+			return nil, fmt.Errorf("compose: loading addon template %q: %w", addon.Name, err)
+		}
+
+		outputMap := buildOutputMap(parent, g)
+		prefixStepRefs(sub, prefix)
+		resolvedWire := resolveAfterWire(addon.Wire, matchedAfter)
+		autoWirePlaceholders(sub, outputMap, resolvedWire, g)
+		addInsertionDeps(sub, afterStep)
+		fixFromDependencies(sub)
+		spliceSteps(parent, sub, afterStep)
+		mergeCleanup(parent, sub)
+
+		lastAddonStep := sub.Execution.Steps[len(sub.Execution.Steps)-1].StepID()
+		lastStepByAfter[matchedAfter] = lastAddonStep
+	}
+
+	return parent, nil
 }
 
 // ResolveWorkflowDir returns the absolute directory containing the graph file,

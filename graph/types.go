@@ -96,16 +96,30 @@ func (a AfterSpec) String() string {
 type Workflow struct {
 	Name        string            `yaml:"name"`
 	Description string            `yaml:"description,omitempty"`
-	Kind        string            `yaml:"kind,omitempty"`     // "addon" for sub-workflows that compose into main workflows
+	Kind        string            `yaml:"kind,omitempty"`     // "addon" for sub-workflows, "slot" for slot options
 	Template    string            `yaml:"template,omitempty"` // path to plan template YAML (relative to graph file)
 	After       AfterSpec         `yaml:"after,omitempty"`    // addon: node(s) to splice after in the base workflow
 	Wire        map[string]string `yaml:"wire,omitempty"`     // addon: default AUTOWIRE overrides
 	Priority    int               `yaml:"priority,omitempty"` // addon: composition ordering (lower = earlier, default 0)
+	Slots       []SlotDef         `yaml:"slots,omitempty"`    // choice points (only on base workflows)
+}
+
+// SlotDef describes a named decision point in a workflow with mutually exclusive options.
+type SlotDef struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description,omitempty"`
+	Options     []string `yaml:"options"`           // workflow names (kind: slot)
+	Default     string   `yaml:"default,omitempty"` // default option name
 }
 
 // IsAddon returns true if this workflow is a bolt-on sub-workflow.
 func (w Workflow) IsAddon() bool {
 	return w.Kind == "addon"
+}
+
+// IsSlot returns true if this workflow is a slot option template.
+func (w Workflow) IsSlot() bool {
+	return w.Kind == "slot"
 }
 
 // Node represents a single logical API operation in the graph.

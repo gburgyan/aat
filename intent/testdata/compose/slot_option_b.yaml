@@ -1,0 +1,14 @@
+execution:
+  steps:
+    - node: search
+      description: "Multi-leg search"
+
+    - node: searchLeg2
+      dependsOn: [search]
+      values:
+        leg1Data: {from: search.results}
+
+    - node: book
+      dependsOn: [searchLeg2]
+      values:
+        flightId: {from: searchLeg2.results, select: {strategy: first}}

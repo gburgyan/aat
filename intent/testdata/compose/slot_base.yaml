@@ -1,0 +1,28 @@
+intent:
+  description: "Test slot-based workflow"
+
+execution:
+  steps:
+    - node: createWorkbench
+      description: "Create workbench"
+
+    - slot: trip-search
+
+    - node: addTraveler
+      dependsOn: [trip-search]
+      values:
+        workbenchId: {from: createWorkbench.workbenchId}
+
+    - slot: payment
+      dependsOn: [trip-search]
+
+    - node: finalStep
+      dependsOn: [addTraveler, payment]
+      isGoal: true
+      values:
+        workbenchId: {from: createWorkbench.workbenchId}
+        amount: AUTOWIRE
+
+  cleanup:
+    - node: commit
+      runOn: always

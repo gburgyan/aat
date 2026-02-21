@@ -506,3 +506,71 @@ execution:
 	sv := p.Execution.Steps[0].Values["item"]
 	assert.Equal(t, "result", sv.FromSelection)
 }
+
+// --- Step.StepID ---
+
+func TestStep_StepID(t *testing.T) {
+	tests := []struct {
+		name     string
+		step     Step
+		expected string
+	}{
+		{"node only", Step{Node: "search"}, "search"},
+		{"id overrides node", Step{ID: "mySearch", Node: "search"}, "mySearch"},
+		{"slot overrides both", Step{Slot: "trip-search", ID: "ignored", Node: "also-ignored"}, "trip-search"},
+		{"slot without others", Step{Slot: "payment"}, "payment"},
+		{"empty", Step{}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, tt.step.StepID())
+		})
+	}
+}
+
+// --- Step.IsSlotMarker ---
+
+func TestStep_IsSlotMarker(t *testing.T) {
+	assert.True(t, (&Step{Slot: "trip-search"}).IsSlotMarker())
+	assert.False(t, (&Step{Node: "search"}).IsSlotMarker())
+	assert.False(t, (&Step{ID: "myStep", Node: "search"}).IsSlotMarker())
+	assert.False(t, (&Step{}).IsSlotMarker())
+}
+
+// --- Slot marker YAML round-trip ---
+
+func TestSlotMarker_ParseRoundTrip(t *testing.T) {
+	data := []byte(`
+execution:
+  steps:
+    - node: createWorkbench
+    - slot: trip-search
+    - node: addTraveler
+      dependsOn: [trip-search]
+    - slot: payment
+      dependsOn: [trip-search]
+    - node: commit
+      dependsOn: [addTraveler, payment]
+      isGoal: true
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	require.Len(t, p.Execution.Steps, 5)
+
+	// Slot markers
+	assert.True(t, p.Execution.Steps[1].IsSlotMarker())
+	assert.Equal(t, "trip-search", p.Execution.Steps[1].Slot)
+	assert.Empty(t, p.Execution.Steps[1].Node)
+
+	assert.True(t, p.Execution.Steps[3].IsSlotMarker())
+	assert.Equal(t, "payment", p.Execution.Steps[3].Slot)
+	assert.Equal(t, []string{"trip-search"}, p.Execution.Steps[3].DependsOn)
+
+	// Regular steps
+	assert.False(t, p.Execution.Steps[0].IsSlotMarker())
+	assert.Equal(t, "createWorkbench", p.Execution.Steps[0].Node)
+
+	// StepID
+	assert.Equal(t, "trip-search", p.Execution.Steps[1].StepID())
+	assert.Equal(t, "payment", p.Execution.Steps[3].StepID())
+}

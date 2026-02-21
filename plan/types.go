@@ -59,9 +59,14 @@ type Execution struct {
 // When multiple steps target the same graph node (e.g., multi-leg flights),
 // use the ID field to give each step a unique identifier. DependsOn and
 // from references use step IDs, which default to the node name when ID is empty.
+//
+// When Slot is set, the step is a placeholder marker for a slot choice point.
+// Node is empty for slot markers. At composition time, the marker is replaced
+// by the chosen option's steps.
 type Step struct {
 	ID            string                    `yaml:"id,omitempty" json:"id,omitempty"`
-	Node          string                    `yaml:"node" json:"node"`
+	Node          string                    `yaml:"node,omitempty" json:"node,omitempty"`
+	Slot          string                    `yaml:"slot,omitempty" json:"slot,omitempty"` // slot marker name
 	DependsOn     []string                  `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
 	Description   string                    `yaml:"description,omitempty" json:"description,omitempty"`
 	IsGoal        bool                      `yaml:"isGoal,omitempty" json:"isGoal,omitempty"`
@@ -74,12 +79,20 @@ type Step struct {
 }
 
 // StepID returns the effective step identifier.
-// If ID is set, returns ID; otherwise returns Node.
+// If Slot is set, returns Slot. If ID is set, returns ID; otherwise returns Node.
 func (s *Step) StepID() string {
+	if s.Slot != "" {
+		return s.Slot
+	}
 	if s.ID != "" {
 		return s.ID
 	}
 	return s.Node
+}
+
+// IsSlotMarker returns true if this step is a slot placeholder marker.
+func (s *Step) IsSlotMarker() bool {
+	return s.Slot != ""
 }
 
 // StepSelection describes a named element selection from an upstream array.

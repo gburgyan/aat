@@ -29,6 +29,16 @@ func TestValidate_NoManifestFound(t *testing.T) {
 }
 
 func TestValidate_ExplicitManifestNotFound(t *testing.T) {
+	// chdir to an empty directory so CWD walk-up doesn't find a manifest.
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer os.Chdir(origDir)
+
+	t.Setenv("AAT_PROJECT", "")
+
+	tmpDir := t.TempDir()
+	require.NoError(t, os.Chdir(tmpDir))
+
 	var buf bytes.Buffer
 	code := validateCommand(&validateArgs{
 		ManifestPath: "/nonexistent/aat-project.yaml",

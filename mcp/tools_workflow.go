@@ -24,10 +24,13 @@ func (s *Server) registerWorkflowTools() {
 
 	s.mcp.AddTool(
 		mcp.NewTool("instantiate_workflow",
-			mcp.WithDescription("Load and compose a workflow template. Returns the skeleton plan YAML with unfed inputs marked. For composed workflows, addons are spliced and AUTOWIRE values auto-wired. No LLM call — deterministic only."),
+			mcp.WithDescription("Load and compose a workflow template. Returns the skeleton plan YAML with unfed inputs marked. For composed workflows, slots are filled and addons are spliced with AUTOWIRE values auto-wired. No LLM call — deterministic only."),
 			mcp.WithString("workflow",
 				mcp.Description("Workflow name (exact or case-insensitive match)"),
 				mcp.Required(),
+			),
+			mcp.WithString("choices",
+				mcp.Description("Comma-separated slot choices as slot=option pairs (e.g., 'trip-search=Round-Trip,payment=Cash')"),
 			),
 			mcp.WithString("addons",
 				mcp.Description("Comma-separated addon workflow names to compose (optional)"),
@@ -65,6 +68,8 @@ func (s *Server) handleListWorkflows(_ context.Context, _ mcp.CallToolRequest) (
 		fmt.Fprintf(&b, "### %s", wf.Name)
 		if wf.IsAddon() {
 			b.WriteString(" [addon]")
+		} else if wf.IsSlot() {
+			b.WriteString(" [slot]")
 		}
 		b.WriteString("\n")
 
@@ -86,6 +91,21 @@ func (s *Server) handleListWorkflows(_ context.Context, _ mcp.CallToolRequest) (
 				fmt.Fprintf(&b, " %s=%s", k, v)
 			}
 			b.WriteString("\n")
+		}
+
+		// Show slot definitions if present.
+		if len(wf.Slots) > 0 {
+			b.WriteString("- Slots:\n")
+			for _, sd := range wf.Slots {
+				defaultStr := ""
+				if sd.Default != "" {
+					defaultStr = fmt.Sprintf(" (default: %s)", sd.Default)
+				}
+				fmt.Fprintf(&b, "  - **%s**: %s%s\n", sd.Name, strings.Join(sd.Options, ", "), defaultStr)
+				if sd.Description != "" {
+					fmt.Fprintf(&b, "    %s\n", sd.Description)
+				}
+			}
 		}
 
 		// Show AUTOWIRE requirements if template exists and is an addon.
@@ -127,7 +147,11 @@ func (s *Server) stepSummary(wf graph.Workflow) string {
 
 	nodes := make([]string, len(p.Execution.Steps))
 	for i, step := range p.Execution.Steps {
-		nodes[i] = step.Node
+		if step.IsSlotMarker() {
+			nodes[i] = "[" + step.Slot + "]"
+		} else {
+			nodes[i] = step.Node
+		}
 	}
 	return fmt.Sprintf("- Steps: %d — %s\n", len(nodes), strings.Join(nodes, " → "))
 }
@@ -164,6 +188,9 @@ func (s *Server) handleInstantiateWorkflow(_ context.Context, req mcp.CallToolRe
 		return mcp.NewToolResultError("missing required parameter: workflow"), nil
 	}
 
+	choicesStr, _ := req.RequireString("choices")
+	choices := parseChoicesParam(choicesStr)
+
 	addonsStr, _ := req.RequireString("addons")
 	var addons []string
 	if addonsStr != "" {
@@ -187,7 +214,13 @@ func (s *Server) handleInstantiateWorkflow(_ context.Context, req mcp.CallToolRe
 
 	var tpl *plan.Plan
 
-	if len(addons) > 0 {
+	if len(wf.Slots) > 0 {
+		composed, composeErr := intent.ComposeWithSlotsAndAddons(wf, choices, addons, g, s.ctx.GraphDir)
+		if composeErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
+		}
+		tpl = composed
+	} else if len(addons) > 0 {
 		composed, composeErr := intent.ComposeWithAddons(wf, addons, g, s.ctx.GraphDir)
 		if composeErr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
@@ -256,7 +289,20 @@ func (s *Server) handleGetWorkflowDetail(_ context.Context, req mcp.CallToolRequ
 	}
 
 	var p *plan.Plan
-	if len(addons) > 0 {
+	if len(wf.Slots) > 0 {
+		// For workflows with slots, use defaults for get_workflow_detail.
+		composed, composeErr := intent.ComposeWithSlots(wf, nil, g, s.ctx.GraphDir)
+		if composeErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("slot composition failed: %v", composeErr)), nil
+		}
+		if len(addons) > 0 {
+			composed, composeErr = intent.ComposeWithSlotsAndAddons(wf, nil, addons, g, s.ctx.GraphDir)
+			if composeErr != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
+			}
+		}
+		p = composed
+	} else if len(addons) > 0 {
 		composed, composeErr := intent.ComposeWithAddons(wf, addons, g, s.ctx.GraphDir)
 		if composeErr != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
@@ -499,6 +545,25 @@ func buildDataFlowSummary(p *plan.Plan, g *graph.Graph) []string {
 		lines[i] = fmt.Sprintf("%s → %s (%s)", e.from, e.to, strings.Join(e.fields, ", "))
 	}
 	return lines
+}
+
+// parseChoicesParam parses a "slot=option,slot2=option2" string into a map.
+func parseChoicesParam(s string) map[string]string {
+	choices := make(map[string]string)
+	if s == "" {
+		return choices
+	}
+	for _, pair := range strings.Split(s, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		parts := strings.SplitN(pair, "=", 2)
+		if len(parts) == 2 {
+			choices[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+		}
+	}
+	return choices
 }
 
 // findWorkflowByName looks up a workflow by name (case-insensitive).
