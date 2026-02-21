@@ -104,6 +104,7 @@ func (s *ArchiveService) GetStep(runID, stepID string) (*StepDetail, error) {
 	detail := toStepDetail(rec, isCleanup, nodeSteps)
 	detail.Extractions = buildExtractions(stepID, rec.Outputs, a, nodeSteps)
 	detail.PlanStepYAML = findPlanStepYAML(a, stepID, rec.Node, isCleanup)
+	detail.InstantiatedStepYAML = findInstantiatedStepYAML(a, stepID, rec.Node, isCleanup)
 
 	// Compute prev/next across all steps (steps then cleanup in order).
 	allSteps := make([]string, 0, len(a.Steps)+len(a.Cleanup))
@@ -676,6 +677,36 @@ func findPlanStepYAML(a *archive.Archive, stepID, nodeName string, isCleanup boo
 
 	// Search verification steps by node name.
 	for _, v := range a.Metadata.Plan.Execution.Verification {
+		if v.Node == nodeName {
+			return marshalStepYAML(v)
+		}
+	}
+
+	return ""
+}
+
+// findInstantiatedStepYAML marshals the instantiated plan step matching the given step ID to YAML.
+// Returns empty string if the archive has no instantiated plan or no matching step is found.
+func findInstantiatedStepYAML(a *archive.Archive, stepID, nodeName string, isCleanup bool) string {
+	if a.Metadata.InstantiatedPlan == nil {
+		return ""
+	}
+
+	for _, s := range a.Metadata.InstantiatedPlan.Execution.Steps {
+		if s.StepID() == stepID {
+			return marshalStepYAML(s)
+		}
+	}
+
+	if isCleanup {
+		for _, c := range a.Metadata.InstantiatedPlan.Execution.Cleanup {
+			if c.Node == nodeName {
+				return marshalStepYAML(c)
+			}
+		}
+	}
+
+	for _, v := range a.Metadata.InstantiatedPlan.Execution.Verification {
 		if v.Node == nodeName {
 			return marshalStepYAML(v)
 		}

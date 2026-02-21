@@ -17,13 +17,14 @@ type Archive struct {
 
 // ArchiveMetadata captures provenance and context for a run.
 type ArchiveMetadata struct {
-	Version      string     `json:"version"`
-	RunID        string     `json:"runId"`
-	Timestamp    time.Time  `json:"timestamp"`
-	Plan         *plan.Plan `json:"plan"`
-	Environment  string     `json:"environment"`
-	GraphVersion string     `json:"graphVersion"`
-	ToolVersion  string     `json:"toolVersion"`
+	Version          string     `json:"version"`
+	RunID            string     `json:"runId"`
+	Timestamp        time.Time  `json:"timestamp"`
+	Plan             *plan.Plan `json:"plan"`
+	InstantiatedPlan *plan.Plan `json:"instantiatedPlan,omitempty"`
+	Environment      string     `json:"environment"`
+	GraphVersion     string     `json:"graphVersion"`
+	ToolVersion      string     `json:"toolVersion"`
 }
 
 // StepRecord captures the execution trace for a single step.

@@ -96,6 +96,7 @@ type StepDetail struct {
 	TransformScript      string                  `json:"transformScript,omitempty"`
 	Extractions          []ExtractionDetail      `json:"extractions,omitempty"`
 	PlanStepYAML         string                  `json:"planStepYaml,omitempty"`
+	InstantiatedStepYAML string                  `json:"instantiatedStepYaml,omitempty"`
 	PrevStepID           string                  `json:"prevStepId,omitempty"`
 	NextStepID           string                  `json:"nextStepId,omitempty"`
 }

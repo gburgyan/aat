@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
+	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 )
 
@@ -34,10 +35,11 @@ func (o Outcome) String() string {
 
 // RunResult captures the complete outcome of a plan execution.
 type RunResult struct {
-	Outcome        Outcome
-	Steps          []StepResult
-	CleanupResults []StepResult
-	Error          error
+	Outcome           Outcome
+	Steps             []StepResult
+	CleanupResults    []StepResult
+	Error             error
+	InstantiatedPlan  *plan.Plan // fully merged plan with graph defaults, nil on early errors
 }
 
 // StepResult captures the outcome of a single step execution.

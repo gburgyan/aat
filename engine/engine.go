@@ -91,20 +91,23 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
+	// Build instantiated plan (plan + graph defaults merged) for archive inspection.
+	instantiatedPlan := InstantiatePlan(p, e.graph)
+
 	// 3. Topological sort
 	sorted, err := TopologicalSort(p.Execution.Steps)
 	if err != nil {
-		return &RunResult{Outcome: OutcomeError, Error: err}
+		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
 	// 3. Validate adapter outputs match graph declarations (only for plan-used nodes)
 	if err := ValidateAdapterOutputsForPlan(e.graph, e.registry, p); err != nil {
-		return &RunResult{Outcome: OutcomeError, Error: err}
+		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
 	// 3b. Validate template required placeholders vs optional graph inputs
 	if err := ValidateTemplateInputsForPlan(e.graph, e.registry, p); err != nil {
-		return &RunResult{Outcome: OutcomeError, Error: err}
+		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
 	// 4. Set plan for constraint-aware resolution
@@ -127,10 +130,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		case <-ctx.Done():
 			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
-				Outcome:        OutcomeError,
-				Steps:          stepResults,
-				CleanupResults: cleanupResults,
-				Error:          fmt.Errorf("execution cancelled: %w", ctx.Err()),
+				Outcome:          OutcomeError,
+				Steps:            stepResults,
+				CleanupResults:   cleanupResults,
+				Error:            fmt.Errorf("execution cancelled: %w", ctx.Err()),
+				InstantiatedPlan: instantiatedPlan,
 			}
 		default:
 		}
@@ -138,9 +142,10 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		node, ok := e.graph.Nodes[step.Node]
 		if !ok {
 			return &RunResult{
-				Outcome: OutcomeError,
-				Steps:   stepResults,
-				Error:   fmt.Errorf("node %q not found in graph", step.Node),
+				Outcome:          OutcomeError,
+				Steps:            stepResults,
+				Error:            fmt.Errorf("node %q not found in graph", step.Node),
+				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 
@@ -158,10 +163,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			// Run cleanup before returning
 			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
-				Outcome:        outcome,
-				Steps:          stepResults,
-				CleanupResults: cleanupResults,
-				Error:          result.Error,
+				Outcome:          outcome,
+				Steps:            stepResults,
+				CleanupResults:   cleanupResults,
+				Error:            result.Error,
+				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 
@@ -191,10 +197,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 					if !e.ContinueOnAssertionFailure {
 						cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 						return &RunResult{
-							Outcome:        outcome,
-							Steps:          stepResults,
-							CleanupResults: cleanupResults,
-							Error:          fmt.Errorf("step %q failed mechanical validation", step.Node),
+							Outcome:          outcome,
+							Steps:            stepResults,
+							CleanupResults:   cleanupResults,
+							Error:            fmt.Errorf("step %q failed mechanical validation", step.Node),
+							InstantiatedPlan: instantiatedPlan,
 						}
 					}
 				}
@@ -205,10 +212,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			outcome = OutcomeFailed
 			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
-				Outcome:        outcome,
-				Steps:          stepResults,
-				CleanupResults: cleanupResults,
-				Error:          fmt.Errorf("step %q: expected failure status %v but got %d", step.Node, step.ExpectFailure.Status, result.StatusCode),
+				Outcome:          outcome,
+				Steps:            stepResults,
+				CleanupResults:   cleanupResults,
+				Error:            fmt.Errorf("step %q: expected failure status %v but got %d", step.Node, step.ExpectFailure.Status, result.StatusCode),
+				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 
@@ -217,10 +225,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			// Run cleanup before returning
 			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
-				Outcome:        outcome,
-				Steps:          stepResults,
-				CleanupResults: cleanupResults,
-				Error:          fmt.Errorf("step %q returned status %d", step.Node, result.StatusCode),
+				Outcome:          outcome,
+				Steps:            stepResults,
+				CleanupResults:   cleanupResults,
+				Error:            fmt.Errorf("step %q returned status %d", step.Node, result.StatusCode),
+				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 
@@ -231,10 +240,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			// Do NOT push cleanup — failing node did not create a valid resource
 			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 			return &RunResult{
-				Outcome:        outcome,
-				Steps:          stepResults,
-				CleanupResults: cleanupResults,
-				Error:          fmt.Errorf("step %q: %s", step.Node, result.ResponseBodyError.Summary()),
+				Outcome:          outcome,
+				Steps:            stepResults,
+				CleanupResults:   cleanupResults,
+				Error:            fmt.Errorf("step %q: %s", step.Node, result.ResponseBodyError.Summary()),
+				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 
@@ -258,10 +268,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			if !e.ContinueOnAssertionFailure {
 				cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 				return &RunResult{
-					Outcome:        outcome,
-					Steps:          stepResults,
-					CleanupResults: cleanupResults,
-					Error:          fmt.Errorf("step %q failed mechanical validation", step.Node),
+					Outcome:          outcome,
+					Steps:            stepResults,
+					CleanupResults:   cleanupResults,
+					Error:            fmt.Errorf("step %q failed mechanical validation", step.Node),
+					InstantiatedPlan: instantiatedPlan,
 				}
 			}
 		}
@@ -271,9 +282,10 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 	cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
 
 	return &RunResult{
-		Outcome:        outcome,
-		Steps:          stepResults,
-		CleanupResults: cleanupResults,
+		Outcome:          outcome,
+		Steps:            stepResults,
+		CleanupResults:   cleanupResults,
+		InstantiatedPlan: instantiatedPlan,
 	}
 }
 

@@ -85,6 +85,7 @@ export interface StepDetail {
   transformScript?: string;
   extractions?: ExtractionDetail[];
   planStepYaml?: string;
+  instantiatedStepYaml?: string;
   prevStepId?: string;
   nextStepId?: string;
 }

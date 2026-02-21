@@ -73,6 +73,8 @@
       t.push({ id: 'errors', label: 'Errors' });
     if (step.planStepYaml)
       t.push({ id: 'plan', label: 'Plan' });
+    if (step.instantiatedStepYaml)
+      t.push({ id: 'instantiated', label: 'Instantiated' });
     return t;
   });
 
@@ -312,6 +314,10 @@
 
       {#if activeTab === 'plan' && step.planStepYaml}
         <YamlViewer content={step.planStepYaml} />
+      {/if}
+
+      {#if activeTab === 'instantiated' && step.instantiatedStepYaml}
+        <YamlViewer content={step.instantiatedStepYaml} />
       {/if}
     </div>
   {/if}

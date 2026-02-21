@@ -23,6 +23,7 @@ func ToArchive(result *RunResult, meta archive.ArchiveMetadata, baseURL string, 
 
 	a.Steps = convertStepResults(result.Steps, baseURL, secrets)
 	a.Cleanup = convertStepResults(result.CleanupResults, baseURL, secrets)
+	a.Metadata.InstantiatedPlan = result.InstantiatedPlan
 
 	return a
 }
