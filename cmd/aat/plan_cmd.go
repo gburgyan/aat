@@ -103,7 +103,7 @@ func validateSinglePlan(planPath string, g *graph.Graph, showUnfed bool) int {
 		return 1
 	}
 
-	if err := plan.Validate(p, g); err != nil {
+	if _, err := plan.InstantiateAndValidate(p, g); err != nil {
 		fmt.Fprintf(os.Stderr, "aat plan validate: %s\n", err)
 		return 1
 	}
@@ -150,7 +150,7 @@ func validateAllTemplates(graphPath string, g *graph.Graph, showUnfed bool) int 
 		// inputs (filled by LLM at composition time). Only validate
 		// standalone workflows structurally.
 		if !wf.IsAddon() {
-			if err := plan.Validate(p, g); err != nil {
+			if _, err := plan.InstantiateAndValidate(p, g); err != nil {
 				fmt.Printf("  %-40s FAIL\n", wf.Name)
 				fmt.Printf("    %s\n", err)
 				hasError = true

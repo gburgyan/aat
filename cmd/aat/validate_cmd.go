@@ -348,7 +348,7 @@ func validatePlans(plansDir string, g *graph.Graph, workflowTemplates map[string
 			continue
 		}
 
-		if err := plan.Validate(p, g); err != nil {
+		if _, err := plan.InstantiateAndValidate(p, g); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name(), err))
 		}
 	}

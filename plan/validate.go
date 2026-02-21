@@ -83,53 +83,15 @@ func Validate(p *Plan, g *graph.Graph) error {
 			inputIndex[input.Name] = idx
 		}
 
-		// Check that required inputs have plan values or graph defaults.
+		// Check that required inputs have plan values.
+		// After instantiation, graph defaults are in step.Values.
 		for _, input := range node.Inputs {
 			if input.Optional {
 				continue
 			}
 			_, hasPlanValue := step.Values[input.Name]
-			hasDefault := input.Default != nil && input.Default.HasValue()
-			if !hasPlanValue && !hasDefault {
-				errs = append(errs, fmt.Sprintf("step %d (%s): required input %q has no plan value or default", i, sid, input.Name))
-			}
-		}
-
-		// Validate graph default from references for inputs without plan values.
-		for _, input := range node.Inputs {
-			if _, hasPlanValue := step.Values[input.Name]; hasPlanValue {
-				continue // plan value overrides graph default
-			}
-			if input.Default == nil || input.Default.From == "" {
-				continue
-			}
-			fromRef := input.Default.From
-			srcNodeName, srcField, refErr := splitRef(fromRef)
-			if refErr != nil {
-				errs = append(errs, fmt.Sprintf("step %d (%s): graph default for %q has invalid from reference %q: %v", i, sid, input.Name, fromRef, refErr))
-				continue
-			}
-			// Find the step ID for the source node
-			srcStepID := ""
-			for _, s := range p.Execution.Steps {
-				if s.Node == srcNodeName {
-					srcStepID = s.StepID()
-					break
-				}
-			}
-			if srcStepID == "" {
-				errs = append(errs, fmt.Sprintf("step %d (%s): graph default for %q references node %q which has no step in this plan", i, sid, input.Name, srcNodeName))
-				continue
-			}
-			// Verify the referenced output exists
-			srcGraphNode := srcStepID
-			if gn, ok := stepIDToNode[srcStepID]; ok {
-				srcGraphNode = gn
-			}
-			if outs, ok := outputsByNode[srcGraphNode]; ok {
-				if _, outExists := outs[srcField]; !outExists {
-					errs = append(errs, fmt.Sprintf("step %d (%s): graph default for %q references output %q which does not exist on node %q", i, sid, input.Name, srcField, srcGraphNode))
-				}
+			if !hasPlanValue {
+				errs = append(errs, fmt.Sprintf("step %d (%s): required input %q has no plan value", i, sid, input.Name))
 			}
 		}
 

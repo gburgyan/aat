@@ -2565,7 +2565,7 @@ func TestValidate_StepAliasing(t *testing.T) {
 		}
 		err := Validate(p, g)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "has no plan value or default")
+		assert.Contains(t, err.Error(), "has no plan value")
 		assert.Contains(t, err.Error(), "departureDate")
 	})
 

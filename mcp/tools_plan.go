@@ -154,7 +154,7 @@ func (s *Server) handleValidatePlan(_ context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(fmt.Sprintf("YAML parse error: %v", err)), nil
 	}
 
-	if err := plan.Validate(p, s.ctx.Graph); err != nil {
+	if _, err := plan.InstantiateAndValidate(p, s.ctx.Graph); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Validation failed:\n%v", err)), nil
 	}
 
@@ -278,7 +278,7 @@ func (s *Server) handleSavePlan(_ context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError(fmt.Sprintf("YAML parse error: %v", err)), nil
 	}
 
-	if err := plan.Validate(p, s.ctx.Graph); err != nil {
+	if _, err := plan.InstantiateAndValidate(p, s.ctx.Graph); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Validation failed:\n%v", err)), nil
 	}
 

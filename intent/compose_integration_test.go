@@ -44,7 +44,7 @@ func TestCompose_FullPayloadWithSeatSelection(t *testing.T) {
 	// Validate the composed plan against the graph.
 	// Seat Selection addon has intentionally unfed value inputs (offerId,
 	// productId on searchSeatMap) that the LLM provides at runtime.
-	err = plan.Validate(p, g)
+	_, err = plan.InstantiateAndValidate(p, g)
 	if err != nil {
 		errStr := err.Error()
 		assert.Contains(t, errStr, "offerId", "unexpected validation error")
@@ -105,7 +105,7 @@ func TestCompose_FullPayloadWithAncillaries(t *testing.T) {
 	p, err := ComposeWithAddons(base, []string{"Ancillary Booking"}, g, tpGraphDirCompose)
 	require.NoError(t, err)
 
-	err = plan.Validate(p, g)
+	_, err = plan.InstantiateAndValidate(p, g)
 	assert.NoError(t, err, "composed plan should validate")
 
 	require.Len(t, p.Execution.Steps, 10, "expected 8 parent + 2 ancillary steps")
@@ -143,7 +143,7 @@ func TestCompose_FullPayloadWithSeatAndAncillaries(t *testing.T) {
 	require.NoError(t, err)
 
 	// Seat Selection addon has intentionally unfed value inputs.
-	err = plan.Validate(p, g)
+	_, err = plan.InstantiateAndValidate(p, g)
 	if err != nil {
 		errStr := err.Error()
 		assert.Contains(t, errStr, "offerId", "unexpected validation error")
@@ -183,7 +183,7 @@ func TestCompose_DynamicWithTravelerModification(t *testing.T) {
 
 	// Traveler Modification addon has intentionally unfed updateValue
 	// (LLM provides the new value at runtime).
-	err = plan.Validate(p, g)
+	_, err = plan.InstantiateAndValidate(p, g)
 	if err != nil {
 		assert.Contains(t, err.Error(), "updateValue", "unexpected validation error")
 	}
@@ -254,7 +254,7 @@ func TestCompose_MarshalRoundTrip(t *testing.T) {
 
 	// Validate the round-tripped plan (Seat Selection has intentionally
 	// unfed offerId/productId that the LLM fills).
-	err = plan.Validate(p2, g)
+	_, err = plan.InstantiateAndValidate(p2, g)
 	if err != nil {
 		errStr := err.Error()
 		assert.Contains(t, errStr, "offerId", "unexpected validation error")

@@ -287,7 +287,7 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	}
 
 	// 4. Validate plan against graph (early validation for clear CI error reporting)
-	if err := plan.Validate(p, g); err != nil {
+	if _, err := plan.InstantiateAndValidate(p, g); err != nil {
 		return &runResult{setupErr: true, err: fmt.Errorf("plan validation: %w", err)}
 	}
 

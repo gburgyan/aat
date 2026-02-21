@@ -85,7 +85,13 @@ func TestResolveInputs_GraphNodeDefault(t *testing.T) {
 	}
 
 	state := NewRunState()
-	step := plan.Step{Node: "target"}
+	// After instantiation, graph defaults are in step values
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"passengers": {Default: 1},
+		},
+	}
 
 	inputs, _, err := ResolveInputs(step, g.Nodes["target"], g, state)
 	require.NoError(t, err)
@@ -1439,12 +1445,18 @@ func TestResolution_GraphDefault(t *testing.T) {
 	}
 
 	state := NewRunState()
-	step := plan.Step{Node: "target"}
+	// After instantiation, graph defaults are in step values
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"count": {Default: 1},
+		},
+	}
 
 	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, nil)
 	require.NoError(t, err)
 	require.Len(t, resolutions, 1)
-	assert.Equal(t, "graph_default", resolutions[0].Source)
+	assert.Equal(t, "plan_default", resolutions[0].Source)
 	assert.Equal(t, 1, resolutions[0].FinalValue)
 }
 

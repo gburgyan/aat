@@ -83,35 +83,30 @@ func (e *Engine) WithMaxRelaxationDepth(n int) *Engine {
 // Run executes a plan: validates, sorts steps topologically, runs each in order,
 // and executes cleanup on completion.
 func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
-	// 1. Inject implicit dependencies from graph-level default from-refs
-	InjectGraphDefaultDeps(p, e.graph)
-
-	// 2. Validate plan against graph
-	if err := plan.Validate(p, e.graph); err != nil {
+	// 1. Instantiate + validate: merge graph defaults, inject deps, validate
+	instantiatedPlan, err := plan.InstantiateAndValidate(p, e.graph)
+	if err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
-	// Build instantiated plan (plan + graph defaults merged) for archive inspection.
-	instantiatedPlan := InstantiatePlan(p, e.graph)
-
-	// 3. Topological sort
-	sorted, err := TopologicalSort(p.Execution.Steps)
+	// 2. Topological sort
+	sorted, err := TopologicalSort(instantiatedPlan.Execution.Steps)
 	if err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
 	// 3. Validate adapter outputs match graph declarations (only for plan-used nodes)
-	if err := ValidateAdapterOutputsForPlan(e.graph, e.registry, p); err != nil {
+	if err := ValidateAdapterOutputsForPlan(e.graph, e.registry, instantiatedPlan); err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
 	// 3b. Validate template required placeholders vs optional graph inputs
-	if err := ValidateTemplateInputsForPlan(e.graph, e.registry, p); err != nil {
+	if err := ValidateTemplateInputsForPlan(e.graph, e.registry, instantiatedPlan); err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
 	// 4. Set plan for constraint-aware resolution
-	e.plan = p
+	e.plan = instantiatedPlan
 	defer func() {
 		e.plan = nil
 	}()

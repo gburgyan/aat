@@ -385,7 +385,7 @@ func adjustPlan(p *plan.Plan, g *graph.Graph, reader io.Reader) (*plan.Plan, err
 	}
 
 	// Revalidate
-	if err := plan.Validate(edited, g); err != nil {
+	if _, err := plan.InstantiateAndValidate(edited, g); err != nil {
 		return nil, fmt.Errorf("edited plan validation failed: %w", err)
 	}
 

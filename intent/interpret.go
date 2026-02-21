@@ -200,7 +200,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	}
 
 	// --- Validate ---
-	if err := plan.Validate(skeleton, req.Graph); err != nil {
+	if _, err := plan.InstantiateAndValidate(skeleton, req.Graph); err != nil {
 		var valErr *plan.ValidationError
 		if !errors.As(err, &valErr) {
 			if trace != nil {
@@ -477,7 +477,7 @@ func retryPlanGeneration(
 
 	PostProcess(retrySkeleton, req.Graph, nil, req.Prompt)
 
-	if err := plan.Validate(retrySkeleton, req.Graph); err != nil {
+	if _, err := plan.InstantiateAndValidate(retrySkeleton, req.Graph); err != nil {
 		if trace != nil {
 			trace.RetryValidationErr = err.Error()
 			trace.FinalPlan = retrySkeleton

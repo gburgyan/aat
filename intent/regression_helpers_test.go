@@ -102,9 +102,9 @@ func assertHasSelection(t *testing.T, p *plan.Plan, node string) {
 	t.Errorf("step %s not found in plan", node)
 }
 
-// assertPlanValid verifies plan.Validate() passes.
+// assertPlanValid verifies plan.InstantiateAndValidate() passes.
 func assertPlanValid(t *testing.T, p *plan.Plan, g *graph.Graph) {
 	t.Helper()
-	err := plan.Validate(p, g)
+	_, err := plan.InstantiateAndValidate(p, g)
 	assert.NoError(t, err, "plan validation failed")
 }

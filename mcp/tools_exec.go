@@ -58,7 +58,7 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError(fmt.Sprintf("loading plan: %v", err)), nil
 	}
 
-	if err := plan.Validate(p, s.ctx.Graph); err != nil {
+	if _, err := plan.InstantiateAndValidate(p, s.ctx.Graph); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("plan validation failed:\n%v", err)), nil
 	}
 

@@ -34,7 +34,7 @@ func TestTravelportTemplates_AllValidate(t *testing.T) {
 			// they have intentionally unfed required inputs that the LLM fills
 			// at composition time. Only validate standalone workflows.
 			if !wf.IsAddon() {
-				err = plan.Validate(p, g)
+				_, err = plan.InstantiateAndValidate(p, g)
 				assert.NoError(t, err, "template validation failed for workflow %q", wf.Name)
 			}
 		})
