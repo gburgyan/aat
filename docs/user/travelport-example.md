@@ -8,7 +8,7 @@ This walks through the included Travelport booking flow — a real end-to-end AP
 |------|-------------|
 | `travelport/graph.yaml` | API graph: nodes, edges, base and addon workflows |
 | `travelport/templates/` | Request/response templates for each operation |
-| `travelport/plans/` | Workflow plan templates (base and addon) |
+| `travelport/workflows/` | Workflow plan templates (base and addon) |
 | `environments/travelport-pp.yaml` | Pre-production environment config |
 
 ## Running
@@ -23,7 +23,7 @@ The travelport directory has an `aat-project.yaml` manifest, so from inside it y
 cd travelport
 
 # Run a pre-written plan
-aat run --plan plans/oneway-fullpayload.yaml
+aat run --plan workflows/oneway-fullpayload.yaml
 
 # Or generate a plan from a prompt (requires LLM config in env)
 aat prompt "Book a one-way flight from Denver to San Francisco"
@@ -33,7 +33,7 @@ You can also run from the repo root with explicit paths:
 
 ```
 ./aat run \
-  --plan travelport/plans/oneway-fullpayload.yaml \
+  --plan travelport/workflows/oneway-fullpayload.yaml \
   --env travelport/env.yaml \
   --graph travelport/graph.yaml \
   --templates travelport/templates/
@@ -42,7 +42,7 @@ You can also run from the repo root with explicit paths:
 Or point `AAT_PROJECT` at the travelport directory:
 
 ```
-AAT_PROJECT=./travelport aat run --plan travelport/plans/oneway-fullpayload.yaml
+AAT_PROJECT=./travelport aat run --plan travelport/workflows/oneway-fullpayload.yaml
 ```
 
 ## Booking Flow
@@ -141,7 +141,7 @@ headers:
 
 ## Customizing the Plan
 
-To book a different route, edit `plans/travelport_booking.yaml`:
+To book a different route, edit `workflows/travelport_booking.yaml`:
 
 ```yaml
     - node: searchFlights

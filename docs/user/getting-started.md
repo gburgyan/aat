@@ -47,7 +47,7 @@ AAT projects use four file types. Each has a distinct role:
 | **Graph** (`graph.yaml`) | Map of your API: operations (nodes), their inputs/outputs, and data-flow edges between them |
 | **Templates** (`templates/*.yaml`) | HTTP request/response details for each operation: method, path, headers, body, extraction rules |
 | **Environment** (`env.yaml`) | Connection config: base URL, authentication, retry settings |
-| **Plan** (`plans/*.yaml`) | Test scenario: which steps to run, input values, and assertions |
+| **Plan** (`workflows/*.yaml`) | Test scenario: which steps to run, input values, and assertions |
 
 A typical project looks like:
 
@@ -60,12 +60,12 @@ my-api-tests/
     getUser.yaml
     deleteUser.yaml
   env.yaml
-  plans/
+  workflows/
     smoke-test.yaml
     full-workflow.yaml
 ```
 
-The graph and templates describe your API's structure. The environment tells AAT how to connect. Plans describe what to test. You write each once (except plans — you'll write many).
+The graph and templates describe your API's structure. The environment tells AAT how to connect. Plans describe what to test. You write each once (except plans — you'll write many for different scenarios).
 
 The optional `aat-project.yaml` manifest lets AAT auto-discover your project files, so you don't need `--env`, `--graph`, and `--templates` on every command. See [Running Tests: Project Discovery](running.md#project-discovery) for setup.
 
@@ -338,7 +338,7 @@ For the full environment reference including LLM configuration and retry setting
 
 A plan defines a test scenario: which steps to execute, what values to use, and what to assert.
 
-**plans/create-and-verify.yaml:**
+**workflows/create-and-verify.yaml:**
 
 ```yaml
 intent:
@@ -400,21 +400,21 @@ aat prompt "create a user named Alice and verify it exists" \
   --templates templates/
 ```
 
-AAT shows the generated plan for review before executing. Use `--save plans/my-test.yaml` to save it for reuse. See [LLM-Assisted Planning](prompt-workflow.md) for details.
+AAT shows the generated plan for review before executing. Use `--save workflows/my-test.yaml` to save it for reuse. See [LLM-Assisted Planning](prompt-workflow.md) for details.
 
 ## 7. Run It
 
 With an `aat-project.yaml` manifest:
 
 ```bash
-aat run --plan plans/create-and-verify.yaml
+aat run --plan workflows/create-and-verify.yaml
 ```
 
 Or with explicit paths:
 
 ```bash
 aat run \
-  --plan plans/create-and-verify.yaml \
+  --plan workflows/create-and-verify.yaml \
   --env env.yaml \
   --graph graph.yaml \
   --templates templates/
@@ -464,7 +464,7 @@ description: "My API test project"
 graph: graph.yaml
 templates: templates/
 environment: env.yaml
-plans: plans/
+workflows: workflows/
 archives: _output/runs
 traces: _output/traces
 ```

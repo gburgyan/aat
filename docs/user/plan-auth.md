@@ -30,7 +30,7 @@ execution:
 Run it the same way as any other plan:
 
 ```bash
-aat run --plan plans/customer-x-booking.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run --plan workflows/customer-x-booking.yaml --env env.yaml --graph graph.yaml --templates templates/
 ```
 
 AAT authenticates with the plan's credentials instead of the environment's. The plan headers merge on top of environment headers.
@@ -104,7 +104,7 @@ overrides:
 The primary use case: each plan targets a specific customer identity.
 
 ```yaml
-# plans/customer-acme-booking.yaml
+# workflows/customer-acme-booking.yaml
 auth:
   type: oauth2
   tokenUrl: https://auth.example.com/token
@@ -141,8 +141,8 @@ execution:
 Different plans can test different customers against the same environment:
 
 ```bash
-aat run --plan plans/customer-acme-booking.yaml --env production.yaml ...
-aat run --plan plans/customer-globex-booking.yaml --env production.yaml ...
+aat run --plan workflows/customer-acme-booking.yaml --env production.yaml ...
+aat run --plan workflows/customer-globex-booking.yaml --env production.yaml ...
 ```
 
 ### API version testing
@@ -150,7 +150,7 @@ aat run --plan plans/customer-globex-booking.yaml --env production.yaml ...
 Test the same flow against different API versions by setting version headers:
 
 ```yaml
-# plans/v2-search-test.yaml
+# workflows/v2-search-test.yaml
 headers:
   Accept-Version: "2"
   Content-Version: "2"
@@ -173,7 +173,7 @@ execution:
 ### Testing with a specific API key
 
 ```yaml
-# plans/partner-api-test.yaml
+# workflows/partner-api-test.yaml
 auth:
   type: apikey
   headerName: X-Partner-Key
@@ -194,7 +194,7 @@ execution:
 Override the environment's auth with `none` to test against a local service that doesn't require authentication:
 
 ```yaml
-# plans/local-smoke.yaml
+# workflows/local-smoke.yaml
 auth:
   type: none
 
@@ -208,7 +208,7 @@ execution:
 You can add plan-level headers without changing the authentication. Omit the `auth:` block and only specify `headers:`:
 
 ```yaml
-# plans/debug-trace.yaml
+# workflows/debug-trace.yaml
 headers:
   X-Debug-Trace: "enabled"
   X-Request-Source: "aat-regression"
@@ -238,13 +238,13 @@ Generate a plan, save it, manually add auth/headers, then run it:
 # Generate and save (don't execute yet)
 aat prompt "Book a flight from Rome to New York" \
   --env env.yaml --graph graph.yaml --templates templates/ \
-  --save plans/rome-to-ny.yaml
+  --save workflows/rome-to-ny.yaml
 
 # Edit the saved plan to add auth/headers
 # (see "Manual editing" below)
 
 # Run with the added credentials
-aat run --plan plans/rome-to-ny.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run --plan workflows/rome-to-ny.yaml --env env.yaml --graph graph.yaml --templates templates/
 ```
 
 ### 2. Adjust flow
@@ -430,7 +430,7 @@ The workflow is: the AI edits the plan YAML on disk, then calls `execute_plan` t
 1. **User describes the test scenario** in natural language, including the customer identity
 2. **AI uses `scaffold_template` or `instantiate_workflow`** to get the base plan structure
 3. **AI adds `auth:` and `headers:` blocks** based on the described identity
-4. **AI saves the plan** to the plans directory
+4. **AI saves the plan** to the workflows directory
 5. **AI calls `execute_plan`** to run it
 6. **AI inspects results** via `inspect_archive` and reports back
 7. If the test fails, the AI modifies the plan (adjust values, relax constraints, fix auth) and re-runs

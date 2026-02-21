@@ -235,13 +235,13 @@ execution:
       values:
         setupId: {from: setup.setupId}
 `
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "multi.yaml"), []byte(templateContent), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "workflows"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "workflows", "multi.yaml"), []byte(templateContent), 0o644))
 
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Multi-Item", Template: "plans/multi.yaml"},
+			{Name: "Multi-Item", Template: "workflows/multi.yaml"},
 		},
 		Nodes: map[string]*graph.Node{
 			"setup":   {Name: "setup", Description: "Setup", Adapter: "a", Inputs: []graph.Input{{Name: "config", Type: "string"}}, Outputs: []graph.Output{{Name: "setupId", Type: "string"}}},
@@ -351,13 +351,13 @@ execution:
     - node: cleanup
       runOn: always
 `
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "booking.yaml"), []byte(templateContent), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "workflows"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "workflows", "booking.yaml"), []byte(templateContent), 0o644))
 
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Booking Flow", Template: "plans/booking.yaml"},
+			{Name: "Booking Flow", Template: "workflows/booking.yaml"},
 		},
 		Nodes: map[string]*graph.Node{
 			"search": {
@@ -567,13 +567,13 @@ execution:
     - node: cleanup
       runOn: always
 `
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "booking.yaml"), []byte(templateContent), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "workflows"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "workflows", "booking.yaml"), []byte(templateContent), 0o644))
 
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Booking Flow", Template: "plans/booking.yaml"},
+			{Name: "Booking Flow", Template: "workflows/booking.yaml"},
 			{Name: "No Template Flow"},
 		},
 		Nodes: map[string]*graph.Node{
@@ -645,12 +645,12 @@ execution:
           from: search.items
           strategy: first
 `
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "retry.yaml"), []byte(templateContent), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "workflows"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "workflows", "retry.yaml"), []byte(templateContent), 0o644))
 
 	g := buildMismatchGraph()
 	g.Workflows = []graph.Workflow{
-		{Name: "Retry Flow", Template: "plans/retry.yaml"},
+		{Name: "Retry Flow", Template: "workflows/retry.yaml"},
 	}
 
 	return g, dir
@@ -758,7 +758,7 @@ func TestInterpret_WorkflowTrace(t *testing.T) {
 
 	// Trace should capture workflow metadata
 	assert.Equal(t, "Booking Flow", result.Trace.WorkflowName)
-	assert.Equal(t, "plans/booking.yaml", result.Trace.TemplatePath)
+	assert.Equal(t, "workflows/booking.yaml", result.Trace.TemplatePath)
 
 	// WorkflowSelection should be in the trace
 	require.NotNil(t, result.Trace.WorkflowSelection)
@@ -830,8 +830,8 @@ func TestValidateWorkflowSelection_NonAddonAsAddon(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Main", Template: "plans/main.yaml"},
-			{Name: "Extra", Template: "plans/extra.yaml"}, // not an addon
+			{Name: "Main", Template: "workflows/main.yaml"},
+			{Name: "Extra", Template: "workflows/extra.yaml"}, // not an addon
 		},
 		Nodes: map[string]*graph.Node{},
 	}
@@ -850,8 +850,8 @@ func TestValidateWorkflowSelection_DuplicateAddon(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Main", Template: "plans/main.yaml"},
-			{Name: "Seat", Kind: "addon", Template: "plans/seat.yaml", After: graph.AfterSpec{"book"}},
+			{Name: "Main", Template: "workflows/main.yaml"},
+			{Name: "Seat", Kind: "addon", Template: "workflows/seat.yaml", After: graph.AfterSpec{"book"}},
 		},
 		Nodes: map[string]*graph.Node{},
 	}
@@ -870,8 +870,8 @@ func TestValidateWorkflowSelection_AddonSelectedAsBase(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Main", Template: "plans/main.yaml"},
-			{Name: "Seat", Kind: "addon", Template: "plans/seat.yaml", After: graph.AfterSpec{"book"}},
+			{Name: "Main", Template: "workflows/main.yaml"},
+			{Name: "Seat", Kind: "addon", Template: "workflows/seat.yaml", After: graph.AfterSpec{"book"}},
 		},
 		Nodes: map[string]*graph.Node{},
 	}
@@ -954,15 +954,15 @@ execution:
       values:
         hotelId: {from: findHotel.hotelId}
 `
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "plans"), 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "flights.yaml"), []byte(flightTemplate), 0o644))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "plans", "hotels.yaml"), []byte(hotelTemplate), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "workflows"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "workflows", "flights.yaml"), []byte(flightTemplate), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "workflows", "hotels.yaml"), []byte(hotelTemplate), 0o644))
 
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Flight Booking", Template: "plans/flights.yaml"},
-			{Name: "Hotel Booking", Template: "plans/hotels.yaml"},
+			{Name: "Flight Booking", Template: "workflows/flights.yaml"},
+			{Name: "Hotel Booking", Template: "workflows/hotels.yaml"},
 		},
 		Nodes: map[string]*graph.Node{
 			"searchFlights": {

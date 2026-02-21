@@ -35,7 +35,7 @@
 - `mcp/tools_workflow.go` — list/instantiate updated
 - `graph/docgen.go` — Steps rendering removed
 - `cmd/aat/prompt_cmd.go` — uses WorkflowSelection
-- `travelport/plans/*.yaml` — intent.goal and metadata.prompt removed
+- `travelport/workflows/*.yaml` — intent.goal and metadata.prompt removed
 
 **Open questions:** None.
 
@@ -132,7 +132,7 @@
 
 **Decisions:**
 - `integration_guide` (arg: `goal`): backward chains to goal, assembles chain trace + per-node detail with docs/template/OAS + domain knowledge. Instruction covers prerequisites, step-by-step walkthrough, example payloads, data flow, error handling, and complete code example.
-- `test_workflow` (arg: `description`): lists graph nodes, domain context, and available capabilities (conditional on PlansDir/ArchiveDir/Environment). Instruction walks through the full test lifecycle: analyze graph → generate plan → review → save → execute → inspect → diagnose.
+- `test_workflow` (arg: `description`): lists graph nodes, domain context, and available capabilities (conditional on WorkflowsDir/ArchiveDir/Environment). Instruction walks through the full test lifecycle: analyze graph → generate plan → review → save → execute → inspect → diagnose.
 - `debug_failing_test` (arg: `run_id`): loads archive, returns graceful message if passed, otherwise assembles failure analysis + successful steps before failure + full failed step detail + graph context for failed nodes + plan goal. Instruction covers root cause identification, data flow tracing, and fix suggestions.
 - All three prompts return 2 messages (context + instruction), both with RoleUser, consistent with existing prompt patterns
 - `debug_failing_test` returns errors (not tool result errors) for missing archive dir and not-found archives, consistent with other prompt handlers
@@ -180,15 +180,15 @@
 
 **Decisions:**
 - All 5 tools registered unconditionally; graceful degradation at handler level (consistent with docs tools pattern)
-- PlansDir-dependent tools (`list_saved_plans`, `load_plan`, `save_plan`) return clear messages when PlansDir is empty rather than erroring
+- WorkflowsDir-dependent tools (`list_saved_plans`, `load_plan`, `save_plan`) return clear messages when WorkflowsDir is empty rather than erroring
 - `generate_plan` checks for Environment and LLM config presence before attempting `intent.Interpret()` — constructs `llm.Client` on-demand via `llm.NewClient(env.LLM)`
-- `validate_plan` always works (only needs graph, which is always present) — no PlansDir dependency
+- `validate_plan` always works (only needs graph, which is always present) — no WorkflowsDir dependency
 - `save_plan` validates before writing: parse → validate → write. Invalid plans never hit disk
 - `resolveplanPath` helper auto-appends `.yaml` if no `.yaml`/`.yml` extension provided — consistent UX for load/save
 - `list_saved_plans` handles unparseable YAML files gracefully — shows them with "(parse error)" instead of failing
-- `generate_plan` returns Markdown with YAML in a code block + narrative text; optional `save_as` parameter saves to PlansDir
+- `generate_plan` returns Markdown with YAML in a code block + narrative text; optional `save_as` parameter saves to WorkflowsDir
 - Used existing test helpers (`newTestServer`, `callTool`, `resultText`) from `tools_graph_test.go`
-- Added `newTestServerWithPlans` helper for tests needing PlansDir; all tests use `t.TempDir()` for isolation
+- Added `newTestServerWithWorkflows` helper for tests needing WorkflowsDir; all tests use `t.TempDir()` for isolation
 
 **Files:**
 - `mcp/tools_plan.go` — NEW: registerPlanTools, 5 handlers, resolveplanPath helper (~250 lines)
@@ -504,7 +504,7 @@
 - `plan/validate.go` — llm in validStrategies, prompt required for llm
 - `archive/types.go` — LLMCall on SelectionRecord
 - `engine/archive.go` — copy LLM call in convertSelections
-- `plans/travelport_booking.yaml` — field names instead of gjson paths
+- `workflows/travelport_booking.yaml` — field names instead of gjson paths
 - `plan/testdata/valid/travelport_booking.yaml` — same
 - `intent/postprocess_test.go` — updated for name expectations
 - `plan/parse_test.go` — updated for name expectations

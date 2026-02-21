@@ -21,7 +21,7 @@ import (
 var validateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate the current AAT project",
-	Long:  "Validate the AAT project: manifest, graph, OAS specs, templates, workflows, and plans.",
+	Long:  "Validate the AAT project: manifest, graph, OAS specs, templates, and workflows.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
@@ -109,9 +109,9 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 			manifestErrors = append(manifestErrors, fmt.Sprintf("environment file not found: %s", m.EnvPath))
 		}
 	}
-	if m.PlansDir != "" {
-		if _, err := os.Stat(m.PlansDir); err != nil {
-			manifestErrors = append(manifestErrors, fmt.Sprintf("plans dir not found: %s", m.PlansDir))
+	if m.WorkflowsDir != "" {
+		if _, err := os.Stat(m.WorkflowsDir); err != nil {
+			manifestErrors = append(manifestErrors, fmt.Sprintf("workflows dir not found: %s", m.WorkflowsDir))
 		}
 	}
 
@@ -262,14 +262,14 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		}
 	}
 
-	// 7. Plans validation
-	if m.PlansDir != "" {
+	// 7. Workflows validation
+	if m.WorkflowsDir != "" {
 		graphDir := filepath.Dir(m.GraphPath)
 		wfTemplates := workflowTemplatePaths(g, graphDir)
-		pvr := validatePlans(m.PlansDir, g, wfTemplates)
+		pvr := validateWorkflows(m.WorkflowsDir, g, wfTemplates)
 		if len(pvr.Errors) > 0 {
 			sections = append(sections, sectionResult{
-				Name:   "Plans",
+				Name:   "Workflows",
 				Status: "FAILED",
 				Errors: pvr.Errors,
 			})
@@ -280,7 +280,7 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 			}
 			detail += ")"
 			sections = append(sections, sectionResult{
-				Name:   "Plans",
+				Name:   "Workflows",
 				Status: "OK",
 				Detail: detail,
 			})
@@ -306,21 +306,21 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 	return 0
 }
 
-// planValidationResult holds counts from plan validation for the detail string.
-type planValidationResult struct {
+// workflowValidationResult holds counts from workflow validation for the detail string.
+type workflowValidationResult struct {
 	Errors    []string
 	Total     int
 	Templates int
 }
 
-// validatePlans walks the plans directory and validates each .yaml file.
+// validateWorkflows walks the workflows directory and validates each .yaml file.
 // Files referenced as workflow templates are only parsed (structural check),
 // not graph-validated, since their missing inputs get wired at composition time.
-func validatePlans(plansDir string, g *graph.Graph, workflowTemplates map[string]bool) planValidationResult {
-	var result planValidationResult
-	entries, err := os.ReadDir(plansDir)
+func validateWorkflows(workflowsDir string, g *graph.Graph, workflowTemplates map[string]bool) workflowValidationResult {
+	var result workflowValidationResult
+	entries, err := os.ReadDir(workflowsDir)
 	if err != nil {
-		result.Errors = []string{fmt.Sprintf("reading plans directory: %s", err)}
+		result.Errors = []string{fmt.Sprintf("reading workflows directory: %s", err)}
 		return result
 	}
 
@@ -333,7 +333,7 @@ func validatePlans(plansDir string, g *graph.Graph, workflowTemplates map[string
 		}
 
 		result.Total++
-		planPath := filepath.Join(plansDir, entry.Name())
+		planPath := filepath.Join(workflowsDir, entry.Name())
 		p, err := plan.ParseFile(planPath)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name(), err))

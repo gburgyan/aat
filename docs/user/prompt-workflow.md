@@ -112,7 +112,7 @@ Use `--save` to write the generated plan to a file:
 ```bash
 aat prompt "Order the cheapest in-stock laptop" \
   --env env.yaml --graph graph.yaml --templates templates/ \
-  --save plans/laptop-order.yaml
+  --save workflows/laptop-order.yaml
 ```
 
 The plan is saved immediately after generation, before the confirmation prompt. You can save a plan and cancel execution if you just want the plan file for later use with `aat run`.

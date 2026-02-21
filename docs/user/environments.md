@@ -21,7 +21,7 @@ auth:
 Run a plan against it:
 
 ```
-aat run --plan plans/smoke.yaml --env test.yaml
+aat run --plan workflows/smoke.yaml --env test.yaml
 ```
 
 The `--env` flag takes a direct file path to the environment YAML file.

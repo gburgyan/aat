@@ -1,5 +1,5 @@
 // Package mcp implements an MCP (Model Context Protocol) server that exposes
-// AAT's API graph, templates, domain knowledge, OAS specs, plans, and execution
+// AAT's API graph, templates, domain knowledge, OAS specs, workflows, and execution
 // capabilities to IDE-based AI tools such as Claude Code.
 //
 // The server is started via `aat mcp serve` and communicates over stdio using

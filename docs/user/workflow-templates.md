@@ -17,24 +17,24 @@ workflows:
   # Base workflows — standalone test scenarios
   - name: Standard Checkout
     description: "Browse products, add to cart, and complete checkout"
-    template: plans/standard-checkout.yaml
+    template: workflows/standard-checkout.yaml
 
   - name: Express Checkout
     description: "Single-step checkout for returning customers"
-    template: plans/express-checkout.yaml
+    template: workflows/express-checkout.yaml
 
   # Addon workflows — splice into a base workflow
   - name: Apply Coupon
     kind: addon
     after: addItem
     description: "Validate and apply a coupon code to the cart"
-    template: plans/apply-coupon.yaml
+    template: workflows/apply-coupon.yaml
 
   - name: Gift Wrap
     kind: addon
     after: addItem
     description: "Add gift wrapping to the order"
-    template: plans/gift-wrap.yaml
+    template: workflows/gift-wrap.yaml
     wire:
       cartId: createCart.cartId
 ```
@@ -50,7 +50,7 @@ workflows:
 | `after` | addon only | Node name in the base workflow to splice after |
 | `wire` | no | Explicit AUTOWIRE overrides for the addon (map of input name to `stepID.outputName` ref, or `"MANUAL"` to leave for the LLM) |
 
-The `template` path is resolved relative to the directory containing the graph file. For example, if the graph is at `myapi/graph.yaml` and the template is `plans/standard-checkout.yaml`, the resolved path is `myapi/plans/standard-checkout.yaml`.
+The `template` path is resolved relative to the directory containing the graph file. For example, if the graph is at `myapi/graph.yaml` and the template is `workflows/standard-checkout.yaml`, the resolved path is `myapi/workflows/standard-checkout.yaml`.
 
 ## Template Structure
 
@@ -240,7 +240,7 @@ These tests catch regressions when graph nodes, edges, or outputs change.
 5. **Validate** — Run `go test ./intent/...` or validate programmatically:
    ```go
    g, _ := graph.ParseFile("graph.yaml")
-   p, _ := intent.LoadWorkflowTemplate("plans/my-template.yaml", ".", g)
+   p, _ := intent.LoadWorkflowTemplate("workflows/my-template.yaml", ".", g)
    err := plan.Validate(p, g)
    ```
 
@@ -272,7 +272,7 @@ Addon templates are self-contained sub-workflows that get composed into a base w
      kind: addon
      after: addItem              # node in the base workflow to splice after
      description: "Validate and apply a coupon code"
-     template: plans/apply-coupon.yaml
+     template: workflows/apply-coupon.yaml
    ```
 
 3. **Add `wire:` overrides if needed** — When a AUTOWIRE input name doesn't match any base workflow output name, use explicit wiring:
@@ -280,7 +280,7 @@ Addon templates are self-contained sub-workflows that get composed into a base w
    - name: Apply Coupon
      kind: addon
      after: addItem
-     template: plans/apply-coupon.yaml
+     template: workflows/apply-coupon.yaml
      wire:
        cartId: createCart.cartId    # explicit: "cartId" output doesn't exist, wire to createCart.cartId
    ```

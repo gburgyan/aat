@@ -296,7 +296,7 @@ func TestWorkflowResource_Valid(t *testing.T) {
 			{
 				Name:        "Test Booking",
 				Description: "Book a test flight",
-				Template:    "testdata/plans/booking.yaml",
+				Template:    "testdata/workflows/booking.yaml",
 			},
 		},
 		Nodes: map[string]*graph.Node{

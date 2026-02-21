@@ -26,7 +26,7 @@ type ServerContext struct {
 	NodeDocs map[string]string // node name -> Markdown content
 
 	// Testing lifecycle (60c, may be nil)
-	PlansDir    string
+	WorkflowsDir    string
 	ArchiveDir  string
 	Environment *config.Environment
 
@@ -87,7 +87,7 @@ func BuildServerContext(manifest *ProjectManifest) (*ServerContext, error) {
 
 	// Set optional directory paths
 	ctx.DocsDir = manifest.DocsDir
-	ctx.PlansDir = manifest.PlansDir
+	ctx.WorkflowsDir = manifest.WorkflowsDir
 	ctx.ArchiveDir = manifest.ArchiveDir
 
 	// Load node documentation (optional)

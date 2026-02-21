@@ -1,6 +1,6 @@
 # Project Validation
 
-The `aat validate` command checks your entire AAT project for consistency. It loads the project manifest, then validates each layer: graph structure, OAS specs, templates, workflows, and plans.
+The `aat validate` command checks your entire AAT project for consistency. It loads the project manifest, then validates each layer: graph structure, OAS specs, templates, and workflows.
 
 ## Quick Start
 
@@ -27,9 +27,9 @@ Validation runs in six sections, each building on the previous:
 | **OAS validation** | If the graph references OAS specs: operation IDs exist, inputs/outputs match spec parameters and schemas |
 | **Adapter outputs** | Template extract keys match graph-declared outputs for every node |
 | **Workflow compatibility** | Addon workflows can wire their AUTOWIRE inputs when composed into base workflows |
-| **Plans** | Every `.yaml` file in the plans directory parses and validates against the graph |
+| **Plans** | Every `.yaml` file in the workflows directory parses and validates against the graph |
 
-Sections are skipped when not applicable (e.g., no OAS specs referenced, no plans directory configured).
+Sections are skipped when not applicable (e.g., no OAS specs referenced, no workflows directory configured).
 
 ## Output
 
@@ -102,7 +102,7 @@ graph: graph.yaml
 templates: templates/
 environment: env.yaml       # optional
 domain: domain.yaml         # optional
-plans: plans/               # optional
+workflows: workflows/       # optional
 archives: _output/runs      # optional
 traces: _output/traces      # optional
 ```

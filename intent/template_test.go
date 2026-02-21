@@ -21,26 +21,26 @@ func fixedNow() time.Time {
 func TestFindWorkflowTemplate_Match(t *testing.T) {
 	g := &graph.Graph{
 		Workflows: []graph.Workflow{
-			{Name: "Booking", Template: "plans/booking.yaml"},
+			{Name: "Booking", Template: "workflows/booking.yaml"},
 			{Name: "Search Only"},
 		},
 	}
 
 	path, found := FindWorkflowTemplate(g, "Booking")
 	assert.True(t, found)
-	assert.Equal(t, "plans/booking.yaml", path)
+	assert.Equal(t, "workflows/booking.yaml", path)
 }
 
 func TestFindWorkflowTemplate_CaseInsensitive(t *testing.T) {
 	g := &graph.Graph{
 		Workflows: []graph.Workflow{
-			{Name: "Full-Payload Booking", Template: "plans/booking.yaml"},
+			{Name: "Full-Payload Booking", Template: "workflows/booking.yaml"},
 		},
 	}
 
 	path, found := FindWorkflowTemplate(g, "full-payload booking")
 	assert.True(t, found)
-	assert.Equal(t, "plans/booking.yaml", path)
+	assert.Equal(t, "workflows/booking.yaml", path)
 }
 
 func TestFindWorkflowTemplate_NoTemplate(t *testing.T) {
@@ -57,7 +57,7 @@ func TestFindWorkflowTemplate_NoTemplate(t *testing.T) {
 func TestFindWorkflowTemplate_NoMatch(t *testing.T) {
 	g := &graph.Graph{
 		Workflows: []graph.Workflow{
-			{Name: "Booking", Template: "plans/booking.yaml"},
+			{Name: "Booking", Template: "workflows/booking.yaml"},
 		},
 	}
 
@@ -72,7 +72,7 @@ func TestLoadWorkflowTemplate_Success(t *testing.T) {
 	g, err := graph.ParseFile("../travelport/graph.yaml")
 	require.NoError(t, err)
 
-	p, err := LoadWorkflowTemplate("plans/roundtrip-journey.yaml", "../travelport", g)
+	p, err := LoadWorkflowTemplate("workflows/roundtrip-journey.yaml", "../travelport", g)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
@@ -86,7 +86,7 @@ func TestLoadWorkflowTemplate_AbsolutePath(t *testing.T) {
 	g, err := graph.ParseFile("../travelport/graph.yaml")
 	require.NoError(t, err)
 
-	absPath, err := filepath.Abs("../travelport/plans/roundtrip-journey.yaml")
+	absPath, err := filepath.Abs("../travelport/workflows/roundtrip-journey.yaml")
 	require.NoError(t, err)
 
 	p, err := LoadWorkflowTemplate(absPath, "/nonexistent", g)
@@ -939,7 +939,7 @@ func TestFormatGraph_WorkflowTemplateMarker(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Booking", Template: "plans/booking.yaml", Description: "Full booking"},
+			{Name: "Booking", Template: "workflows/booking.yaml", Description: "Full booking"},
 			{Name: "Search Only", Description: "Just search"},
 		},
 		Nodes: map[string]*graph.Node{},

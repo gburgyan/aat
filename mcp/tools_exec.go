@@ -41,8 +41,8 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	// Guard: required configuration
-	if s.ctx.PlansDir == "" {
-		return mcp.NewToolResultError("plans directory not configured — set the `plans` field in aat-project.yaml"), nil
+	if s.ctx.WorkflowsDir == "" {
+		return mcp.NewToolResultError("workflows directory not configured — set the `workflows` field in aat-project.yaml"), nil
 	}
 	if s.ctx.Environment == nil {
 		return mcp.NewToolResultError("no environment configured — set the `environment` field in aat-project.yaml to enable execution"), nil
@@ -52,7 +52,7 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	// Load and validate plan
-	planPath := resolveplanPath(s.ctx.PlansDir, name)
+	planPath := resolveWorkflowPath(s.ctx.WorkflowsDir, name)
 	p, err := plan.ParseFile(planPath)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("loading plan: %v", err)), nil

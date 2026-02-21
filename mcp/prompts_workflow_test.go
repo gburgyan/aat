@@ -195,7 +195,7 @@ func TestTestWorkflow_CapabilitiesFull(t *testing.T) {
 		Graph:       g,
 		Registry:    adapter.NewRegistry(),
 		Manifest:    &ProjectManifest{Name: "test"},
-		PlansDir:    "/tmp/plans",
+		WorkflowsDir:    "/tmp/plans",
 		ArchiveDir:  "/tmp/archives",
 		Environment: &config.Environment{Name: "test"},
 	}
@@ -213,7 +213,7 @@ func TestTestWorkflow_CapabilitiesFull(t *testing.T) {
 
 func TestTestWorkflow_CapabilitiesMinimal(t *testing.T) {
 	g := twoNodeGraph()
-	srv := newTestServer(g) // no PlansDir, no ArchiveDir, no Environment
+	srv := newTestServer(g) // no WorkflowsDir, no ArchiveDir, no Environment
 	result, err := callPrompt(t, srv.handleTestWorkflow, map[string]string{"description": "test flow"})
 	require.NoError(t, err)
 

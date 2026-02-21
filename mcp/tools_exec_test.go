@@ -24,7 +24,7 @@ func TestHandleExecutePlan_MissingName(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "missing required parameter")
 }
 
-func TestHandleExecutePlan_NoPlansDirConfigured(t *testing.T) {
+func TestHandleExecutePlan_NoWorkflowsDirConfigured(t *testing.T) {
 	g := twoNodeGraph()
 	ctx := &ServerContext{
 		Graph:       g,
@@ -37,7 +37,7 @@ func TestHandleExecutePlan_NoPlansDirConfigured(t *testing.T) {
 
 	result := callTool(t, srv.handleExecutePlan, map[string]any{"name": "test"})
 	assert.True(t, result.IsError)
-	assert.Contains(t, resultText(t, result), "plans directory not configured")
+	assert.Contains(t, resultText(t, result), "workflows directory not configured")
 }
 
 func TestHandleExecutePlan_NoEnvironmentConfigured(t *testing.T) {
@@ -46,7 +46,7 @@ func TestHandleExecutePlan_NoEnvironmentConfigured(t *testing.T) {
 		Graph:    g,
 		Registry: adapter.NewRegistry(),
 		Manifest: &ProjectManifest{Name: "test"},
-		PlansDir: t.TempDir(),
+		WorkflowsDir: t.TempDir(),
 	}
 	srv := NewServer(ctx)
 
@@ -61,7 +61,7 @@ func TestHandleExecutePlan_NoArchiveDirConfigured(t *testing.T) {
 		Graph:       g,
 		Registry:    adapter.NewRegistry(),
 		Manifest:    &ProjectManifest{Name: "test"},
-		PlansDir:    t.TempDir(),
+		WorkflowsDir:    t.TempDir(),
 		Environment: &config.Environment{Name: "test"},
 	}
 	srv := NewServer(ctx)
@@ -78,7 +78,7 @@ func TestHandleExecutePlan_PlanNotFound(t *testing.T) {
 		Graph:       g,
 		Registry:    adapter.NewRegistry(),
 		Manifest:    &ProjectManifest{Name: "test"},
-		PlansDir:    plansDir,
+		WorkflowsDir:    plansDir,
 		ArchiveDir:  t.TempDir(),
 		Environment: &config.Environment{Name: "test", Auth: config.AuthConfig{Type: "none"}},
 	}
@@ -99,7 +99,7 @@ func TestHandleExecutePlan_InvalidMode(t *testing.T) {
 		Graph:       g,
 		Registry:    adapter.NewRegistry(),
 		Manifest:    &ProjectManifest{Name: "test"},
-		PlansDir:    plansDir,
+		WorkflowsDir:    plansDir,
 		ArchiveDir:  t.TempDir(),
 		Environment: &config.Environment{Name: "test", Auth: config.AuthConfig{Type: "none"}},
 	}
@@ -123,7 +123,7 @@ func TestHandleExecutePlan_InvalidPlan(t *testing.T) {
 		Graph:       g,
 		Registry:    adapter.NewRegistry(),
 		Manifest:    &ProjectManifest{Name: "test"},
-		PlansDir:    plansDir,
+		WorkflowsDir:    plansDir,
 		ArchiveDir:  t.TempDir(),
 		Environment: &config.Environment{Name: "test", Auth: config.AuthConfig{Type: "none"}},
 	}

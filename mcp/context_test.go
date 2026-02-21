@@ -160,14 +160,14 @@ func TestBuildServerContext_OptionalDirs(t *testing.T) {
 	_, manifest := setupTestProject(t)
 
 	manifest.DocsDir = "/some/docs"
-	manifest.PlansDir = "/some/plans"
+	manifest.WorkflowsDir = "/some/plans"
 	manifest.ArchiveDir = "/some/archives"
 
 	ctx, err := BuildServerContext(manifest)
 	require.NoError(t, err)
 
 	assert.Equal(t, "/some/docs", ctx.DocsDir)
-	assert.Equal(t, "/some/plans", ctx.PlansDir)
+	assert.Equal(t, "/some/plans", ctx.WorkflowsDir)
 	assert.Equal(t, "/some/archives", ctx.ArchiveDir)
 }
 

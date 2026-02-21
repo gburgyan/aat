@@ -89,7 +89,7 @@ type ProjectManifest struct {
     TemplatesPath string   `yaml:"templates"`
     DomainPath    string   `yaml:"domain,omitempty"`
     DocsDir       string   `yaml:"docs,omitempty"`
-    PlansDir      string   `yaml:"plans,omitempty"`
+    WorkflowsDir  string   `yaml:"workflows,omitempty"`
     ArchiveDir    string   `yaml:"archives,omitempty"`
     EnvPath       string   `yaml:"environment,omitempty"`
 }
@@ -107,7 +107,7 @@ type ServerContext struct {
     NodeDocs    map[string]string  // node name -> Markdown content
 
     // Testing lifecycle (60c, may be nil)
-    PlansDir    string
+    WorkflowsDir string
     ArchiveDir  string
     Environment *config.Environment
 
@@ -373,9 +373,9 @@ The current implementation is HTTP/REST-centric (templates, OAS). To avoid one-w
 |------|--------|-------------|
 | `generate_plan` | `prompt` (required), `save_as` (optional) | Delegate to `intent.Interpret()`. Return plan YAML + narrative. Optionally save. |
 | `validate_plan` | `yaml` (required, string) | Parse YAML, validate against graph, return errors/warnings or "valid" |
-| `list_saved_plans` | — | Scan plans dir, show name + goal + step count for each |
+| `list_saved_plans` | — | Scan workflows dir, show name + goal + step count for each |
 | `load_plan` | `name` (required) | Load plan, return YAML + narrative (via `plan.FormatNarrative`) |
-| `save_plan` | `name` (required), `yaml` (required) | Validate + write to plans dir |
+| `save_plan` | `name` (required), `yaml` (required) | Validate + write to workflows dir |
 
 **Dependencies:** `intent.Interpret` requires LLM client. `generate_plan` checks that `Environment.LLM` is configured.
 

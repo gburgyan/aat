@@ -18,7 +18,7 @@ type ProjectManifest struct {
 	TemplatesPath string   `yaml:"templates"`
 	DomainPath    string   `yaml:"domain,omitempty"`
 	DocsDir       string   `yaml:"docs,omitempty"`
-	PlansDir      string   `yaml:"plans,omitempty"`
+	WorkflowsDir  string   `yaml:"workflows,omitempty"`
 	ArchiveDir    string   `yaml:"archives,omitempty"`
 	TracesDir     string   `yaml:"traces,omitempty"`
 	EnvPath       string   `yaml:"environment,omitempty"`
@@ -55,8 +55,8 @@ func LoadManifest(path string) (*ProjectManifest, error) {
 	if m.DocsDir != "" {
 		m.DocsDir = resolvePath(baseDir, m.DocsDir)
 	}
-	if m.PlansDir != "" {
-		m.PlansDir = resolvePath(baseDir, m.PlansDir)
+	if m.WorkflowsDir != "" {
+		m.WorkflowsDir = resolvePath(baseDir, m.WorkflowsDir)
 	}
 	if m.ArchiveDir != "" {
 		m.ArchiveDir = resolvePath(baseDir, m.ArchiveDir)

@@ -16,13 +16,13 @@ func workflowTestGraph() *graph.Graph {
 		Workflows: []graph.Workflow{
 			{
 				Name:     "Full-Payload Booking",
-				Template: "plans/booking.yaml",
+				Template: "workflows/booking.yaml",
 			},
 			{
 				Name:        "Seat Selection",
 				Kind:        "addon",
 				Description: "Select a seat",
-				Template:    "plans/seat.yaml",
+				Template:    "workflows/seat.yaml",
 				After:       graph.AfterSpec{"book"},
 				Wire:        map[string]string{"workbenchId": "book.workbenchId"},
 			},
@@ -75,7 +75,7 @@ func TestHandleListWorkflows_WithStepSummary(t *testing.T) {
 		Workflows: []graph.Workflow{
 			{
 				Name:     "Test Booking",
-				Template: "testdata/plans/booking.yaml",
+				Template: "testdata/workflows/booking.yaml",
 			},
 		},
 		Nodes: map[string]*graph.Node{
@@ -110,7 +110,7 @@ func TestHandleGetWorkflowDetail_Valid(t *testing.T) {
 			{
 				Name:        "Test Booking",
 				Description: "Book a test flight",
-				Template:    "testdata/plans/booking.yaml",
+				Template:    "testdata/workflows/booking.yaml",
 			},
 		},
 		Nodes: map[string]*graph.Node{

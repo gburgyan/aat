@@ -14,7 +14,7 @@ templates: templates/
 domain: domain.yaml        # optional
 docs: docs/                 # optional — per-node Markdown docs
 environment: env.yaml       # optional
-plans: plans/               # optional
+workflows: workflows/       # optional
 archives: _output/runs      # optional
 traces: _output/traces      # optional
 ```
@@ -56,7 +56,7 @@ The `aat-project.yaml` file tells the MCP server (and the CLI — see [Running T
 | `domain` | no | Path to domain knowledge YAML |
 | `docs` | no | Directory containing per-node Markdown docs |
 | `environment` | no | Path to environment config |
-| `plans` | no | Directory containing plan files |
+| `workflows` | no | Directory containing workflow/plan files |
 | `archives` | no | Directory containing run archives |
 
 All paths are resolved relative to the manifest file's directory.

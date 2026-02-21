@@ -106,7 +106,7 @@ func TestFormatGraph_WithWorkflows(t *testing.T) {
 			{
 				Name:        "Booking Flow",
 				Description: "Standard booking",
-				Template:    "plans/booking.yaml",
+				Template:    "workflows/booking.yaml",
 			},
 			{
 				Name: "Simple Flow",
@@ -235,12 +235,12 @@ func TestFormatGraph_WithAddonWorkflows(t *testing.T) {
 		Workflows: []graph.Workflow{
 			{
 				Name:     "Main Booking",
-				Template: "plans/main.yaml",
+				Template: "workflows/main.yaml",
 			},
 			{
 				Name:     "Seat Selection",
 				Kind:     "addon",
-				Template: "plans/seat.yaml",
+				Template: "workflows/seat.yaml",
 				After:    graph.AfterSpec{"book"},
 			},
 		},
@@ -266,8 +266,8 @@ func TestFormatWorkflowMenu_Basic(t *testing.T) {
 		Title:       "Travel API",
 		Description: "API for travel booking.",
 		Workflows: []graph.Workflow{
-			{Name: "Booking Flow", Template: "plans/booking.yaml", Description: "Standard booking"},
-			{Name: "Search Only", Template: "plans/search.yaml", Description: "Search without booking"},
+			{Name: "Booking Flow", Template: "workflows/booking.yaml", Description: "Standard booking"},
+			{Name: "Search Only", Template: "workflows/search.yaml", Description: "Search without booking"},
 			{Name: "No Template"},
 		},
 		Nodes: map[string]*graph.Node{
@@ -305,9 +305,9 @@ func TestFormatWorkflowMenu_AddonsShowAfter(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
 		Workflows: []graph.Workflow{
-			{Name: "Main", Template: "plans/main.yaml", Description: "Main flow"},
-			{Name: "Seat Selection", Kind: "addon", Template: "plans/seat.yaml", After: graph.AfterSpec{"commitBooking"}, Description: "Add seat preferences"},
-			{Name: "Ancillary", Kind: "addon", Template: "plans/anc.yaml", After: graph.AfterSpec{"addTraveler"}, Description: "Add ancillaries"},
+			{Name: "Main", Template: "workflows/main.yaml", Description: "Main flow"},
+			{Name: "Seat Selection", Kind: "addon", Template: "workflows/seat.yaml", After: graph.AfterSpec{"commitBooking"}, Description: "Add seat preferences"},
+			{Name: "Ancillary", Kind: "addon", Template: "workflows/anc.yaml", After: graph.AfterSpec{"addTraveler"}, Description: "Add ancillaries"},
 		},
 		Nodes: map[string]*graph.Node{},
 	}
@@ -343,7 +343,7 @@ func TestFormatWorkflowMenu_WithNotes(t *testing.T) {
 		Version: "1.0.0",
 		Notes:   "Only use production credentials.",
 		Workflows: []graph.Workflow{
-			{Name: "Test", Template: "plans/test.yaml"},
+			{Name: "Test", Template: "workflows/test.yaml"},
 		},
 		Nodes: map[string]*graph.Node{},
 	}

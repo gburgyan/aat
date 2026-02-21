@@ -412,14 +412,14 @@ workflows:
   # Base workflow
   - name: Standard Checkout
     description: "Browse products, add to cart, and complete checkout"
-    template: plans/standard-checkout.yaml
+    template: workflows/standard-checkout.yaml
 
   # Addon workflow — splices into a base workflow
   - name: Apply Coupon
     kind: addon
     after: addItem
     description: "Validate and apply a coupon code"
-    template: plans/apply-coupon.yaml
+    template: workflows/apply-coupon.yaml
     wire:
       cartId: createCart.cartId
 ```

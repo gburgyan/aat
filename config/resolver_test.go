@@ -16,7 +16,7 @@ graph: graph.yaml
 templates: templates/
 domain: domain.yaml
 environment: env.yaml
-plans: plans/
+workflows: workflows/
 archives: runs/
 traces: traces/
 `
@@ -59,7 +59,7 @@ func TestResolveProjectPaths_CWDManifest(t *testing.T) {
 	assert.Equal(t, filepath.Join(dir, "templates"), result.TemplatesPath)
 	assert.Equal(t, filepath.Join(dir, "env.yaml"), result.EnvPath)
 	assert.Equal(t, filepath.Join(dir, "domain.yaml"), result.DomainPath)
-	assert.Equal(t, filepath.Join(dir, "plans"), result.PlansDir)
+	assert.Equal(t, filepath.Join(dir, "workflows"), result.WorkflowsDir)
 	assert.Equal(t, filepath.Join(dir, "runs"), result.ArchiveDir)
 	assert.Equal(t, filepath.Join(dir, "traces"), result.TracesDir)
 	assert.Equal(t, filepath.Join(dir, "aat-project.yaml"), result.ManifestPath)
@@ -157,7 +157,7 @@ func TestResolveProjectPaths_ExplicitManifest(t *testing.T) {
 	assert.Equal(t, filepath.Join(dir, "templates"), result.TemplatesPath)
 	assert.Equal(t, filepath.Join(dir, "env.yaml"), result.EnvPath)
 	assert.Equal(t, filepath.Join(dir, "domain.yaml"), result.DomainPath)
-	assert.Equal(t, filepath.Join(dir, "plans"), result.PlansDir)
+	assert.Equal(t, filepath.Join(dir, "workflows"), result.WorkflowsDir)
 	assert.Equal(t, filepath.Join(dir, "runs"), result.ArchiveDir)
 	assert.Equal(t, filepath.Join(dir, "traces"), result.TracesDir)
 	assert.Equal(t, filepath.Join(dir, "aat-project.yaml"), result.ManifestPath)

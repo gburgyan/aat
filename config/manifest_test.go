@@ -19,7 +19,7 @@ graph: graph.yaml
 templates: templates/
 domain: domain.yaml
 docs: docs/
-plans: plans/
+workflows: workflows/
 archives: runs/
 traces: traces/
 environment: env.yaml
@@ -39,7 +39,7 @@ environment: env.yaml
 	assert.Equal(t, filepath.Join(dir, "templates"), m.TemplatesPath)
 	assert.Equal(t, filepath.Join(dir, "domain.yaml"), m.DomainPath)
 	assert.Equal(t, filepath.Join(dir, "docs"), m.DocsDir)
-	assert.Equal(t, filepath.Join(dir, "plans"), m.PlansDir)
+	assert.Equal(t, filepath.Join(dir, "workflows"), m.WorkflowsDir)
 	assert.Equal(t, filepath.Join(dir, "runs"), m.ArchiveDir)
 	assert.Equal(t, filepath.Join(dir, "traces"), m.TracesDir)
 	assert.Equal(t, filepath.Join(dir, "env.yaml"), m.EnvPath)
@@ -61,7 +61,7 @@ templates: templates/
 	assert.Equal(t, filepath.Join(dir, "templates"), m.TemplatesPath)
 	assert.Empty(t, m.DomainPath)
 	assert.Empty(t, m.DocsDir)
-	assert.Empty(t, m.PlansDir)
+	assert.Empty(t, m.WorkflowsDir)
 	assert.Empty(t, m.ArchiveDir)
 	assert.Empty(t, m.TracesDir)
 	assert.Empty(t, m.EnvPath)

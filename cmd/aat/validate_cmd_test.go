@@ -171,22 +171,22 @@ response:
 	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "test.adapter.yaml"), []byte(templateContent), 0644))
 
 	// Create plans dir with a valid plan
-	plansDir := filepath.Join(dir, "plans")
-	require.NoError(t, os.MkdirAll(plansDir, 0755))
+	workflowsDir := filepath.Join(dir, "workflows")
+	require.NoError(t, os.MkdirAll(workflowsDir, 0755))
 	planContent := `execution:
   steps:
     - node: testNode
       values:
         input1: "hello"
 `
-	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "good.yaml"), []byte(planContent), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "good.yaml"), []byte(planContent), 0644))
 
 	// Create manifest
 	manifestContent := `
 name: test-project
 graph: graph.yaml
 templates: templates/
-plans: plans/
+workflows: workflows/
 `
 	manifestPath := filepath.Join(dir, "aat-project.yaml")
 	require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0644))
@@ -194,7 +194,7 @@ plans: plans/
 	var buf bytes.Buffer
 	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
 	assert.Equal(t, 0, code, "output: %s", buf.String())
-	assert.Contains(t, buf.String(), "Plans")
+	assert.Contains(t, buf.String(), "Workflows")
 	assert.Contains(t, buf.String(), "(1 files)")
 	assert.Contains(t, buf.String(), "PASSED")
 }
@@ -234,15 +234,15 @@ response:
 	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "test.adapter.yaml"), []byte(templateContent), 0644))
 
 	// Create plans dir with one valid and one invalid plan
-	plansDir := filepath.Join(dir, "plans")
-	require.NoError(t, os.MkdirAll(plansDir, 0755))
-	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "good.yaml"), []byte(`execution:
+	workflowsDir := filepath.Join(dir, "workflows")
+	require.NoError(t, os.MkdirAll(workflowsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "good.yaml"), []byte(`execution:
   steps:
     - node: testNode
       values:
         input1: "hello"
 `), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "bad.yaml"), []byte(`execution:
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "bad.yaml"), []byte(`execution:
   steps:
     - node: nonexistentNode
       values:
@@ -254,7 +254,7 @@ response:
 name: test-project
 graph: graph.yaml
 templates: templates/
-plans: plans/
+workflows: workflows/
 `
 	manifestPath := filepath.Join(dir, "aat-project.yaml")
 	require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0644))
@@ -262,7 +262,7 @@ plans: plans/
 	var buf bytes.Buffer
 	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
 	assert.Equal(t, 1, code, "output: %s", buf.String())
-	assert.Contains(t, buf.String(), "Plans")
+	assert.Contains(t, buf.String(), "Workflows")
 	assert.Contains(t, buf.String(), "FAILED")
 	assert.Contains(t, buf.String(), "bad.yaml")
 }
@@ -331,11 +331,11 @@ func TestValidate_WorkflowTemplateSkipsGraphValidation(t *testing.T) {
 workflows:
   - name: book-flight
     description: Book a flight
-    template: plans/booking.yaml
+    template: workflows/booking.yaml
   - name: add-seat
     kind: addon
     description: Add a seat
-    template: plans/seat-addon.yaml
+    template: workflows/seat-addon.yaml
     after: CreateReservation
 nodes:
   SearchAir:
@@ -386,11 +386,11 @@ response:
 
 	// Create plans dir with workflow templates that have missing inputs
 	// (offerId is not provided — it would be wired by ComposeWithAddons)
-	plansDir := filepath.Join(dir, "plans")
-	require.NoError(t, os.MkdirAll(plansDir, 0755))
+	workflowsDir := filepath.Join(dir, "workflows")
+	require.NoError(t, os.MkdirAll(workflowsDir, 0755))
 
 	// seat-addon.yaml: workflow template — intentionally missing offerId
-	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "seat-addon.yaml"), []byte(`execution:
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "seat-addon.yaml"), []byte(`execution:
   steps:
     - node: CreateReservation
       values:
@@ -398,7 +398,7 @@ response:
 `), 0644))
 
 	// booking.yaml: base workflow template
-	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "booking.yaml"), []byte(`execution:
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "booking.yaml"), []byte(`execution:
   steps:
     - node: SearchAir
       values:
@@ -415,7 +415,7 @@ response:
 name: test-project
 graph: graph.yaml
 templates: templates/
-plans: plans/
+workflows: workflows/
 `
 	manifestPath := filepath.Join(dir, "aat-project.yaml")
 	require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0644))
@@ -424,7 +424,7 @@ plans: plans/
 	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
 	output := buf.String()
 	assert.Equal(t, 0, code, "output: %s", output)
-	assert.Contains(t, output, "Plans")
+	assert.Contains(t, output, "Workflows")
 	assert.Contains(t, output, "2 templates")
 	assert.Contains(t, output, "PASSED")
 }
@@ -437,7 +437,7 @@ func TestValidate_NonTemplatePlanStillValidated(t *testing.T) {
 workflows:
   - name: book-flight
     description: Book a flight
-    template: plans/booking.yaml
+    template: workflows/booking.yaml
 nodes:
   SearchAir:
     description: search
@@ -486,11 +486,11 @@ response:
 `), 0644))
 
 	// Create plans dir
-	plansDir := filepath.Join(dir, "plans")
-	require.NoError(t, os.MkdirAll(plansDir, 0755))
+	workflowsDir := filepath.Join(dir, "workflows")
+	require.NoError(t, os.MkdirAll(workflowsDir, 0755))
 
 	// booking.yaml: referenced as workflow template — skipped for graph validation
-	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "booking.yaml"), []byte(`execution:
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "booking.yaml"), []byte(`execution:
   steps:
     - node: SearchAir
       values:
@@ -503,7 +503,7 @@ response:
 `), 0644))
 
 	// bad-standalone.yaml: NOT referenced by any workflow — should be graph-validated and fail
-	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "bad-standalone.yaml"), []byte(`execution:
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "bad-standalone.yaml"), []byte(`execution:
   steps:
     - node: NonexistentNode
       values:
@@ -515,7 +515,7 @@ response:
 name: test-project
 graph: graph.yaml
 templates: templates/
-plans: plans/
+workflows: workflows/
 `
 	manifestPath := filepath.Join(dir, "aat-project.yaml")
 	require.NoError(t, os.WriteFile(manifestPath, []byte(manifestContent), 0644))
@@ -524,7 +524,7 @@ plans: plans/
 	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
 	output := buf.String()
 	assert.Equal(t, 1, code, "output: %s", output)
-	assert.Contains(t, output, "Plans")
+	assert.Contains(t, output, "Workflows")
 	assert.Contains(t, output, "FAILED")
 	assert.Contains(t, output, "bad-standalone.yaml")
 }

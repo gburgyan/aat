@@ -7,14 +7,14 @@ AAT executes API test plans against a live environment. A single `aat run` comma
 If your project has an `aat-project.yaml` manifest (see [Project Discovery](#project-discovery)):
 
 ```
-aat run --plan plans/booking_flow.yaml
+aat run --plan workflows/booking_flow.yaml
 ```
 
 Or specify paths explicitly:
 
 ```
 aat run \
-  --plan plans/booking_flow.yaml \
+  --plan workflows/booking_flow.yaml \
   --env environments/staging.yaml \
   --graph graph.yaml \
   --templates templates/
@@ -354,7 +354,7 @@ jobs:
         run: |
           aat run \
             --json \
-            --plan plans/booking_flow.yaml \
+            --plan workflows/booking_flow.yaml \
             --env environments/ci.yaml \
             --graph graph.yaml \
             --templates templates/ \
@@ -459,7 +459,7 @@ graph: graph.yaml
 templates: templates/
 environment: env.yaml
 domain: domain.yaml         # optional
-plans: plans/               # optional
+workflows: workflows/       # optional
 archives: _output/runs      # optional
 traces: _output/traces      # optional
 ```
@@ -468,10 +468,10 @@ All paths are relative to the manifest file. With this in place:
 
 ```bash
 # Before: every flag required
-aat run --plan plans/test.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run --plan workflows/test.yaml --env env.yaml --graph graph.yaml --templates templates/
 
 # After: only the plan is needed
-aat run --plan plans/test.yaml
+aat run --plan workflows/test.yaml
 ```
 
 ### Using `AAT_PROJECT`
@@ -480,7 +480,7 @@ Set the env var to point to your project directory (or manifest file):
 
 ```bash
 export AAT_PROJECT=~/projects/my-api
-aat run --plan plans/test.yaml
+aat run --plan workflows/test.yaml
 ```
 
 ### User-level default project
@@ -578,7 +578,7 @@ You're debugging why `searchFlights` returns unexpected results. Run it locally 
 
 ```bash
 # Start your local service on port 8080, then:
-aat run --plan plans/booking_flow.yaml --env staging.yaml \
+aat run --plan workflows/booking_flow.yaml --env staging.yaml \
   --override searchFlights=http://localhost:8080
 ```
 
@@ -587,7 +587,7 @@ aat run --plan plans/booking_flow.yaml --env staging.yaml \
 Route pricing calls to staging while everything else hits production:
 
 ```bash
-aat run --plan plans/booking_flow.yaml --env production.yaml \
+aat run --plan workflows/booking_flow.yaml --env production.yaml \
   --env-overlay staging-pricing.yaml
 ```
 
@@ -605,7 +605,7 @@ overrides:
 Your production API uses `/11/air/search` but your local service uses `/api/v2/air/search`:
 
 ```bash
-aat run --plan plans/search_test.yaml --env production.yaml \
+aat run --plan workflows/search_test.yaml --env production.yaml \
   --env-overlay local-search.yaml
 ```
 

@@ -183,12 +183,12 @@ func (s *Server) handleTestWorkflow(_ context.Context, req mcp.GetPromptRequest)
 	ctxBuf.WriteString("# Available Capabilities\n\n")
 
 	ctxBuf.WriteString("**Plan tools:** generate_plan, validate_plan")
-	if s.ctx.PlansDir != "" {
+	if s.ctx.WorkflowsDir != "" {
 		ctxBuf.WriteString(", save_plan, list_plans, load_plan")
 	}
 	ctxBuf.WriteString("\n")
 
-	if s.ctx.Environment != nil && s.ctx.PlansDir != "" && s.ctx.ArchiveDir != "" {
+	if s.ctx.Environment != nil && s.ctx.WorkflowsDir != "" && s.ctx.ArchiveDir != "" {
 		ctxBuf.WriteString("**Execution:** execute_plan\n")
 	}
 
