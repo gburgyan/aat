@@ -237,8 +237,11 @@ Opt-in via `InterpretRequest.EnableTrace = true`. Zero overhead when disabled. K
 Beyond `run` and `prompt` (shown above), the CLI provides:
 
 ```bash
-# Project-level validation (manifest, graph, OAS, templates, workflows, plans)
+# Validation (unified — bare validates everything, subcommands focus on one scope)
 aat validate [--manifest FILE] [--strict]
+aat validate graph [--graph FILE] [--oas FILE] [--templates DIR] [--strict]
+aat validate plan [--graph FILE] [--plan FILE] [--unfed]
+aat validate workflow [--graph FILE] [--strict]
 
 # Web UI
 aat web [--port 9119] [--open] [--dev] [--manifest FILE]
@@ -248,11 +251,7 @@ aat web view [ref] [--port 9119]        # open a specific run in the browser
 aat mcp serve [--manifest FILE]
 
 # Plan management
-aat plan validate --graph FILE [--plan FILE] [--unfed]
 aat plan list [--manifest FILE]
-
-# Graph inspection
-aat graph validate --graph FILE [--oas FILE] [--strict]
 
 # Scaffold from OpenAPI spec
 aat generate --oas FILE [--output-graph graph.yaml] [--output-templates templates/]
@@ -260,6 +259,8 @@ aat generate --oas FILE [--output-graph graph.yaml] [--output-templates template
 # Documentation generation
 aat docs generate --graph FILE [--domain FILE] [--output FILE] [--title TEXT] [--split]
 ```
+
+All `aat validate` subcommands support manifest auto-discovery: when `--graph` is omitted and a manifest is discoverable, the graph path resolves from the manifest. Explicit flags always override.
 
 ## Web UI
 
