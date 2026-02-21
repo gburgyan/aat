@@ -6,6 +6,19 @@ AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API w
 
 `github.com/gburgyan/aat` — Go 1.24+
 
+## Build System
+
+The project uses a Makefile for builds:
+
+```bash
+make build      # Build frontend, then Go binary with version/commit/date ldflags
+make frontend   # cd server/web && npm install && npm run build
+make test       # go test ./...
+make clean      # Remove binary and frontend artifacts (node_modules, dist)
+```
+
+`make build` injects `VERSION`, `COMMIT`, and `BUILD_DATE` into `internal/version` via `-ldflags`.
+
 ## Package Structure
 
 | Package | Responsibility |
@@ -21,9 +34,9 @@ AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API w
 | `archive/` | Run archives: capture, inspection, diffing, reports |
 | `llm/` | Provider-agnostic LLM client |
 | `config/` | Configuration, environments, local storage |
-| `server/` | Local web API server, WebSocket, embedded frontend |
-| `mcp/` | MCP server: API lifecycle platform for IDE-based AI tools |
-| `gateway/` | LLM gateway proxy logic |
+| `server/` | Local web API server (chi), embedded Svelte SPA frontend, archive viewer |
+| `mcp/` | MCP server: API lifecycle platform for IDE-based AI tools (stdio transport) |
+| `gateway/` | LLM gateway proxy logic (stub — deferred) |
 | `internal/testutil/` | Shared test helpers and fixtures |
 | `internal/version/` | Build version info |
 
@@ -65,6 +78,33 @@ func TestRun(t *testing.T) {
     // assert
 }
 ```
+
+## Project Manifest
+
+Each AAT project has an `aat-project.yaml` manifest that declares project artifacts for CLI auto-discovery. The CLI walks up from `cwd` to find it (`config.FindManifest()`), or it can be passed explicitly via `--manifest`.
+
+```yaml
+# travelport/aat-project.yaml
+name: travelport
+description: Travelport JSON API integration testing
+tags: [travel, api, booking]
+graph: graph.yaml
+templates: templates/
+domain: domain.yaml
+workflows: workflows/
+plans: plans/
+archives: runs/
+environment: env.yaml
+```
+
+Key type: `config.ProjectManifest`. Fields: `Name` (required), `GraphPath` (required), `TemplatesPath` (required), `DomainPath`, `WorkflowsDir`, `PlanDirs`, `ArchiveDir`, `TracesDir`, `EnvPath`.
+
+Used by: `aat validate`, `aat web`, `aat mcp serve`, `aat plan list`, and as defaults for `aat run`/`aat prompt` when explicit flags are omitted.
+
+## Plans vs Workflows
+
+- **Workflows** (`workflows/` dir) — pre-written reusable templates defined in the graph YAML. Composed at runtime via `ComposeWithAddons`. Referenced by name in `WorkflowSelection`.
+- **Plans** (`plans/` dir) — user-generated execution instances, typically saved from `aat prompt --save`. These are concrete, ready-to-run YAML files.
 
 ## Testing Philosophy
 
@@ -132,7 +172,7 @@ make build
 
 # Execute a pre-written plan
 ./aat run \
-  --plan travelport/plans/roundtrip-booking.yaml \
+  --plan travelport/workflows/roundtrip-booking.yaml \
   --env travelport/env.yaml \
   --graph travelport/graph.yaml \
   --templates travelport/templates/ \
@@ -148,11 +188,13 @@ make build
 ```
 
 **Travelport config files:**
+- `travelport/aat-project.yaml` — project manifest (auto-discovery root)
 - `travelport/env.yaml` — environment config (auth, LLM endpoint)
 - `travelport/graph.yaml` — API graph (59 nodes)
 - `travelport/templates/` — 56 request templates
 - `travelport/domain.yaml` — domain knowledge (concepts, types, value pools)
-- `travelport/plans/` — 27 pre-written plan files for various scenarios
+- `travelport/workflows/` — pre-written workflow templates (base + addons)
+- `travelport/plans/` — saved plan instances from `aat prompt --save`
 
 LLM config (endpoint, API key, model) comes from the `llm:` section in the env YAML. The API key resolves from an OS environment variable via `SecretRef`.
 
@@ -181,15 +223,54 @@ aat prompt --trace --trace-dir traces/ --env env.yaml --graph graph.yaml --templ
 ```
 
 The trace captures:
-- **Goal call**: full system/user prompts, raw LLM response, token counts, timing, whether heuristic fallback was used
-- **Backward chaining**: nodes, edges, decisions, timing
-- **Skeleton**: the deterministic plan scaffold + YAML sent to the LLM, unfed inputs list
-- **Plan call**: full prompts, raw LLM response, token counts, timing
+- **Workflow selection call**: full system/user prompts, raw LLM response, token counts, timing (selects workflow + addons)
+- **Skeleton**: the composed plan scaffold + YAML sent to the LLM, unfed inputs list
+- **Plan call (value fill)**: full prompts, raw LLM response, token counts, timing
 - **Merge/post-process**: snapshots of the plan after merge and after post-processing
 - **Validation**: any validation errors
 - **Partial traces on error**: if the pipeline fails mid-way, whatever was captured so far is still written
 
 Opt-in via `InterpretRequest.EnableTrace = true`. Zero overhead when disabled. Key types: `intent.PlanTrace`, `intent.WritePlanTrace`.
+
+## CLI Commands
+
+Beyond `run` and `prompt` (shown above), the CLI provides:
+
+```bash
+# Project-level validation (manifest, graph, OAS, templates, workflows, plans)
+aat validate [--manifest FILE] [--strict]
+
+# Web UI
+aat web [--port 9119] [--open] [--dev] [--manifest FILE]
+aat web view [ref] [--port 9119]        # open a specific run in the browser
+
+# MCP server (stdio transport, for IDE-based AI tools)
+aat mcp serve [--manifest FILE]
+
+# Plan management
+aat plan validate --graph FILE [--plan FILE] [--unfed]
+aat plan list [--manifest FILE]
+
+# Graph inspection
+aat graph validate --graph FILE [--oas FILE] [--strict]
+
+# Scaffold from OpenAPI spec
+aat generate --oas FILE [--output-graph graph.yaml] [--output-templates templates/]
+
+# Documentation generation
+aat docs generate --graph FILE [--domain FILE] [--output FILE] [--title TEXT] [--split]
+```
+
+## Web UI
+
+Svelte 5 + Vite 6 + TypeScript SPA in `server/web/`. Embedded via `//go:embed` in production builds.
+
+- **Default port**: 9119
+- **Router**: chi/v5
+- **API routes**: `/api/runs`, `/api/runs/latest`, `/api/runs/{id}`, `/api/runs/{id}/steps/{stepId}`
+- **Features**: run list, run detail with Gantt timeline, step detail with audit tabs
+- **Dev mode**: `cd server/web && npm run dev` (Vite on :5173) + `aat web --dev` (Go server proxies to Vite)
+- **Production**: `make build` embeds compiled frontend into the Go binary
 
 ## Task planning
 
@@ -197,5 +278,5 @@ If a task seems too aggressive to do in one operation, push back and offer to br
 
 ## Current Stage
 
-**Stage 2: Intelligence** — Foundation complete. Working through LLM-assisted planning and execution.
+**Stage 3a: CI/CD, Web UI & Polish** — Stage 2 complete.
 See `docs/internal/progress.md` for detailed status.
