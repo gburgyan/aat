@@ -42,6 +42,10 @@ type Engine struct {
 	// relaxed per step. Zero means use the default (3).
 	MaxRelaxationDepth int
 
+	// Observer receives real-time progress events during execution.
+	// Nil means no notifications (zero overhead).
+	Observer ProgressObserver
+
 	// plan is set during Run() for constraint-aware resolution.
 	plan *plan.Plan
 }
@@ -80,9 +84,22 @@ func (e *Engine) WithMaxRelaxationDepth(n int) *Engine {
 	return e
 }
 
+// WithProgress sets the progress observer and returns the engine for chaining.
+func (e *Engine) WithProgress(obs ProgressObserver) *Engine {
+	e.Observer = obs
+	return e
+}
+
 // Run executes a plan: validates, sorts steps topologically, runs each in order,
 // and executes cleanup on completion.
-func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
+func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
+	// Ensure OnRunComplete fires on every exit path.
+	defer func() {
+		if e.Observer != nil && result != nil {
+			e.Observer.OnRunComplete(result)
+		}
+	}()
+
 	// 1. Instantiate + validate: merge graph defaults, inject deps, validate
 	instantiatedPlan, err := plan.InstantiateAndValidate(p, e.graph)
 	if err != nil {
@@ -115,15 +132,16 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 	cleanupStack := &CleanupStack{}
 	var stepResults []StepResult
 	outcome := OutcomePassed
+	total := len(sorted)
 
-	defer func() {
-		// Cleanup is handled by the caller via the returned RunResult
-	}()
+	if e.Observer != nil {
+		e.Observer.OnRunStart(total, string(e.effectiveMode()))
+	}
 
-	for _, step := range sorted {
+	for i, step := range sorted {
 		select {
 		case <-ctx.Done():
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+			cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
 			return &RunResult{
 				Outcome:          OutcomeError,
 				Steps:            stepResults,
@@ -144,24 +162,32 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 			}
 		}
 
-		var result StepResult
+		if e.Observer != nil {
+			e.Observer.OnStepStart(i, total, step)
+		}
+
+		var stepResult StepResult
 		if e.effectiveMode() == config.ModeAdaptive {
-			result = e.executeStepAdaptive(ctx, step, node, state)
+			stepResult = e.executeStepAdaptive(ctx, step, node, state)
 		} else {
 			tracker := NewRelaxationTracker(e.maxRelaxationDepth())
-			result = e.executeStepWithTracking(ctx, step, node, state, tracker)
+			stepResult = e.executeStepWithTracking(ctx, step, node, state, tracker)
 		}
-		stepResults = append(stepResults, result)
+		stepResults = append(stepResults, stepResult)
 
-		if result.Error != nil {
+		if e.Observer != nil {
+			e.Observer.OnStepComplete(i, total, stepResult)
+		}
+
+		if stepResult.Error != nil {
 			outcome = OutcomeError
 			// Run cleanup before returning
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+			cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
 			return &RunResult{
 				Outcome:          outcome,
 				Steps:            stepResults,
 				CleanupResults:   cleanupResults,
-				Error:            result.Error,
+				Error:            stepResult.Error,
 				InstantiatedPlan: instantiatedPlan,
 			}
 		}
@@ -170,27 +196,27 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		if step.ExpectFailure != nil {
 			efr := &ExpectFailureResult{
 				ExpectedStatuses: step.ExpectFailure.Status,
-				ActualStatus:     result.StatusCode,
+				ActualStatus:     stepResult.StatusCode,
 				Description:      step.ExpectFailure.Description,
 			}
 			for _, expected := range step.ExpectFailure.Status {
-				if result.StatusCode == expected {
+				if stepResult.StatusCode == expected {
 					efr.Passed = true
 					break
 				}
 			}
-			result.ExpectFailure = efr
-			stepResults[len(stepResults)-1] = result
+			stepResult.ExpectFailure = efr
+			stepResults[len(stepResults)-1] = stepResult
 
 			if efr.Passed {
 				// Expected failure occurred — this is a PASS.
 				// Do NOT store outputs (error responses have no useful outputs).
 				// Do NOT push cleanup (no resource was created).
 				// Mechanical assertions still ran in executeStep; check them.
-				if result.Validation != nil && !result.Validation.Passed {
+				if stepResult.Validation != nil && !stepResult.Validation.Passed {
 					outcome = OutcomeFailed
 					if !e.ContinueOnAssertionFailure {
-						cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+						cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
 						return &RunResult{
 							Outcome:          outcome,
 							Steps:            stepResults,
@@ -205,47 +231,47 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 
 			// Unexpected success or wrong error code — FAIL.
 			outcome = OutcomeFailed
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+			cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
 			return &RunResult{
 				Outcome:          outcome,
 				Steps:            stepResults,
 				CleanupResults:   cleanupResults,
-				Error:            fmt.Errorf("step %q: expected failure status %v but got %d", step.Node, step.ExpectFailure.Status, result.StatusCode),
+				Error:            fmt.Errorf("step %q: expected failure status %v but got %d", step.Node, step.ExpectFailure.Status, stepResult.StatusCode),
 				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 
-		if result.StatusCode >= 400 {
+		if stepResult.StatusCode >= 400 {
 			outcome = OutcomeFailed
 			// Run cleanup before returning
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+			cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
 			return &RunResult{
 				Outcome:          outcome,
 				Steps:            stepResults,
 				CleanupResults:   cleanupResults,
-				Error:            fmt.Errorf("step %q returned status %d", step.Node, result.StatusCode),
+				Error:            fmt.Errorf("step %q returned status %d", step.Node, stepResult.StatusCode),
 				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 
 		// Check for response body errors (API returned 2xx but body indicates error)
-		if result.ResponseBodyError != nil {
+		if stepResult.ResponseBodyError != nil {
 			outcome = OutcomeFailed
 			// Do NOT store outputs — error responses produce unreliable data
 			// Do NOT push cleanup — failing node did not create a valid resource
-			cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+			cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
 			return &RunResult{
 				Outcome:          outcome,
 				Steps:            stepResults,
 				CleanupResults:   cleanupResults,
-				Error:            fmt.Errorf("step %q: %s", step.Node, result.ResponseBodyError.Summary()),
+				Error:            fmt.Errorf("step %q: %s", step.Node, stepResult.ResponseBodyError.Summary()),
 				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 
 		// Store outputs keyed by step ID (supports step aliasing)
-		if result.Outputs != nil {
-			state.StoreOutputs(step.StepID(), result.Outputs)
+		if stepResult.Outputs != nil {
+			state.StoreOutputs(step.StepID(), stepResult.Outputs)
 		}
 
 		// Push cleanup if node has one — done before assertion check because
@@ -258,10 +284,10 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		}
 
 		// Run mechanical assertions if configured
-		if result.Validation != nil && !result.Validation.Passed {
+		if stepResult.Validation != nil && !stepResult.Validation.Passed {
 			outcome = OutcomeFailed
 			if !e.ContinueOnAssertionFailure {
-				cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+				cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
 				return &RunResult{
 					Outcome:          outcome,
 					Steps:            stepResults,
@@ -274,7 +300,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 	}
 
 	// All steps succeeded — run cleanup
-	cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+	cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
 
 	return &RunResult{
 		Outcome:          outcome,
@@ -282,6 +308,20 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
 		CleanupResults:   cleanupResults,
 		InstantiatedPlan: instantiatedPlan,
 	}
+}
+
+// executeCleanupWithNotifications runs cleanup and notifies the observer.
+func (e *Engine) executeCleanupWithNotifications(ctx context.Context, cleanupStack *CleanupStack, state *RunState) []StepResult {
+	if e.Observer != nil && cleanupStack.Len() > 0 {
+		e.Observer.OnCleanupStart(cleanupStack.Len())
+	}
+	cleanupResults := cleanupStack.ExecuteAll(ctx, e.graph, e.registry, e.router, state)
+	if e.Observer != nil {
+		for i, cr := range cleanupResults {
+			e.Observer.OnCleanupStepComplete(i, len(cleanupResults), cr)
+		}
+	}
+	return cleanupResults
 }
 
 func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, tracker *RelaxationTracker) StepResult {

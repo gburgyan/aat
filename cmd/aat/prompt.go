@@ -309,17 +309,16 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	}
 
 	// Create engine and run
+	observer := &CLIProgressObserver{out: os.Stdout}
 	eng := engine.NewEngine(g, registry, router).
 		WithMode(effectiveMode).
 		WithDomain(kb).
 		WithLLM(llmClient).
-		WithMaxRelaxationDepth(env.Settings.MaxRelaxationDepth)
+		WithMaxRelaxationDepth(env.Settings.MaxRelaxationDepth).
+		WithProgress(observer)
 	fmt.Printf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), effectiveMode)
 
 	result := eng.Run(ctx, p)
-
-	// Print summary
-	printRunSummary(result, os.Stdout)
 
 	// Write archive
 	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir)

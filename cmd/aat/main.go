@@ -415,17 +415,24 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	}
 
 	// 12. Create engine and run
+	var observer engine.ProgressObserver
+	if out != io.Discard {
+		observer = &CLIProgressObserver{out: out}
+	}
 	eng := engine.NewEngine(g, registry, router).
 		WithMode(effectiveMode).
 		WithDomain(kb).
 		WithLLM(llmClient).
-		WithMaxRelaxationDepth(env.Settings.MaxRelaxationDepth)
+		WithMaxRelaxationDepth(env.Settings.MaxRelaxationDepth).
+		WithProgress(observer)
 	logf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), effectiveMode)
 
 	result := eng.Run(ctx, p)
 
-	// Print human-readable summary (suppressed in quiet mode via out=Discard)
-	printRunSummary(result, out)
+	// Print human-readable summary only when no observer is active
+	if observer == nil {
+		printRunSummary(result, out)
+	}
 
 	// Write archive (merge plan secrets for redaction)
 	secrets := env.CollectSecrets()
