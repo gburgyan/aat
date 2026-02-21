@@ -56,6 +56,73 @@ func TestBuildViewURL(t *testing.T) {
 	}
 }
 
+func TestBuildTraceViewURL(t *testing.T) {
+	tests := []struct {
+		name     string
+		port     int
+		traceRef string
+		want     string
+	}{
+		{
+			name:     "list (no ref)",
+			port:     9119,
+			traceRef: "",
+			want:     "http://localhost:9119/traces",
+		},
+		{
+			name:     "specific trace",
+			port:     9119,
+			traceRef: "trace-20260221-141444-be49e7e9",
+			want:     "http://localhost:9119/traces/trace-20260221-141444-be49e7e9",
+		},
+		{
+			name:     "custom port list",
+			port:     8080,
+			traceRef: "",
+			want:     "http://localhost:8080/traces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildTraceViewURL(tt.port, tt.traceRef)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestWebViewTraceCommand_ServerAlreadyRunning(t *testing.T) {
+	srv := server.NewServer(server.ServerOptions{
+		Port:       19225,
+		ArchiveDir: t.TempDir(),
+	})
+	go func() { _ = srv.ListenAndServe() }()
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+	require.True(t, waitForServer(srv, 3*time.Second))
+
+	var opened string
+	orig := openURLFunc
+	openURLFunc = func(url string) error {
+		opened = url
+		return nil
+	}
+	defer func() { openURLFunc = orig }()
+
+	// No ref → opens trace list.
+	err := webViewTraceCommand(19225, "", t.TempDir(), "")
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:19225/traces", opened)
+
+	// With ref → opens specific trace.
+	err = webViewTraceCommand(19225, "trace-abc123", t.TempDir(), "")
+	require.NoError(t, err)
+	assert.Equal(t, "http://localhost:19225/traces/trace-abc123", opened)
+}
+
 func TestCheckServerHealth_OK(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
