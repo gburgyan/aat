@@ -48,14 +48,15 @@ type TargetedAssertion struct {
 
 // InputContext provides rich per-input context for the LLM prompt.
 type InputContext struct {
-	StepID         string
-	InputName      string
-	InputType      string
-	NodeDesc       string
-	DomainType     string   // from TypeDef.Description
-	Format         string   // from TypeDef.Format
-	PoolValues     []string // sample values from value pool
-	GraphConstr    string   // graph-level constraint annotation
+	StepID           string
+	InputName        string
+	InputType        string
+	NodeDesc         string
+	InputDescription string   // graph.Input.Description
+	DomainType       string   // from TypeDef.Description
+	Format           string   // from TypeDef.Format
+	PoolValues       []string // sample values from value pool
+	GraphConstr      string   // graph-level constraint annotation
 	IsDate         bool
 	IsConfigurable  bool   // true if graph.Input.Configurable
 	IsPoolInput     bool   // true if template has a pool and no Default is set
@@ -96,11 +97,12 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 			}
 
 			ic := InputContext{
-				StepID:         step.StepID(),
-				InputName:      inp.Name,
-				InputType:      inp.Type,
-				NodeDesc:       node.Description,
-				IsConfigurable: inp.Configurable,
+				StepID:           step.StepID(),
+				InputName:        inp.Name,
+				InputType:        inp.Type,
+				NodeDesc:         node.Description,
+				InputDescription: inp.Description,
+				IsConfigurable:   inp.Configurable,
 			}
 
 			// Check for fromResolved auto-wiring.

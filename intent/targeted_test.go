@@ -377,11 +377,11 @@ func TestBuildTargetedPlanPrompt_PoolDisplay(t *testing.T) {
 		{StepID: "search", InputName: "destination", InputType: "string", PoolValues: []string{"LHR", "CDG"}},
 	}
 
-	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", time.Now())
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
 
-	// Template pool should use "Pool (random at runtime)" label
-	assert.Contains(t, user, "Pool (random at runtime): DEN, SFO, ORD")
-	// Domain pool should use "Sample values" label
+	// Pool-section inputs should NOT show concrete pool values.
+	assert.NotContains(t, user, "Pool (random at runtime): DEN, SFO, ORD")
+	// Required-section inputs with domain samples should still show "Sample values".
 	assert.Contains(t, user, "Sample values: LHR, CDG")
 }
 
@@ -392,10 +392,10 @@ func TestBuildTargetedPlanPrompt_PoolSeparateSection(t *testing.T) {
 		{StepID: "search", InputName: "carrier", InputType: "string", IsConfigurable: true},
 	}
 
-	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", time.Now())
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
 
 	// Pool inputs should be under their own section, not "Inputs That Need Values".
-	assert.Contains(t, user, "## Pool Inputs — already have randomized values")
+	assert.Contains(t, user, "## Pool Inputs — override when user specifies")
 	assert.Contains(t, user, "## Inputs That Need Values")
 	assert.Contains(t, user, "## Optional Configuration")
 
@@ -484,7 +484,7 @@ func TestBuildTargetedPlanPrompt_ConfigurableSection(t *testing.T) {
 		{StepID: "search", InputName: "carrier", InputType: "string", IsConfigurable: true},
 	}
 
-	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", time.Now())
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
 
 	// Required inputs in main section.
 	assert.Contains(t, user, "## Inputs That Need Values")
@@ -1918,7 +1918,7 @@ func TestBuildTargetedPlanPrompt_AutoWiredSection(t *testing.T) {
 		{StepID: "search1", InputName: "carrier", InputType: "string", IsConfigurable: true},
 	}
 
-	_, user := buildTargetedPlanPrompt(inputContexts, nil, "fly from Nashville on both legs", time.Now())
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "fly from Nashville on both legs", "", time.Now())
 
 	// Auto-wired section should appear.
 	assert.Contains(t, user, "## Auto-Wired Inputs")
@@ -1963,4 +1963,119 @@ func TestValidateTargetedResponse_FromResolvedMissing_NoError(t *testing.T) {
 
 	issues := validateTargetedResponse(resp, unfedSet, inputContexts, nil)
 	assert.Empty(t, issues)
+}
+
+// --- InputDescription tests ---
+
+func TestBuildInputContexts_InputDescription(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search flights", Adapter: "a",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string", Description: "Departure airport/city code (3-letter IATA)"},
+					{Name: "destination", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{}},
+			},
+		},
+	}
+
+	contexts := buildInputContexts(p, g, nil)
+
+	require.Len(t, contexts, 2)
+	assert.Equal(t, "Departure airport/city code (3-letter IATA)", contexts[0].InputDescription)
+	assert.Empty(t, contexts[1].InputDescription)
+}
+
+func TestBuildTargetedPlanPrompt_InputDescription(t *testing.T) {
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", InputDescription: "Departure airport/city code (3-letter IATA)"},
+		{StepID: "search", InputName: "destination", InputType: "string"},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
+
+	assert.Contains(t, user, "Purpose: Departure airport/city code (3-letter IATA)")
+	// Input without description should not have a Purpose line.
+	destIdx := strings.Index(user, "### search.destination")
+	nextSection := strings.Index(user[destIdx:], "\n\n")
+	destBlock := user[destIdx : destIdx+nextSection]
+	assert.NotContains(t, destBlock, "Purpose:")
+}
+
+// --- Node group header tests ---
+
+func TestBuildTargetedPlanPrompt_NodeGroupHeaders(t *testing.T) {
+	inputContexts := []InputContext{
+		{StepID: "searchFlights", InputName: "origin", InputType: "string", NodeDesc: "Search for flights"},
+		{StepID: "searchFlights", InputName: "destination", InputType: "string", NodeDesc: "Search for flights"},
+		{StepID: "addOffer", InputName: "offerId", InputType: "string", NodeDesc: "Add offer to cart"},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
+
+	// Node headers should appear once per node.
+	assert.Contains(t, user, "**searchFlights** — Search for flights")
+	assert.Contains(t, user, "**addOffer** — Add offer to cart")
+
+	// Header should appear only once per section even with multiple inputs.
+	count := strings.Count(user, "**searchFlights** — Search for flights")
+	assert.Equal(t, 1, count)
+}
+
+func TestBuildTargetedPlanPrompt_NodeGroupHeaders_AcrossSections(t *testing.T) {
+	// A node may appear in multiple sections — header shows once per section.
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", NodeDesc: "Search flights"},
+		{StepID: "search", InputName: "airportCode", InputType: "string", NodeDesc: "Search flights", IsPoolInput: true, HasTemplatePool: true, PoolValues: []string{"DEN"}},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
+
+	// Header should appear in both required and pool sections.
+	count := strings.Count(user, "**search** — Search flights")
+	assert.Equal(t, 2, count)
+}
+
+func TestBuildTargetedPlanPrompt_NodeGroupHeaders_NoDesc(t *testing.T) {
+	// Nodes without a description should not get a header.
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "origin", InputType: "string", NodeDesc: ""},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
+
+	assert.NotContains(t, user, "**search**")
+}
+
+// --- Pool values hidden tests ---
+
+func TestBuildTargetedPlanPrompt_PoolValuesHidden(t *testing.T) {
+	inputContexts := []InputContext{
+		{
+			StepID: "search", InputName: "origin", InputType: "string",
+			InputDescription: "Departure airport code",
+			IsPoolInput: true, HasTemplatePool: true,
+			PoolValues:  []string{"DEN", "ORD", "ATL", "DFW", "IAH"},
+			GraphConstr: "IATA airport/city code (pattern: ^[A-Z]{3}$)",
+		},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
+
+	// Pool values should NOT appear in the pool section.
+	assert.NotContains(t, user, "DEN")
+	assert.NotContains(t, user, "Pool (random at runtime)")
+
+	// But Purpose and Validation should still appear.
+	assert.Contains(t, user, "Purpose: Departure airport code")
+	assert.Contains(t, user, "Validation: IATA airport/city code (pattern: ^[A-Z]{3}$)")
 }

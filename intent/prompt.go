@@ -48,6 +48,7 @@ func buildTargetedPlanPrompt(
 	inputContexts []InputContext,
 	selectionContexts []SelectionContext,
 	userPrompt string,
+	workflowDescription string,
 	now time.Time,
 ) (system, user string) {
 	dateStr := now.Format("2006-01-02")
@@ -141,19 +142,25 @@ Rules:
 	// Per-input context — required inputs.
 	if len(requiredInputs) > 0 {
 		ub.WriteString("## Inputs That Need Values\n\n")
+		var lastNode string
 		for _, ic := range requiredInputs {
+			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
 			writeInputContext(&ub, ic)
 		}
 	}
 
-	// Pool inputs — already have randomized values.
+	// Pool inputs — override when user specifies.
 	if len(poolInputs) > 0 {
-		ub.WriteString("## Pool Inputs — already have randomized values\n\n")
-		ub.WriteString("These inputs have curated value pools. A random value will be chosen at runtime.\n")
-		ub.WriteString("Do NOT provide values for these UNLESS the user's intent names a specific value.\n")
-		ub.WriteString("If the user doesn't specify, omit entirely.\n\n")
+		ub.WriteString("## Pool Inputs — override when user specifies\n\n")
+		ub.WriteString("These inputs have curated value pools with randomized defaults at runtime.\n")
+		ub.WriteString("When the user's intent specifies a value for one of these inputs, provide it.\n")
+		ub.WriteString("When the user doesn't specify, omit to use the random pool default.\n\n")
+		var lastNode string
 		for _, ic := range poolInputs {
-			writeInputContext(&ub, ic)
+			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
+			icCopy := ic
+			icCopy.PoolValues = nil // Don't show concrete pool values — format/description suffices
+			writeInputContext(&ub, icCopy)
 		}
 	}
 
@@ -163,7 +170,9 @@ Rules:
 		ub.WriteString("These inputs are automatically derived from sibling inputs at runtime.\n")
 		ub.WriteString("Do NOT provide values for these UNLESS the user's intent explicitly requires\n")
 		ub.WriteString("a different value than what the wiring would produce.\n\n")
+		var lastNode string
 		for _, ic := range autoWiredInputs {
+			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
 			writeInputContext(&ub, ic)
 		}
 	}
@@ -171,7 +180,9 @@ Rules:
 	// Configurable inputs — separate section.
 	if len(configurableInputs) > 0 {
 		ub.WriteString("## Optional Configuration\n\n")
+		var lastNode string
 		for _, ic := range configurableInputs {
+			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
 			writeInputContext(&ub, ic)
 		}
 	}
@@ -196,6 +207,13 @@ Rules:
 		}
 	}
 
+	// Workflow context (from Call 1 description).
+	if workflowDescription != "" {
+		ub.WriteString("## Workflow Context\n\n")
+		ub.WriteString(workflowDescription)
+		ub.WriteString("\n\n")
+	}
+
 	// User intent.
 	ub.WriteString("## User Intent\n\n")
 	ub.WriteString(userPrompt)
@@ -205,9 +223,21 @@ Rules:
 	return system, user
 }
 
+// writeNodeGroupHeader emits a node description header when the node changes
+// within a section. Returns the current node's StepID for tracking.
+func writeNodeGroupHeader(ub *strings.Builder, ic InputContext, lastNode string) string {
+	if ic.NodeDesc != "" && ic.StepID != lastNode {
+		fmt.Fprintf(ub, "**%s** — %s\n\n", ic.StepID, ic.NodeDesc)
+	}
+	return ic.StepID
+}
+
 // writeInputContext writes the per-input prompt block for a single InputContext.
 func writeInputContext(ub *strings.Builder, ic InputContext) {
 	fmt.Fprintf(ub, "### %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
+	if ic.InputDescription != "" {
+		fmt.Fprintf(ub, "Purpose: %s\n", ic.InputDescription)
+	}
 	if ic.FromResolved != "" {
 		fmt.Fprintf(ub, "Auto-wired from: %s\n", ic.FromResolved)
 	}
@@ -247,11 +277,12 @@ func buildTargetedRetryPrompt(
 	inputContexts []InputContext,
 	selectionContexts []SelectionContext,
 	userPrompt string,
+	workflowDescription string,
 	now time.Time,
 	validationErrors []string,
 	hints []string,
 ) (system, user string) {
-	system, user = buildTargetedPlanPrompt(inputContexts, selectionContexts, userPrompt, now)
+	system, user = buildTargetedPlanPrompt(inputContexts, selectionContexts, userPrompt, workflowDescription, now)
 
 	// Append validation error context to the system prompt.
 	var sb strings.Builder

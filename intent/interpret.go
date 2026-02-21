@@ -325,7 +325,7 @@ func buildAndFillPlan(
 	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB)
 	selectionContexts := buildSelectionContexts(skeleton, req.Graph)
 
-	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, now)
+	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, ws.Description, now)
 
 	planCallStart := time.Now()
 	planResp, err := req.Client.Complete(ctx, &llm.Request{
@@ -369,7 +369,7 @@ func buildAndFillPlan(
 		// Retry once with specific error feedback.
 		retryMsgs := formatValidationIssues(issues)
 		retrySystem, retryUser := buildTargetedRetryPrompt(
-			inputContexts, selectionContexts, req.Prompt, now, retryMsgs, nil,
+			inputContexts, selectionContexts, req.Prompt, ws.Description, now, retryMsgs, nil,
 		)
 
 		retryStart := time.Now()
@@ -455,7 +455,7 @@ func retryPlanGeneration(
 	now := time.Now()
 	system, user := buildTargetedRetryPrompt(
 		inputContexts, selectionContexts,
-		req.Prompt, now, valErr.Errors, hints,
+		req.Prompt, ws.Description, now, valErr.Errors, hints,
 	)
 
 	retryCallStart := time.Now()
