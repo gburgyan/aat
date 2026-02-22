@@ -110,7 +110,7 @@ func (s *Server) handleGeneratePlan(ctx context.Context, req mcp.CallToolRequest
 		return mcp.NewToolResultError(fmt.Sprintf("marshalling plan: %v", err)), nil
 	}
 
-	// Optionally save
+	// Optionally save (as recipe by default, compact and workflow-evolution-resilient)
 	saveAs, _ := req.RequireString("save_as")
 	if saveAs != "" && len(s.ctx.PlanDirs) > 0 {
 		savePath, err := config.ResolvePlanWritePath(s.ctx.PlanDirs, saveAs)
@@ -120,8 +120,23 @@ func (s *Server) handleGeneratePlan(ctx context.Context, req mcp.CallToolRequest
 		if err := os.MkdirAll(filepath.Dir(savePath), 0o755); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("creating plans directory: %v", err)), nil
 		}
-		if err := plan.WriteFile(result.Plan, savePath); err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("saving plan: %v", err)), nil
+		// Save as recipe if we have the workflow selection and targeted response.
+		if result.WorkflowSelection != nil {
+			r := &plan.Recipe{
+				Kind:      "recipe",
+				Metadata:  result.Plan.Metadata,
+				Selection: intent.WorkflowSelectionToRecipeSelection(result.WorkflowSelection),
+			}
+			if result.TargetedResponse != nil {
+				r.Overrides = intent.TargetedResponseToRecipeOverrides(result.TargetedResponse)
+			}
+			if err := plan.WriteRecipe(r, savePath); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("saving recipe: %v", err)), nil
+			}
+		} else {
+			if err := plan.WriteFile(result.Plan, savePath); err != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("saving plan: %v", err)), nil
+			}
 		}
 	}
 
@@ -153,9 +168,21 @@ func (s *Server) handleValidatePlan(_ context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError("missing required parameter: yaml"), nil
 	}
 
-	p, err := plan.Parse([]byte(yamlStr))
+	parsed, err := plan.ParseAny([]byte(yamlStr))
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("YAML parse error: %v", err)), nil
+	}
+
+	var p *plan.Plan
+	switch v := parsed.(type) {
+	case *plan.Plan:
+		p = v
+	case *plan.Recipe:
+		reconstituted, reconErr := intent.Reconstitute(v, s.ctx.Graph, s.ctx.GraphDir)
+		if reconErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("reconstituting recipe: %v", reconErr)), nil
+		}
+		p = reconstituted
 	}
 
 	if _, err := plan.InstantiateAndValidate(p, s.ctx.Graph); err != nil {
@@ -187,16 +214,25 @@ func (s *Server) handleListSavedPlans(_ context.Context, _ mcp.CallToolRequest) 
 
 	var plans []planInfo
 	for _, entry := range planEntries {
-		p, err := plan.ParseFile(entry.FullPath)
+		parsed, err := plan.ParseAnyFile(entry.FullPath)
 		if err != nil {
 			plans = append(plans, planInfo{name: entry.Name, goal: "(parse error)", stepCount: 0})
 			continue
 		}
-		plans = append(plans, planInfo{
-			name:      entry.Name,
-			goal:      p.Intent.Goal,
-			stepCount: len(p.Execution.Steps),
-		})
+		switch v := parsed.(type) {
+		case *plan.Plan:
+			plans = append(plans, planInfo{
+				name:      entry.Name,
+				goal:      v.Intent.Goal,
+				stepCount: len(v.Execution.Steps),
+			})
+		case *plan.Recipe:
+			plans = append(plans, planInfo{
+				name:      entry.Name,
+				goal:      "[recipe] " + v.Selection.Description,
+				stepCount: 0,
+			})
+		}
 	}
 
 	if len(plans) == 0 {
@@ -206,12 +242,17 @@ func (s *Server) handleListSavedPlans(_ context.Context, _ mcp.CallToolRequest) 
 	var b strings.Builder
 	fmt.Fprintf(&b, "Found %d plan(s):\n\n", len(plans))
 	for _, p := range plans {
-		fmt.Fprintf(&b, "- **%s** — goal: %s, %d steps\n", p.name, p.goal, p.stepCount)
+		if p.stepCount > 0 {
+			fmt.Fprintf(&b, "- **%s** — goal: %s, %d steps\n", p.name, p.goal, p.stepCount)
+		} else {
+			fmt.Fprintf(&b, "- **%s** — %s\n", p.name, p.goal)
+		}
 	}
 	return mcp.NewToolResultText(b.String()), nil
 }
 
 // handleLoadPlan loads a plan from the plans directory and returns YAML + narrative.
+// Recipes are reconstituted to full plans before generating the narrative.
 func (s *Server) handleLoadPlan(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name, err := req.RequireString("name")
 	if err != nil {
@@ -232,9 +273,21 @@ func (s *Server) handleLoadPlan(_ context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError(fmt.Sprintf("reading plan: %v", err)), nil
 	}
 
-	p, err := plan.Parse(data)
+	parsed, err := plan.ParseAny(data)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("parsing plan: %v", err)), nil
+	}
+
+	var p *plan.Plan
+	switch v := parsed.(type) {
+	case *plan.Plan:
+		p = v
+	case *plan.Recipe:
+		reconstituted, reconErr := intent.Reconstitute(v, s.ctx.Graph, s.ctx.GraphDir)
+		if reconErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("reconstituting recipe: %v", reconErr)), nil
+		}
+		p = reconstituted
 	}
 
 	narrative := plan.FormatNarrative(p, s.ctx.Graph)
@@ -250,6 +303,7 @@ func (s *Server) handleLoadPlan(_ context.Context, req mcp.CallToolRequest) (*mc
 }
 
 // handleSavePlan validates and saves a plan YAML to the plans directory.
+// Accepts both full plan YAML and recipe YAML.
 func (s *Server) handleSavePlan(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	name, err := req.RequireString("name")
 	if err != nil {
@@ -264,27 +318,40 @@ func (s *Server) handleSavePlan(_ context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError("plans directory not configured — set the `plans` field in aat-project.yaml"), nil
 	}
 
-	p, err := plan.Parse([]byte(yamlStr))
+	parsed, err := plan.ParseAny([]byte(yamlStr))
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("YAML parse error: %v", err)), nil
 	}
 
-	if _, err := plan.InstantiateAndValidate(p, s.ctx.Graph); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("Validation failed:\n%v", err)), nil
-	}
-
-	savePath, err := config.ResolvePlanWritePath(s.ctx.PlanDirs, name)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("resolving save path: %v", err)), nil
+	savePath, saveErr := config.ResolvePlanWritePath(s.ctx.PlanDirs, name)
+	if saveErr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("resolving save path: %v", saveErr)), nil
 	}
 	if err := os.MkdirAll(filepath.Dir(savePath), 0o755); err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("creating plans directory: %v", err)), nil
 	}
-	if err := plan.WriteFile(p, savePath); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("saving plan: %v", err)), nil
+
+	var summary string
+	switch v := parsed.(type) {
+	case *plan.Plan:
+		if _, err := plan.InstantiateAndValidate(v, s.ctx.Graph); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Validation failed:\n%v", err)), nil
+		}
+		if err := plan.WriteFile(v, savePath); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("saving plan: %v", err)), nil
+		}
+		summary = fmt.Sprintf("Plan saved to %s (%d steps, goal: %s)", filepath.Base(savePath), len(v.Execution.Steps), v.Intent.Goal)
+	case *plan.Recipe:
+		// Validate by reconstituting.
+		if _, reconErr := intent.Reconstitute(v, s.ctx.Graph, s.ctx.GraphDir); reconErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Recipe validation failed:\n%v", reconErr)), nil
+		}
+		if err := plan.WriteRecipe(v, savePath); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("saving recipe: %v", err)), nil
+		}
+		summary = fmt.Sprintf("Recipe saved to %s (workflow: %s)", filepath.Base(savePath), v.Selection.Workflow)
 	}
 
-	summary := fmt.Sprintf("Plan saved to %s (%d steps, goal: %s)", filepath.Base(savePath), len(p.Execution.Steps), p.Intent.Goal)
 	return mcp.NewToolResultText(summary), nil
 }
 

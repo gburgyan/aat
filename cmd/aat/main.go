@@ -15,6 +15,7 @@ import (
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 	"github.com/spf13/cobra"
@@ -291,10 +292,25 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	}
 	logf("aat: loaded graph (%d nodes)\n", len(g.Nodes))
 
-	// 3. Load plan
-	p, err := plan.ParseFile(args.PlanPath)
+	// 3. Load plan (or recipe)
+	parsed, err := plan.ParseAnyFile(args.PlanPath)
 	if err != nil {
 		return &runResult{setupErr: true, err: fmt.Errorf("loading plan: %w", err)}
+	}
+
+	var p *plan.Plan
+	switch v := parsed.(type) {
+	case *plan.Plan:
+		p = v
+	case *plan.Recipe:
+		logf("aat: reconstituting recipe %q...\n", v.Selection.Workflow)
+		reconstituted, reconErr := intent.Reconstitute(v, g, filepath.Dir(args.GraphPath))
+		if reconErr != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("reconstituting recipe: %w", reconErr)}
+		}
+		p = reconstituted
+	default:
+		return &runResult{setupErr: true, err: fmt.Errorf("unexpected parse result type %T", parsed)}
 	}
 
 	// 4. Validate plan against graph (early validation for clear CI error reporting)

@@ -11,6 +11,7 @@ import (
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
+	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -64,9 +65,21 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	if planPath == "" {
 		return mcp.NewToolResultError(fmt.Sprintf("plan %q not found", name)), nil
 	}
-	p, err := plan.ParseFile(planPath)
+	parsed, err := plan.ParseAnyFile(planPath)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("loading plan: %v", err)), nil
+	}
+
+	var p *plan.Plan
+	switch v := parsed.(type) {
+	case *plan.Plan:
+		p = v
+	case *plan.Recipe:
+		reconstituted, reconErr := intent.Reconstitute(v, s.ctx.Graph, s.ctx.GraphDir)
+		if reconErr != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("reconstituting recipe: %v", reconErr)), nil
+		}
+		p = reconstituted
 	}
 
 	if _, err := plan.InstantiateAndValidate(p, s.ctx.Graph); err != nil {

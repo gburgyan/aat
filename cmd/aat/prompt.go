@@ -58,6 +58,7 @@ var promptCmd = &cobra.Command{
 		if savePlan != "" {
 			savePlan = resolveSavePlan(savePlan, resolved.PlanDirs)
 		}
+		saveFull, _ := cmd.Flags().GetBool("save-full")
 		autoConfirm, _ := cmd.Flags().GetBool("yes")
 		tracePlan, _ := cmd.Flags().GetBool("trace")
 
@@ -88,6 +89,7 @@ var promptCmd = &cobra.Command{
 			DomainPath:    resolved.DomainPath,
 			OutputDir:     outputDir,
 			SavePlan:      savePlan,
+			SaveFull:      saveFull,
 			AutoConfirm:   autoConfirm,
 			TracePlan:     tracePlan,
 			TraceDir:      traceDir,
@@ -104,7 +106,8 @@ func init() {
 	promptCmd.Flags().String("templates", "", "path to templates directory")
 	promptCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
 	promptCmd.Flags().String("output", "_output/runs", "directory for archive output")
-	promptCmd.Flags().String("save", "", "save generated plan (name resolved via plans dir, or literal path)")
+	promptCmd.Flags().String("save", "", "save generated plan as recipe (name resolved via plans dir, or literal path)")
+	promptCmd.Flags().Bool("save-full", false, "save as full expanded plan instead of compact recipe")
 	promptCmd.Flags().Bool("yes", false, "skip confirmation prompt")
 	promptCmd.Flags().Bool("trace", false, "capture planning pipeline trace for debugging")
 	promptCmd.Flags().String("trace-dir", "_output/traces", "directory for plan trace output")
@@ -119,6 +122,7 @@ type promptArgs struct {
 	DomainPath    string
 	OutputDir     string
 	SavePlan      string
+	SaveFull      bool // when true, save as full expanded plan instead of compact recipe
 	AutoConfirm   bool
 	TracePlan     bool
 	TraceDir      string
@@ -215,10 +219,27 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 
 	// 9. Save plan if --save specified
 	if args.SavePlan != "" {
-		if err := plan.WriteFile(result.Plan, args.SavePlan); err != nil {
-			return fmt.Errorf("saving plan: %w", err)
+		if args.SaveFull {
+			// Legacy full-plan format.
+			if err := plan.WriteFile(result.Plan, args.SavePlan); err != nil {
+				return fmt.Errorf("saving plan: %w", err)
+			}
+			fmt.Printf("aat: full plan saved to %s\n", args.SavePlan)
+		} else {
+			// Default: compact recipe format.
+			r := &plan.Recipe{
+				Kind:     "recipe",
+				Metadata: result.Plan.Metadata,
+				Selection: intent.WorkflowSelectionToRecipeSelection(result.WorkflowSelection),
+			}
+			if result.TargetedResponse != nil {
+				r.Overrides = intent.TargetedResponseToRecipeOverrides(result.TargetedResponse)
+			}
+			if err := plan.WriteRecipe(r, args.SavePlan); err != nil {
+				return fmt.Errorf("saving recipe: %w", err)
+			}
+			fmt.Printf("aat: recipe saved to %s\n", args.SavePlan)
 		}
-		fmt.Printf("aat: plan saved to %s\n", args.SavePlan)
 	}
 
 	// 10. Confirmation loop

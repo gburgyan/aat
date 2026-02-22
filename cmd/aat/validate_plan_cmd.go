@@ -82,7 +82,7 @@ func planValidateCommand(args *planValidateArgs) int {
 
 	// Single plan mode.
 	if args.PlanPath != "" {
-		return validateSinglePlan(args.PlanPath, g, args.Unfed)
+		return validateSinglePlan(args.PlanPath, args.GraphPath, g, args.Unfed)
 	}
 
 	// All workflow templates mode.
@@ -90,10 +90,27 @@ func planValidateCommand(args *planValidateArgs) int {
 }
 
 // validateSinglePlan validates one plan file against the graph.
-func validateSinglePlan(planPath string, g *graph.Graph, showUnfed bool) int {
-	p, err := plan.ParseFile(planPath)
+func validateSinglePlan(planPath, graphPath string, g *graph.Graph, showUnfed bool) int {
+	parsed, err := plan.ParseAnyFile(planPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "aat validate plan: %s\n", err)
+		return 1
+	}
+
+	var p *plan.Plan
+	switch v := parsed.(type) {
+	case *plan.Plan:
+		p = v
+	case *plan.Recipe:
+		fmt.Printf("Reconstituting recipe %q...\n", v.Selection.Workflow)
+		reconstituted, reconErr := intent.Reconstitute(v, g, filepath.Dir(graphPath))
+		if reconErr != nil {
+			fmt.Fprintf(os.Stderr, "aat validate plan: reconstituting recipe: %s\n", reconErr)
+			return 1
+		}
+		p = reconstituted
+	default:
+		fmt.Fprintf(os.Stderr, "aat validate plan: unexpected parse result type %T\n", parsed)
 		return 1
 	}
 
