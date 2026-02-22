@@ -32,11 +32,11 @@ var runPlanCmd = &cobra.Command{
 
 		planPath := resolvePlanPath(args[0], resolved.PlanDirs)
 
-		mode, _ := cmd.Flags().GetString("mode")
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
 		envOverlay, _ := cmd.Flags().GetString("env-overlay")
+		retries, _ := cmd.Flags().GetInt("retries")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -46,12 +46,12 @@ var runPlanCmd = &cobra.Command{
 			GraphPath:     resolved.GraphPath,
 			TemplatesPath: resolved.TemplatesPath,
 			OutputDir:     outputDir,
-			Mode:          mode,
 			DomainPath:    resolved.DomainPath,
 			JSON:          jsonFlag,
 			Quiet:         quiet,
 			Overrides:     overrideFlags,
 			EnvOverlay:    envOverlay,
+			MaxRetries:    retries,
 		}
 
 		code := executeRun(ra)
@@ -105,13 +105,17 @@ func executeRun(ra *runArgs) int {
 
 	// Quiet (non-JSON): show the final summary line
 	if ra.Quiet && res.summary != nil {
+		attemptSuffix := ""
+		if res.summary.Attempts > 1 {
+			attemptSuffix = fmt.Sprintf(" (%d attempts)", res.summary.Attempts)
+		}
 		switch res.summary.Outcome {
 		case "passed":
-			fmt.Fprintf(os.Stdout, "PASSED (%d/%d steps)\n", res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps)
+			fmt.Fprintf(os.Stdout, "PASSED (%d/%d steps)%s\n", res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps, attemptSuffix)
 		case "failed":
-			fmt.Fprintf(os.Stdout, "FAILED: %s\n", res.summary.Error)
+			fmt.Fprintf(os.Stdout, "FAILED: %s%s\n", res.summary.Error, attemptSuffix)
 		case "error":
-			fmt.Fprintf(os.Stdout, "ERROR: %s\n", res.summary.Error)
+			fmt.Fprintf(os.Stdout, "ERROR: %s%s\n", res.summary.Error, attemptSuffix)
 		}
 		if res.archivePath != "" {
 			fmt.Fprintf(os.Stdout, "Archive: %s\n", res.archivePath)
@@ -150,5 +154,8 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 		observer = &CLIProgressObserver{out: out}
 	}
 
+	if args.MaxRetries > 0 {
+		return loadAndRunPlanWithRetries(ctx, rctx, args.PlanPath, args.OutputDir, args.MaxRetries, observer, logf)
+	}
 	return loadAndRunPlan(ctx, rctx, args.PlanPath, args.OutputDir, observer, logf)
 }

@@ -15,6 +15,8 @@ export interface RunListEntry {
   durationMs: number;
   planName?: string;
   batchId?: string;
+  attempt?: number;
+  totalAttempts?: number;
 }
 
 export interface RunDetail {
@@ -34,6 +36,16 @@ export interface RunDetail {
   batchId?: string;
   steps: StepSummary[];
   cleanup?: StepSummary[];
+  attempt?: number;
+  totalAttempts?: number;
+  attempts?: AttemptSummary[];
+}
+
+export interface AttemptSummary {
+  attempt: number;
+  outcome: Outcome;
+  error?: string;
+  fileName: string;
 }
 
 export interface StepSummary {
@@ -50,7 +62,6 @@ export interface StepSummary {
   isCleanup?: boolean;
   hasSelections?: boolean;
   hasResolutions?: boolean;
-  hasLLMCalls?: boolean;
   hasTransform?: boolean;
   retryCount?: number;
   offsetMs?: number;
@@ -70,7 +81,6 @@ export interface StepDetail {
   isCleanup?: boolean;
   hasSelections?: boolean;
   hasResolutions?: boolean;
-  hasLLMCalls?: boolean;
   retryCount?: number;
   startTime?: string;
   inputs?: Record<string, unknown>;
@@ -80,7 +90,6 @@ export interface StepDetail {
   validation?: ValidationDetail;
   selections?: SelectionDetail[];
   resolutions?: ResolutionDetail[];
-  relaxations?: RelaxationDetail[];
   errorClassification?: ErrorClassDetail;
   expectFailure?: ExpectFailureDetail;
   responseBodyError?: ResponseBodyErrorDetail;
@@ -153,8 +162,6 @@ export interface SelectionDetail {
   strategy: string;
   selectedIndex: number;
   selectionName?: string;
-  filterRelaxed?: boolean;
-  llmCall?: LLMCallDetail;
 }
 
 export interface ResolutionDetail {
@@ -170,9 +177,6 @@ export interface ResolutionDetail {
   poolIndex?: number;
   poolSize?: number;
   tried?: unknown[];
-  relaxed?: boolean;
-  relaxedConstraint?: string;
-  llmCall?: LLMCallDetail;
 }
 
 export interface LLMCallDetail {
@@ -189,13 +193,6 @@ export interface LLMCallDetail {
 export interface LLMMessageDetail {
   role: string;
   content: string;
-}
-
-export interface RelaxationDetail {
-  constraintName: string;
-  inputRef: string;
-  reason: string;
-  depth: number;
 }
 
 export interface ErrorClassDetail {
@@ -303,6 +300,7 @@ export interface BatchRunSummary {
   failedCount: number;
   durationMs: number;
   error?: string;
+  attempts?: number;
 }
 
 export type UnifiedListEntry =

@@ -321,21 +321,12 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		}
 	}
 
-	// Determine execution mode: prompt command always has LLM, default to lean
-	effectiveMode := env.LLM.Mode
-	if effectiveMode == "" {
-		effectiveMode = config.ModeLean
-	}
-
 	// Create engine and run
 	observer := &CLIProgressObserver{out: os.Stdout}
 	eng := engine.NewEngine(g, registry, router).
-		WithMode(effectiveMode).
 		WithDomain(kb).
-		WithLLM(llmClient).
-		WithMaxRelaxationDepth(env.Settings.MaxRelaxationDepth).
 		WithProgress(observer)
-	fmt.Printf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), effectiveMode)
+	fmt.Printf("aat: executing plan (%d steps)...\n\n", len(p.Execution.Steps))
 
 	result := eng.Run(ctx, p)
 

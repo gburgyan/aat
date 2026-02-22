@@ -16,7 +16,6 @@ import (
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/intent"
-	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -27,12 +26,12 @@ type runArgs struct {
 	GraphPath     string
 	TemplatesPath string
 	OutputDir     string
-	Mode          string
 	DomainPath    string
 	JSON          bool
 	Quiet         bool
 	Overrides     []string // "nodeName=http://url" pairs
 	EnvOverlay    string   // path to overlay YAML
+	MaxRetries    int      // max plan-level retries (0 = no retries)
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -43,6 +42,8 @@ type RunSummary struct {
 	Cleanup     []StepSummary `json:"cleanup,omitempty"`
 	Summary     SummaryStats  `json:"summary"`
 	ArchivePath string        `json:"archive_path,omitempty"`
+	Attempts    int           `json:"attempts,omitempty"` // total attempts (omitted if 1)
+	Retried     bool          `json:"retried,omitempty"`  // true if any retries occurred
 }
 
 // StepSummary is a per-step entry in the JSON summary.
@@ -82,6 +83,7 @@ type runResult struct {
 	archivePath string
 	err         error
 	setupErr    bool // true when error occurred before engine execution
+	attempts    int  // total attempts (1 = no retries)
 }
 
 // exitCodeInfra is the exit code for infrastructure/config errors.
@@ -347,6 +349,131 @@ func writeRunArchiveWithSecrets(result *engine.RunResult, p *plan.Plan, env *con
 	return archivePath, nil
 }
 
+// retryDelay is the fixed delay between plan-level retry attempts.
+const retryDelay = 2 * time.Second
+
+// isRetryable returns true if the run result should trigger a plan-level retry.
+// Setup errors (bad plan, missing template) are not retried.
+func isRetryable(res *runResult) bool {
+	if res.setupErr {
+		return false
+	}
+	switch res.outcome {
+	case engine.OutcomePassed:
+		return false
+	case engine.OutcomeFailed, engine.OutcomeError:
+		return true
+	default:
+		return false
+	}
+}
+
+// loadAndRunPlanWithRetries wraps loadAndRunPlan with plan-level retry logic.
+// maxRetries is the number of additional attempts after the first failure (0 = no retries).
+// Each attempt gets fresh engine state. Failed attempts are saved as attempt-NN.json.
+func loadAndRunPlanWithRetries(ctx context.Context, rctx *runContext, planPath, outputDir string, maxRetries int, observer engine.ProgressObserver, logf func(string, ...any)) *runResult {
+	if maxRetries <= 0 {
+		// No retries — original behavior
+		return loadAndRunPlan(ctx, rctx, planPath, outputDir, observer, logf)
+	}
+
+	// Generate a stable run ID for the entire logical run
+	runID := archive.GenerateRunID()
+	runDir := filepath.Join(outputDir, runID)
+	totalPossible := maxRetries + 1
+
+	// Collect secrets once for all archive writes
+	secrets := make(map[string]bool)
+	for k, v := range rctx.Secrets {
+		secrets[k] = v
+	}
+
+	// Parse plan once to collect plan-level auth secrets
+	parsed, err := plan.ParseAnyFile(planPath)
+	if err == nil {
+		if p, ok := parsed.(*plan.Plan); ok && p.Auth != nil {
+			for k, v := range config.CollectAuthSecrets(p.Auth) {
+				secrets[k] = v
+			}
+		}
+	}
+
+	var lastRes *runResult
+	for attempt := 1; attempt <= totalPossible; attempt++ {
+		select {
+		case <-ctx.Done():
+			return &runResult{
+				outcome:  engine.OutcomeError,
+				err:      fmt.Errorf("execution cancelled: %w", ctx.Err()),
+				attempts: attempt - 1,
+			}
+		default:
+		}
+
+		if attempt > 1 {
+			logf("[attempt %d/%d] retrying...\n", attempt, totalPossible)
+			// Brief delay between retries
+			select {
+			case <-ctx.Done():
+				return &runResult{
+					outcome:  engine.OutcomeError,
+					err:      fmt.Errorf("execution cancelled during retry delay: %w", ctx.Err()),
+					attempts: attempt - 1,
+				}
+			case <-time.After(retryDelay):
+			}
+		}
+
+		// Execute the plan (writes its own archive to runDir)
+		res := loadAndRunPlanToDir(ctx, rctx, planPath, runDir, observer, logf)
+		lastRes = res
+		lastRes.attempts = attempt
+
+		if !isRetryable(res) {
+			break
+		}
+
+		// Save failed attempt archive
+		if res.summary != nil {
+			// Rename the archive.json that was written to attempt-NN.json
+			attemptFile := fmt.Sprintf("attempt-%02d.json", attempt)
+			mainArchive := filepath.Join(runDir, "archive.json")
+			attemptPath := filepath.Join(runDir, attemptFile)
+			if renameErr := os.Rename(mainArchive, attemptPath); renameErr != nil {
+				logf("aat: warning: could not save attempt archive: %s\n", renameErr)
+			}
+		}
+
+		if attempt < totalPossible {
+			reason := "unknown"
+			if res.err != nil {
+				reason = res.err.Error()
+			}
+			logf("[attempt %d/%d] FAILED: %s\n", attempt, totalPossible, reason)
+		}
+	}
+
+	// Annotate the final archive with attempt metadata if retries occurred
+	if lastRes != nil && lastRes.attempts > 1 && lastRes.archivePath != "" {
+		// Re-read, annotate, and re-write the final archive
+		if arc, readErr := archive.Read(lastRes.archivePath); readErr == nil {
+			arc.Metadata.Attempt = lastRes.attempts
+			arc.Metadata.TotalAttempts = lastRes.attempts
+			if writeErr := archive.Write(arc, lastRes.archivePath); writeErr != nil {
+				logf("aat: warning: could not annotate final archive: %s\n", writeErr)
+			}
+		}
+	}
+
+	// Annotate summary with attempt info
+	if lastRes != nil && lastRes.summary != nil && lastRes.attempts > 1 {
+		lastRes.summary.Attempts = lastRes.attempts
+		lastRes.summary.Retried = true
+	}
+
+	return lastRes
+}
+
 // resolveOutputDir determines the output directory from flag, manifest, or default.
 func resolveOutputDir(flagChanged bool, flagValue, manifestDir string) string {
 	if flagChanged {
@@ -399,19 +526,16 @@ func resolvePlanPath(planPath string, planDirs []string) string {
 // This allows batch execution to load environment, graph, templates, and domain
 // once and reuse them across multiple plan runs.
 type runContext struct {
-	Env                *config.Environment
-	Graph              *graph.Graph
-	Registry           *adapter.Registry
-	KB                 *domain.KnowledgeBase
-	LLMClient          llm.Client
-	Mode               config.ExecutionMode
-	MaxRelaxationDepth int
-	GraphDir           string // for recipe reconstitution
-	Secrets            map[string]bool
+	Env      *config.Environment
+	Graph    *graph.Graph
+	Registry *adapter.Registry
+	KB       *domain.KnowledgeBase
+	GraphDir string // for recipe reconstitution
+	Secrets  map[string]bool
 
 	// Override configuration (from env-file, overlay, CLI flags)
-	Overrides     []string // CLI --override flags
-	EnvOverlay    string   // path to overlay YAML
+	Overrides  []string // CLI --override flags
+	EnvOverlay string   // path to overlay YAML
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -461,42 +585,29 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 	}
 	logf("aat: loaded %d templates\n", count)
 
-	// 5. Determine execution mode
-	effectiveMode := config.ExecutionMode(args.Mode)
-	if effectiveMode == "" {
-		effectiveMode = env.LLM.Mode
-	}
-	if effectiveMode == "" {
-		effectiveMode = config.ModeStrict
-	}
-
-	// 6. Create LLM client if mode requires it
-	var llmClient llm.Client
-	if effectiveMode != config.ModeStrict && env.LLM.Endpoint != "" {
-		llmClient, err = llm.NewClient(env.LLM)
-		if err != nil {
-			return nil, fmt.Errorf("creating LLM client: %w", err)
-		}
-	}
-
 	return &runContext{
-		Env:                env,
-		Graph:              g,
-		Registry:           registry,
-		KB:                 kb,
-		LLMClient:          llmClient,
-		Mode:               effectiveMode,
-		MaxRelaxationDepth: env.Settings.MaxRelaxationDepth,
-		GraphDir:           filepath.Dir(args.GraphPath),
-		Secrets:            env.CollectSecrets(),
-		Overrides:          args.Overrides,
-		EnvOverlay:         args.EnvOverlay,
+		Env:        env,
+		Graph:      g,
+		Registry:   registry,
+		KB:         kb,
+		GraphDir:   filepath.Dir(args.GraphPath),
+		Secrets:    env.CollectSecrets(),
+		Overrides:  args.Overrides,
+		EnvOverlay: args.EnvOverlay,
 	}, nil
 }
 
 // loadAndRunPlan parses a plan file, then executes it using the shared runContext.
-// Returns a runResult. The outputDir controls where the archive is written.
+// Returns a runResult. The outputDir is the parent; a run-ID subdirectory is created.
 func loadAndRunPlan(ctx context.Context, rctx *runContext, planPath, outputDir string, observer engine.ProgressObserver, logf func(string, ...any)) *runResult {
+	runID := archive.GenerateRunID()
+	runDir := filepath.Join(outputDir, runID)
+	return loadAndRunPlanToDir(ctx, rctx, planPath, runDir, observer, logf)
+}
+
+// loadAndRunPlanToDir parses a plan file, executes it, and writes the archive
+// to the specified run directory (archive.json within runDir).
+func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir string, observer engine.ProgressObserver, logf func(string, ...any)) *runResult {
 	// 1. Parse plan (or recipe)
 	parsed, err := plan.ParseAnyFile(planPath)
 	if err != nil {
@@ -600,12 +711,9 @@ func loadAndRunPlan(ctx context.Context, rctx *runContext, planPath, outputDir s
 
 	// 6. Create engine and run
 	eng := engine.NewEngine(rctx.Graph, rctx.Registry, router).
-		WithMode(rctx.Mode).
 		WithDomain(rctx.KB).
-		WithLLM(rctx.LLMClient).
-		WithMaxRelaxationDepth(rctx.MaxRelaxationDepth).
 		WithProgress(observer)
-	logf("aat: executing plan (%d steps, mode=%s)...\n\n", len(p.Execution.Steps), rctx.Mode)
+	logf("aat: executing plan (%d steps)...\n\n", len(p.Execution.Steps))
 
 	result := eng.Run(ctx, p)
 
@@ -624,9 +732,21 @@ func loadAndRunPlan(ctx context.Context, rctx *runContext, planPath, outputDir s
 			secrets[k] = v
 		}
 	}
-	archivePath, archiveErr := writeRunArchiveWithSecrets(result, p, rctx.Env, rctx.Graph, outputDir, secrets)
-	if archiveErr != nil {
+
+	meta := archive.ArchiveMetadata{
+		Version:      "1.0.0",
+		RunID:        filepath.Base(runDir),
+		Timestamp:    time.Now(),
+		Plan:         p,
+		Environment:  rctx.Env.Name,
+		GraphVersion: rctx.Graph.Version,
+		ToolVersion:  "0.1.0",
+	}
+	arc := engine.ToArchive(result, meta, rctx.Env.APIBaseURL, secrets)
+	archivePath := filepath.Join(runDir, "archive.json")
+	if archiveErr := archive.Write(arc, archivePath); archiveErr != nil {
 		logf("aat: warning: %s\n", archiveErr)
+		archivePath = ""
 	} else {
 		logf("Archive: %s\n", archivePath)
 	}

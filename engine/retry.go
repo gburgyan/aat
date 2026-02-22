@@ -10,20 +10,15 @@ import (
 	"github.com/gburgyan/aat/plan"
 )
 
-// executeStepWithTracking wraps executeStepWithRetry, passing the tracker through
-// and attaching relaxation records to the result.
-func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, tracker *RelaxationTracker) StepResult {
-	result := e.executeStepWithRetry(ctx, step, node, state, tracker)
-	if tracker != nil {
-		result.Relaxations = tracker.Records()
-	}
-	return result
+// executeStepWithTracking wraps executeStepWithRetry.
+func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
+	return e.executeStepWithRetry(ctx, step, node, state)
 }
 
 // executeStepWithRetry wraps executeStep with retry logic based on the step's
 // RetryConfig. If no RetryConfig is set, it behaves identically to executeStep.
-func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, tracker *RelaxationTracker) StepResult {
-	result := e.executeStep(ctx, step, node, state, tracker)
+func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
+	result := e.executeStep(ctx, step, node, state)
 
 	// Negative assertion steps should not retry — the failure IS the expected behavior.
 	if step.ExpectFailure != nil {
@@ -90,7 +85,7 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 		}
 
 		// Retry the step
-		result = e.executeStep(ctx, step, node, state, tracker)
+		result = e.executeStep(ctx, step, node, state)
 		result.RetryCount = attempt
 
 		cls = classifyStepResult(&result)

@@ -9,15 +9,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ExecutionMode controls how the engine handles LLM involvement.
-type ExecutionMode string
-
-const (
-	ModeStrict   ExecutionMode = "strict"
-	ModeLean     ExecutionMode = "lean"
-	ModeAdaptive ExecutionMode = "adaptive"
-)
-
 // ArchiveFormat controls the format for run archives.
 type ArchiveFormat string
 
@@ -83,19 +74,17 @@ type AuthConfig struct {
 
 // LLMConfig holds LLM provider configuration.
 type LLMConfig struct {
-	Endpoint string        `yaml:"endpoint"`
-	APIKey   SecretRef     `yaml:"apiKey"`
-	Model    string        `yaml:"model"`
-	Mode     ExecutionMode `yaml:"mode"`
-	Provider string        `yaml:"provider,omitempty"` // "openai" or "anthropic"; auto-detected from endpoint if empty
+	Endpoint string    `yaml:"endpoint"`
+	APIKey   SecretRef `yaml:"apiKey"`
+	Model    string    `yaml:"model"`
+	Provider string    `yaml:"provider,omitempty"` // "openai" or "anthropic"; auto-detected from endpoint if empty
 }
 
 // RuntimeSettings holds execution-time configuration with sensible defaults.
 type RuntimeSettings struct {
-	MaxRunDuration     Duration      `yaml:"maxRunDuration"`
-	DefaultRetries     int           `yaml:"defaultRetries"`
-	MaxRelaxationDepth int           `yaml:"maxRelaxationDepth"`
-	ArchiveFormat      ArchiveFormat `yaml:"archiveFormat"`
+	MaxRunDuration Duration      `yaml:"maxRunDuration"`
+	DefaultRetries int           `yaml:"defaultRetries"`
+	ArchiveFormat  ArchiveFormat `yaml:"archiveFormat"`
 }
 
 // PathRewrite controls URL path rewriting for overrides.

@@ -19,10 +19,10 @@ func init() {
 	runCmd.PersistentFlags().String("graph", "", "path to graph YAML file")
 	runCmd.PersistentFlags().String("templates", "", "path to templates directory")
 	runCmd.PersistentFlags().String("output", "_output/runs", "directory for archive output")
-	runCmd.PersistentFlags().String("mode", "", "execution mode: strict, lean, adaptive (overrides env config)")
 	runCmd.PersistentFlags().String("domain", "", "path to domain knowledge YAML file")
 	runCmd.PersistentFlags().StringSlice("override", nil, "node=url override (repeatable, e.g. searchFlights=http://localhost:8080)")
 	runCmd.PersistentFlags().String("env-overlay", "", "path to environment overlay YAML file")
+	runCmd.PersistentFlags().Int("retries", 0, "max plan-level retries on failure (0 = no retries)")
 
 	runCmd.AddCommand(runPlanCmd)
 }

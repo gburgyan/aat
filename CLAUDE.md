@@ -60,20 +60,17 @@ Cross-package dependencies use direct struct fields and function parameters — 
 // Production: construct with NewEngine + builder methods
 router := engine.NewExecutorRouter(executor, envConfig)
 eng := engine.NewEngine(g, registry, router).
-    WithMode(config.ModeLean).
-    WithLLM(llmClient).
     WithDomain(kb)
 
 // Usage: collaborators are struct fields or function params
 func (e *Engine) Run(ctx context.Context, p *plan.Plan) *RunResult {
-    // use e.graph, e.LLMClient, etc.
+    // use e.graph, e.KB, etc.
 }
 
 // Tests: construct with test implementations
 func TestRun(t *testing.T) {
     router := engine.NewExecutorRouter(executor, envConfig)
-    eng := engine.NewEngine(g, &fakeRegistry{}, router).
-        WithMode(config.ModeStrict)
+    eng := engine.NewEngine(g, &fakeRegistry{}, router)
     result := eng.Run(ctx, testPlan)
     // assert
 }
@@ -191,12 +188,12 @@ make build
   --templates travelport/templates/
 
 # Shared run flags (apply to both plan and batch):
-#   --mode MODE        strict (no LLM), lean (LLM fallback), adaptive (lean + relaxation)
 #   --output DIR       archive output directory (default: runs/)
 #   --json             machine-readable JSON summary to stdout
 #   --quiet            suppress progress, show final line only
 #   --override NODE=URL  route a node to a different URL (repeatable)
 #   --env-overlay FILE   path to overlay YAML with additional overrides
+#   --retries N        max plan-level retries on failure (0 = no retries)
 ```
 
 **Travelport config files:**

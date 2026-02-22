@@ -61,7 +61,6 @@ type StepResult struct {
 	RetryCount    int                        // number of retries performed (0 = no retries)
 	Validation    *validate.MechanicalResult // nil if no assertions configured
 	DisplayOutputs    []DisplayOutput             // outputs tagged with display labels
-	Relaxations       []RelaxationRecord         // soft constraints relaxed during this step
 	ExpectFailure     *ExpectFailureResult       // non-nil for negative assertion steps
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
 }
@@ -91,9 +90,7 @@ type SelectionDecision struct {
 	FilteredSize  int
 	Strategy      string
 	SelectedIndex int
-	LLMCall       *LLMCallRecord // non-nil for llm strategy
-	SelectionName string         // non-empty for named selections
-	FilterRelaxed bool           // true if filter was relaxed to produce this selection
+	SelectionName string // non-empty for named selections
 }
 
 // ValueResolution records how a single input was resolved.
@@ -110,26 +107,6 @@ type ValueResolution struct {
 	ConstraintOK      bool           // whether constraint passed
 	PoolIndex         int            // index in fallback pool (-1 if not from pool)
 	PoolSize          int            // fallback pool size (0 if no pool)
-	Tried             []any          // values tried and rejected before this one
-	LLMCall           *LLMCallRecord // non-nil if LLM was consulted
-	Relaxed           bool           // true if a soft constraint was relaxed
-	RelaxedConstraint string         // name of the relaxed constraint
+	Tried []any // values tried and rejected before this one
 }
 
-// LLMCallRecord captures details of a single LLM API call for value selection.
-type LLMCallRecord struct {
-	Messages     []LLMMessage
-	Model        string
-	Response     string
-	InputTokens  int
-	OutputTokens int
-	DurationMs   int64
-	FinishReason string
-	Error        string // non-empty if LLM call failed
-}
-
-// LLMMessage is a prompt message sent to the LLM.
-type LLMMessage struct {
-	Role    string
-	Content string
-}

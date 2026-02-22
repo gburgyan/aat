@@ -112,7 +112,12 @@
             onkeydown={(e: KeyboardEvent) => handleRowKeydown(e, run.runId)}
           >
             <td><OutcomeBadge outcome={run.outcome} size="sm" /></td>
-            <td class="cell-plan" title={run.planName || run.runId}>{run.planName || run.runId}</td>
+            <td class="cell-plan" title={run.planName || run.runId}>
+              {run.planName || run.runId}
+              {#if run.attempts && run.attempts > 1}
+                <span class="retry-badge" title="Took {run.attempts} attempts">{run.attempts} attempts</span>
+              {/if}
+            </td>
             <td class="cell-steps">
               <span class="steps-passed">{run.passedCount}</span>{#if run.failedCount > 0}<span class="steps-separator"> / </span><span class="steps-failed">{run.failedCount}</span>{/if}
               <span class="steps-separator"> of {run.stepCount}</span>
@@ -128,5 +133,18 @@
 <style>
   .steps-error {
     color: var(--color-warning, #f59e0b);
+  }
+  .retry-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-warning, #f59e0b);
+    background: rgba(245, 158, 11, 0.12);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    margin-left: 0.4rem;
+    vertical-align: baseline;
   }
 </style>

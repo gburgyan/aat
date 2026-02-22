@@ -89,6 +89,12 @@ func (s *ArchiveService) GetRun(id string) (*RunDetail, error) {
 	}
 	detail := toRunDetail(a)
 	detail.BatchID = batchID
+
+	// Load attempt summaries if this was a retried run.
+	if a.Metadata.TotalAttempts > 1 {
+		detail.Attempts = s.loadAttemptSummaries(id, batchID)
+	}
+
 	return detail, nil
 }
 
@@ -239,6 +245,49 @@ func (s *ArchiveService) loadBatchArchive(id string) (*archive.BatchArchive, err
 	return b, nil
 }
 
+// loadAttemptSummaries scans a run directory for attempt-NN.json files
+// and returns a summary of each prior failed attempt.
+func (s *ArchiveService) loadAttemptSummaries(runID, batchID string) []AttemptSummary {
+	// Determine the run directory path.
+	var runDir string
+	if batchID != "" {
+		runDir = filepath.Join(s.archiveDir, batchID, runID)
+	} else {
+		runDir = filepath.Join(s.archiveDir, runID)
+	}
+
+	entries, err := os.ReadDir(runDir)
+	if err != nil {
+		return nil
+	}
+
+	var attempts []AttemptSummary
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "attempt-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		attemptPath := filepath.Join(runDir, name)
+		a, err := archive.Read(attemptPath)
+		if err != nil {
+			continue
+		}
+		attempts = append(attempts, AttemptSummary{
+			Attempt:  a.Metadata.Attempt,
+			Outcome:  a.Result.Outcome,
+			Error:    a.Result.Error,
+			FileName: name,
+		})
+	}
+
+	// Sort by attempt number.
+	sort.Slice(attempts, func(i, j int) bool {
+		return attempts[i].Attempt < attempts[j].Attempt
+	})
+
+	return attempts
+}
+
 // effectiveStepID returns the step's explicit StepID if set, else falls back to Node.
 func effectiveStepID(s archive.StepRecord) string {
 	if s.StepID != "" {
@@ -260,21 +309,6 @@ func findStep(a *archive.Archive, stepID string) (archive.StepRecord, bool, bool
 		}
 	}
 	return archive.StepRecord{}, false, false
-}
-
-// hasLLMCalls checks whether any selection or resolution in the step has an LLM call.
-func hasLLMCalls(s archive.StepRecord) bool {
-	for _, sel := range s.Selections {
-		if sel.LLMCall != nil {
-			return true
-		}
-	}
-	for _, res := range s.Resolutions {
-		if res.LLMCall != nil {
-			return true
-		}
-	}
-	return false
 }
 
 // formatDuration renders a millisecond duration as a human-readable string.
@@ -312,14 +346,16 @@ func toRunListEntry(a *archive.Archive) RunListEntry {
 	}
 
 	return RunListEntry{
-		RunID:       a.Metadata.RunID,
-		Timestamp:   a.Metadata.Timestamp,
-		Outcome:     a.Result.Outcome,
-		StepCount:   len(a.Steps),
-		PassedCount: passed,
-		FailedCount: failed,
-		DurationMs:  totalDuration(a),
-		PlanName:    extractPlanName(a),
+		RunID:         a.Metadata.RunID,
+		Timestamp:     a.Metadata.Timestamp,
+		Outcome:       a.Result.Outcome,
+		StepCount:     len(a.Steps),
+		PassedCount:   passed,
+		FailedCount:   failed,
+		DurationMs:    totalDuration(a),
+		PlanName:      extractPlanName(a),
+		Attempt:       a.Metadata.Attempt,
+		TotalAttempts: a.Metadata.TotalAttempts,
 	}
 }
 
@@ -350,6 +386,7 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 			FailedCount: r.FailedCount,
 			DurationMs:  r.DurationMs,
 			Error:       r.Error,
+			Attempts:    r.Attempts,
 		}
 	}
 
@@ -421,6 +458,8 @@ func toRunDetail(a *archive.Archive) *RunDetail {
 		ToolVersion:     a.Metadata.ToolVersion,
 		Steps:           steps,
 		Cleanup:         cleanup,
+		Attempt:         a.Metadata.Attempt,
+		TotalAttempts:   a.Metadata.TotalAttempts,
 	}
 }
 
@@ -454,7 +493,6 @@ func toStepSummary(s archive.StepRecord, isCleanup bool, runStart time.Time) Ste
 		IsCleanup:            isCleanup,
 		HasSelections:        len(s.Selections) > 0,
 		HasResolutions:       len(s.Resolutions) > 0,
-		HasLLMCalls:          hasLLMCalls(s),
 		HasTransform:         s.TransformScript != "",
 		RetryCount:           s.RetryCount,
 		OffsetMs:             offsetMs,
@@ -495,7 +533,6 @@ func toStepDetail(s archive.StepRecord, isCleanup bool, nodeSteps map[string]str
 		IsCleanup:            isCleanup,
 		HasSelections:        len(s.Selections) > 0,
 		HasResolutions:       len(s.Resolutions) > 0,
-		HasLLMCalls:          hasLLMCalls(s),
 		RetryCount:           s.RetryCount,
 		StartTime:            s.StartTime,
 		Inputs:               s.Inputs,
@@ -505,7 +542,6 @@ func toStepDetail(s archive.StepRecord, isCleanup bool, nodeSteps map[string]str
 		Validation:           toValidationDetail(s.Validation),
 		Selections:           toSelectionDetails(s.Selections, nodeSteps),
 		Resolutions:          toResolutionDetails(s.Resolutions),
-		Relaxations:          toRelaxationDetails(s.Relaxations),
 		ErrorClassification:  toErrorClassDetail(s.ErrorClass),
 		ExpectFailure:        toExpectFailureDetail(s.ExpectFailure),
 		ResponseBodyError:    toResponseBodyErrorDetail(s.ResponseBodyError),
@@ -619,8 +655,6 @@ func toSelectionDetails(recs []archive.SelectionRecord, nodeSteps map[string]str
 			Strategy:      r.Strategy,
 			SelectedIndex: r.SelectedIndex,
 			SelectionName: r.SelectionName,
-			FilterRelaxed: r.FilterRelaxed,
-			LLMCall:       toLLMCallDetail(r.LLMCall),
 		}
 	}
 	return out
@@ -633,63 +667,18 @@ func toResolutionDetails(recs []archive.ValueResolutionRecord) []ResolutionDetai
 	out := make([]ResolutionDetail, len(recs))
 	for i, r := range recs {
 		out[i] = ResolutionDetail{
-			InputName:         r.InputName,
-			Source:            r.Source,
-			RawValue:          r.RawValue,
-			FinalValue:        r.FinalValue,
-			FromStep:          r.FromStep,
-			FromOutput:        r.FromOutput,
-			Expression:        r.Expression,
-			Constraint:        r.Constraint,
-			ConstraintOK:      r.ConstraintOK,
-			PoolIndex:         r.PoolIndex,
-			PoolSize:          r.PoolSize,
-			Tried:             r.Tried,
-			Relaxed:           r.Relaxed,
-			RelaxedConstraint: r.RelaxedConstraint,
-			LLMCall:           toLLMCallDetail(r.LLMCall),
-		}
-	}
-	return out
-}
-
-func toLLMCallDetail(c *archive.LLMCallRecord) *LLMCallDetail {
-	if c == nil {
-		return nil
-	}
-	var msgs []LLMMessageDetail
-	if len(c.Messages) > 0 {
-		msgs = make([]LLMMessageDetail, len(c.Messages))
-		for i, m := range c.Messages {
-			msgs[i] = LLMMessageDetail{
-				Role:    m.Role,
-				Content: m.Content,
-			}
-		}
-	}
-	return &LLMCallDetail{
-		Messages:     msgs,
-		Model:        c.Model,
-		Response:     c.Response,
-		InputTokens:  c.InputTokens,
-		OutputTokens: c.OutputTokens,
-		DurationMs:   c.DurationMs,
-		FinishReason: c.FinishReason,
-		Error:        c.Error,
-	}
-}
-
-func toRelaxationDetails(recs []archive.RelaxationArchiveRecord) []RelaxationDetail {
-	if len(recs) == 0 {
-		return nil
-	}
-	out := make([]RelaxationDetail, len(recs))
-	for i, r := range recs {
-		out[i] = RelaxationDetail{
-			ConstraintName: r.ConstraintName,
-			InputRef:       r.InputRef,
-			Reason:         r.Reason,
-			Depth:          r.Depth,
+			InputName:    r.InputName,
+			Source:       r.Source,
+			RawValue:     r.RawValue,
+			FinalValue:   r.FinalValue,
+			FromStep:     r.FromStep,
+			FromOutput:   r.FromOutput,
+			Expression:   r.Expression,
+			Constraint:   r.Constraint,
+			ConstraintOK: r.ConstraintOK,
+			PoolIndex:    r.PoolIndex,
+			PoolSize:     r.PoolSize,
+			Tried:        r.Tried,
 		}
 	}
 	return out

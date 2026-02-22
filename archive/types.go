@@ -25,6 +25,8 @@ type ArchiveMetadata struct {
 	Environment      string     `json:"environment"`
 	GraphVersion     string     `json:"graphVersion"`
 	ToolVersion      string     `json:"toolVersion"`
+	Attempt          int        `json:"attempt,omitempty"`       // 1-indexed attempt number
+	TotalAttempts    int        `json:"totalAttempts,omitempty"` // total attempts (omitted if 1)
 }
 
 // StepRecord captures the execution trace for a single step.
@@ -41,7 +43,6 @@ type StepRecord struct {
 	Validation  *ValidationRecord         `json:"validation,omitempty"`
 	Selections  []SelectionRecord         `json:"selections,omitempty"`
 	Resolutions []ValueResolutionRecord   `json:"resolutions,omitempty"`
-	Relaxations []RelaxationArchiveRecord `json:"relaxations,omitempty"`
 	DisplayOutputs    []DisplayOutputRecord    `json:"displayOutputs,omitempty"`
 	ErrorClass        *ErrorClassRecord         `json:"errorClassification,omitempty"`
 	ExpectFailure     *ExpectFailureRecord      `json:"expectFailure,omitempty"`
@@ -112,19 +113,9 @@ type SelectionRecord struct {
 	SourceSize    int            `json:"sourceSize"`
 	FilterExpr    string         `json:"filterExpr,omitempty"`
 	FilteredSize  int            `json:"filteredSize"`
-	Strategy      string         `json:"strategy"`
-	SelectedIndex int            `json:"selectedIndex"`
-	LLMCall       *LLMCallRecord `json:"llmCall,omitempty"`
-	SelectionName string         `json:"selectionName,omitempty"`
-	FilterRelaxed bool           `json:"filterRelaxed,omitempty"`
-}
-
-// RelaxationArchiveRecord captures a single constraint relaxation event.
-type RelaxationArchiveRecord struct {
-	ConstraintName string `json:"constraintName"`
-	InputRef       string `json:"inputRef"`
-	Reason         string `json:"reason"`
-	Depth          int    `json:"depth"`
+	Strategy      string `json:"strategy"`
+	SelectedIndex int    `json:"selectedIndex"`
+	SelectionName string `json:"selectionName,omitempty"`
 }
 
 // ErrorClassRecord captures the error classification for a failed step.
@@ -144,32 +135,11 @@ type ValueResolutionRecord struct {
 	FromStep          string         `json:"fromStep,omitempty"`
 	FromOutput        string         `json:"fromOutput,omitempty"`
 	Expression        string         `json:"expression,omitempty"`
-	Constraint        string         `json:"constraint,omitempty"`
-	ConstraintOK      *bool          `json:"constraintOk,omitempty"`
-	PoolIndex         int            `json:"poolIndex,omitempty"`
-	PoolSize          int            `json:"poolSize,omitempty"`
-	Tried             []any          `json:"tried,omitempty"`
-	LLMCall           *LLMCallRecord `json:"llmCall,omitempty"`
-	Relaxed           bool           `json:"relaxed,omitempty"`
-	RelaxedConstraint string         `json:"relaxedConstraint,omitempty"`
-}
-
-// LLMCallRecord captures details of a single LLM API call.
-type LLMCallRecord struct {
-	Messages     []LLMMessageRecord `json:"messages"`
-	Model        string             `json:"model"`
-	Response     string             `json:"response"`
-	InputTokens  int                `json:"inputTokens"`
-	OutputTokens int                `json:"outputTokens"`
-	DurationMs   int64              `json:"durationMs"`
-	FinishReason string             `json:"finishReason,omitempty"`
-	Error        string             `json:"error,omitempty"`
-}
-
-// LLMMessageRecord captures a single prompt message sent to the LLM.
-type LLMMessageRecord struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Constraint   string `json:"constraint,omitempty"`
+	ConstraintOK *bool  `json:"constraintOk,omitempty"`
+	PoolIndex    int    `json:"poolIndex,omitempty"`
+	PoolSize     int    `json:"poolSize,omitempty"`
+	Tried        []any  `json:"tried,omitempty"`
 }
 
 // ArchiveResult captures the overall outcome of a run.
@@ -204,6 +174,7 @@ type BatchRunEntry struct {
 	FailedCount int    `json:"failedCount"`
 	DurationMs  int64  `json:"durationMs"`
 	Error       string `json:"error,omitempty"`
+	Attempts    int    `json:"attempts,omitempty"` // total attempts (omitted if 1)
 }
 
 // BatchResult captures the aggregate outcome of a batch.

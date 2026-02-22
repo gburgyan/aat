@@ -15,35 +15,48 @@ var (
 
 // RunListEntry is a summary of a single run for list display.
 type RunListEntry struct {
-	RunID       string    `json:"runId"`
-	Timestamp   time.Time `json:"timestamp"`
-	Outcome     string    `json:"outcome"`
-	StepCount   int       `json:"stepCount"`
-	PassedCount int       `json:"passedCount"`
-	FailedCount int       `json:"failedCount"`
-	DurationMs  int64     `json:"durationMs"`
-	PlanName    string    `json:"planName,omitempty"`
-	BatchID     string    `json:"batchId,omitempty"`
+	RunID         string    `json:"runId"`
+	Timestamp     time.Time `json:"timestamp"`
+	Outcome       string    `json:"outcome"`
+	StepCount     int       `json:"stepCount"`
+	PassedCount   int       `json:"passedCount"`
+	FailedCount   int       `json:"failedCount"`
+	DurationMs    int64     `json:"durationMs"`
+	PlanName      string    `json:"planName,omitempty"`
+	BatchID       string    `json:"batchId,omitempty"`
+	Attempt       int       `json:"attempt,omitempty"`
+	TotalAttempts int       `json:"totalAttempts,omitempty"`
 }
 
 // RunDetail is the full overview of a single run.
 type RunDetail struct {
-	RunID           string        `json:"runId"`
-	Timestamp       time.Time     `json:"timestamp"`
-	Outcome         string        `json:"outcome"`
-	Error           string        `json:"error,omitempty"`
-	DurationMs      int64         `json:"durationMs"`
-	DurationDisplay string        `json:"durationDisplay"`
-	StepCount       int           `json:"stepCount"`
-	PassedCount     int           `json:"passedCount"`
-	FailedCount     int           `json:"failedCount"`
-	PlanName        string        `json:"planName,omitempty"`
-	Environment     string        `json:"environment,omitempty"`
-	GraphVersion    string        `json:"graphVersion,omitempty"`
-	ToolVersion     string        `json:"toolVersion,omitempty"`
-	BatchID         string        `json:"batchId,omitempty"`
-	Steps           []StepSummary `json:"steps"`
-	Cleanup         []StepSummary `json:"cleanup,omitempty"`
+	RunID           string           `json:"runId"`
+	Timestamp       time.Time        `json:"timestamp"`
+	Outcome         string           `json:"outcome"`
+	Error           string           `json:"error,omitempty"`
+	DurationMs      int64            `json:"durationMs"`
+	DurationDisplay string           `json:"durationDisplay"`
+	StepCount       int              `json:"stepCount"`
+	PassedCount     int              `json:"passedCount"`
+	FailedCount     int              `json:"failedCount"`
+	PlanName        string           `json:"planName,omitempty"`
+	Environment     string           `json:"environment,omitempty"`
+	GraphVersion    string           `json:"graphVersion,omitempty"`
+	ToolVersion     string           `json:"toolVersion,omitempty"`
+	BatchID         string           `json:"batchId,omitempty"`
+	Steps           []StepSummary    `json:"steps"`
+	Cleanup         []StepSummary    `json:"cleanup,omitempty"`
+	Attempt         int              `json:"attempt,omitempty"`
+	TotalAttempts   int              `json:"totalAttempts,omitempty"`
+	Attempts        []AttemptSummary `json:"attempts,omitempty"`
+}
+
+// AttemptSummary captures the outcome of a single retry attempt.
+type AttemptSummary struct {
+	Attempt  int    `json:"attempt"`
+	Outcome  string `json:"outcome"`
+	Error    string `json:"error,omitempty"`
+	FileName string `json:"fileName"`
 }
 
 // StepSummary is a compact view of a step for timeline display.
@@ -61,7 +74,6 @@ type StepSummary struct {
 	IsCleanup           bool            `json:"isCleanup,omitempty"`
 	HasSelections       bool            `json:"hasSelections,omitempty"`
 	HasResolutions      bool            `json:"hasResolutions,omitempty"`
-	HasLLMCalls         bool            `json:"hasLLMCalls,omitempty"`
 	HasTransform        bool            `json:"hasTransform,omitempty"`
 	RetryCount          int             `json:"retryCount,omitempty"`
 	OffsetMs            int64           `json:"offsetMs,omitempty"`
@@ -82,7 +94,6 @@ type StepDetail struct {
 	IsCleanup            bool                    `json:"isCleanup,omitempty"`
 	HasSelections        bool                    `json:"hasSelections,omitempty"`
 	HasResolutions       bool                    `json:"hasResolutions,omitempty"`
-	HasLLMCalls          bool                    `json:"hasLLMCalls,omitempty"`
 	RetryCount           int                     `json:"retryCount,omitempty"`
 	StartTime            time.Time               `json:"startTime,omitempty"`
 	Inputs               map[string]any          `json:"inputs,omitempty"`
@@ -92,7 +103,6 @@ type StepDetail struct {
 	Validation           *ValidationDetail       `json:"validation,omitempty"`
 	Selections           []SelectionDetail       `json:"selections,omitempty"`
 	Resolutions          []ResolutionDetail      `json:"resolutions,omitempty"`
-	Relaxations          []RelaxationDetail      `json:"relaxations,omitempty"`
 	ErrorClassification  *ErrorClassDetail       `json:"errorClassification,omitempty"`
 	ExpectFailure        *ExpectFailureDetail    `json:"expectFailure,omitempty"`
 	ResponseBodyError    *ResponseBodyErrorDetail `json:"responseBodyError,omitempty"`
@@ -172,10 +182,8 @@ type SelectionDetail struct {
 	FilterExpr    string         `json:"filterExpr,omitempty"`
 	FilteredSize  int            `json:"filteredSize"`
 	Strategy      string         `json:"strategy"`
-	SelectedIndex int            `json:"selectedIndex"`
-	SelectionName string         `json:"selectionName,omitempty"`
-	FilterRelaxed bool           `json:"filterRelaxed,omitempty"`
-	LLMCall       *LLMCallDetail `json:"llmCall,omitempty"`
+	SelectedIndex int    `json:"selectedIndex"`
+	SelectionName string `json:"selectionName,omitempty"`
 }
 
 // ResolutionDetail captures how a single input was resolved.
@@ -189,12 +197,9 @@ type ResolutionDetail struct {
 	Expression        string         `json:"expression,omitempty"`
 	Constraint        string         `json:"constraint,omitempty"`
 	ConstraintOK      *bool          `json:"constraintOk,omitempty"`
-	PoolIndex         int            `json:"poolIndex,omitempty"`
-	PoolSize          int            `json:"poolSize,omitempty"`
-	Tried             []any          `json:"tried,omitempty"`
-	Relaxed           bool           `json:"relaxed,omitempty"`
-	RelaxedConstraint string         `json:"relaxedConstraint,omitempty"`
-	LLMCall           *LLMCallDetail `json:"llmCall,omitempty"`
+	PoolIndex int   `json:"poolIndex,omitempty"`
+	PoolSize  int   `json:"poolSize,omitempty"`
+	Tried     []any `json:"tried,omitempty"`
 }
 
 // LLMCallDetail captures details of a single LLM API call.
@@ -213,14 +218,6 @@ type LLMCallDetail struct {
 type LLMMessageDetail struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-}
-
-// RelaxationDetail captures a single constraint relaxation event.
-type RelaxationDetail struct {
-	ConstraintName string `json:"constraintName"`
-	InputRef       string `json:"inputRef"`
-	Reason         string `json:"reason"`
-	Depth          int    `json:"depth"`
 }
 
 // ErrorClassDetail captures the error classification for a failed step.
@@ -289,4 +286,5 @@ type BatchRunSummary struct {
 	FailedCount int    `json:"failedCount"`
 	DurationMs  int64  `json:"durationMs"`
 	Error       string `json:"error,omitempty"`
+	Attempts    int    `json:"attempts,omitempty"`
 }

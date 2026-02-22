@@ -71,9 +71,6 @@
           {#if step.retryCount && step.retryCount > 0}
             <span class="step-retry-badge">{step.retryCount} retry</span>
           {/if}
-          {#if step.hasLLMCalls}
-            <span class="step-llm-badge">LLM</span>
-          {/if}
         </div>
 
         {#if step.displayOutputs && step.displayOutputs.length > 0}

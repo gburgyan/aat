@@ -591,17 +591,18 @@ func TestValidate_SelectionStrategies(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("llm with prompt ok", func(t *testing.T) {
+	t.Run("llm strategy rejected", func(t *testing.T) {
 		p := baseStep(&SelectionConfig{Strategy: "llm", Prompt: "pick the cheapest option"})
 		err := Validate(p, g)
-		assert.NoError(t, err)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unknown selection strategy")
 	})
 
-	t.Run("llm without prompt rejected", func(t *testing.T) {
+	t.Run("llm without prompt also rejected", func(t *testing.T) {
 		p := baseStep(&SelectionConfig{Strategy: "llm"})
 		err := Validate(p, g)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "llm strategy requires prompt")
+		assert.Contains(t, err.Error(), "unknown selection strategy")
 	})
 }
 
@@ -1876,7 +1877,7 @@ func TestValidate_NamedSelections(t *testing.T) {
 							"offering": {
 								From:     "searchFlights.catalogOfferings",
 								Strategy: "llm",
-								// Missing prompt for llm strategy
+								// llm is no longer a valid strategy
 							},
 						},
 						Values: map[string]StepValue{
@@ -1889,7 +1890,7 @@ func TestValidate_NamedSelections(t *testing.T) {
 		}
 		err := Validate(p, g)
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "llm strategy requires prompt")
+		assert.Contains(t, err.Error(), "unknown selection strategy")
 	})
 }
 

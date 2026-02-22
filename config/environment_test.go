@@ -27,10 +27,8 @@ func TestLoadEnvironment_Full(t *testing.T) {
 	assert.Equal(t, "testuser", env.Auth.Credentials["username"].Value)
 	assert.Equal(t, "https://llm.example.com/v1", env.LLM.Endpoint)
 	assert.Equal(t, "gpt-4", env.LLM.Model)
-	assert.Equal(t, ModeAdaptive, env.LLM.Mode)
 	assert.Equal(t, 5*time.Minute, env.Settings.MaxRunDuration.Duration)
 	assert.Equal(t, 3, env.Settings.DefaultRetries)
-	assert.Equal(t, 5, env.Settings.MaxRelaxationDepth)
 	assert.Equal(t, ArchiveJSONGZ, env.Settings.ArchiveFormat)
 	assert.Equal(t, "Full test environment with all fields populated.", env.Notes)
 }
@@ -44,10 +42,8 @@ func TestLoadEnvironment_Minimal(t *testing.T) {
 	assert.Equal(t, "none", env.Auth.Type)
 
 	// Verify defaults applied
-	assert.Equal(t, ModeLean, env.LLM.Mode)
 	assert.Equal(t, 120*time.Second, env.Settings.MaxRunDuration.Duration)
 	assert.Equal(t, 2, env.Settings.DefaultRetries)
-	assert.Equal(t, 3, env.Settings.MaxRelaxationDepth)
 	assert.Equal(t, ArchiveJSON, env.Settings.ArchiveFormat)
 }
 
@@ -100,7 +96,7 @@ func TestValidateEnvironment_InvalidAuthType(t *testing.T) {
 		Name:       "test",
 		APIBaseURL: "https://api.example.com",
 		Auth:       AuthConfig{Type: "magic"},
-		LLM:        LLMConfig{Mode: ModeLean},
+		LLM:        LLMConfig{},
 		Settings:   RuntimeSettings{ArchiveFormat: ArchiveJSON},
 	}
 	err := ValidateEnvironment(env)
@@ -123,7 +119,7 @@ func TestValidateEnvironment_OAuth2MissingCredentials(t *testing.T) {
 			TokenURL: "https://auth.example.com/token",
 			// no credentials
 		},
-		LLM:      LLMConfig{Mode: ModeLean},
+		LLM:      LLMConfig{},
 		Settings: RuntimeSettings{ArchiveFormat: ArchiveJSON},
 	}
 	err := ValidateEnvironment(env)
@@ -139,7 +135,7 @@ func TestValidateEnvironment_APIKeyMissingKey(t *testing.T) {
 		Name:       "test",
 		APIBaseURL: "https://api.example.com",
 		Auth:       AuthConfig{Type: "apikey", HeaderName: "X-Api-Key"},
-		LLM:        LLMConfig{Mode: ModeLean},
+		LLM:        LLMConfig{},
 		Settings:   RuntimeSettings{ArchiveFormat: ArchiveJSON},
 	}
 	err := ValidateEnvironment(env)
@@ -155,7 +151,7 @@ func TestValidateEnvironment_APIKeyMissingHeaderName(t *testing.T) {
 			Type:        "apikey",
 			Credentials: map[string]SecretRef{"key": {Source: "literal", Value: "abc"}},
 		},
-		LLM:      LLMConfig{Mode: ModeLean},
+		LLM:      LLMConfig{},
 		Settings: RuntimeSettings{ArchiveFormat: ArchiveJSON},
 	}
 	err := ValidateEnvironment(env)
@@ -163,18 +159,12 @@ func TestValidateEnvironment_APIKeyMissingHeaderName(t *testing.T) {
 	assert.Contains(t, err.Error(), "auth.headerName is required")
 }
 
-func TestValidateEnvironment_InvalidMode(t *testing.T) {
-	_, err := LoadEnvironment("testdata/environments/invalid/bad_mode.yaml")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "unknown llm.mode")
-}
-
 func TestValidateEnvironment_InvalidArchiveFormat(t *testing.T) {
 	env := &Environment{
 		Name:       "test",
 		APIBaseURL: "https://api.example.com",
 		Auth:       AuthConfig{Type: "none"},
-		LLM:        LLMConfig{Mode: ModeLean},
+		LLM:        LLMConfig{},
 		Settings:   RuntimeSettings{ArchiveFormat: "xml"},
 	}
 	err := ValidateEnvironment(env)

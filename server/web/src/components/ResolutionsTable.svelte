@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { ResolutionDetail } from '../lib/types';
   import { navigate } from '../lib/router';
-  import LlmCallPanel from './LlmCallPanel.svelte';
 
   interface Props {
     resolutions: ResolutionDetail[];
@@ -23,8 +22,6 @@
         return 'badge-primary';
       case 'pool':
         return 'badge-warning';
-      case 'llm':
-        return 'badge-purple';
       default:
         return 'badge-muted';
     }
@@ -66,9 +63,6 @@
         <td class="dt-mono" style="font-weight: 600;">{r.inputName}</td>
         <td>
           <span class="badge badge-sm {sourceBadgeClass(r.source)}">{r.source}</span>
-          {#if r.relaxed}
-            <span class="badge badge-sm badge-warning" style="margin-left: 0.25rem;">relaxed</span>
-          {/if}
         </td>
         <td class="dt-mono">{formatValue(r.finalValue ?? r.rawValue)}</td>
         <td class="dt-mono dt-muted">
@@ -85,21 +79,11 @@
           {#if r.constraint}
             <span class="dt-mono">{r.constraint}</span>
           {/if}
-          {#if r.relaxedConstraint}
-            <span class="dt-mono" style="color: var(--color-warning);"> (relaxed: {r.relaxedConstraint})</span>
-          {/if}
           {#if r.poolSize}
             pool {(r.poolIndex ?? 0) + 1}/{r.poolSize}
           {/if}
         </td>
       </tr>
-      {#if r.llmCall}
-        <tr>
-          <td colspan="6" style="padding: 0.5rem 0.65rem;">
-            <LlmCallPanel call={r.llmCall} collapsible />
-          </td>
-        </tr>
-      {/if}
     {/each}
   </tbody>
 </table>

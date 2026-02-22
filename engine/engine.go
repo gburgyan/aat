@@ -8,10 +8,8 @@ import (
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
-	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
-	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 )
@@ -28,19 +26,8 @@ type Engine struct {
 	// is set to Failed but subsequent steps still execute.
 	ContinueOnAssertionFailure bool
 
-	// Mode controls LLM involvement: strict (never), lean (after pool exhausted),
-	// adaptive (lean + step-level soft constraint relaxation on 4xx). Empty defaults to strict.
-	Mode config.ExecutionMode
-
-	// KB is the optional domain knowledge base for LLM-assisted value selection.
+	// KB is the optional domain knowledge base (used for prompt context, not execution).
 	KB *domain.KnowledgeBase
-
-	// LLMClient is the optional LLM client for value selection calls.
-	LLMClient llm.Client
-
-	// MaxRelaxationDepth limits the number of soft constraints that can be
-	// relaxed per step. Zero means use the default (3).
-	MaxRelaxationDepth int
 
 	// Observer receives real-time progress events during execution.
 	// Nil means no notifications (zero overhead).
@@ -60,27 +47,9 @@ func NewEngine(g *graph.Graph, registry *adapter.Registry, router *ExecutorRoute
 	}
 }
 
-// WithMode sets the execution mode and returns the engine for chaining.
-func (e *Engine) WithMode(mode config.ExecutionMode) *Engine {
-	e.Mode = mode
-	return e
-}
-
 // WithDomain sets the domain knowledge base and returns the engine for chaining.
 func (e *Engine) WithDomain(kb *domain.KnowledgeBase) *Engine {
 	e.KB = kb
-	return e
-}
-
-// WithLLM sets the LLM client and returns the engine for chaining.
-func (e *Engine) WithLLM(client llm.Client) *Engine {
-	e.LLMClient = client
-	return e
-}
-
-// WithMaxRelaxationDepth sets the per-step relaxation budget and returns the engine for chaining.
-func (e *Engine) WithMaxRelaxationDepth(n int) *Engine {
-	e.MaxRelaxationDepth = n
 	return e
 }
 
@@ -135,7 +104,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	total := len(sorted)
 
 	if e.Observer != nil {
-		e.Observer.OnRunStart(total, string(e.effectiveMode()))
+		e.Observer.OnRunStart(total, "strict")
 	}
 
 	for i, step := range sorted {
@@ -166,13 +135,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			e.Observer.OnStepStart(i, total, step)
 		}
 
-		var stepResult StepResult
-		if e.effectiveMode() == config.ModeAdaptive {
-			stepResult = e.executeStepAdaptive(ctx, step, node, state)
-		} else {
-			tracker := NewRelaxationTracker(e.maxRelaxationDepth())
-			stepResult = e.executeStepWithTracking(ctx, step, node, state, tracker)
-		}
+		stepResult := e.executeStepWithTracking(ctx, step, node, state)
 		stepResults = append(stepResults, stepResult)
 
 		if e.Observer != nil {
@@ -324,12 +287,12 @@ func (e *Engine) executeCleanupWithNotifications(ctx context.Context, cleanupSta
 	return cleanupResults
 }
 
-func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, tracker *RelaxationTracker) StepResult {
+func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
 	start := time.Now()
 	sid := step.StepID()
 
 	// Construct ResolveContext from engine fields
-	rctx := e.buildResolveContext(node, tracker)
+	rctx := e.buildResolveContext(node)
 
 	// Resolve inputs
 	inputs, selections, resolutions, err := ResolveInputsWithContext(ctx, step, node, e.graph, state, rctx)
@@ -462,110 +425,15 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 // buildResolveContext creates a ResolveContext from the engine's configuration.
 // Always returns a non-nil context so that expression evaluation and constraint
 // checking are active.
-func (e *Engine) buildResolveContext(node *graph.Node, tracker *RelaxationTracker) *ResolveContext {
+func (e *Engine) buildResolveContext(node *graph.Node) *ResolveContext {
 	return &ResolveContext{
-		Mode:      e.effectiveMode(),
 		Now:       time.Now(),
 		EnvLookup: os.Getenv,
 		KB:        e.KB,
-		LLM:       e.LLMClient,
 		Node:      node,
 		Plan:      e.plan,
-		Tracker:   tracker,
 		Registry:  e.registry,
 	}
-}
-
-// maxRelaxationDepth returns the configured depth or the default of 3.
-func (e *Engine) maxRelaxationDepth() int {
-	if e.MaxRelaxationDepth > 0 {
-		return e.MaxRelaxationDepth
-	}
-	return 3
-}
-
-// executeStepAdaptive wraps executeStepWithRetry with step-level relaxation.
-// When a step fails with CategoryClient, it finds the first unrelaxed soft
-// constraint, relaxes it, and retries. ExpectFailure steps skip relaxation.
-func (e *Engine) executeStepAdaptive(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
-	tracker := NewRelaxationTracker(e.maxRelaxationDepth())
-
-	// ExpectFailure steps should not be relaxed
-	if step.ExpectFailure != nil {
-		return e.executeStepWithTracking(ctx, step, node, state, tracker)
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return StepResult{
-				Node:        step.Node,
-				Error:       fmt.Errorf("adaptive retry cancelled: %w", ctx.Err()),
-				Relaxations: tracker.Records(),
-			}
-		default:
-		}
-
-		result := e.executeStepWithRetry(ctx, step, node, state, tracker)
-
-		// Success or non-client error → done
-		cls := classifyStepResult(&result)
-		if cls == nil || cls.Category != CategoryClient {
-			result.Relaxations = tracker.Records()
-			return result
-		}
-
-		// Try to find and relax a soft constraint for one of this step's inputs
-		relaxed := false
-		if e.plan != nil && e.plan.Intent.Constraints != nil {
-			for _, sc := range e.plan.Intent.Constraints.Soft {
-				if tracker.IsRelaxed(sc.Name) {
-					continue
-				}
-				if err := tracker.CanRelax(sc.Name); err != nil {
-					continue
-				}
-				// Check if this constraint applies to this step
-				for _, ref := range sc.AppliesTo {
-					nodeRef, _, _ := splitAppliesTo(ref)
-					if nodeRef == step.Node {
-						tracker.Relax(sc.Name, ref, "step_failed")
-						relaxed = true
-						break
-					}
-				}
-				if relaxed {
-					break
-				}
-			}
-		}
-
-		if !relaxed {
-			// No more relaxable constraints — return failure
-			result.Relaxations = tracker.Records()
-			return result
-		}
-		// Loop back to retry with relaxed constraint
-	}
-}
-
-// splitAppliesTo splits an AppliesTo reference like "node.input" into
-// (node, input, true) or ("node", "", false) if there's no dot.
-func splitAppliesTo(ref string) (string, string, bool) {
-	for i, c := range ref {
-		if c == '.' {
-			return ref[:i], ref[i+1:], true
-		}
-	}
-	return ref, "", false
-}
-
-// effectiveMode returns the engine's execution mode, defaulting to strict.
-func (e *Engine) effectiveMode() config.ExecutionMode {
-	if e.Mode == "" {
-		return config.ModeStrict
-	}
-	return e.Mode
 }
 
 // convertAssertions bridges plan.MechanicalAssertion to validate.MechanicalAssertion.

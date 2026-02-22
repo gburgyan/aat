@@ -1,8 +1,0 @@
-environment: badmode
-apiBaseUrl: https://api.example.com
-
-auth:
-  type: none
-
-llm:
-  mode: turbo

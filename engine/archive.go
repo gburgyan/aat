@@ -67,9 +67,6 @@ func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) ar
 	if len(s.Resolutions) > 0 {
 		rec.Resolutions = convertResolutions(s.Resolutions, secrets)
 	}
-	if len(s.Relaxations) > 0 {
-		rec.Relaxations = convertRelaxations(s.Relaxations)
-	}
 	if s.ErrorClass != nil {
 		rec.ErrorClass = convertErrorClass(s.ErrorClass)
 	}
@@ -140,7 +137,7 @@ func convertValidation(v *validate.MechanicalResult) *archive.ValidationRecord {
 func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
 	records := make([]archive.SelectionRecord, len(sels))
 	for i, s := range sels {
-		rec := archive.SelectionRecord{
+		records[i] = archive.SelectionRecord{
 			InputName:     s.InputName,
 			SourceNode:    s.SourceNode,
 			SourceField:   s.SourceField,
@@ -150,24 +147,6 @@ func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
 			Strategy:      s.Strategy,
 			SelectedIndex: s.SelectedIndex,
 			SelectionName: s.SelectionName,
-			FilterRelaxed: s.FilterRelaxed,
-		}
-		if s.LLMCall != nil {
-			rec.LLMCall = convertLLMCall(s.LLMCall)
-		}
-		records[i] = rec
-	}
-	return records
-}
-
-func convertRelaxations(relaxations []RelaxationRecord) []archive.RelaxationArchiveRecord {
-	records := make([]archive.RelaxationArchiveRecord, len(relaxations))
-	for i, r := range relaxations {
-		records[i] = archive.RelaxationArchiveRecord{
-			ConstraintName: r.ConstraintName,
-			InputRef:       r.InputRef,
-			Reason:         r.Reason,
-			Depth:          r.Depth,
 		}
 	}
 	return records
@@ -186,49 +165,25 @@ func convertResolutions(resolutions []ValueResolution, secrets map[string]bool) 
 	records := make([]archive.ValueResolutionRecord, len(resolutions))
 	for i, r := range resolutions {
 		rec := archive.ValueResolutionRecord{
-			InputName:         r.InputName,
-			Source:            r.Source,
-			RawValue:          archive.RedactValue(r.RawValue, secrets),
-			FinalValue:        archive.RedactValue(r.FinalValue, secrets),
-			FromStep:          r.FromStep,
-			FromOutput:        r.FromOutput,
-			Expression:        r.Expression,
-			Constraint:        r.Constraint,
-			PoolIndex:         r.PoolIndex,
-			PoolSize:          r.PoolSize,
-			Tried:             archive.RedactSlice(r.Tried, secrets),
-			Relaxed:           r.Relaxed,
-			RelaxedConstraint: r.RelaxedConstraint,
+			InputName:  r.InputName,
+			Source:     r.Source,
+			RawValue:   archive.RedactValue(r.RawValue, secrets),
+			FinalValue: archive.RedactValue(r.FinalValue, secrets),
+			FromStep:   r.FromStep,
+			FromOutput: r.FromOutput,
+			Expression: r.Expression,
+			Constraint: r.Constraint,
+			PoolIndex:  r.PoolIndex,
+			PoolSize:   r.PoolSize,
+			Tried:      archive.RedactSlice(r.Tried, secrets),
 		}
 		if r.Constraint != "" {
 			ok := r.ConstraintOK
 			rec.ConstraintOK = &ok
 		}
-		if r.LLMCall != nil {
-			rec.LLMCall = convertLLMCall(r.LLMCall)
-		}
 		records[i] = rec
 	}
 	return records
-}
-
-func convertLLMCall(call *LLMCallRecord) *archive.LLMCallRecord {
-	rec := &archive.LLMCallRecord{
-		Model:        call.Model,
-		Response:     call.Response,
-		InputTokens:  call.InputTokens,
-		OutputTokens: call.OutputTokens,
-		DurationMs:   call.DurationMs,
-		FinishReason: call.FinishReason,
-		Error:        call.Error,
-	}
-	for _, m := range call.Messages {
-		rec.Messages = append(rec.Messages, archive.LLMMessageRecord{
-			Role:    m.Role,
-			Content: m.Content,
-		})
-	}
-	return rec
 }
 
 // errString returns the error message or empty string for nil.

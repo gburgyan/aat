@@ -89,27 +89,6 @@ func TestHandleExecutePlan_PlanNotFound(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "loading plan")
 }
 
-func TestHandleExecutePlan_InvalidMode(t *testing.T) {
-	plansDir := t.TempDir()
-	g := twoNodeGraph()
-
-	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "test.yaml"), []byte(validPlanYAML()), 0o644))
-
-	ctx := &ServerContext{
-		Graph:       g,
-		Registry:    adapter.NewRegistry(),
-		Manifest:    &ProjectManifest{Name: "test"},
-		WorkflowsDir:    plansDir,
-		ArchiveDir:  t.TempDir(),
-		Environment: &config.Environment{Name: "test", Auth: config.AuthConfig{Type: "none"}},
-	}
-	srv := NewServer(ctx)
-
-	result := callTool(t, srv.handleExecutePlan, map[string]any{"name": "test", "mode": "turbo"})
-	assert.True(t, result.IsError)
-	assert.Contains(t, resultText(t, result), "invalid mode")
-}
-
 func TestHandleExecutePlan_InvalidPlan(t *testing.T) {
 	plansDir := t.TempDir()
 	g := twoNodeGraph()
@@ -155,10 +134,9 @@ func TestFormatExecutionSummary_PassedRun(t *testing.T) {
 		},
 	}
 
-	text := formatExecutionSummary(result, "run-test-001", config.ModeStrict)
+	text := formatExecutionSummary(result, "run-test-001")
 	assert.Contains(t, text, "passed")
 	assert.Contains(t, text, "run-test-001")
-	assert.Contains(t, text, "strict")
 	assert.Contains(t, text, "search")
 	assert.Contains(t, text, "book")
 	assert.Contains(t, text, "200")
@@ -181,10 +159,9 @@ func TestFormatExecutionSummary_FailedRun(t *testing.T) {
 		},
 	}
 
-	text := formatExecutionSummary(result, "run-test-002", config.ModeLean)
+	text := formatExecutionSummary(result, "run-test-002")
 	assert.Contains(t, text, "failed")
 	assert.Contains(t, text, "500")
-	assert.Contains(t, text, "lean")
 }
 
 func TestFormatExecutionSummary_WithCleanup(t *testing.T) {
@@ -198,7 +175,7 @@ func TestFormatExecutionSummary_WithCleanup(t *testing.T) {
 		},
 	}
 
-	text := formatExecutionSummary(result, "run-test-003", config.ModeStrict)
+	text := formatExecutionSummary(result, "run-test-003")
 	assert.Contains(t, text, "Cleanup")
 	assert.Contains(t, text, "cancelBooking")
 }
@@ -212,7 +189,7 @@ func TestFormatExecutionSummary_ErrorRun(t *testing.T) {
 		},
 	}
 
-	text := formatExecutionSummary(result, "run-test-004", config.ModeStrict)
+	text := formatExecutionSummary(result, "run-test-004")
 	assert.Contains(t, text, "error")
 	assert.Contains(t, text, "ERROR")
 }

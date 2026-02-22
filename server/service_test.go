@@ -601,7 +601,6 @@ func TestGetRun_StepSummary_HasFlags(t *testing.T) {
 
 	assert.True(t, run.Steps[0].HasSelections)
 	assert.True(t, run.Steps[0].HasResolutions)
-	assert.False(t, run.Steps[0].HasLLMCalls)
 }
 
 func TestGetRun_CleanupSteps(t *testing.T) {
@@ -793,49 +792,6 @@ func TestGetStep_Resolutions(t *testing.T) {
 	assert.Equal(t, 5, res.PoolSize)
 }
 
-func TestGetStep_LLMCall(t *testing.T) {
-	dir := t.TempDir()
-
-	step := makeStep("node", 200, 100)
-	step.Resolutions = []archive.ValueResolutionRecord{
-		{
-			InputName: "origin",
-			Source:    "llm",
-			LLMCall: &archive.LLMCallRecord{
-				Messages: []archive.LLMMessageRecord{
-					{Role: "system", Content: "You are a travel expert"},
-					{Role: "user", Content: "Pick an airport"},
-				},
-				Model:        "gpt-4",
-				Response:     "JFK",
-				InputTokens:  50,
-				OutputTokens: 5,
-				DurationMs:   800,
-				FinishReason: "stop",
-			},
-		},
-	}
-
-	a := makeArchive("run-20260101-100000-aaaa0001", "passed", step)
-	writeArchive(t, dir, a)
-
-	svc := NewArchiveService(dir)
-	detail, err := svc.GetStep("run-20260101-100000-aaaa0001", "node")
-	require.NoError(t, err)
-
-	require.Len(t, detail.Resolutions, 1)
-	require.NotNil(t, detail.Resolutions[0].LLMCall)
-	llm := detail.Resolutions[0].LLMCall
-	assert.Equal(t, "gpt-4", llm.Model)
-	assert.Equal(t, "JFK", llm.Response)
-	assert.Equal(t, 50, llm.InputTokens)
-	assert.Equal(t, 5, llm.OutputTokens)
-	assert.Equal(t, int64(800), llm.DurationMs)
-	assert.Equal(t, "stop", llm.FinishReason)
-	require.Len(t, llm.Messages, 2)
-	assert.Equal(t, "system", llm.Messages[0].Role)
-	assert.Equal(t, "user", llm.Messages[1].Role)
-}
 
 func TestGetStep_ErrorClassification(t *testing.T) {
 	dir := t.TempDir()
@@ -1040,62 +996,6 @@ func TestFormatDuration(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.expected, func(t *testing.T) {
 			assert.Equal(t, tt.expected, formatDuration(tt.ms))
-		})
-	}
-}
-
-func TestHasLLMCalls(t *testing.T) {
-	tests := []struct {
-		name     string
-		step     archive.StepRecord
-		expected bool
-	}{
-		{
-			name:     "no selections or resolutions",
-			step:     archive.StepRecord{Node: "node"},
-			expected: false,
-		},
-		{
-			name: "selection without LLM",
-			step: archive.StepRecord{
-				Node:       "node",
-				Selections: []archive.SelectionRecord{{Strategy: "first"}},
-			},
-			expected: false,
-		},
-		{
-			name: "selection with LLM",
-			step: archive.StepRecord{
-				Node: "node",
-				Selections: []archive.SelectionRecord{
-					{Strategy: "llm", LLMCall: &archive.LLMCallRecord{Model: "gpt-4"}},
-				},
-			},
-			expected: true,
-		},
-		{
-			name: "resolution without LLM",
-			step: archive.StepRecord{
-				Node:        "node",
-				Resolutions: []archive.ValueResolutionRecord{{Source: "pool"}},
-			},
-			expected: false,
-		},
-		{
-			name: "resolution with LLM",
-			step: archive.StepRecord{
-				Node: "node",
-				Resolutions: []archive.ValueResolutionRecord{
-					{Source: "llm", LLMCall: &archive.LLMCallRecord{Model: "gpt-4"}},
-				},
-			},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, hasLLMCalls(tt.step))
 		})
 	}
 }

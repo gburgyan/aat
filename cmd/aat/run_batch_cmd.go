@@ -50,8 +50,8 @@ With an absolute path, treats it as a standalone plan directory.`,
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
 		envOverlay, _ := cmd.Flags().GetString("env-overlay")
-		mode, _ := cmd.Flags().GetString("mode")
 		parallel, _ := cmd.Flags().GetInt("parallel")
+		retries, _ := cmd.Flags().GetInt("retries")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -61,12 +61,12 @@ With an absolute path, treats it as a standalone plan directory.`,
 				GraphPath:     resolved.GraphPath,
 				TemplatesPath: resolved.TemplatesPath,
 				OutputDir:     outputDir,
-				Mode:          mode,
 				DomainPath:    resolved.DomainPath,
 				JSON:          jsonFlag,
 				Quiet:         quiet,
 				Overrides:     overrideFlags,
 				EnvOverlay:    envOverlay,
+				MaxRetries:    retries,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,
@@ -116,6 +116,7 @@ type BatchRunResult struct {
 	DurationMs  int64  `json:"duration_ms"`
 	Error       string `json:"error,omitempty"`
 	ArchivePath string `json:"archive_path,omitempty"`
+	Attempts    int    `json:"attempts,omitempty"` // total attempts (omitted if 1)
 }
 
 // BatchStats is the aggregate counts in the batch JSON summary.
@@ -169,13 +170,17 @@ func executeBatch(ba *batchArgs) int {
 
 	if ba.Quiet && res.summary != nil {
 		for _, r := range res.summary.Runs {
+			attemptSuffix := ""
+			if r.Attempts > 1 {
+				attemptSuffix = fmt.Sprintf(" (%d attempts)", r.Attempts)
+			}
 			switch r.Outcome {
 			case "passed":
-				fmt.Fprintf(os.Stdout, "%s: PASSED\n", r.PlanName)
+				fmt.Fprintf(os.Stdout, "%s: PASSED%s\n", r.PlanName, attemptSuffix)
 			case "failed":
-				fmt.Fprintf(os.Stdout, "%s: FAILED: %s\n", r.PlanName, r.Error)
+				fmt.Fprintf(os.Stdout, "%s: FAILED: %s%s\n", r.PlanName, r.Error, attemptSuffix)
 			case "error":
-				fmt.Fprintf(os.Stdout, "%s: ERROR: %s\n", r.PlanName, r.Error)
+				fmt.Fprintf(os.Stdout, "%s: ERROR: %s%s\n", r.PlanName, r.Error, attemptSuffix)
 			}
 		}
 		fmt.Fprintf(os.Stdout, "Batch: %d/%d PASSED",
@@ -358,7 +363,12 @@ func batchSequential(ctx context.Context, rctx *runContext, plans []config.PlanE
 			observer = NewBatchStreamObserver(out, planName)
 		}
 
-		res := loadAndRunPlan(ctx, rctx, entry.FullPath, batchDir, observer, noopLogf)
+		var res *runResult
+		if args.MaxRetries > 0 {
+			res = loadAndRunPlanWithRetries(ctx, rctx, entry.FullPath, batchDir, args.MaxRetries, observer, noopLogf)
+		} else {
+			res = loadAndRunPlan(ctx, rctx, entry.FullPath, batchDir, observer, noopLogf)
+		}
 
 		br, be := buildPlanResult(planName, res)
 		runs = append(runs, br)
@@ -423,7 +433,13 @@ func batchParallel(ctx context.Context, rctx *runContext, plans []config.PlanEnt
 				observer = NewParallelProgressObserver(state, renderer)
 			}
 
-			res := loadAndRunPlan(gctx, rctx, entry.FullPath, batchDir, observer, noopLogf)
+			var res *runResult
+			if args.MaxRetries > 0 {
+				res = loadAndRunPlanWithRetries(gctx, rctx, entry.FullPath, batchDir, args.MaxRetries, observer, noopLogf)
+			} else {
+				res = loadAndRunPlan(gctx, rctx, entry.FullPath, batchDir, observer, noopLogf)
+			}
+
 			if res != nil {
 				results[i] = *res
 			}
@@ -504,6 +520,12 @@ func buildPlanResult(planName string, res *runResult) (BatchRunResult, archive.B
 	// Extract run ID from archive path for batch entry
 	if res.archivePath != "" {
 		be.RunID = filepath.Base(filepath.Dir(res.archivePath))
+	}
+
+	// Annotate with attempt count if retries occurred
+	if res.attempts > 1 {
+		br.Attempts = res.attempts
+		be.Attempts = res.attempts
 	}
 
 	return br, be

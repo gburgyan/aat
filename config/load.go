@@ -76,17 +76,11 @@ func MergeOverrides(base, overlay []HostOverride) []HostOverride {
 }
 
 func applyDefaults(env *Environment) {
-	if env.LLM.Mode == "" {
-		env.LLM.Mode = ModeLean
-	}
 	if env.Settings.MaxRunDuration.Duration == 0 {
 		env.Settings.MaxRunDuration.Duration = 120 * time.Second
 	}
 	if env.Settings.DefaultRetries == 0 {
 		env.Settings.DefaultRetries = 2
-	}
-	if env.Settings.MaxRelaxationDepth == 0 {
-		env.Settings.MaxRelaxationDepth = 3
 	}
 	if env.Settings.ArchiveFormat == "" {
 		env.Settings.ArchiveFormat = ArchiveJSON
@@ -105,7 +99,6 @@ func ValidateEnvironment(env *Environment) error {
 	}
 
 	errs = append(errs, ValidateAuth(&env.Auth)...)
-	errs = append(errs, validateLLM(&env.LLM)...)
 	errs = append(errs, validateSettings(&env.Settings)...)
 	errs = append(errs, validateOverrides(env.Overrides)...)
 
@@ -144,21 +137,6 @@ func ValidateAuth(auth *AuthConfig) []string {
 		// no requirements
 	default:
 		errs = append(errs, fmt.Sprintf("unknown auth type %q (expected oauth2, apikey, bearer, or none)", auth.Type))
-	}
-
-	return errs
-}
-
-func validateLLM(llm *LLMConfig) []string {
-	var errs []string
-
-	if llm.Mode != "" {
-		switch llm.Mode {
-		case ModeStrict, ModeLean, ModeAdaptive:
-			// valid
-		default:
-			errs = append(errs, fmt.Sprintf("unknown llm.mode %q (expected strict, lean, or adaptive)", llm.Mode))
-		}
 	}
 
 	return errs

@@ -48,8 +48,8 @@ func TestTravelportTemplates_AllValidate(t *testing.T) {
 		})
 	}
 
-	// 24 non-booking + 10 slot-based (Booking base + 8 trip-search slots + 1 payment slot).
-	assert.Equal(t, 34, templatedWorkflows, "expected 34 workflows with templates")
+	// 25 non-booking + 10 slot-based (Booking base + 8 trip-search slots + 1 payment slot).
+	assert.Equal(t, 35, templatedWorkflows, "expected 35 workflows with templates")
 }
 
 // TestTravelportTemplates_UnfedInputs verifies the unfed inputs for each

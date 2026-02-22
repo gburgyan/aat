@@ -831,7 +831,7 @@ func TestResolveInputsWithContext_ExpressionInDefault(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-02-13", inputs["departureDate"])
@@ -858,7 +858,7 @@ func TestResolveInputsWithContext_ExpressionTodayBare(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-02-08", inputs["date"])
@@ -888,7 +888,7 @@ func TestResolveInputsWithContext_ConstraintPasses(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, 2, inputs["passengers"])
@@ -920,7 +920,7 @@ func TestResolveInputsWithContext_ConstraintFails_Pool(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "DEN", inputs["origin"]) // first pool value that passes
@@ -952,7 +952,7 @@ func TestResolveInputsWithContext_PoolSequential(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "GOOD", inputs["code"]) // first pool value that passes
@@ -983,7 +983,7 @@ func TestResolveInputsWithContext_PoolRandom(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 
 	// Run multiple times and verify we get a result from the pool
 	seen := make(map[any]bool)
@@ -1021,7 +1021,7 @@ func TestResolveInputsWithContext_AllPoolFail(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed constraint")
@@ -1051,7 +1051,7 @@ func TestResolveInputsWithContext_ExpressionInPool(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-02-13", inputs["date"]) // first pool value
@@ -1128,7 +1128,7 @@ func TestResolveInputsWithContext_MixedInputs(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "sess-123", inputs["sessionId"])       // from plan From ref
@@ -1161,7 +1161,7 @@ func TestResolveInputsWithContext_ReferenceEarlierInput(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "2026-02-13", inputs["departureDate"])
@@ -1192,7 +1192,7 @@ func TestResolveInputsWithContext_ConstraintFailsNoPool(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed constraint")
@@ -1221,7 +1221,6 @@ func TestResolveInputsWithContext_EnvExpression(t *testing.T) {
 
 	rctx := &ResolveContext{
 		Now:       fixedNow(),
-		Mode:      "strict",
 		EnvLookup: func(key string) string {
 			if key == "TEST_KEY" {
 				return "secret-123"
@@ -1259,7 +1258,7 @@ func TestResolveInputsWithContext_NoDefaultOnlyPool(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "DEN", inputs["code"]) // first pool value
@@ -1384,7 +1383,7 @@ func TestResolution_ExpressionSource(t *testing.T) {
 		Values: map[string]plan.StepValue{"date": {Default: "{{today + 5 days}}"}},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	require.Len(t, resolutions, 1)
@@ -1418,7 +1417,7 @@ func TestResolution_Pool(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	_, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	require.Len(t, resolutions, 1)
@@ -1779,44 +1778,6 @@ func TestResolveElementFieldPath_Unit(t *testing.T) {
 	assert.Equal(t, "offeringId", resolveElementFieldPath(noReg, g, "source", "unknown", "offeringId"))
 }
 
-func TestResolution_LLMFallback(t *testing.T) {
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name:   "target",
-				Inputs: []graph.Input{{Name: "origin", Type: "string"}},
-			},
-		},
-	}
-
-	stub := &stubLLMClient{responses: []string{"DEN"}}
-	state := NewRunState()
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default:      "BAD",
-				Constraint:   "value == 'DEN' || value == 'LAX'",
-				Pool: []any{"ALSO_BAD"},
-			},
-		},
-	}
-
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "lean", LLM: stub}
-	inputs, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
-	require.NoError(t, err)
-	assert.Equal(t, "DEN", inputs["origin"])
-	require.Len(t, resolutions, 1)
-	r := resolutions[0]
-	assert.Equal(t, "llm", r.Source)
-	assert.Equal(t, "DEN", r.FinalValue)
-	require.NotNil(t, r.LLMCall)
-	assert.Equal(t, "DEN", r.LLMCall.Response)
-	assert.Len(t, r.LLMCall.Messages, 2)
-	assert.Len(t, r.Tried, 2) // "BAD" and "ALSO_BAD"
-}
-
 // --- Named Selection tests ---
 
 func TestResolveInputs_NamedSelection_FirstStrategy(t *testing.T) {
@@ -2065,558 +2026,6 @@ func TestResolveInputs_NamedSelection_FieldNotFound(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found in element")
 }
 
-func TestResolveInputs_LLMDedup_OldStyle(t *testing.T) {
-	// Two inputs with strategy:llm, same source and prompt, different fields.
-	// Should make only ONE LLM call.
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"source": {
-				Name: "source",
-				Outputs: []graph.Output{
-					{
-						Name: "items",
-						Type: "item[]",
-						ElementFields: []graph.Field{
-							{Name: "itemId", Type: "string", Path: "id"},
-							{Name: "itemName", Type: "string", Path: "name"},
-						},
-					},
-				},
-			},
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "selectedId", Type: "string"},
-					{Name: "selectedName", Type: "string"},
-				},
-			},
-		},
-	}
-
-	stub := &stubLLMClient{responses: []string{"0"}} // only one response needed
-
-	state := NewRunState()
-	state.StoreOutputs("source", map[string]any{
-		"items": []any{
-			map[string]any{"id": "id-1", "name": "first"},
-			map[string]any{"id": "id-2", "name": "second"},
-		},
-	})
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"selectedId": {
-				From: "source.items",
-				Select: &plan.SelectionConfig{
-					Strategy: "llm",
-					Field:    "itemId",
-					Prompt:   "pick the best item",
-				},
-			},
-			"selectedName": {
-				From: "source.items",
-				Select: &plan.SelectionConfig{
-					Strategy: "llm",
-					Field:    "itemName",
-					Prompt:   "pick the best item",
-				},
-			},
-		},
-	}
-
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "lean", LLM: stub}
-	inputs, _, _, err := ResolveInputsWithContext(
-		context.Background(), step, g.Nodes["target"], g, state, rctx,
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "id-1", inputs["selectedId"])
-	assert.Equal(t, "first", inputs["selectedName"])
-
-	// Only one LLM call should have been made
-	assert.Equal(t, 1, stub.calls, "expected exactly one LLM call due to dedup")
-}
-
-// --- Resolution-time relaxation tests (Task 20b) ---
-
-func buildRelaxationPlan(softConstraintName, appliesTo, constraintExpr string) *plan.Plan {
-	return &plan.Plan{
-		Intent: plan.Intent{
-			Constraints: &plan.Constraints{
-				Soft: []plan.Constraint{
-					{
-						Type:      "preference",
-						Name:      softConstraintName,
-						AppliesTo: []string{appliesTo},
-					},
-				},
-			},
-		},
-	}
-}
-
-func TestResolveWithFallback_SoftConstraintRelaxation(t *testing.T) {
-	// Default value "DEN" fails constraint "value == 'LAX'", but since it's
-	// a soft constraint, relaxation should accept "DEN" as the result.
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "origin", Type: "string"},
-				},
-			},
-		},
-	}
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default:    "DEN",
-				Constraint: "value == 'LAX'",
-			},
-		},
-	}
-
-	p := buildRelaxationPlan("airport_pref", "target.origin", "value == 'LAX'")
-	tracker := NewRelaxationTracker(3)
-
-	rctx := &ResolveContext{
-		Now:     fixedNow(),
-		Mode:    "strict",
-		Node:    g.Nodes["target"],
-		Plan:    p,
-		Tracker: tracker,
-	}
-
-	ectx := plan.ExprContext{
-		Now:    rctx.Now,
-		Values: make(map[string]any),
-	}
-
-	val, _, res, err := resolveWithFallback(
-		context.Background(),
-		step.Values["origin"],
-		g.Nodes["target"].Inputs[0],
-		ectx,
-		map[string]any{},
-		rctx,
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "DEN", val)
-	require.NotNil(t, res)
-	assert.True(t, res.Relaxed)
-	assert.Equal(t, "airport_pref", res.RelaxedConstraint)
-	assert.Equal(t, "plan_default", res.Source)
-
-	// Tracker should record the relaxation
-	assert.Equal(t, 1, tracker.Depth())
-	records := tracker.Records()
-	require.Len(t, records, 1)
-	assert.Equal(t, "airport_pref", records[0].ConstraintName)
-	assert.Equal(t, "target.origin", records[0].InputRef)
-	assert.Equal(t, "resolution_exhausted", records[0].Reason)
-}
-
-func TestResolveWithFallback_HardConstraintNoRelaxation(t *testing.T) {
-	// Hard constraints should NOT be relaxed
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "origin", Type: "string"},
-				},
-			},
-		},
-	}
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default:    "DEN",
-				Constraint: "value == 'LAX'",
-			},
-		},
-	}
-
-	// Only hard constraint, no soft
-	p := &plan.Plan{
-		Intent: plan.Intent{
-			Constraints: &plan.Constraints{
-				Hard: []plan.Constraint{
-					{
-						Type:      "exact_airport",
-						Name:      "airport_req",
-						AppliesTo: []string{"target.origin"},
-					},
-				},
-			},
-		},
-	}
-
-	tracker := NewRelaxationTracker(3)
-	rctx := &ResolveContext{
-		Now:     fixedNow(),
-		Mode:    "strict",
-		Node:    g.Nodes["target"],
-		Plan:    p,
-		Tracker: tracker,
-	}
-
-	ectx := plan.ExprContext{
-		Now:    rctx.Now,
-		Values: make(map[string]any),
-	}
-
-	_, _, _, err := resolveWithFallback(
-		context.Background(),
-		step.Values["origin"],
-		g.Nodes["target"].Inputs[0],
-		ectx,
-		map[string]any{},
-		rctx,
-	)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed constraint")
-	assert.Equal(t, 0, tracker.Depth())
-}
-
-func TestResolveWithFallback_BudgetExhausted(t *testing.T) {
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "origin", Type: "string"},
-				},
-			},
-		},
-	}
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default:    "DEN",
-				Constraint: "value == 'LAX'",
-			},
-		},
-	}
-
-	p := buildRelaxationPlan("airport_pref", "target.origin", "")
-	tracker := NewRelaxationTracker(1)
-
-	// Exhaust the budget
-	tracker.Relax("some_other", "ref", "reason")
-
-	rctx := &ResolveContext{
-		Now:     fixedNow(),
-		Mode:    "strict",
-		Node:    g.Nodes["target"],
-		Plan:    p,
-		Tracker: tracker,
-	}
-
-	ectx := plan.ExprContext{
-		Now:    rctx.Now,
-		Values: make(map[string]any),
-	}
-
-	_, _, _, err := resolveWithFallback(
-		context.Background(),
-		step.Values["origin"],
-		g.Nodes["target"].Inputs[0],
-		ectx,
-		map[string]any{},
-		rctx,
-	)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed constraint")
-}
-
-func TestResolveWithFallback_NilTrackerBackwardCompat(t *testing.T) {
-	// Without tracker, relaxation should not happen (backward compat)
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "origin", Type: "string"},
-				},
-			},
-		},
-	}
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default:    "DEN",
-				Constraint: "value == 'LAX'",
-			},
-		},
-	}
-
-	rctx := &ResolveContext{
-		Now:  fixedNow(),
-		Mode: "strict",
-		Node: g.Nodes["target"],
-		// Tracker and Plan are nil
-	}
-
-	ectx := plan.ExprContext{
-		Now:    rctx.Now,
-		Values: make(map[string]any),
-	}
-
-	_, _, _, err := resolveWithFallback(
-		context.Background(),
-		step.Values["origin"],
-		g.Nodes["target"].Inputs[0],
-		ectx,
-		map[string]any{},
-		rctx,
-	)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "failed constraint")
-}
-
-func TestResolveWithFallback_PoolExhausted_Relaxation(t *testing.T) {
-	// All pool values fail constraint, but soft constraint allows relaxation
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "origin", Type: "string"},
-				},
-			},
-		},
-	}
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default:      "DEN",
-				Pool: []any{"SFO", "JFK"},
-				Constraint:   "value == 'LAX'",
-			},
-		},
-	}
-
-	p := buildRelaxationPlan("airport_pref", "target.origin", "")
-	tracker := NewRelaxationTracker(3)
-
-	rctx := &ResolveContext{
-		Now:     fixedNow(),
-		Mode:    "strict",
-		Node:    g.Nodes["target"],
-		Plan:    p,
-		Tracker: tracker,
-	}
-
-	ectx := plan.ExprContext{
-		Now:    rctx.Now,
-		Values: make(map[string]any),
-	}
-
-	val, _, res, err := resolveWithFallback(
-		context.Background(),
-		step.Values["origin"],
-		g.Nodes["target"].Inputs[0],
-		ectx,
-		map[string]any{},
-		rctx,
-	)
-	require.NoError(t, err)
-	// Should get the first tried value (DEN)
-	assert.Equal(t, "DEN", val)
-	require.NotNil(t, res)
-	assert.True(t, res.Relaxed)
-	assert.Equal(t, "airport_pref", res.RelaxedConstraint)
-	assert.Len(t, res.Tried, 3) // DEN, SFO, JFK all tried
-}
-
-func TestResolveWithFallback_IsRelaxedPreCheck(t *testing.T) {
-	// When a constraint is already relaxed in the tracker,
-	// the constraint should be skipped entirely.
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "origin", Type: "string"},
-				},
-			},
-		},
-	}
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default:    "DEN",
-				Constraint: "value == 'LAX'", // would fail without relaxation
-			},
-		},
-	}
-
-	p := buildRelaxationPlan("airport_pref", "target.origin", "")
-	tracker := NewRelaxationTracker(3)
-	// Pre-relax the constraint (simulating step-level relaxation)
-	tracker.Relax("airport_pref", "target.origin", "step_failed")
-
-	rctx := &ResolveContext{
-		Now:     fixedNow(),
-		Mode:    "strict",
-		Node:    g.Nodes["target"],
-		Plan:    p,
-		Tracker: tracker,
-	}
-
-	ectx := plan.ExprContext{
-		Now:    rctx.Now,
-		Values: make(map[string]any),
-	}
-
-	val, _, res, err := resolveWithFallback(
-		context.Background(),
-		step.Values["origin"],
-		g.Nodes["target"].Inputs[0],
-		ectx,
-		map[string]any{},
-		rctx,
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "DEN", val)
-	require.NotNil(t, res)
-	assert.True(t, res.Relaxed) // marked as relaxed since constraint was skipped
-	assert.Equal(t, "plan_default", res.Source)
-	assert.True(t, res.ConstraintOK) // passes because constraint was effectively removed
-}
-
-func TestResolveWithFallback_CircularRelaxation(t *testing.T) {
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "origin", Type: "string"},
-				},
-			},
-		},
-	}
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default:    "DEN",
-				Constraint: "value == 'LAX'",
-			},
-		},
-	}
-
-	p := buildRelaxationPlan("airport_pref", "target.origin", "")
-	tracker := NewRelaxationTracker(5)
-	// Already relaxed this exact constraint
-	tracker.Relax("airport_pref", "target.origin", "resolution_exhausted")
-
-	rctx := &ResolveContext{
-		Now:     fixedNow(),
-		Mode:    "strict",
-		Node:    g.Nodes["target"],
-		Plan:    p,
-		Tracker: tracker,
-	}
-
-	ectx := plan.ExprContext{
-		Now:    rctx.Now,
-		Values: make(map[string]any),
-	}
-
-	// With IsRelaxed pre-check, DEN should pass (constraint skipped)
-	val, _, res, err := resolveWithFallback(
-		context.Background(),
-		step.Values["origin"],
-		g.Nodes["target"].Inputs[0],
-		ectx,
-		map[string]any{},
-		rctx,
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "DEN", val)
-	require.NotNil(t, res)
-	assert.True(t, res.Relaxed)
-}
-
-func TestResolveWithFallback_NoConstraint_NoRelaxation(t *testing.T) {
-	// Without a constraint expression, relaxation should not be attempted
-	g := &graph.Graph{
-		Version: "1.0.0",
-		Nodes: map[string]*graph.Node{
-			"target": {
-				Name: "target",
-				Inputs: []graph.Input{
-					{Name: "origin", Type: "string"},
-				},
-			},
-		},
-	}
-
-	step := plan.Step{
-		Node: "target",
-		Values: map[string]plan.StepValue{
-			"origin": {
-				Default: "DEN",
-				// No constraint
-			},
-		},
-	}
-
-	p := buildRelaxationPlan("airport_pref", "target.origin", "")
-	tracker := NewRelaxationTracker(3)
-
-	rctx := &ResolveContext{
-		Now:     fixedNow(),
-		Mode:    "strict",
-		Node:    g.Nodes["target"],
-		Plan:    p,
-		Tracker: tracker,
-	}
-
-	ectx := plan.ExprContext{
-		Now:    rctx.Now,
-		Values: make(map[string]any),
-	}
-
-	val, _, res, err := resolveWithFallback(
-		context.Background(),
-		step.Values["origin"],
-		g.Nodes["target"].Inputs[0],
-		ectx,
-		map[string]any{},
-		rctx,
-	)
-	require.NoError(t, err)
-	assert.Equal(t, "DEN", val)
-	require.NotNil(t, res)
-	assert.False(t, res.Relaxed)
-	assert.Equal(t, 0, tracker.Depth())
-}
-
 func TestResolveInputsWithContext_CancelledContext(t *testing.T) {
 	g := &graph.Graph{
 		Version: "1.0.0",
@@ -2676,7 +2085,7 @@ func TestResolveInputs_FromResolved_Basic(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "SFO", inputs["leg1Destination"])
@@ -2720,7 +2129,7 @@ func TestResolveInputs_FromResolved_WithConstraint(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.NoError(t, err)
 	assert.Equal(t, "SFO", inputs["leg1Destination"])
@@ -2751,7 +2160,7 @@ func TestResolveInputs_FromResolved_Unresolved(t *testing.T) {
 		},
 	}
 
-	rctx := &ResolveContext{Now: fixedNow(), Mode: "strict"}
+	rctx := &ResolveContext{Now: fixedNow()}
 	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "fromResolved references")

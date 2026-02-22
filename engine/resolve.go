@@ -10,27 +10,21 @@ import (
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
-	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
-	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 	"github.com/tidwall/gjson"
 )
 
 // ResolveContext provides optional context for enhanced value resolution,
-// including expression evaluation, constraint checking, fallback pools,
-// and LLM-assisted value selection.
+// including expression evaluation, constraint checking, and fallback pools.
 type ResolveContext struct {
-	Mode      config.ExecutionMode
 	Now       time.Time
 	EnvLookup func(string) string
-	KB        *domain.KnowledgeBase  // may be nil
-	LLM       llm.Client             // may be nil
+	KB        *domain.KnowledgeBase // may be nil
 	Node      *graph.Node
-	Plan      *plan.Plan             // for constraint classification (may be nil)
-	Tracker   *RelaxationTracker     // per-step relaxation tracker (may be nil)
-	Registry  *adapter.Registry      // may be nil; enables template-side elementField resolution
+	Plan      *plan.Plan            // for constraint classification (may be nil)
+	Registry  *adapter.Registry     // may be nil; enables template-side elementField resolution
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -125,14 +119,6 @@ func dedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
 	return fmt.Sprintf("%s|%s|%s|%s|%d", fromNode, fromField, sel.Strategy, sel.Filter, sel.Index)
 }
 
-// llmDedupKey builds a cache key for LLM selection deduplication.
-// It excludes Field (since Field is extraction, not selection) so that
-// two inputs selecting from the same source with the same prompt share
-// one LLM call.
-func llmDedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
-	return fmt.Sprintf("%s|%s|llm|%s|%s", fromNode, fromField, sel.Filter, sel.Prompt)
-}
-
 // namedSelectionEntry holds the result of resolving a named selection.
 type namedSelectionEntry struct {
 	element    any    // the full selected element
@@ -171,36 +157,20 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		Prompt:    sel.Prompt,
 	}
 
+	// Resolve elementField names in SortField
+	resolvedSel := resolveSelectionFields(selCfg, rctx, g, fromNode, fromField)
+
+	// Check dedup cache
 	var result *selectionResult
-	var llmRec *LLMCallRecord
-	var filterRelaxed bool
-
-	if strategy == "llm" {
-		result, llmRec, err = llmSelectElement(ctx, rctx, arr, selCfg, selName, g, fromNode, fromField)
-		if err != nil {
-			return nil, nil, fmt.Errorf("llm selection %q: %w", selName, err)
-		}
+	key := dedupKey(fromNode, fromField, selCfg)
+	if cached, ok := dedupCache[key]; ok {
+		result = cached
 	} else {
-		// Resolve elementField names in SortField
-		resolvedSel := resolveSelectionFields(selCfg, rctx, g, fromNode, fromField)
-
-		// Check dedup cache
-		key := dedupKey(fromNode, fromField, selCfg)
-		if cached, ok := dedupCache[key]; ok {
-			result = cached
-		} else {
-			result, err = applySelection(arr, resolvedSel)
-			if err != nil {
-				// Try filter relaxation
-				relaxedResult, wasRelaxed, relaxErr := tryRelaxFilter(rctx, step.Node, selName, arr, resolvedSel, err)
-				if relaxErr != nil || !wasRelaxed {
-					return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
-				}
-				result = relaxedResult
-				filterRelaxed = true
-			}
-			dedupCache[key] = result
+		result, err = applySelection(arr, resolvedSel)
+		if err != nil {
+			return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
 		}
+		dedupCache[key] = result
 	}
 
 	entry := &namedSelectionEntry{
@@ -221,9 +191,7 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		FilteredSize:  result.filteredSize,
 		Strategy:      strategy,
 		SelectedIndex: result.index,
-		LLMCall:       llmRec,
 		SelectionName: selName,
-		FilterRelaxed: filterRelaxed,
 	}
 	if sel.Filter != "" {
 		decision.FilterExpr = sel.Filter
@@ -424,56 +392,6 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 		return nil, nil, err
 	}
 
-	// LLM selection strategy — check dedup cache first
-	if sel != nil && sel.Strategy == "llm" {
-		llmKey := llmDedupKey(fromNode, fromField, sel)
-		if cached, ok := dedupCache[llmKey]; ok {
-			decision := &SelectionDecision{
-				InputName:     inputName,
-				SourceNode:    fromNode,
-				SourceField:   fromField,
-				SourceSize:    len(arr),
-				FilteredSize:  cached.filteredSize,
-				Strategy:      "llm",
-				SelectedIndex: cached.index,
-			}
-			if sel.Field != "" {
-				resolvedField := resolveElementFieldPath(rctx, g, fromNode, fromField, sel.Field)
-				val, exErr := extractField(cached.element, resolvedField)
-				if exErr != nil {
-					return nil, nil, exErr
-				}
-				return val, decision, nil
-			}
-			return cached.element, decision, nil
-		}
-
-		result, llmRec, llmErr := llmSelectElement(ctx, rctx, arr, sel, inputName, g, fromNode, fromField)
-		if llmErr != nil {
-			return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, llmErr)
-		}
-		dedupCache[llmKey] = result
-		decision := &SelectionDecision{
-			InputName:     inputName,
-			SourceNode:    fromNode,
-			SourceField:   fromField,
-			SourceSize:    len(arr),
-			FilteredSize:  result.filteredSize,
-			Strategy:      "llm",
-			SelectedIndex: result.index,
-			LLMCall:       llmRec,
-		}
-		if sel.Field != "" {
-			resolvedField := resolveElementFieldPath(rctx, g, fromNode, fromField, sel.Field)
-			val, exErr := extractField(result.element, resolvedField)
-			if exErr != nil {
-				return nil, nil, exErr
-			}
-			return val, decision, nil
-		}
-		return result.element, decision, nil
-	}
-
 	// Resolve elementField names to extraction keys for applySelection (min/max SortField)
 	resolvedSel := resolveSelectionFields(sel, rctx, g, fromNode, fromField)
 
@@ -482,22 +400,12 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 	cached, hasCached := dedupCache[key]
 
 	var result *selectionResult
-	var filterRelaxed bool
 	if hasCached {
 		result = cached
 	} else {
 		result, err = applySelection(arr, resolvedSel)
 		if err != nil {
-			stepNode := ""
-			if rctx != nil && rctx.Node != nil {
-				stepNode = rctx.Node.Name
-			}
-			relaxedResult, wasRelaxed, relaxErr := tryRelaxFilter(rctx, stepNode, inputName, arr, resolvedSel, err)
-			if relaxErr != nil || !wasRelaxed {
-				return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, err)
-			}
-			result = relaxedResult
-			filterRelaxed = true
+			return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, err)
 		}
 		dedupCache[key] = result
 	}
@@ -510,7 +418,6 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 		FilteredSize:  result.filteredSize,
 		Strategy:      strategyName(sel),
 		SelectedIndex: result.index,
-		FilterRelaxed: filterRelaxed,
 	}
 	if sel != nil && sel.Filter != "" {
 		decision.FilterExpr = sel.Filter
@@ -653,28 +560,12 @@ func checkConstraint(constraint string, candidate any, resolvedInputs map[string
 }
 
 // resolveWithFallback tries the StepValue default (with expression evaluation
-// and constraint checking), then iterates the pool. If all deterministic
-// values are exhausted and mode allows, delegates to the LLM. Returns the first
-// value that passes the constraint. PoolStrategy controls iteration order:
+// and constraint checking), then iterates the pool. Returns the first value
+// that passes the constraint. PoolStrategy controls iteration order:
 // nil/"random" = shuffled (default), "sequential" = in order.
-//
-// When a RelaxationTracker is present (via rctx), and all resolution paths are
-// exhausted, resolveWithFallback will attempt to relax the corresponding soft
-// constraint and accept the first tried value.
 func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Input, ectx plan.ExprContext, resolvedInputs map[string]any, rctx *ResolveContext) (any, *SelectionDecision, *ValueResolution, error) {
 	inputName := input.Name
-
-	// IsRelaxed pre-check: if this input's soft constraint is already relaxed
-	// (e.g. from step-level relaxation), skip constraint checking entirely.
-	constraintSkipped := false
 	effectiveConstraint := sv.Constraint
-	if effectiveConstraint != "" && rctx != nil && rctx.Tracker != nil && rctx.Plan != nil && rctx.Node != nil {
-		sc, found := FindSoftConstraintForInput(rctx.Plan, rctx.Node.Name, inputName)
-		if found && rctx.Tracker.IsRelaxed(sc.Name) {
-			effectiveConstraint = ""
-			constraintSkipped = true
-		}
-	}
 
 	var tried []any
 
@@ -702,9 +593,6 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 				ConstraintOK: true,
 				PoolIndex:    -1,
 				PoolSize:     len(sv.Pool),
-			}
-			if constraintSkipped {
-				res.Relaxed = true
 			}
 			if isExpression(sv.Default) {
 				if s, ok := sv.Default.(string); ok {
@@ -774,137 +662,16 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 			tried = append(tried, evaluated)
 		}
 
-		// All pool values failed — try LLM if mode allows
-		val, llmRec, err := llmSelectValue(ctx, rctx, input, sv, resolvedInputs)
-		if err == nil {
-			res := &ValueResolution{
-				InputName:    inputName,
-				Source:       "llm",
-				FinalValue:   val,
-				Constraint:   sv.Constraint,
-				ConstraintOK: true,
-				PoolIndex:    -1,
-				PoolSize:     len(sv.Pool),
-				Tried:        tried,
-				LLMCall:      llmRec,
-			}
-			return val, nil, res, nil
-		}
-
-		// All deterministic + LLM paths exhausted — try relaxation
-		if relaxedVal, res, ok := tryRelaxResolution(rctx, inputName, sv, tried); ok {
-			return relaxedVal, nil, res, nil
-		}
-
 		return nil, nil, nil, fmt.Errorf("all fallback pool values for %q failed constraint %q", inputName, sv.Constraint)
 	}
 
-	// No pool — try LLM if default failed constraint
+	// No pool — default existed but failed constraint
 	if sv.Default != nil {
-		// Default existed but failed constraint, try LLM
-		val, llmRec, err := llmSelectValue(ctx, rctx, input, sv, resolvedInputs)
-		if err == nil {
-			res := &ValueResolution{
-				InputName:    inputName,
-				Source:       "llm",
-				FinalValue:   val,
-				Constraint:   sv.Constraint,
-				ConstraintOK: true,
-				PoolIndex:    -1,
-				Tried:        tried,
-				LLMCall:      llmRec,
-			}
-			return val, nil, res, nil
-		}
-
-		// LLM also failed — try relaxation
-		if relaxedVal, res, ok := tryRelaxResolution(rctx, inputName, sv, tried); ok {
-			return relaxedVal, nil, res, nil
-		}
-
 		return nil, nil, nil, fmt.Errorf("default value for %q failed constraint %q and no fallback pool is configured", inputName, sv.Constraint)
 	}
 
 	// No default and no pool
 	return nil, nil, nil, fmt.Errorf("required input %q has no value", inputName)
-}
-
-// tryRelaxFilter attempts to relax a selection filter when the filter produces
-// zero matches. If relaxation is possible, it retries the selection without the
-// filter. Returns (result, decision, true) on success, or (nil, nil, false) if
-// relaxation isn't possible.
-func tryRelaxFilter(rctx *ResolveContext, stepNode, inputName string,
-	arr []any, sel *plan.SelectionConfig, origErr error) (*selectionResult, bool, error) {
-
-	if rctx == nil || rctx.Tracker == nil || rctx.Plan == nil {
-		return nil, false, origErr
-	}
-	if sel == nil || sel.Filter == "" {
-		return nil, false, origErr
-	}
-	if !strings.Contains(origErr.Error(), "matched no elements") {
-		return nil, false, origErr
-	}
-
-	sc, found := FindSoftConstraintForInput(rctx.Plan, stepNode, inputName)
-	if !found {
-		return nil, false, origErr
-	}
-	if err := rctx.Tracker.CanRelax(sc.Name); err != nil {
-		return nil, false, origErr
-	}
-
-	inputRef := stepNode + "." + inputName
-	rctx.Tracker.Relax(sc.Name, inputRef, "filter_empty")
-
-	// Retry without filter
-	relaxedSel := *sel
-	relaxedSel.Filter = ""
-	result, err := applySelection(arr, &relaxedSel)
-	if err != nil {
-		return nil, false, err
-	}
-	return result, true, nil
-}
-
-// tryRelaxResolution attempts to relax a soft constraint when all resolution
-// paths have been exhausted. Returns the first tried value and true if relaxation
-// succeeded, or (nil, nil, false) if relaxation is not possible.
-func tryRelaxResolution(rctx *ResolveContext, inputName string, sv plan.StepValue, tried []any) (any, *ValueResolution, bool) {
-	if rctx == nil || rctx.Tracker == nil || rctx.Plan == nil || rctx.Node == nil {
-		return nil, nil, false
-	}
-	if sv.Constraint == "" || len(tried) == 0 {
-		return nil, nil, false
-	}
-
-	sc, found := FindSoftConstraintForInput(rctx.Plan, rctx.Node.Name, inputName)
-	if !found {
-		return nil, nil, false
-	}
-
-	if err := rctx.Tracker.CanRelax(sc.Name); err != nil {
-		return nil, nil, false
-	}
-
-	inputRef := rctx.Node.Name + "." + inputName
-	rctx.Tracker.Relax(sc.Name, inputRef, "resolution_exhausted")
-
-	// Return the first tried value (it passed expression eval but failed constraint)
-	val := tried[0]
-	res := &ValueResolution{
-		InputName:         inputName,
-		Source:            "plan_default",
-		FinalValue:        val,
-		Constraint:        sv.Constraint,
-		ConstraintOK:      false,
-		PoolIndex:         -1,
-		PoolSize:          len(sv.Pool),
-		Tried:             tried,
-		Relaxed:           true,
-		RelaxedConstraint: sc.Name,
-	}
-	return val, res, true
 }
 
 // isExpression returns true if the value is a string containing {{...}} templates.

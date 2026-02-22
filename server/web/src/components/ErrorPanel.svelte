@@ -3,21 +3,18 @@
     ErrorClassDetail,
     ExpectFailureDetail,
     ResponseBodyErrorDetail,
-    RelaxationDetail,
   } from '../lib/types';
 
   interface Props {
     errorClassification?: ErrorClassDetail;
     expectFailure?: ExpectFailureDetail;
     responseBodyError?: ResponseBodyErrorDetail;
-    relaxations?: RelaxationDetail[];
   }
 
   let {
     errorClassification,
     expectFailure,
     responseBodyError,
-    relaxations,
   }: Props = $props();
 
   function categoryBadgeClass(cat: string): string {
@@ -98,31 +95,5 @@
         <span>{responseBodyError.category}</span>
       {/if}
     </div>
-  </div>
-{/if}
-
-{#if relaxations && relaxations.length > 0}
-  <div class="error-section">
-    <h4 class="error-section-title">Relaxations</h4>
-    <table class="detail-table">
-      <thead>
-        <tr>
-          <th>Constraint</th>
-          <th>Input Ref</th>
-          <th>Reason</th>
-          <th>Depth</th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each relaxations as r, i (i)}
-          <tr style="border-left: 3px solid var(--color-warning);">
-            <td class="dt-mono">{r.constraintName}</td>
-            <td class="dt-mono dt-muted">{r.inputRef}</td>
-            <td>{r.reason}</td>
-            <td>{r.depth}</td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
   </div>
 {/if}

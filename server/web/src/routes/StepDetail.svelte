@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { StepDetail, LLMCallDetail } from '../lib/types';
+  import type { StepDetail } from '../lib/types';
   import { fetchStep } from '../lib/api';
   import { navigate } from '../lib/router';
   import { formatDuration, httpStatusCategory } from '../lib/format';
@@ -12,7 +12,6 @@
   import SelectionsTable from '../components/SelectionsTable.svelte';
   import ExtractionsTable from '../components/ExtractionsTable.svelte';
   import YamlViewer from '../components/YamlViewer.svelte';
-  import LlmCallPanel from '../components/LlmCallPanel.svelte';
   import ErrorPanel from '../components/ErrorPanel.svelte';
 
   interface Props {
@@ -67,8 +66,6 @@
       t.push({ id: 'resolutions', label: `Resolutions (${step.resolutions.length})` });
     if (step.selections && step.selections.length > 0)
       t.push({ id: 'selections', label: `Selections (${step.selections.length})` });
-    if (llmCalls.length > 0)
-      t.push({ id: 'llm', label: `LLM (${llmCalls.length})` });
     if (hasErrors)
       t.push({ id: 'errors', label: 'Errors' });
     if (step.planStepYaml)
@@ -78,34 +75,8 @@
     return t;
   });
 
-  interface LLMCallContext {
-    context: string;
-    call: LLMCallDetail;
-  }
-
-  let llmCalls = $derived.by((): LLMCallContext[] => {
-    if (!step) return [];
-    const calls: LLMCallContext[] = [];
-    if (step.resolutions) {
-      for (const r of step.resolutions) {
-        if (r.llmCall) {
-          calls.push({ context: `Resolution: ${r.inputName}`, call: r.llmCall });
-        }
-      }
-    }
-    if (step.selections) {
-      for (const s of step.selections) {
-        if (s.llmCall) {
-          calls.push({ context: `Selection: ${s.inputName}`, call: s.llmCall });
-        }
-      }
-    }
-    return calls;
-  });
-
   let hasErrors = $derived(
-    !!(step?.errorClassification || step?.expectFailure || step?.responseBodyError ||
-      (step?.relaxations && step.relaxations.length > 0)),
+    !!(step?.errorClassification || step?.expectFailure || step?.responseBodyError),
   );
 
   // Set initial active tab when tabs change
@@ -217,12 +188,6 @@
           <span class="meta-value"><span class="step-retry-badge">{step.retryCount}</span></span>
         </div>
       {/if}
-      {#if step.hasLLMCalls}
-        <div class="step-detail-meta-item">
-          <span class="meta-label">LLM</span>
-          <span class="meta-value"><span class="step-llm-badge">LLM</span></span>
-        </div>
-      {/if}
     </div>
 
     {#if step.displayOutputs && step.displayOutputs.length > 0}
@@ -296,19 +261,11 @@
         <SelectionsTable selections={step.selections} {runId} />
       {/if}
 
-      {#if activeTab === 'llm'}
-        {#each llmCalls as lc, i (i)}
-          <h4 class="section-heading">{lc.context}</h4>
-          <LlmCallPanel call={lc.call} />
-        {/each}
-      {/if}
-
       {#if activeTab === 'errors'}
         <ErrorPanel
           errorClassification={step.errorClassification}
           expectFailure={step.expectFailure}
           responseBodyError={step.responseBodyError}
-          relaxations={step.relaxations}
         />
       {/if}
 

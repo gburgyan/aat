@@ -485,24 +485,15 @@ p {
   color: var(--color-text-muted);
 }
 
-.step-retry-badge,
-.step-llm-badge {
+.step-retry-badge {
   font-size: 0.7rem;
   font-weight: 600;
   padding: 0.1rem 0.35rem;
   border-radius: 4px;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-}
-
-.step-retry-badge {
   color: var(--color-warning);
   background: rgba(245, 158, 11, 0.12);
-}
-
-.step-llm-badge {
-  color: #818cf8;
-  background: rgba(99, 102, 241, 0.12);
 }
 
 .step-outputs {

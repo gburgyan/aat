@@ -24,12 +24,10 @@ llm:
     source: env
     var: LLM_API_KEY
   model: gpt-4
-  mode: adaptive
 
 settings:
   maxRunDuration: 5m
   defaultRetries: 3
-  maxRelaxationDepth: 5
   archiveFormat: json.gz
 
 notes: Full test environment with all fields populated.

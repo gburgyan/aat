@@ -12,7 +12,6 @@ import (
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/intent"
-	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -131,39 +130,9 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		}
 	}
 
-	// Determine execution mode
-	modeStr, _ := req.RequireString("mode")
-	effectiveMode := config.ExecutionMode(modeStr)
-	if effectiveMode == "" {
-		effectiveMode = s.ctx.Environment.LLM.Mode
-	}
-	if effectiveMode == "" {
-		effectiveMode = config.ModeStrict
-	}
-
-	// Validate mode
-	switch effectiveMode {
-	case config.ModeStrict, config.ModeLean, config.ModeAdaptive:
-		// valid
-	default:
-		return mcp.NewToolResultError(fmt.Sprintf("invalid mode %q — use strict, lean, or adaptive", effectiveMode)), nil
-	}
-
-	// Create LLM client if mode requires it
-	var llmClient llm.Client
-	if effectiveMode != config.ModeStrict && s.ctx.Environment.LLM.Endpoint != "" {
-		llmClient, err = llm.NewClient(s.ctx.Environment.LLM)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("creating LLM client: %v", err)), nil
-		}
-	}
-
 	// Build and run engine
 	eng := engine.NewEngine(s.ctx.Graph, s.ctx.Registry, router).
-		WithMode(effectiveMode).
-		WithDomain(s.ctx.KB).
-		WithLLM(llmClient).
-		WithMaxRelaxationDepth(s.ctx.Environment.Settings.MaxRelaxationDepth)
+		WithDomain(s.ctx.KB)
 
 	result := eng.Run(ctx, p)
 
@@ -191,18 +160,17 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	// Format summary
-	summary := formatExecutionSummary(result, runID, effectiveMode)
+	summary := formatExecutionSummary(result, runID)
 	return mcp.NewToolResultText(summary), nil
 }
 
 // formatExecutionSummary produces a Markdown summary of a plan execution.
-func formatExecutionSummary(result *engine.RunResult, runID string, mode config.ExecutionMode) string {
+func formatExecutionSummary(result *engine.RunResult, runID string) string {
 	var b strings.Builder
 
 	// Outcome header
 	fmt.Fprintf(&b, "## Execution: %s\n\n", result.Outcome.String())
 	fmt.Fprintf(&b, "- **Run ID:** %s\n", runID)
-	fmt.Fprintf(&b, "- **Mode:** %s\n", mode)
 	if result.Error != nil {
 		fmt.Fprintf(&b, "- **Error:** %s\n", result.Error)
 	}

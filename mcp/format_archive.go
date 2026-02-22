@@ -149,9 +149,6 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 			if sel.FilterExpr != "" {
 				fmt.Fprintf(&b, ", filter: `%s` → %d", sel.FilterExpr, sel.FilteredSize)
 			}
-			if sel.FilterRelaxed {
-				b.WriteString(", filter relaxed")
-			}
 			b.WriteString(")\n")
 		}
 		b.WriteString("\n")
@@ -175,20 +172,7 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 				}
 				fmt.Fprintf(&b, " constraint=`%s` (%s)", r.Constraint, ok)
 			}
-			if r.Relaxed {
-				fmt.Fprintf(&b, " **relaxed** (%s)", r.RelaxedConstraint)
-			}
 			b.WriteString("\n")
-		}
-		b.WriteString("\n")
-	}
-
-	// Relaxations
-	if len(s.Relaxations) > 0 {
-		b.WriteString("**Relaxations:**\n\n")
-		for _, r := range s.Relaxations {
-			fmt.Fprintf(&b, "- %s on %s: %s (depth %d)\n",
-				r.ConstraintName, r.InputRef, r.Reason, r.Depth)
 		}
 		b.WriteString("\n")
 	}
@@ -252,15 +236,6 @@ func formatFailureAnalysis(a *archive.Archive) string {
 				if !ar.Passed {
 					fmt.Fprintf(&b, "- %s: %s\n", ar.Type, ar.Message)
 				}
-			}
-			b.WriteString("\n")
-		}
-
-		// Relaxations
-		if len(fs.Relaxations) > 0 {
-			fmt.Fprintf(&b, "**Relaxations attempted:** %d\n", len(fs.Relaxations))
-			for _, r := range fs.Relaxations {
-				fmt.Fprintf(&b, "- %s on %s\n", r.ConstraintName, r.InputRef)
 			}
 			b.WriteString("\n")
 		}
