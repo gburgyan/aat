@@ -136,6 +136,7 @@ func traceToDetail(t *intent.PlanTrace) *TraceDetail {
 		TemplatePath:       t.TemplatePath,
 		Repetitions:        t.Repetitions,
 		TemplateExpandedYAML: planToYAML(t.TemplateExpanded),
+		RecipeYAML:           t.RecipeYAML,
 	}
 
 	if t.Skeleton != nil {

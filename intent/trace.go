@@ -43,6 +43,9 @@ type PlanTrace struct {
 	TemplatePath     string         `json:"templatePath,omitempty"`
 	Repetitions      map[string]int `json:"repetitions,omitempty"`
 	TemplateExpanded *plan.Plan     `json:"templateExpanded,omitempty"`
+
+	// Recipe YAML (compact representation of LLM decisions).
+	RecipeYAML string `json:"recipeYaml,omitempty"`
 }
 
 // LLMCallTrace captures a single LLM request/response pair.

@@ -31,7 +31,8 @@ type InterpretRequest struct {
 type InterpretResult struct {
 	Plan               *plan.Plan
 	WorkflowSelection  *WorkflowSelection
-	Trace              *PlanTrace // non-nil only when EnableTrace was true
+	TargetedResponse   *TargetedResponse  // Call 2 output; used for recipe save
+	Trace              *PlanTrace         // non-nil only when EnableTrace was true
 }
 
 // WorkflowSelection captures the output of the first LLM call: which workflow
@@ -162,6 +163,9 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		return traceErr(err)
 	}
 
+	// Keep the last successfully-parsed targeted response for recipe save.
+	lastTargeted := targeted
+
 	// --- Wrong Plan Escape (max 1 round-trip) ---
 	if targeted.WrongPlan != nil {
 		if trace != nil {
@@ -193,10 +197,12 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 
 		ws = reselSR.Selection
 
-		skeleton, _, err = buildAndFillPlan(ctx, req, ws, trace, now)
+		var targeted2 *TargetedResponse
+		skeleton, targeted2, err = buildAndFillPlan(ctx, req, ws, trace, now)
 		if err != nil {
 			return traceErr(err)
 		}
+		lastTargeted = targeted2
 		// Don't check wrongPlan on the second attempt — proceed with whatever we got.
 	}
 
@@ -230,11 +236,24 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	if trace != nil {
 		trace.FinalPlan = skeleton
 		trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
+		// Capture recipe YAML for trace viewer.
+		if ws != nil && lastTargeted != nil {
+			r := &plan.Recipe{
+				Kind:      "recipe",
+				Metadata:  skeleton.Metadata,
+				Selection: WorkflowSelectionToRecipeSelection(ws),
+				Overrides: TargetedResponseToRecipeOverrides(lastTargeted),
+			}
+			if data, err := plan.MarshalRecipe(r); err == nil {
+				trace.RecipeYAML = string(data)
+			}
+		}
 	}
 
 	return &InterpretResult{
 		Plan:              skeleton,
 		WorkflowSelection: ws,
+		TargetedResponse:  lastTargeted,
 		Trace:             trace,
 	}, nil
 }
@@ -500,11 +519,24 @@ func retryPlanGeneration(
 	if trace != nil {
 		trace.FinalPlan = retrySkeleton
 		trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
+		// Capture recipe YAML for trace viewer.
+		if ws != nil && targeted != nil {
+			r := &plan.Recipe{
+				Kind:      "recipe",
+				Metadata:  retrySkeleton.Metadata,
+				Selection: WorkflowSelectionToRecipeSelection(ws),
+				Overrides: TargetedResponseToRecipeOverrides(targeted),
+			}
+			if data, err := plan.MarshalRecipe(r); err == nil {
+				trace.RecipeYAML = string(data)
+			}
+		}
 	}
 
 	return &InterpretResult{
-		Plan:  retrySkeleton,
-		Trace: trace,
+		Plan:             retrySkeleton,
+		TargetedResponse: targeted,
+		Trace:            trace,
 	}
 }
 

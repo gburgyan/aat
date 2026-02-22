@@ -253,6 +253,7 @@ export interface TraceDetail {
   templatePath?: string;
   repetitions?: unknown;
   templateExpandedYaml?: string;
+  recipeYaml?: string;
 }
 
 export interface SkeletonDetail {

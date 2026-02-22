@@ -48,6 +48,7 @@ type TraceDetail struct {
 	TemplatePath         string `json:"templatePath,omitempty"`
 	Repetitions          any    `json:"repetitions,omitempty"`
 	TemplateExpandedYAML string `json:"templateExpandedYaml,omitempty"`
+	RecipeYAML           string `json:"recipeYaml,omitempty"`
 }
 
 // SkeletonDetail captures the skeleton plan construction step.

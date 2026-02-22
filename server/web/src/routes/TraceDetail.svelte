@@ -48,7 +48,7 @@
     t.push({ id: 'selection', label: 'Selection' });
     if (trace.skeleton) t.push({ id: 'skeleton', label: 'Skeleton' });
     t.push({ id: 'valuefill', label: 'Value Fill' });
-    if (trace.mergedPlanYaml || trace.finalPlanYaml || trace.templateExpandedYaml)
+    if (trace.mergedPlanYaml || trace.finalPlanYaml || trace.templateExpandedYaml || trace.recipeYaml)
       t.push({ id: 'plans', label: 'Plans' });
     if (trace.validationErr || trace.retryCall)
       t.push({ id: 'validation', label: 'Validation' });
@@ -217,6 +217,11 @@
         {#if trace.finalPlanYaml}
           <h4 class="section-heading">Final Plan</h4>
           <YamlViewer content={trace.finalPlanYaml} />
+        {/if}
+
+        {#if trace.recipeYaml}
+          <h4 class="section-heading">Recipe (Saved Format)</h4>
+          <YamlViewer content={trace.recipeYaml} />
         {/if}
       {/if}
 
