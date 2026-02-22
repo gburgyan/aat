@@ -395,7 +395,7 @@ func TestBuildTargetedPlanPrompt_PoolSeparateSection(t *testing.T) {
 	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
 
 	// Pool inputs should be under their own section, not "Inputs That Need Values".
-	assert.Contains(t, user, "## Pool Inputs — override when user specifies")
+	assert.Contains(t, user, "## Pool Inputs — DO NOT provide values unless the user specifies")
 	assert.Contains(t, user, "## Inputs That Need Values")
 	assert.Contains(t, user, "## Optional Configuration")
 
@@ -405,7 +405,7 @@ func TestBuildTargetedPlanPrompt_PoolSeparateSection(t *testing.T) {
 
 	// Verify section ordering: required inputs come before pool inputs
 	requiredIdx := strings.Index(user, "## Inputs That Need Values")
-	poolIdx := strings.Index(user, "## Pool Inputs")
+	poolIdx := strings.Index(user, "## Pool Inputs — DO NOT")
 	configIdx := strings.Index(user, "## Optional Configuration")
 	assert.Less(t, requiredIdx, poolIdx)
 	assert.Less(t, poolIdx, configIdx)
@@ -2078,4 +2078,41 @@ func TestBuildTargetedPlanPrompt_PoolValuesHidden(t *testing.T) {
 	// But Purpose and Validation should still appear.
 	assert.Contains(t, user, "Purpose: Departure airport code")
 	assert.Contains(t, user, "Validation: IATA airport/city code (pattern: ^[A-Z]{3}$)")
+}
+
+// --- Pool date hint conditioning ---
+
+func TestBuildTargetedPlanPrompt_PoolDateHintSoft(t *testing.T) {
+	inputContexts := []InputContext{
+		{StepID: "search", InputName: "departureDate", InputType: "date", IsDate: true, IsPoolInput: true, HasTemplatePool: true},
+		{StepID: "search", InputName: "returnDate", InputType: "date", IsDate: true},
+	}
+
+	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", "", time.Now())
+
+	// Pool date input should have softer hint.
+	assert.Contains(t, user, "Date field — if providing a value, use {{today + N days}} syntax")
+
+	// Non-pool date input should have the standard hint.
+	assert.Contains(t, user, "Date field — use {{today + N days}}")
+}
+
+// --- System prompt pool guidance ---
+
+func TestBuildTargetedPlanPrompt_SystemPromptPoolGuidance(t *testing.T) {
+	system, _ := buildTargetedPlanPrompt(nil, nil, "test", "", time.Now())
+
+	// System prompt should contain pool-specific guidance.
+	assert.Contains(t, system, "Pool Inputs")
+	assert.Contains(t, system, "OMIT the key entirely unless the user explicitly specifies")
+}
+
+// --- User's Prompt section rename ---
+
+func TestBuildTargetedPlanPrompt_UserPromptSection(t *testing.T) {
+	_, user := buildTargetedPlanPrompt(nil, nil, "book a flight from JFK", "", time.Now())
+
+	assert.Contains(t, user, "## User's Prompt")
+	assert.NotContains(t, user, "## User Intent")
+	assert.Contains(t, user, "book a flight from JFK")
 }

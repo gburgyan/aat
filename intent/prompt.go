@@ -68,7 +68,8 @@ Today's date is ` + dateStr + `. Default to dates at least 7 days in the future 
 
 ## Values
 
-For each input listed below, provide a LITERAL value (string, number, or date expression).
+For inputs in the "Inputs That Need Values" section, provide a LITERAL value (string, number, or date expression).
+For inputs in the "Pool Inputs" section, OMIT the key entirely unless the user explicitly specifies a value — pool inputs auto-select at runtime.
 - Pick from the sample values when provided
 - Hard constraints MUST be met; soft constraints SHOULD be met
 - For date fields, use {{today + N days}} syntax
@@ -149,12 +150,16 @@ Rules:
 		}
 	}
 
-	// Pool inputs — override when user specifies.
+	// Pool inputs — DO NOT provide values unless the user specifies.
 	if len(poolInputs) > 0 {
-		ub.WriteString("## Pool Inputs — override when user specifies\n\n")
-		ub.WriteString("These inputs have curated value pools with randomized defaults at runtime.\n")
-		ub.WriteString("When the user's intent specifies a value for one of these inputs, provide it.\n")
-		ub.WriteString("When the user doesn't specify, omit to use the random pool default.\n\n")
+		ub.WriteString("## Pool Inputs — DO NOT provide values unless the user specifies\n\n")
+		ub.WriteString("These inputs have curated value pools that automatically pick random values at runtime.\n")
+		ub.WriteString("DO NOT include these in your \"values\" response unless the user's prompt EXPLICITLY mentions a specific value for that input.\n")
+		ub.WriteString("- User specifies a concrete value (name, code, ID, date) → provide it\n")
+		ub.WriteString("- User's prompt is silent about an input → OMIT it, the pool handles it\n")
+		ub.WriteString("- User says \"next week\" for a date field → provide the date expression\n")
+		ub.WriteString("- User gives no date preference → OMIT date inputs entirely\n")
+		ub.WriteString("When in doubt, OMIT. The pool defaults are designed for exactly this case.\n\n")
 		var lastNode string
 		for _, ic := range poolInputs {
 			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
@@ -214,8 +219,8 @@ Rules:
 		ub.WriteString("\n\n")
 	}
 
-	// User intent.
-	ub.WriteString("## User Intent\n\n")
+	// User's prompt.
+	ub.WriteString("## User's Prompt\n\n")
 	ub.WriteString(userPrompt)
 	ub.WriteString("\n")
 
@@ -266,7 +271,11 @@ func writeInputContext(ub *strings.Builder, ic InputContext) {
 		fmt.Fprintf(ub, "Validation: %s\n", ic.GraphConstr)
 	}
 	if ic.IsDate {
-		ub.WriteString("Date field — use {{today + N days}}\n")
+		if ic.IsPoolInput {
+			ub.WriteString("Date field — if providing a value, use {{today + N days}} syntax\n")
+		} else {
+			ub.WriteString("Date field — use {{today + N days}}\n")
+		}
 	}
 	ub.WriteString("\n")
 }
