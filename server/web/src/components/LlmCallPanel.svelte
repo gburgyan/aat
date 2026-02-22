@@ -9,6 +9,8 @@
 
   let { call, collapsible = false }: Props = $props();
 
+  let copyStates: Record<string, string> = $state({});
+
   function roleClass(role: string): string {
     switch (role) {
       case 'system':
@@ -19,6 +21,17 @@
         return 'badge-success';
       default:
         return 'badge-muted';
+    }
+  }
+
+  async function copyText(key: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      copyStates[key] = 'Copied!';
+      setTimeout(() => (copyStates[key] = 'Copy'), 1500);
+    } catch {
+      copyStates[key] = 'Failed';
+      setTimeout(() => (copyStates[key] = 'Copy'), 1500);
     }
   }
 </script>
@@ -60,14 +73,20 @@
         <div class="llm-message-role" style="background: var(--color-surface);">
           <span class="badge badge-sm {roleClass(msg.role)}">{msg.role}</span>
         </div>
-        <pre class="llm-message-content">{msg.content}</pre>
+        <div class="llm-pre-wrapper">
+          <button class="llm-copy-btn" onclick={() => copyText(`msg-${i}`, msg.content)}>{copyStates[`msg-${i}`] || 'Copy'}</button>
+          <pre class="llm-message-content">{msg.content}</pre>
+        </div>
       </div>
     {/each}
   {/if}
 
   {#if call.response}
     <h4 class="section-heading">Response</h4>
-    <pre class="llm-response-pre">{call.response}</pre>
+    <div class="llm-pre-wrapper">
+      <button class="llm-copy-btn" onclick={() => copyText('response', call.response)}>{copyStates['response'] || 'Copy'}</button>
+      <pre class="llm-response-pre">{call.response}</pre>
+    </div>
   {/if}
 {/snippet}
 
