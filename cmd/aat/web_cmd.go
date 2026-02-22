@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -259,8 +260,12 @@ func webViewTraceCommand(port int, traceRef string, archiveDir string, tracesDir
 	})
 }
 
-// buildViewURL constructs the URL for viewing a run in the frontend.
+// buildViewURL constructs the URL for viewing a run or batch in the frontend.
+// Refs with a "batch-" prefix route to the batch detail page.
 func buildViewURL(port int, ref string) string {
+	if strings.HasPrefix(ref, "batch-") {
+		return fmt.Sprintf("http://localhost:%d/batches/%s", port, ref)
+	}
 	return fmt.Sprintf("http://localhost:%d/runs/%s", port, ref)
 }
 

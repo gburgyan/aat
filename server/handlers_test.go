@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/gburgyan/aat/archive"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -255,6 +256,109 @@ func TestHandleListRuns_EmptyIsArray(t *testing.T) {
 	// Raw body should start with '[' not 'n' (for null)
 	body := rec.Body.String()
 	assert.Equal(t, "[]\n", body)
+}
+
+// --- handleListBatches ---
+
+func TestHandleListBatches_Success(t *testing.T) {
+	dir := t.TempDir()
+
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/batches")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var batches []BatchListEntry
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&batches))
+	assert.Len(t, batches, 1)
+	assert.Equal(t, "batch-20260201-100000-aaaa0001", batches[0].BatchID)
+}
+
+func TestHandleListBatches_Empty(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/batches")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var batches []BatchListEntry
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&batches))
+	assert.Len(t, batches, 0)
+	assert.NotNil(t, batches)
+}
+
+func TestHandleListBatches_EmptyIsArray(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/batches")
+
+	body := rec.Body.String()
+	assert.Equal(t, "[]\n", body)
+}
+
+// --- handleGetBatch ---
+
+func TestHandleGetBatch_Success(t *testing.T) {
+	dir := t.TempDir()
+
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "roundtrip", RunID: "run-1", Outcome: "passed", StepCount: 5, DurationMs: 1500},
+	)
+	writeBatchArchive(t, dir, b)
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/batches/batch-20260201-100000-aaaa0001")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var detail BatchDetail
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&detail))
+	assert.Equal(t, "batch-20260201-100000-aaaa0001", detail.BatchID)
+	assert.Equal(t, "passed", detail.Outcome)
+	require.Len(t, detail.Runs, 1)
+	assert.Equal(t, "roundtrip", detail.Runs[0].PlanName)
+}
+
+func TestHandleGetBatch_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/batches/batch-nonexistent")
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	var errResp apiError
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
+	assert.Equal(t, "not_found", errResp.Code)
+}
+
+// --- handleGetRun with batch member ---
+
+func TestHandleGetRun_BatchMember(t *testing.T) {
+	dir := t.TempDir()
+
+	batchID := "batch-20260201-100000-aaaa0001"
+	b := makeBatchArchive(batchID, "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-20260201-100000-bbbb0001", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+	writeBatchMemberArchive(t, dir, batchID,
+		makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100)),
+	)
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs/run-20260201-100000-bbbb0001")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var run RunDetail
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&run))
+	assert.Equal(t, "run-20260201-100000-bbbb0001", run.RunID)
+	assert.Equal(t, batchID, run.BatchID)
 }
 
 // Verify unknown archive dirs at the handler level don't crash.

@@ -14,6 +14,7 @@ export interface RunListEntry {
   failedCount: number;
   durationMs: number;
   planName?: string;
+  batchId?: string;
 }
 
 export interface RunDetail {
@@ -30,6 +31,7 @@ export interface RunDetail {
   environment?: string;
   graphVersion?: string;
   toolVersion?: string;
+  batchId?: string;
   steps: StepSummary[];
   cleanup?: StepSummary[];
 }
@@ -261,3 +263,48 @@ export interface SkeletonDetail {
   unfedInputs?: string[];
   durationMs: number;
 }
+
+// --- Batch types ---
+
+export interface BatchListEntry {
+  batchId: string;
+  timestamp: string;
+  outcome: Outcome;
+  totalRuns: number;
+  passedRuns: number;
+  failedRuns: number;
+  errorRuns: number;
+  totalDurationMs: number;
+  source?: string;
+  toolVersion?: string;
+}
+
+export interface BatchDetail {
+  batchId: string;
+  timestamp: string;
+  outcome: Outcome;
+  totalRuns: number;
+  passedRuns: number;
+  failedRuns: number;
+  errorRuns: number;
+  totalDurationMs: number;
+  durationDisplay: string;
+  source?: string;
+  toolVersion?: string;
+  runs: BatchRunSummary[];
+}
+
+export interface BatchRunSummary {
+  planName: string;
+  runId: string;
+  outcome: Outcome;
+  stepCount: number;
+  passedCount: number;
+  failedCount: number;
+  durationMs: number;
+  error?: string;
+}
+
+export type UnifiedListEntry =
+  | { kind: 'run'; entry: RunListEntry; timestamp: string }
+  | { kind: 'batch'; entry: BatchListEntry; timestamp: string };

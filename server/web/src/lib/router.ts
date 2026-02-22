@@ -2,11 +2,13 @@ export type Route =
   | { view: 'run-list' }
   | { view: 'run-detail'; runId: string }
   | { view: 'step-detail'; runId: string; stepId: string }
+  | { view: 'batch-detail'; batchId: string }
   | { view: 'trace-list' }
   | { view: 'trace-detail'; traceId: string };
 
 const runDetailRe = /^\/runs\/([^/]+)$/;
 const stepDetailRe = /^\/runs\/([^/]+)\/steps\/([^/]+)$/;
+const batchDetailRe = /^\/batches\/([^/]+)$/;
 const traceDetailRe = /^\/traces\/([^/]+)$/;
 
 export function parseRoute(path: string): Route {
@@ -17,6 +19,9 @@ export function parseRoute(path: string): Route {
 
   m = path.match(runDetailRe);
   if (m) return { view: 'run-detail', runId: m[1] };
+
+  m = path.match(batchDetailRe);
+  if (m) return { view: 'batch-detail', batchId: m[1] };
 
   m = path.match(traceDetailRe);
   if (m) return { view: 'trace-detail', traceId: m[1] };

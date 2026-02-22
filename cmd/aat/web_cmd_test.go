@@ -46,6 +46,18 @@ func TestBuildViewURL(t *testing.T) {
 			ref:  "my-run",
 			want: "http://localhost:3000/runs/my-run",
 		},
+		{
+			name: "batch ref",
+			port: 9119,
+			ref:  "batch-20260220-143022-abc12345",
+			want: "http://localhost:9119/batches/batch-20260220-143022-abc12345",
+		},
+		{
+			name: "batch ref custom port",
+			port: 8080,
+			ref:  "batch-abc",
+			want: "http://localhost:8080/batches/batch-abc",
+		},
 	}
 
 	for _, tt := range tests {

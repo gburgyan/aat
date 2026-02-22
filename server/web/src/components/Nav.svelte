@@ -72,6 +72,14 @@
         >{route.runId}</a>
       </li>
       <li class="breadcrumb-active">{route.stepId}</li>
+    {:else if route.view === 'batch-detail'}
+      <li>
+        <a
+          href="/"
+          onclick={(e: MouseEvent) => handleClick(e, '/')}
+        >Runs</a>
+      </li>
+      <li class="breadcrumb-active">{route.batchId}</li>
     {:else if route.view === 'trace-list'}
       <li class="breadcrumb-active">Traces</li>
     {:else if route.view === 'trace-detail'}

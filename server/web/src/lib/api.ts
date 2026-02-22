@@ -1,4 +1,4 @@
-import type { RunListEntry, RunDetail, StepDetail, TraceListEntry, TraceDetail, ApiError } from './types';
+import type { RunListEntry, RunDetail, StepDetail, TraceListEntry, TraceDetail, BatchListEntry, BatchDetail, ApiError } from './types';
 
 export class ApiRequestError extends Error {
   status: number;
@@ -41,6 +41,14 @@ export function fetchStep(runId: string, stepId: string): Promise<StepDetail> {
   return request<StepDetail>(
     `/api/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}`,
   );
+}
+
+export function fetchBatches(limit = 50): Promise<BatchListEntry[]> {
+  return request<BatchListEntry[]>(`/api/batches?limit=${limit}`);
+}
+
+export function fetchBatch(id: string): Promise<BatchDetail> {
+  return request<BatchDetail>(`/api/batches/${encodeURIComponent(id)}`);
 }
 
 export function fetchTraces(limit = 50): Promise<TraceListEntry[]> {

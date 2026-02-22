@@ -92,6 +92,44 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, run)
 }
 
+func (s *Server) handleListBatches(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if q := r.URL.Query().Get("limit"); q != "" {
+		n, err := strconv.Atoi(q)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_parameter", fmt.Sprintf("invalid limit: %q", q))
+			return
+		}
+		limit = n
+	}
+
+	batches, err := s.service.ListBatches(limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+
+	if batches == nil {
+		batches = []BatchListEntry{}
+	}
+	writeJSON(w, http.StatusOK, batches)
+}
+
+func (s *Server) handleGetBatch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	batch, err := s.service.GetBatch(id)
+	if err != nil {
+		if errors.Is(err, ErrBatchNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, batch)
+}
+
 func (s *Server) handleGetStep(w http.ResponseWriter, r *http.Request) {
 	runID := chi.URLParam(r, "id")
 	stepID := chi.URLParam(r, "stepId")

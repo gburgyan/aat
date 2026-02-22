@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -1293,6 +1294,297 @@ func TestGetStep_ExtractionsAndPlanYAML(t *testing.T) {
 
 	// Plan YAML populated
 	assert.Contains(t, detail.PlanStepYAML, "node: SearchOffers")
+}
+
+// --- batch test helpers ---
+
+func makeBatchArchive(batchID, outcome string, runs ...archive.BatchRunEntry) *archive.BatchArchive {
+	passed, failed, errCount := 0, 0, 0
+	var totalDur int64
+	for _, r := range runs {
+		switch r.Outcome {
+		case "passed":
+			passed++
+		case "failed":
+			failed++
+		case "error":
+			errCount++
+		}
+		totalDur += r.DurationMs
+	}
+	return &archive.BatchArchive{
+		Metadata: archive.BatchMetadata{
+			Version:     "1.0.0",
+			BatchID:     batchID,
+			Timestamp:   time.Date(2026, 2, 20, 10, 0, 0, 0, time.UTC),
+			Source:      "all",
+			ToolVersion: "0.6.0",
+		},
+		Runs: runs,
+		Result: archive.BatchResult{
+			Outcome:         outcome,
+			TotalRuns:       len(runs),
+			PassedRuns:      passed,
+			FailedRuns:      failed,
+			ErrorRuns:       errCount,
+			TotalDurationMs: totalDur,
+		},
+	}
+}
+
+func writeBatchArchive(t *testing.T, dir string, b *archive.BatchArchive) {
+	t.Helper()
+	path := filepath.Join(dir, b.Metadata.BatchID, "batch.json")
+	err := archive.WriteBatch(b, path)
+	require.NoError(t, err)
+}
+
+func writeBatchMemberArchive(t *testing.T, dir string, batchID string, a *archive.Archive) {
+	t.Helper()
+	path := filepath.Join(dir, batchID, a.Metadata.RunID, "archive.json")
+	err := archive.Write(a, path)
+	require.NoError(t, err)
+}
+
+// --- ListBatches ---
+
+func TestListBatches_EmptyDirectory(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewArchiveService(dir)
+	batches, err := svc.ListBatches(0)
+	assert.NoError(t, err)
+	assert.Nil(t, batches)
+}
+
+func TestListBatches_SortedNewestFirst(t *testing.T) {
+	dir := t.TempDir()
+
+	b1 := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	b2 := makeBatchArchive("batch-20260202-100000-aaaa0002", "failed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-2", Outcome: "failed", DurationMs: 200},
+	)
+	writeBatchArchive(t, dir, b1)
+	writeBatchArchive(t, dir, b2)
+
+	svc := NewArchiveService(dir)
+	batches, err := svc.ListBatches(0)
+	require.NoError(t, err)
+	require.Len(t, batches, 2)
+
+	assert.Equal(t, "batch-20260202-100000-aaaa0002", batches[0].BatchID)
+	assert.Equal(t, "batch-20260201-100000-aaaa0001", batches[1].BatchID)
+	assert.Equal(t, "failed", batches[0].Outcome)
+	assert.Equal(t, 1, batches[0].TotalRuns)
+}
+
+func TestListBatches_Limit(t *testing.T) {
+	dir := t.TempDir()
+
+	for i := 0; i < 5; i++ {
+		b := makeBatchArchive(
+			fmt.Sprintf("batch-2026020%d-100000-aaaa000%d", i+1, i+1),
+			"passed",
+			archive.BatchRunEntry{PlanName: "plan", RunID: fmt.Sprintf("run-%d", i), Outcome: "passed", DurationMs: 100},
+		)
+		writeBatchArchive(t, dir, b)
+	}
+
+	svc := NewArchiveService(dir)
+	batches, err := svc.ListBatches(2)
+	require.NoError(t, err)
+	assert.Len(t, batches, 2)
+}
+
+func TestListBatches_SkipsCorruptBatchJSON(t *testing.T) {
+	dir := t.TempDir()
+
+	good := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, good)
+
+	// Write corrupt batch.json
+	corruptDir := filepath.Join(dir, "batch-20260202-100000-aaaa0002")
+	require.NoError(t, createDir(corruptDir))
+	require.NoError(t, writeFile(filepath.Join(corruptDir, "batch.json"), []byte("not json")))
+
+	svc := NewArchiveService(dir)
+	batches, err := svc.ListBatches(0)
+	require.NoError(t, err)
+	assert.Len(t, batches, 1)
+	assert.Equal(t, "batch-20260201-100000-aaaa0001", batches[0].BatchID)
+}
+
+func TestListBatches_NotConfigured(t *testing.T) {
+	svc := NewArchiveService("")
+	_, err := svc.ListBatches(0)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "not configured")
+}
+
+func TestListBatches_Fields(t *testing.T) {
+	dir := t.TempDir()
+
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "failed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+		archive.BatchRunEntry{PlanName: "plan2", RunID: "run-2", Outcome: "failed", DurationMs: 200},
+	)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	batches, err := svc.ListBatches(0)
+	require.NoError(t, err)
+	require.Len(t, batches, 1)
+
+	entry := batches[0]
+	assert.Equal(t, "failed", entry.Outcome)
+	assert.Equal(t, 2, entry.TotalRuns)
+	assert.Equal(t, 1, entry.PassedRuns)
+	assert.Equal(t, 1, entry.FailedRuns)
+	assert.Equal(t, 0, entry.ErrorRuns)
+	assert.Equal(t, int64(300), entry.TotalDurationMs)
+	assert.Equal(t, "all", entry.Source)
+	assert.Equal(t, "0.6.0", entry.ToolVersion)
+}
+
+// --- GetBatch ---
+
+func TestGetBatch_ReturnsDetail(t *testing.T) {
+	dir := t.TempDir()
+
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "roundtrip", RunID: "run-1", Outcome: "passed", StepCount: 5, PassedCount: 5, DurationMs: 1500},
+		archive.BatchRunEntry{PlanName: "oneway", RunID: "run-2", Outcome: "passed", StepCount: 3, PassedCount: 3, DurationMs: 800},
+	)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetBatch("batch-20260201-100000-aaaa0001")
+	require.NoError(t, err)
+
+	assert.Equal(t, "batch-20260201-100000-aaaa0001", detail.BatchID)
+	assert.Equal(t, "passed", detail.Outcome)
+	assert.Equal(t, 2, detail.TotalRuns)
+	assert.Equal(t, "2.3s", detail.DurationDisplay)
+	require.Len(t, detail.Runs, 2)
+	assert.Equal(t, "roundtrip", detail.Runs[0].PlanName)
+	assert.Equal(t, "run-1", detail.Runs[0].RunID)
+	assert.Equal(t, 5, detail.Runs[0].StepCount)
+}
+
+func TestGetBatch_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewArchiveService(dir)
+
+	_, err := svc.GetBatch("batch-nonexistent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrBatchNotFound))
+}
+
+// --- loadArchive fallthrough to batch members ---
+
+func TestLoadArchive_FindsStandaloneRun(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	loaded, err := svc.loadArchive("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+	assert.Equal(t, "run-20260101-100000-aaaa0001", loaded.Metadata.RunID)
+}
+
+func TestLoadArchive_FindsBatchMemberRun(t *testing.T) {
+	dir := t.TempDir()
+
+	batchID := "batch-20260201-100000-aaaa0001"
+	b := makeBatchArchive(batchID, "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-20260201-100000-bbbb0001", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	memberArchive := makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100))
+	writeBatchMemberArchive(t, dir, batchID, memberArchive)
+
+	svc := NewArchiveService(dir)
+	loaded, err := svc.loadArchive("run-20260201-100000-bbbb0001")
+	require.NoError(t, err)
+	assert.Equal(t, "run-20260201-100000-bbbb0001", loaded.Metadata.RunID)
+}
+
+func TestLoadArchiveWithContext_ReturnsBatchID(t *testing.T) {
+	dir := t.TempDir()
+
+	batchID := "batch-20260201-100000-aaaa0001"
+	b := makeBatchArchive(batchID, "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-20260201-100000-bbbb0001", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	memberArchive := makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100))
+	writeBatchMemberArchive(t, dir, batchID, memberArchive)
+
+	svc := NewArchiveService(dir)
+	loaded, gotBatchID, err := svc.loadArchiveWithContext("run-20260201-100000-bbbb0001")
+	require.NoError(t, err)
+	assert.Equal(t, "run-20260201-100000-bbbb0001", loaded.Metadata.RunID)
+	assert.Equal(t, batchID, gotBatchID)
+}
+
+func TestLoadArchiveWithContext_StandaloneHasNoBatchID(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	_, gotBatchID, err := svc.loadArchiveWithContext("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+	assert.Equal(t, "", gotBatchID)
+}
+
+func TestLoadArchive_RunNotFoundAnywhere(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewArchiveService(dir)
+
+	_, err := svc.loadArchive("run-nonexistent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+// --- GetRun with batchId ---
+
+func TestGetRun_BatchMemberHasBatchID(t *testing.T) {
+	dir := t.TempDir()
+
+	batchID := "batch-20260201-100000-aaaa0001"
+	b := makeBatchArchive(batchID, "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-20260201-100000-bbbb0001", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	memberArchive := makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100))
+	writeBatchMemberArchive(t, dir, batchID, memberArchive)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260201-100000-bbbb0001")
+	require.NoError(t, err)
+	assert.Equal(t, batchID, run.BatchID)
+}
+
+func TestGetRun_StandaloneHasNoBatchID(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+	assert.Equal(t, "", run.BatchID)
 }
 
 // --- file helpers ---

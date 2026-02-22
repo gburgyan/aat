@@ -83,11 +83,13 @@ func (s *ArchiveService) LatestRunID() (string, error) {
 
 // GetRun loads a full run overview by run ID.
 func (s *ArchiveService) GetRun(id string) (*RunDetail, error) {
-	a, err := s.loadArchive(id)
+	a, batchID, err := s.loadArchiveWithContext(id)
 	if err != nil {
 		return nil, err
 	}
-	return toRunDetail(a), nil
+	detail := toRunDetail(a)
+	detail.BatchID = batchID
+	return detail, nil
 }
 
 // GetStep loads the full detail of a single step within a run.
@@ -130,17 +132,111 @@ func (s *ArchiveService) GetStep(runID, stepID string) (*StepDetail, error) {
 }
 
 // loadArchive reads an archive by run ID. Returns ErrRunNotFound if the
-// archive directory or file doesn't exist.
+// archive directory or file doesn't exist. Falls through to batch directories
+// if the run is not found as a standalone archive.
 func (s *ArchiveService) loadArchive(id string) (*archive.Archive, error) {
+	a, _, err := s.loadArchiveWithContext(id)
+	return a, err
+}
+
+// loadArchiveWithContext reads an archive by run ID and returns the batch ID
+// if the run is found inside a batch directory. Returns ("", ErrRunNotFound)
+// if not found anywhere.
+func (s *ArchiveService) loadArchiveWithContext(id string) (*archive.Archive, string, error) {
+	// First, try standalone run directory.
 	archivePath := filepath.Join(s.archiveDir, id, "archive.json")
 	a, err := archive.Read(archivePath)
+	if err == nil {
+		return a, "", nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, "", fmt.Errorf("reading archive %q: %w", id, err)
+	}
+
+	// Not found as standalone — scan batch directories.
+	entries, dirErr := os.ReadDir(s.archiveDir)
+	if dirErr != nil {
+		return nil, "", fmt.Errorf("run %q: %w", id, ErrRunNotFound)
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "batch-") {
+			continue
+		}
+		batchRunPath := filepath.Join(s.archiveDir, e.Name(), id, "archive.json")
+		a, err := archive.Read(batchRunPath)
+		if err == nil {
+			return a, e.Name(), nil
+		}
+	}
+
+	return nil, "", fmt.Errorf("run %q: %w", id, ErrRunNotFound)
+}
+
+// ListBatches scans the archive directory for batch directories, reads each batch.json,
+// and returns summaries sorted newest-first. limit=0 means no limit.
+// Unreadable batch archives are skipped silently.
+func (s *ArchiveService) ListBatches(limit int) ([]BatchListEntry, error) {
+	if s.archiveDir == "" {
+		return nil, fmt.Errorf("archive directory not configured")
+	}
+
+	entries, err := os.ReadDir(s.archiveDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading archive directory: %w", err)
+	}
+
+	var batchDirs []os.DirEntry
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "batch-") {
+			batchDirs = append(batchDirs, e)
+		}
+	}
+
+	sort.Slice(batchDirs, func(i, j int) bool {
+		return batchDirs[i].Name() > batchDirs[j].Name()
+	})
+
+	if limit > 0 && len(batchDirs) > limit {
+		batchDirs = batchDirs[:limit]
+	}
+
+	var results []BatchListEntry
+	for _, dir := range batchDirs {
+		b, err := s.loadBatchArchive(dir.Name())
+		if err != nil {
+			continue
+		}
+		results = append(results, toBatchListEntry(b))
+	}
+
+	return results, nil
+}
+
+// GetBatch loads a full batch overview by batch ID.
+func (s *ArchiveService) GetBatch(id string) (*BatchDetail, error) {
+	b, err := s.loadBatchArchive(id)
+	if err != nil {
+		return nil, err
+	}
+	return toBatchDetail(b), nil
+}
+
+// loadBatchArchive reads a batch archive by batch ID. Returns ErrBatchNotFound
+// if the batch directory or batch.json doesn't exist.
+func (s *ArchiveService) loadBatchArchive(id string) (*archive.BatchArchive, error) {
+	batchPath := filepath.Join(s.archiveDir, id, "batch.json")
+	b, err := archive.ReadBatch(batchPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("run %q: %w", id, ErrRunNotFound)
+			return nil, fmt.Errorf("batch %q: %w", id, ErrBatchNotFound)
 		}
-		return nil, fmt.Errorf("reading archive %q: %w", id, err)
+		return nil, fmt.Errorf("reading batch archive %q: %w", id, err)
 	}
-	return a, nil
+	return b, nil
 }
 
 // effectiveStepID returns the step's explicit StepID if set, else falls back to Node.
@@ -224,6 +320,52 @@ func toRunListEntry(a *archive.Archive) RunListEntry {
 		FailedCount: failed,
 		DurationMs:  totalDuration(a),
 		PlanName:    extractPlanName(a),
+	}
+}
+
+func toBatchListEntry(b *archive.BatchArchive) BatchListEntry {
+	return BatchListEntry{
+		BatchID:         b.Metadata.BatchID,
+		Timestamp:       b.Metadata.Timestamp,
+		Outcome:         b.Result.Outcome,
+		TotalRuns:       b.Result.TotalRuns,
+		PassedRuns:      b.Result.PassedRuns,
+		FailedRuns:      b.Result.FailedRuns,
+		ErrorRuns:       b.Result.ErrorRuns,
+		TotalDurationMs: b.Result.TotalDurationMs,
+		Source:          b.Metadata.Source,
+		ToolVersion:     b.Metadata.ToolVersion,
+	}
+}
+
+func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
+	runs := make([]BatchRunSummary, len(b.Runs))
+	for i, r := range b.Runs {
+		runs[i] = BatchRunSummary{
+			PlanName:    r.PlanName,
+			RunID:       r.RunID,
+			Outcome:     r.Outcome,
+			StepCount:   r.StepCount,
+			PassedCount: r.PassedCount,
+			FailedCount: r.FailedCount,
+			DurationMs:  r.DurationMs,
+			Error:       r.Error,
+		}
+	}
+
+	return &BatchDetail{
+		BatchID:         b.Metadata.BatchID,
+		Timestamp:       b.Metadata.Timestamp,
+		Outcome:         b.Result.Outcome,
+		TotalRuns:       b.Result.TotalRuns,
+		PassedRuns:      b.Result.PassedRuns,
+		FailedRuns:      b.Result.FailedRuns,
+		ErrorRuns:       b.Result.ErrorRuns,
+		TotalDurationMs: b.Result.TotalDurationMs,
+		DurationDisplay: formatDuration(b.Result.TotalDurationMs),
+		Source:          b.Metadata.Source,
+		ToolVersion:     b.Metadata.ToolVersion,
+		Runs:            runs,
 	}
 }
 

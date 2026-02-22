@@ -8,8 +8,9 @@ import (
 
 // Sentinel errors for service methods.
 var (
-	ErrRunNotFound  = errors.New("run not found")
-	ErrStepNotFound = errors.New("step not found")
+	ErrRunNotFound   = errors.New("run not found")
+	ErrStepNotFound  = errors.New("step not found")
+	ErrBatchNotFound = errors.New("batch not found")
 )
 
 // RunListEntry is a summary of a single run for list display.
@@ -22,6 +23,7 @@ type RunListEntry struct {
 	FailedCount int       `json:"failedCount"`
 	DurationMs  int64     `json:"durationMs"`
 	PlanName    string    `json:"planName,omitempty"`
+	BatchID     string    `json:"batchId,omitempty"`
 }
 
 // RunDetail is the full overview of a single run.
@@ -39,6 +41,7 @@ type RunDetail struct {
 	Environment     string        `json:"environment,omitempty"`
 	GraphVersion    string        `json:"graphVersion,omitempty"`
 	ToolVersion     string        `json:"toolVersion,omitempty"`
+	BatchID         string        `json:"batchId,omitempty"`
 	Steps           []StepSummary `json:"steps"`
 	Cleanup         []StepSummary `json:"cleanup,omitempty"`
 }
@@ -242,4 +245,48 @@ type ResponseBodyErrorDetail struct {
 	Message  string `json:"message,omitempty"`
 	Code     string `json:"code,omitempty"`
 	Category string `json:"category,omitempty"`
+}
+
+// --- Batch types ---
+
+// BatchListEntry is a summary of a batch run for list display.
+type BatchListEntry struct {
+	BatchID        string    `json:"batchId"`
+	Timestamp      time.Time `json:"timestamp"`
+	Outcome        string    `json:"outcome"`
+	TotalRuns      int       `json:"totalRuns"`
+	PassedRuns     int       `json:"passedRuns"`
+	FailedRuns     int       `json:"failedRuns"`
+	ErrorRuns      int       `json:"errorRuns"`
+	TotalDurationMs int64   `json:"totalDurationMs"`
+	Source         string    `json:"source,omitempty"`
+	ToolVersion    string    `json:"toolVersion,omitempty"`
+}
+
+// BatchDetail is the full overview of a batch run.
+type BatchDetail struct {
+	BatchID         string            `json:"batchId"`
+	Timestamp       time.Time         `json:"timestamp"`
+	Outcome         string            `json:"outcome"`
+	TotalRuns       int               `json:"totalRuns"`
+	PassedRuns      int               `json:"passedRuns"`
+	FailedRuns      int               `json:"failedRuns"`
+	ErrorRuns       int               `json:"errorRuns"`
+	TotalDurationMs int64             `json:"totalDurationMs"`
+	DurationDisplay string            `json:"durationDisplay"`
+	Source          string            `json:"source,omitempty"`
+	ToolVersion     string            `json:"toolVersion,omitempty"`
+	Runs            []BatchRunSummary `json:"runs"`
+}
+
+// BatchRunSummary is a compact view of a single run within a batch.
+type BatchRunSummary struct {
+	PlanName    string `json:"planName"`
+	RunID       string `json:"runId"`
+	Outcome     string `json:"outcome"`
+	StepCount   int    `json:"stepCount"`
+	PassedCount int    `json:"passedCount"`
+	FailedCount int    `json:"failedCount"`
+	DurationMs  int64  `json:"durationMs"`
+	Error       string `json:"error,omitempty"`
 }

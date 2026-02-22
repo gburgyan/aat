@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { RunDetail } from '../lib/types';
   import { fetchRun } from '../lib/api';
+  import { navigate } from '../lib/router';
   import { formatDuration, timeAgo, formatTimestamp } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
   import OutcomeBadge from '../components/OutcomeBadge.svelte';
@@ -50,6 +51,15 @@
       <h1 class="run-detail-title">{displayName}</h1>
     </div>
 
+    {#if run.batchId}
+      <div class="run-batch-link">
+        Part of batch <a
+          href="/batches/{run.batchId}"
+          onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/batches/${run.batchId}`); }}
+        >{run.batchId}</a>
+      </div>
+    {/if}
+
     {#if run.error}
       <div class="run-detail-error">{run.error}</div>
     {/if}
@@ -92,3 +102,19 @@
     <StepTimeline steps={run.cleanup} {runId} sectionLabel="Cleanup" muted />
   {/if}
 {/if}
+
+<style>
+  .run-batch-link {
+    font-size: 0.85rem;
+    color: var(--color-text-muted, #9ca3af);
+    margin-bottom: 0.5rem;
+  }
+  .run-batch-link a {
+    color: var(--color-primary, #6366f1);
+    text-decoration: none;
+  }
+  .run-batch-link a:hover {
+    color: var(--color-primary-hover, #818cf8);
+    text-decoration: underline;
+  }
+</style>

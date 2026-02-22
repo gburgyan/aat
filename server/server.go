@@ -66,6 +66,9 @@ func (s *Server) buildRouter() chi.Router {
 		r.Get("/runs/{id}", s.handleGetRun)
 		r.Get("/runs/{id}/steps/{stepId}", s.handleGetStep)
 
+		r.Get("/batches", s.handleListBatches)
+		r.Get("/batches/{id}", s.handleGetBatch)
+
 		r.Get("/traces", s.handleListTraces)
 		r.Get("/traces/{id}", s.handleGetTrace)
 	})
