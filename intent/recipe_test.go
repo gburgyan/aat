@@ -71,11 +71,6 @@ func TestReconstitute_SimpleWorkflow(t *testing.T) {
 			Workflow:    "Base",
 			Description: "Book a flight",
 		},
-		Overrides: plan.RecipeOverrides{
-			Descriptions: map[string]string{
-				"search": "Search for flights",
-			},
-		},
 	}
 
 	p, err := Reconstitute(recipe, g, ".")
@@ -85,7 +80,7 @@ func TestReconstitute_SimpleWorkflow(t *testing.T) {
 	// Verify basic structure.
 	assert.Len(t, p.Execution.Steps, 3) // search, book, commit
 
-	// Verify the description was applied.
+	// Verify template descriptions are used (not overridden).
 	var searchStep *plan.Step
 	for i := range p.Execution.Steps {
 		if p.Execution.Steps[i].Node == "search" {
@@ -94,7 +89,7 @@ func TestReconstitute_SimpleWorkflow(t *testing.T) {
 		}
 	}
 	require.NotNil(t, searchStep, "search step should exist")
-	assert.Equal(t, "Search for flights", searchStep.Description)
+	assert.Equal(t, "Search for items", searchStep.Description) // template description preserved
 }
 
 func TestReconstitute_WithAddons(t *testing.T) {
@@ -249,9 +244,6 @@ func TestTargetedResponseToRecipeOverrides_RoundTrip(t *testing.T) {
 				{Type: "status", Expect: 200},
 			},
 		},
-		Descriptions: map[string]string{
-			"search": "Search for flights",
-		},
 	}
 
 	ro := TargetedResponseToRecipeOverrides(tr)
@@ -262,13 +254,12 @@ func TestTargetedResponseToRecipeOverrides_RoundTrip(t *testing.T) {
 	assert.Equal(t, "carrier == 'QF'", ro.Selections["offering.leg1"].Filter)
 	require.Len(t, ro.Assertions["commit"], 1)
 	assert.Equal(t, "status", ro.Assertions["commit"][0].Type)
-	assert.Equal(t, "Search for flights", ro.Descriptions["search"])
+	assert.Nil(t, ro.Descriptions) // descriptions are not saved
 
 	// Convert back.
 	tr2 := recipeOverridesToTargetedResponse(ro)
 	assert.Equal(t, tr.Values["search.origin"], tr2.Values["search.origin"])
 	assert.Equal(t, tr.Selections["offering.leg1"].Strategy, tr2.Selections["offering.leg1"].Strategy)
-	assert.Equal(t, tr.Descriptions["search"], tr2.Descriptions["search"])
 }
 
 func TestTargetedResponseToRecipeOverrides_Nil(t *testing.T) {
@@ -286,10 +277,9 @@ func TestWorkflowSelectionToRecipeSelection_Nil(t *testing.T) {
 
 func TestTargetedResponseToRecipeOverrides_EmptyMaps(t *testing.T) {
 	tr := &TargetedResponse{
-		Values:       map[string]any{},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
-		Descriptions: map[string]string{},
+		Values:     map[string]any{},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	ro := TargetedResponseToRecipeOverrides(tr)

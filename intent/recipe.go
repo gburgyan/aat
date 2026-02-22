@@ -94,10 +94,9 @@ func recipeSelectionToWorkflowSelection(rs plan.RecipeSelection) WorkflowSelecti
 // to the intent-package TargetedResponse for application to the skeleton.
 func recipeOverridesToTargetedResponse(ro plan.RecipeOverrides) *TargetedResponse {
 	tr := &TargetedResponse{
-		Values:       make(map[string]any),
-		Selections:   make(map[string]TargetedSelection),
-		Assertions:   make(map[string][]TargetedAssertion),
-		Descriptions: make(map[string]string),
+		Values:     make(map[string]any),
+		Selections: make(map[string]TargetedSelection),
+		Assertions: make(map[string][]TargetedAssertion),
 	}
 
 	for k, v := range ro.Values {
@@ -128,10 +127,6 @@ func recipeOverridesToTargetedResponse(ro plan.RecipeOverrides) *TargetedRespons
 		tr.Assertions[k] = ta
 	}
 
-	for k, desc := range ro.Descriptions {
-		tr.Descriptions[k] = desc
-	}
-
 	return tr
 }
 
@@ -158,10 +153,9 @@ func TargetedResponseToRecipeOverrides(tr *TargetedResponse) plan.RecipeOverride
 	}
 
 	ro := plan.RecipeOverrides{
-		Values:       make(map[string]any),
-		Selections:   make(map[string]plan.RecipeSelectionOverride),
-		Assertions:   make(map[string][]plan.RecipeAssertion),
-		Descriptions: make(map[string]string),
+		Values:     make(map[string]any),
+		Selections: make(map[string]plan.RecipeSelectionOverride),
+		Assertions: make(map[string][]plan.RecipeAssertion),
 	}
 
 	for k, v := range tr.Values {
@@ -192,10 +186,6 @@ func TargetedResponseToRecipeOverrides(tr *TargetedResponse) plan.RecipeOverride
 		ro.Assertions[k] = ra
 	}
 
-	for k, desc := range tr.Descriptions {
-		ro.Descriptions[k] = desc
-	}
-
 	// Clean up empty maps to produce cleaner YAML.
 	if len(ro.Values) == 0 {
 		ro.Values = nil
@@ -205,9 +195,6 @@ func TargetedResponseToRecipeOverrides(tr *TargetedResponse) plan.RecipeOverride
 	}
 	if len(ro.Assertions) == 0 {
 		ro.Assertions = nil
-	}
-	if len(ro.Descriptions) == 0 {
-		ro.Descriptions = nil
 	}
 
 	return ro

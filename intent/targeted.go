@@ -13,11 +13,10 @@ import (
 
 // TargetedResponse is the JSON structure returned by the targeted phase 2 LLM call.
 type TargetedResponse struct {
-	Values       map[string]any                 `json:"values"`
-	Selections   map[string]TargetedSelection   `json:"selections"`
-	Assertions   map[string][]TargetedAssertion `json:"assertions"`
-	Descriptions map[string]string              `json:"descriptions"`
-	WrongPlan    *WrongPlanSignal               `json:"wrongPlan,omitempty"`
+	Values     map[string]any                 `json:"values"`
+	Selections map[string]TargetedSelection   `json:"selections"`
+	Assertions map[string][]TargetedAssertion `json:"assertions"`
+	WrongPlan  *WrongPlanSignal               `json:"wrongPlan,omitempty"`
 }
 
 // WrongPlanSignal is returned by the Call 2 LLM when it determines the selected
@@ -322,17 +321,13 @@ func parseTargetedResponse(content string) (*TargetedResponse, error) {
 	if resp.Assertions == nil {
 		resp.Assertions = map[string][]TargetedAssertion{}
 	}
-	if resp.Descriptions == nil {
-		resp.Descriptions = map[string]string{}
-	}
-
 	return &resp, nil
 }
 
 // applyTargetedResponse applies the LLM's targeted decisions to the skeleton.
-// It sets values for unfed inputs, overrides selection strategies, adds
-// assertions, and sets step descriptions. Wired inputs (not in unfedSet)
-// are rejected to prevent the LLM from shadowing auto-wired edges.
+// It sets values for unfed inputs, overrides selection strategies, and adds
+// assertions. Wired inputs (not in unfedSet) are rejected to prevent the LLM
+// from shadowing auto-wired edges.
 func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet map[string]bool) {
 	// Build step index by ID.
 	stepByID := map[string]*plan.Step{}
@@ -442,14 +437,6 @@ func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet
 		step.Assertions.Mechanical = append(step.Assertions.Mechanical, sanitized...)
 	}
 
-	// Apply descriptions.
-	for stepID, desc := range resp.Descriptions {
-		step, ok := stepByID[stepID]
-		if !ok {
-			continue
-		}
-		step.Description = desc
-	}
 }
 
 // sanitizeAssertions validates and fixes LLM-generated assertions, filtering

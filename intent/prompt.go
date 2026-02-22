@@ -38,7 +38,7 @@ Rules:
 // buildTargetedPlanPrompt constructs the messages for the targeted phase 2 LLM call.
 // Instead of sending the full skeleton YAML and asking for a complete YAML response,
 // it provides per-input context and asks for a flat JSON response with only the
-// decisions the LLM needs to make: values, selection overrides, assertions, and descriptions.
+// decisions the LLM needs to make: values, selection overrides, and assertions.
 //
 // The prompt is deliberately narrow: it only includes the inputs that need values,
 // selection contexts for optional overrides, and the user's intent. Plan structure
@@ -59,8 +59,7 @@ Respond with a JSON object (no markdown fencing, just raw JSON):
 {
   "values": {"stepID.inputName": "value"},
   "selections": {"stepID.selectionName": {"strategy": "match", "filter": "expr"}},
-  "assertions": {"stepID": [{"type": "status", "expect": 200}]},
-  "descriptions": {"stepID": "What this step does"}
+  "assertions": {"stepID": [{"type": "status", "expect": 200}]}
 }
 Omit empty categories.
 
@@ -105,10 +104,6 @@ DO NOT re-filter on values already constrained by search inputs — redundant an
 Do NOT add assertions unless the user explicitly says "verify that..." or "assert that...".
 Valid types: status, fieldExists, fieldEquals, predicate.
 Use bare field names (no jsonpath $ prefix).
-
-## Descriptions
-
-Add a brief description for each step explaining what it does in context.
 
 ## Wrong Workflow
 
