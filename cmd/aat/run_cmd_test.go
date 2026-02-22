@@ -26,7 +26,7 @@ func TestRunCommand_MissingPlan(t *testing.T) {
 		TemplatesPath: "x",
 	}, io.Discard)
 	require.Error(t, res.err)
-	assert.Contains(t, res.err.Error(), "--plan is required")
+	assert.Contains(t, res.err.Error(), "plan path is required")
 }
 
 func TestRunCommand_MissingEnv(t *testing.T) {

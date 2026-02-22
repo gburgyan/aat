@@ -1,0 +1,154 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/engine"
+	"github.com/spf13/cobra"
+)
+
+// runPlanCmd executes a single pre-written test plan.
+var runPlanCmd = &cobra.Command{
+	Use:   "plan <name-or-path>",
+	Short: "Execute a single test plan",
+	Long:  "Execute an API test plan against a configured environment. The plan can be specified by name (resolved via plan directories) or by path.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
+
+		changed := func(name string) bool { return cmd.Flags().Changed(name) }
+		getString := func(name string) string { v, _ := cmd.Flags().GetString(name); return v }
+
+		overrides := buildProjectOverrides(changed, getString)
+		resolved, err := config.ResolveProjectPaths(overrides)
+		if err != nil {
+			return err
+		}
+
+		planPath := resolvePlanPath(args[0], resolved.PlanDirs)
+
+		mode, _ := cmd.Flags().GetString("mode")
+		jsonFlag, _ := cmd.Flags().GetBool("json")
+		quiet, _ := cmd.Flags().GetBool("quiet")
+		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
+		envOverlay, _ := cmd.Flags().GetString("env-overlay")
+
+		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
+
+		ra := &runArgs{
+			PlanPath:      planPath,
+			EnvPath:       resolved.EnvPath,
+			GraphPath:     resolved.GraphPath,
+			TemplatesPath: resolved.TemplatesPath,
+			OutputDir:     outputDir,
+			Mode:          mode,
+			DomainPath:    resolved.DomainPath,
+			JSON:          jsonFlag,
+			Quiet:         quiet,
+			Overrides:     overrideFlags,
+			EnvOverlay:    envOverlay,
+		}
+
+		code := executeRun(ra)
+		if code != 0 {
+			return &exitError{Code: code}
+		}
+		return nil
+	},
+}
+
+func init() {
+	// Local flags specific to single-plan execution
+	runPlanCmd.Flags().Bool("json", false, "output machine-readable JSON summary to stdout")
+	runPlanCmd.Flags().Bool("quiet", false, "suppress progress messages, show only final summary")
+}
+
+// executeRun handles output modes (JSON/quiet/normal) and returns an exit code.
+// This is the entry point called by the Cobra RunE and by tests.
+func executeRun(ra *runArgs) int {
+	// --json implies --quiet
+	if ra.JSON {
+		ra.Quiet = true
+	}
+
+	// Choose output writer: --quiet suppresses progress
+	var out io.Writer = os.Stdout
+	if ra.Quiet {
+		out = io.Discard
+	}
+
+	res := runCommand(context.Background(), ra, out)
+
+	// JSON output
+	if ra.JSON {
+		if res.summary != nil {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			enc.Encode(res.summary)
+		} else {
+			// Setup error before we got a RunResult — emit minimal JSON
+			s := &RunSummary{
+				Outcome: "error",
+				Error:   errString(res.err),
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			enc.Encode(s)
+		}
+		return exitCode(res)
+	}
+
+	// Quiet (non-JSON): show the final summary line
+	if ra.Quiet && res.summary != nil {
+		switch res.summary.Outcome {
+		case "passed":
+			fmt.Fprintf(os.Stdout, "PASSED (%d/%d steps)\n", res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps)
+		case "failed":
+			fmt.Fprintf(os.Stdout, "FAILED: %s\n", res.summary.Error)
+		case "error":
+			fmt.Fprintf(os.Stdout, "ERROR: %s\n", res.summary.Error)
+		}
+		if res.archivePath != "" {
+			fmt.Fprintf(os.Stdout, "Archive: %s\n", res.archivePath)
+		}
+		return exitCode(res)
+	}
+
+	// Normal (non-quiet, non-JSON): errors already printed during execution
+	if res.err != nil {
+		fmt.Fprintf(os.Stderr, "aat: %s\n", res.err)
+	}
+	return exitCode(res)
+}
+
+// runCommand executes the full run pipeline. Extracted for testability.
+// The out writer receives progress messages; callers pass io.Discard for quiet mode.
+func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
+	logf := func(format string, a ...any) {
+		fmt.Fprintf(out, format, a...)
+	}
+
+	// Validate required fields
+	if args.PlanPath == "" {
+		return &runResult{setupErr: true, err: fmt.Errorf("plan path is required")}
+	}
+
+	// Load shared infrastructure
+	rctx, err := loadRunContext(ctx, args, logf)
+	if err != nil {
+		return &runResult{setupErr: true, err: err}
+	}
+
+	// Create observer
+	var observer engine.ProgressObserver
+	if out != io.Discard {
+		observer = &CLIProgressObserver{out: out}
+	}
+
+	return loadAndRunPlan(ctx, rctx, args.PlanPath, args.OutputDir, observer, logf)
+}

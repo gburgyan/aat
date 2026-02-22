@@ -8,10 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/gburgyan/aat/adapter"
-	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/engine"
@@ -442,34 +440,3 @@ func resolveSavePlan(name string, planDirs []string) string {
 	return name + ".yaml"
 }
 
-// writeRunArchive creates a run archive in the output directory and returns
-// the archive path. It collects secrets from the environment for redaction.
-func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string) (string, error) {
-	secrets := env.CollectSecrets()
-	if p.Auth != nil {
-		for k, v := range config.CollectAuthSecrets(p.Auth) {
-			secrets[k] = v
-		}
-	}
-	return writeRunArchiveWithSecrets(result, p, env, g, outputDir, secrets)
-}
-
-// writeRunArchiveWithSecrets creates a run archive using a pre-built secrets set.
-func writeRunArchiveWithSecrets(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string, secrets map[string]bool) (string, error) {
-	runID := archive.GenerateRunID()
-	meta := archive.ArchiveMetadata{
-		Version:      "1.0.0",
-		RunID:        runID,
-		Timestamp:    time.Now(),
-		Plan:         p,
-		Environment:  env.Name,
-		GraphVersion: g.Version,
-		ToolVersion:  "0.1.0",
-	}
-	arc := engine.ToArchive(result, meta, env.APIBaseURL, secrets)
-	archivePath := filepath.Join(outputDir, runID, "archive.json")
-	if err := archive.Write(arc, archivePath); err != nil {
-		return "", fmt.Errorf("writing archive: %w", err)
-	}
-	return archivePath, nil
-}

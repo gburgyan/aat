@@ -10,7 +10,17 @@ import (
 // Write serializes an Archive as indented JSON and writes it to the given path.
 // Parent directories are created if they don't exist.
 func Write(a *Archive, path string) error {
-	data, err := json.MarshalIndent(a, "", "  ")
+	return writeJSON(a, path)
+}
+
+// WriteBatch serializes a BatchArchive as indented JSON to the given path.
+// Parent directories are created if they don't exist.
+func WriteBatch(b *BatchArchive, path string) error {
+	return writeJSON(b, path)
+}
+
+func writeJSON(v any, path string) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshalling archive: %w", err)
 	}

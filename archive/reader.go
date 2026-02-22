@@ -20,3 +20,18 @@ func Read(path string) (*Archive, error) {
 
 	return &a, nil
 }
+
+// ReadBatch loads a BatchArchive from a JSON file at the given path.
+func ReadBatch(path string) (*BatchArchive, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading batch archive file: %w", err)
+	}
+
+	var b BatchArchive
+	if err := json.Unmarshal(data, &b); err != nil {
+		return nil, fmt.Errorf("unmarshalling batch archive: %w", err)
+	}
+
+	return &b, nil
+}

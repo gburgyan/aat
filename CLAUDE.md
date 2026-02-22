@@ -170,15 +170,27 @@ make build
 #   --trace-dir DIR    trace output directory (default: traces/)
 #   --output DIR       archive output directory (default: runs/)
 
-# Execute a pre-written plan
-./aat run \
-  --plan travelport/workflows/roundtrip-booking.yaml \
+# Execute a single pre-written plan
+./aat run plan travelport/workflows/roundtrip-booking.yaml \
   --env travelport/env.yaml \
   --graph travelport/graph.yaml \
   --templates travelport/templates/ \
   --domain travelport/domain.yaml
 
-# Optional run flags:
+# Execute all plans in configured plan directories as a batch
+./aat run batch \
+  --env travelport/env.yaml \
+  --graph travelport/graph.yaml \
+  --templates travelport/templates/ \
+  --domain travelport/domain.yaml
+
+# Execute plans under a specific subdirectory
+./aat run batch booking/ \
+  --env travelport/env.yaml \
+  --graph travelport/graph.yaml \
+  --templates travelport/templates/
+
+# Shared run flags (apply to both plan and batch):
 #   --mode MODE        strict (no LLM), lean (LLM fallback), adaptive (lean + relaxation)
 #   --output DIR       archive output directory (default: runs/)
 #   --json             machine-readable JSON summary to stdout
@@ -207,11 +219,15 @@ AAT has two layers of observability: **run archives** capture execution, **plan 
 Every execution writes a JSON archive to the output directory (default `runs/`). Archives contain per-step request/response pairs, timing, status codes, and overall outcome. Sensitive headers are redacted.
 
 ```bash
-aat run --plan plan.yaml --env env.yaml --output runs/
+aat run plan plan.yaml --env env.yaml --output runs/
 # produces: runs/run-YYYYMMDD-HHMMSS-XXXXXXXX/archive.json
+
+aat run batch --output runs/
+# produces: runs/batch-YYYYMMDD-HHMMSS-XXXXXXXX/batch.json
+#           runs/batch-.../run-YYYYMMDD-HHMMSS-XXXXXXXX/archive.json (per plan)
 ```
 
-Key types: `archive.Archive`, `archive.Write`, `archive.Read`, `archive.GenerateRunID`.
+Key types: `archive.Archive`, `archive.Write`, `archive.Read`, `archive.GenerateRunID`, `archive.BatchArchive`, `archive.WriteBatch`, `archive.ReadBatch`, `archive.GenerateBatchID`.
 
 ### Plan Traces (`intent/`)
 
@@ -234,9 +250,13 @@ Opt-in via `InterpretRequest.EnableTrace = true`. Zero overhead when disabled. K
 
 ## CLI Commands
 
-Beyond `run` and `prompt` (shown above), the CLI provides:
+Beyond `prompt` (shown above), the CLI provides:
 
 ```bash
+# Execute plans
+aat run plan <name-or-path>            # single plan (positional arg)
+aat run batch [directory]              # all plans, or filtered by subdirectory
+
 # Validation (unified — bare validates everything, subcommands focus on one scope)
 aat validate [--manifest FILE] [--strict]
 aat validate graph [--graph FILE] [--oas FILE] [--templates DIR] [--strict]

@@ -177,3 +177,41 @@ type ArchiveResult struct {
 	Outcome string `json:"outcome"`
 	Error   string `json:"error,omitempty"`
 }
+
+// BatchArchive is the top-level JSON structure for a batch run (batch.json).
+type BatchArchive struct {
+	Metadata BatchMetadata   `json:"metadata"`
+	Runs     []BatchRunEntry `json:"runs"`
+	Result   BatchResult     `json:"result"`
+}
+
+// BatchMetadata captures provenance and context for a batch run.
+type BatchMetadata struct {
+	Version     string    `json:"version"`
+	BatchID     string    `json:"batchId"`
+	Timestamp   time.Time `json:"timestamp"`
+	Source      string    `json:"source,omitempty"` // directory filter or "all"
+	ToolVersion string    `json:"toolVersion,omitempty"`
+}
+
+// BatchRunEntry is a summary of a single run within a batch.
+type BatchRunEntry struct {
+	PlanName    string `json:"planName"`
+	RunID       string `json:"runId"`
+	Outcome     string `json:"outcome"`
+	StepCount   int    `json:"stepCount"`
+	PassedCount int    `json:"passedCount"`
+	FailedCount int    `json:"failedCount"`
+	DurationMs  int64  `json:"durationMs"`
+	Error       string `json:"error,omitempty"`
+}
+
+// BatchResult captures the aggregate outcome of a batch.
+type BatchResult struct {
+	Outcome         string `json:"outcome"` // passed, failed, error
+	TotalRuns       int    `json:"totalRuns"`
+	PassedRuns      int    `json:"passedRuns"`
+	FailedRuns      int    `json:"failedRuns"`
+	ErrorRuns       int    `json:"errorRuns"`
+	TotalDurationMs int64  `json:"totalDurationMs"`
+}
