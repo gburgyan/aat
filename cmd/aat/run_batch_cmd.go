@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
 	"github.com/spf13/cobra"
+	"golang.org/x/sync/errgroup"
 )
 
 // runBatchCmd executes all plans in a directory as a correlated batch.
@@ -49,6 +51,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
 		envOverlay, _ := cmd.Flags().GetString("env-overlay")
 		mode, _ := cmd.Flags().GetString("mode")
+		parallel, _ := cmd.Flags().GetInt("parallel")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -67,6 +70,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,
+			Parallel:   parallel,
 		}
 
 		code := executeBatch(ba)
@@ -80,6 +84,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 func init() {
 	runBatchCmd.Flags().Bool("json", false, "output machine-readable JSON batch summary to stdout")
 	runBatchCmd.Flags().Bool("quiet", false, "suppress progress messages, show only per-plan summary lines")
+	runBatchCmd.Flags().Int("parallel", 1, "number of plans to execute concurrently (default 1 = sequential)")
 
 	runCmd.AddCommand(runBatchCmd)
 }
@@ -89,6 +94,7 @@ type batchArgs struct {
 	runArgs
 	PlanDirs   []string
 	FilterPath string // optional subdirectory filter
+	Parallel   int    // concurrency limit; <=1 means sequential
 }
 
 // BatchSummary is the machine-readable JSON output for batch CI/CD pipelines.
@@ -123,10 +129,10 @@ type BatchStats struct {
 
 // batchResult is the internal result from batchCommand.
 type batchResult struct {
-	summary     *BatchSummary
-	batchDir    string
-	err         error
-	setupErr    bool
+	summary  *BatchSummary
+	batchDir string
+	err      error
+	setupErr bool
 }
 
 // executeBatch handles output modes and returns an exit code.
@@ -233,7 +239,11 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		}
 	}
 
-	logf("aat: batch run — %d plans\n\n", len(plans))
+	logf("aat: batch run — %d plans", len(plans))
+	if args.Parallel > 1 {
+		logf(" (parallel=%d)", args.Parallel)
+	}
+	logf("\n\n")
 
 	// 2. Load shared infrastructure once
 	rctx, err := loadRunContext(ctx, &args.runArgs, logf)
@@ -247,78 +257,15 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 
 	logf("\n")
 
-	// 4. Execute each plan
+	// 4. Execute plans
 	batchStart := time.Now()
 	var runs []BatchRunResult
 	var batchEntries []archive.BatchRunEntry
 
-	for i, entry := range plans {
-		planName := planBaseName(entry.Name)
-		logf("  [%d/%d] %s", i+1, len(plans), planName)
-
-		// Create per-plan output directory inside the batch directory
-		planOutputDir := batchDir
-
-		// Create a quiet observer for batch (suppress per-step output)
-		var observer engine.ProgressObserver
-		noopLogf := func(string, ...any) {}
-
-		res := loadAndRunPlan(ctx, rctx, entry.FullPath, planOutputDir, observer, noopLogf)
-
-		// Build per-plan results
-		br := BatchRunResult{
-			PlanName:    planName,
-			ArchivePath: res.archivePath,
-		}
-		be := archive.BatchRunEntry{
-			PlanName: planName,
-		}
-
-		if res.summary != nil {
-			br.Outcome = res.summary.Outcome
-			br.StepCount = res.summary.Summary.TotalSteps
-			br.PassedSteps = res.summary.Summary.PassedSteps
-			br.FailedSteps = res.summary.Summary.FailedSteps
-			br.DurationMs = res.summary.Summary.DurationMs
-			br.Error = res.summary.Error
-
-			be.Outcome = res.summary.Outcome
-			be.StepCount = res.summary.Summary.TotalSteps
-			be.PassedCount = res.summary.Summary.PassedSteps
-			be.FailedCount = res.summary.Summary.FailedSteps
-			be.DurationMs = res.summary.Summary.DurationMs
-			be.Error = res.summary.Error
-		} else {
-			br.Outcome = "error"
-			if res.err != nil {
-				br.Error = res.err.Error()
-			}
-			be.Outcome = "error"
-			if res.err != nil {
-				be.Error = res.err.Error()
-			}
-		}
-
-		// Extract run ID from archive path for batch entry
-		if res.archivePath != "" {
-			be.RunID = filepath.Base(filepath.Dir(res.archivePath))
-		}
-
-		runs = append(runs, br)
-		batchEntries = append(batchEntries, be)
-
-		// Print per-plan summary line
-		dur := formatDuration(time.Duration(br.DurationMs) * time.Millisecond)
-		switch br.Outcome {
-		case "passed":
-			logf("  PASSED (%d steps, %s)\n", br.StepCount, dur)
-		case "failed":
-			logf("  FAILED (%d steps, %s)\n", br.StepCount, dur)
-		case "error":
-			logf("  ERROR: %s\n", br.Error)
-		default:
-			logf("  %s\n", br.Outcome)
-		}
+	if args.Parallel > 1 {
+		runs, batchEntries = batchParallel(ctx, rctx, plans, batchDir, args, out)
+	} else {
+		runs, batchEntries = batchSequential(ctx, rctx, plans, batchDir, args, out)
 	}
 
 	totalDur := time.Since(batchStart)
@@ -393,6 +340,187 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	return &batchResult{
 		summary:  summary,
 		batchDir: batchDir,
+	}
+}
+
+// batchSequential executes plans one at a time with streaming step output.
+func batchSequential(ctx context.Context, rctx *runContext, plans []config.PlanEntry, batchDir string, args *batchArgs, out io.Writer) ([]BatchRunResult, []archive.BatchRunEntry) {
+	var runs []BatchRunResult
+	var batchEntries []archive.BatchRunEntry
+	noopLogf := func(string, ...any) {}
+
+	for _, entry := range plans {
+		planName := planBaseName(entry.Name)
+
+		// Create streaming observer for sequential mode (unless output suppressed)
+		var observer engine.ProgressObserver
+		if out != io.Discard {
+			observer = NewBatchStreamObserver(out, planName)
+		}
+
+		res := loadAndRunPlan(ctx, rctx, entry.FullPath, batchDir, observer, noopLogf)
+
+		br, be := buildPlanResult(planName, res)
+		runs = append(runs, br)
+		batchEntries = append(batchEntries, be)
+
+		// When no observer, print a one-line summary (quiet-ish fallback)
+		if observer == nil {
+			dur := formatDuration(time.Duration(br.DurationMs) * time.Millisecond)
+			switch br.Outcome {
+			case "passed":
+				fmt.Fprintf(out, "  %s  PASSED (%d steps, %s)\n", planName, br.StepCount, dur)
+			case "failed":
+				fmt.Fprintf(out, "  %s  FAILED (%d steps, %s)\n", planName, br.StepCount, dur)
+			case "error":
+				fmt.Fprintf(out, "  %s  ERROR: %s\n", planName, br.Error)
+			}
+		}
+
+		fmt.Fprintln(out)
+	}
+
+	return runs, batchEntries
+}
+
+// batchParallel executes plans concurrently using errgroup with a concurrency limit.
+func batchParallel(ctx context.Context, rctx *runContext, plans []config.PlanEntry, batchDir string, args *batchArgs, out io.Writer) ([]BatchRunResult, []archive.BatchRunEntry) {
+	n := len(plans)
+	results := make([]runResult, n)
+	planNames := make([]string, n)
+
+	for i, entry := range plans {
+		planNames[i] = planBaseName(entry.Name)
+	}
+
+	// Detect terminal for progress rendering
+	ti := DetectTerminal()
+	var renderer *ProgressRenderer
+	if out != io.Discard && ti.IsTTY {
+		renderer = NewProgressRenderer(out, ti.Width)
+	}
+
+	// Shared mutex for non-TTY output
+	var outputMu sync.Mutex
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(args.Parallel)
+
+	for i, entry := range plans {
+		i, entry := i, entry // capture loop vars
+
+		g.Go(func() error {
+			noopLogf := func(string, ...any) {}
+
+			var observer engine.ProgressObserver
+			if renderer != nil {
+				state := &PlanProgressState{
+					PlanName:  planNames[i],
+					PlanIndex: i,
+					StartTime: time.Now(),
+				}
+				renderer.AddPlan(state)
+				observer = NewParallelProgressObserver(state, renderer)
+			}
+
+			res := loadAndRunPlan(gctx, rctx, entry.FullPath, batchDir, observer, noopLogf)
+			if res != nil {
+				results[i] = *res
+			}
+
+			// Build result line for completion
+			br, _ := buildPlanResult(planNames[i], res)
+			resultLine := formatBatchResultLine(planNames[i], br)
+
+			if renderer != nil {
+				// Find the state from the observer and complete it
+				if ppo, ok := observer.(*ParallelProgressObserver); ok {
+					renderer.CompletePlan(ppo.state, resultLine)
+				}
+			} else if out != io.Discard {
+				// Non-TTY fallback: print simple result line under mutex
+				outputMu.Lock()
+				fmt.Fprintln(out, resultLine)
+				outputMu.Unlock()
+			}
+
+			return nil
+		})
+	}
+
+	g.Wait()
+
+	if renderer != nil {
+		renderer.Finish()
+	}
+
+	// Build final results in original plan order
+	var runs []BatchRunResult
+	var batchEntries []archive.BatchRunEntry
+	for i := range plans {
+		br, be := buildPlanResult(planNames[i], &results[i])
+		runs = append(runs, br)
+		batchEntries = append(batchEntries, be)
+	}
+
+	return runs, batchEntries
+}
+
+// buildPlanResult constructs BatchRunResult and BatchRunEntry from a runResult.
+func buildPlanResult(planName string, res *runResult) (BatchRunResult, archive.BatchRunEntry) {
+	br := BatchRunResult{
+		PlanName:    planName,
+		ArchivePath: res.archivePath,
+	}
+	be := archive.BatchRunEntry{
+		PlanName: planName,
+	}
+
+	if res.summary != nil {
+		br.Outcome = res.summary.Outcome
+		br.StepCount = res.summary.Summary.TotalSteps
+		br.PassedSteps = res.summary.Summary.PassedSteps
+		br.FailedSteps = res.summary.Summary.FailedSteps
+		br.DurationMs = res.summary.Summary.DurationMs
+		br.Error = res.summary.Error
+
+		be.Outcome = res.summary.Outcome
+		be.StepCount = res.summary.Summary.TotalSteps
+		be.PassedCount = res.summary.Summary.PassedSteps
+		be.FailedCount = res.summary.Summary.FailedSteps
+		be.DurationMs = res.summary.Summary.DurationMs
+		be.Error = res.summary.Error
+	} else {
+		br.Outcome = "error"
+		if res.err != nil {
+			br.Error = res.err.Error()
+		}
+		be.Outcome = "error"
+		if res.err != nil {
+			be.Error = res.err.Error()
+		}
+	}
+
+	// Extract run ID from archive path for batch entry
+	if res.archivePath != "" {
+		be.RunID = filepath.Base(filepath.Dir(res.archivePath))
+	}
+
+	return br, be
+}
+
+// formatBatchResultLine formats a single plan result as a display line.
+func formatBatchResultLine(planName string, br BatchRunResult) string {
+	dur := formatDuration(time.Duration(br.DurationMs) * time.Millisecond)
+	switch br.Outcome {
+	case "passed":
+		return fmt.Sprintf("  %s  PASSED (%d steps, %s)", planName, br.StepCount, dur)
+	case "failed":
+		return fmt.Sprintf("  %s  FAILED (%d steps, %s)", planName, br.StepCount, dur)
+	case "error":
+		return fmt.Sprintf("  %s  ERROR: %s", planName, br.Error)
+	default:
+		return fmt.Sprintf("  %s  %s", planName, br.Outcome)
 	}
 }
 
