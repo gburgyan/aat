@@ -25,7 +25,11 @@ func (o *CLIProgressObserver) OnStepStart(index, total int, step plan.Step) {
 }
 
 func (o *CLIProgressObserver) OnStepComplete(index, total int, result engine.StepResult) {
-	prefix := fmt.Sprintf("  [%d/%d] %-20s", index+1, total, result.Node)
+	totalStr := fmt.Sprintf("%d", total)
+	width := len(totalStr)
+	// indent = "  [" (3) + width + "/" (1) + len(totalStr) + "] " (2)
+	indent := 6 + width + len(totalStr)
+	prefix := fmt.Sprintf("  [%*d/%s] %-20s", width, index+1, totalStr, result.Node)
 	if result.Error != nil {
 		if result.RetryCount > 0 {
 			fmt.Fprintf(o.out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(result), result.RetryCount)
@@ -40,7 +44,7 @@ func (o *CLIProgressObserver) OnStepComplete(index, total int, result engine.Ste
 		}
 		fmt.Fprintf(o.out, "%s %s  %dms%s\n", prefix, status, result.Duration.Milliseconds(), validMark)
 		for _, do := range result.DisplayOutputs {
-			fmt.Fprintf(o.out, "        %s: %v\n", do.Label, do.Value)
+			fmt.Fprintf(o.out, "%*s%s: %v\n", indent, "", do.Label, do.Value)
 		}
 	} else {
 		fmt.Fprintf(o.out, "%s (no response)\n", prefix)
