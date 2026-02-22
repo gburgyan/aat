@@ -63,7 +63,7 @@ Respond with a JSON object (no markdown fencing, just raw JSON):
 }
 Omit empty categories.
 
-Today's date is ` + dateStr + `. Default to dates at least 7 days in the future or past depending on context. The user's prompt takes priority (e.g., "tomorrow" → {{today + 1 day}}). Expression syntax: {{today + 30 days}}.
+Today's date is ` + dateStr + `. The user's prompt takes priority for dates (e.g., "tomorrow" → {{today + 1 day}}). Expression syntax: {{today + 30 days}}.
 
 ## Values
 
@@ -71,6 +71,7 @@ For inputs in the "Inputs That Need Values" section, provide a LITERAL value (st
 For inputs in the "Pool Inputs" section, OMIT the key entirely unless the user explicitly specifies a value — pool inputs auto-select at runtime.
 - Pick from the sample values when provided
 - Hard constraints MUST be met; soft constraints SHOULD be met
+- For required date fields (in "Inputs That Need Values"), default to at least 7 days in the future or past depending on context
 - For date fields, use {{today + N days}} syntax
 - If "Current value:" is shown, keep it unless the user's intent requires a different value
 - DO NOT use "from", "fromSelection", "select", or any reference/object syntax — only plain scalars
