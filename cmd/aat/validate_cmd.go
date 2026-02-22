@@ -299,7 +299,8 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 
 	// 8. Plans validation
 	if len(m.PlanDirs) > 0 {
-		pvr := validatePlans([]string(m.PlanDirs), g)
+		graphDir := filepath.Dir(m.GraphPath)
+		pvr := validatePlans([]string(m.PlanDirs), g, graphDir)
 		if len(pvr.Errors) > 0 {
 			sections = append(sections, sectionResult{
 				Name:   "Plans",
@@ -307,10 +308,18 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 				Errors: pvr.Errors,
 			})
 		} else if pvr.Total > 0 {
+			detail := fmt.Sprintf("(%d files", pvr.Total)
+			if pvr.Recipes > 0 {
+				detail += fmt.Sprintf(", %d recipe", pvr.Recipes)
+				if pvr.Recipes > 1 {
+					detail += "s"
+				}
+			}
+			detail += ")"
 			sections = append(sections, sectionResult{
 				Name:   "Plans",
 				Status: "OK",
-				Detail: fmt.Sprintf("(%d files)", pvr.Total),
+				Detail: detail,
 			})
 		}
 	}
@@ -405,12 +414,14 @@ func workflowTemplatePaths(g *graph.Graph, graphDir string) map[string]bool {
 
 // planValidationResult holds counts from plan validation.
 type planValidationResult struct {
-	Errors []string
-	Total  int
+	Errors  []string
+	Total   int
+	Recipes int
 }
 
 // validatePlans walks all plan directories and validates each plan file.
-func validatePlans(planDirs []string, g *graph.Graph) planValidationResult {
+// Recipe-format files are reconstituted into full plans before validation.
+func validatePlans(planDirs []string, g *graph.Graph, graphDir string) planValidationResult {
 	var result planValidationResult
 
 	entries, err := config.ListPlans(planDirs)
@@ -421,13 +432,21 @@ func validatePlans(planDirs []string, g *graph.Graph) planValidationResult {
 
 	for _, entry := range entries {
 		result.Total++
-		p, err := plan.ParseFile(entry.FullPath)
+		parsed, err := plan.ParseAnyFile(entry.FullPath)
 		if err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name, err))
 			continue
 		}
-		if _, err := plan.InstantiateAndValidate(p, g); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name, err))
+		switch v := parsed.(type) {
+		case *plan.Plan:
+			if _, err := plan.InstantiateAndValidate(v, g); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.Name, err))
+			}
+		case *plan.Recipe:
+			result.Recipes++
+			if _, err := intent.Reconstitute(v, g, graphDir); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: reconstituting recipe: %s", entry.Name, err))
+			}
 		}
 	}
 

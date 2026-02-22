@@ -540,3 +540,280 @@ workflows: workflows/
 	assert.Contains(t, output, "FAILED")
 	assert.Contains(t, output, "bad-standalone.yaml")
 }
+
+func TestValidate_WithRecipePlan(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create graph with a workflow
+	graphContent := `version: "1.0.0"
+workflows:
+  - name: book-flight
+    description: Book a flight
+    template: workflows/booking.yaml
+nodes:
+  SearchAir:
+    description: search
+    adapter: search.adapter
+    inputs:
+      - name: origin
+        type: string
+    outputs:
+      - name: offerId
+        type: string
+  CreateReservation:
+    description: reserve
+    adapter: reserve.adapter
+    inputs:
+      - name: offerId
+        type: string
+        from: SearchAir.offerId
+    outputs:
+      - name: reservationId
+        type: string
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "graph.yaml"), []byte(graphContent), 0644))
+
+	// Create templates
+	templatesDir := filepath.Join(dir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "search.adapter.yaml"), []byte(`adapter: search.adapter
+protocol: http
+request:
+  method: POST
+  path: /search
+  body: "{}"
+response:
+  extract:
+    offerId: "$.offerId"
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "reserve.adapter.yaml"), []byte(`adapter: reserve.adapter
+protocol: http
+request:
+  method: POST
+  path: /reserve
+  body: "{}"
+response:
+  extract:
+    reservationId: "$.reservationId"
+`), 0644))
+
+	// Create workflow template
+	workflowsDir := filepath.Join(dir, "workflows")
+	require.NoError(t, os.MkdirAll(workflowsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "booking.yaml"), []byte(`execution:
+  steps:
+    - node: SearchAir
+      values:
+        origin: ""
+    - node: CreateReservation
+      dependsOn: [SearchAir]
+      values:
+        offerId:
+          from: SearchAir.offerId
+`), 0644))
+
+	// Create plans dir with a recipe
+	plansDir := filepath.Join(dir, "plans")
+	require.NoError(t, os.MkdirAll(plansDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "recipe.yaml"), []byte(`kind: recipe
+metadata:
+  prompt: "book a flight from JFK"
+selection:
+  workflow: book-flight
+overrides:
+  values:
+    SearchAir.origin: "JFK"
+`), 0644))
+
+	// Create manifest
+	manifestPath := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`
+name: test-project
+graph: graph.yaml
+templates: templates/
+workflows: workflows/
+plans:
+  - plans/
+`), 0644))
+
+	var buf bytes.Buffer
+	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
+	output := buf.String()
+	assert.Equal(t, 0, code, "output: %s", output)
+	assert.Contains(t, output, "Plans")
+	assert.Contains(t, output, "1 recipe")
+	assert.Contains(t, output, "PASSED")
+}
+
+func TestValidate_WithRecipePlan_BadWorkflow(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a simple graph (no workflows)
+	graphContent := `version: "1.0.0"
+nodes:
+  testNode:
+    description: test
+    adapter: test.adapter
+    inputs:
+      - name: input1
+        type: string
+    outputs:
+      - name: output1
+        type: string
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "graph.yaml"), []byte(graphContent), 0644))
+
+	// Create templates dir
+	templatesDir := filepath.Join(dir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "test.adapter.yaml"), []byte(`adapter: test.adapter
+protocol: http
+request:
+  method: POST
+  path: /test
+  body: "{}"
+response:
+  extract:
+    output1: "$.result"
+`), 0644))
+
+	// Create plans dir with a recipe referencing a nonexistent workflow
+	plansDir := filepath.Join(dir, "plans")
+	require.NoError(t, os.MkdirAll(plansDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "bad-recipe.yaml"), []byte(`kind: recipe
+selection:
+  workflow: nonexistent-workflow
+`), 0644))
+
+	// Create manifest
+	manifestPath := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`
+name: test-project
+graph: graph.yaml
+templates: templates/
+plans:
+  - plans/
+`), 0644))
+
+	var buf bytes.Buffer
+	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
+	output := buf.String()
+	assert.Equal(t, 1, code, "output: %s", output)
+	assert.Contains(t, output, "Plans")
+	assert.Contains(t, output, "FAILED")
+	assert.Contains(t, output, "bad-recipe.yaml")
+	assert.Contains(t, output, "reconstituting recipe")
+}
+
+func TestValidate_WithMixedPlansAndRecipes(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create graph with a workflow
+	graphContent := `version: "1.0.0"
+workflows:
+  - name: book-flight
+    description: Book a flight
+    template: workflows/booking.yaml
+nodes:
+  SearchAir:
+    description: search
+    adapter: search.adapter
+    inputs:
+      - name: origin
+        type: string
+    outputs:
+      - name: offerId
+        type: string
+  CreateReservation:
+    description: reserve
+    adapter: reserve.adapter
+    inputs:
+      - name: offerId
+        type: string
+        from: SearchAir.offerId
+    outputs:
+      - name: reservationId
+        type: string
+`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "graph.yaml"), []byte(graphContent), 0644))
+
+	// Create templates
+	templatesDir := filepath.Join(dir, "templates")
+	require.NoError(t, os.MkdirAll(templatesDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "search.adapter.yaml"), []byte(`adapter: search.adapter
+protocol: http
+request:
+  method: POST
+  path: /search
+  body: "{}"
+response:
+  extract:
+    offerId: "$.offerId"
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(templatesDir, "reserve.adapter.yaml"), []byte(`adapter: reserve.adapter
+protocol: http
+request:
+  method: POST
+  path: /reserve
+  body: "{}"
+response:
+  extract:
+    reservationId: "$.reservationId"
+`), 0644))
+
+	// Create workflow template
+	workflowsDir := filepath.Join(dir, "workflows")
+	require.NoError(t, os.MkdirAll(workflowsDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(workflowsDir, "booking.yaml"), []byte(`execution:
+  steps:
+    - node: SearchAir
+      values:
+        origin: ""
+    - node: CreateReservation
+      dependsOn: [SearchAir]
+      values:
+        offerId:
+          from: SearchAir.offerId
+`), 0644))
+
+	// Create plans dir with both a regular plan and a recipe
+	plansDir := filepath.Join(dir, "plans")
+	require.NoError(t, os.MkdirAll(plansDir, 0755))
+	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "regular.yaml"), []byte(`execution:
+  steps:
+    - node: SearchAir
+      values:
+        origin: "LAX"
+    - node: CreateReservation
+      dependsOn: [SearchAir]
+      values:
+        offerId:
+          from: SearchAir.offerId
+`), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(plansDir, "recipe.yaml"), []byte(`kind: recipe
+selection:
+  workflow: book-flight
+overrides:
+  values:
+    SearchAir.origin: "JFK"
+`), 0644))
+
+	// Create manifest
+	manifestPath := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(manifestPath, []byte(`
+name: test-project
+graph: graph.yaml
+templates: templates/
+workflows: workflows/
+plans:
+  - plans/
+`), 0644))
+
+	var buf bytes.Buffer
+	code := validateCommand(&validateArgs{ManifestPath: manifestPath}, &buf)
+	output := buf.String()
+	assert.Equal(t, 0, code, "output: %s", output)
+	assert.Contains(t, output, "Plans")
+	assert.Contains(t, output, "(2 files, 1 recipe)")
+	assert.Contains(t, output, "PASSED")
+}
