@@ -157,6 +157,7 @@ func (o *ParallelProgressObserver) OnRunStart(total int, mode string) {
 	o.state.TotalSteps = total
 	o.state.StartTime = time.Now()
 	o.state.mu.Unlock()
+	o.renderer.updateCountWidth(total)
 	o.renderer.Refresh()
 }
 
@@ -182,12 +183,13 @@ func (o *ParallelProgressObserver) OnRunComplete(result *engine.RunResult) {
 // ProgressRenderer draws Docker-style multi-line progress bars for concurrent plans.
 // It uses ANSI escape codes to redraw the progress area in place.
 type ProgressRenderer struct {
-	mu        sync.Mutex
-	out       io.Writer
-	termWidth int
-	plans     []*PlanProgressState
-	nameWidth int     // max plan name width for alignment
-	lines     int     // number of lines currently drawn in the progress area
+	mu         sync.Mutex
+	out        io.Writer
+	termWidth  int
+	plans      []*PlanProgressState
+	nameWidth  int // max plan name width for alignment
+	denomWidth int // max digit width of TotalSteps across plans, for slash-aligned counts
+	lines      int // number of lines currently drawn in the progress area
 }
 
 // NewProgressRenderer creates a renderer targeting the given writer with terminal width.
@@ -235,6 +237,17 @@ func (r *ProgressRenderer) CompletePlan(state *PlanProgressState, resultLine str
 	r.renderLocked()
 }
 
+// updateCountWidth updates the cached denominator digit width if a new plan's
+// total steps are wider. Must be called when TotalSteps becomes known.
+func (r *ProgressRenderer) updateCountWidth(totalSteps int) {
+	dw := len(fmt.Sprintf("%d", totalSteps))
+	r.mu.Lock()
+	if dw > r.denomWidth {
+		r.denomWidth = dw
+	}
+	r.mu.Unlock()
+}
+
 // Refresh redraws the progress area. Safe for concurrent calls.
 func (r *ProgressRenderer) Refresh() {
 	r.mu.Lock()
@@ -273,15 +286,17 @@ func (r *ProgressRenderer) renderLocked() {
 
 	for _, p := range r.plans {
 		snap := p.Snapshot()
-		line := r.formatPlanLine(snap)
+		line := r.formatPlanLine(snap, r.denomWidth)
 		fmt.Fprintln(r.out, line)
 		r.lines++
 	}
 }
 
 // formatPlanLine renders a single plan's progress bar.
-// Format: "  planName  [####------] 3/7  currentNode"
-func (r *ProgressRenderer) formatPlanLine(snap PlanProgressState) string {
+// Format: "  planName  [####------]  3/7  currentNode"
+// denomWidth is the digit width of the largest TotalSteps; both numerator and
+// denominator are padded to this width so the slash aligns across plans.
+func (r *ProgressRenderer) formatPlanLine(snap PlanProgressState, denomWidth int) string {
 	nameCol := r.nameWidth
 	if nameCol < 10 {
 		nameCol = 10
@@ -300,8 +315,11 @@ func (r *ProgressRenderer) formatPlanLine(snap PlanProgressState) string {
 		return fmt.Sprintf("  %-*s  [waiting...]", nameCol, name)
 	}
 
-	// Count column: "3/7"
-	countStr := fmt.Sprintf("%d/%d", snap.CompletedSteps, snap.TotalSteps)
+	// Count column: " 3/7 " with both sides padded to denomWidth so slashes align.
+	if denomWidth < len(fmt.Sprintf("%d", snap.TotalSteps)) {
+		denomWidth = len(fmt.Sprintf("%d", snap.TotalSteps))
+	}
+	countStr := fmt.Sprintf("%*d/%-*d", denomWidth, snap.CompletedSteps, denomWidth, snap.TotalSteps)
 
 	// Node column — truncate if needed
 	nodeCol := 20

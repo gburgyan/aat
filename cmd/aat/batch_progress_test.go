@@ -366,7 +366,7 @@ func TestProgressRenderer_FormatPlanLine_Bar(t *testing.T) {
 		TotalSteps:     10,
 		CompletedSteps: 5,
 		CurrentNode:    "currentStep",
-	})
+	}, 0)
 
 	assert.Contains(t, line, "my-plan")
 	assert.Contains(t, line, "5/10")
@@ -381,7 +381,7 @@ func TestProgressRenderer_FormatPlanLine_WaitingState(t *testing.T) {
 	line := r.formatPlanLine(PlanProgressState{
 		PlanName:   "pending-plan",
 		TotalSteps: 0,
-	})
+	}, 0)
 
 	assert.Contains(t, line, "pending-plan")
 	assert.Contains(t, line, "[waiting...]")
@@ -395,7 +395,7 @@ func TestProgressRenderer_FormatPlanLine_LongName(t *testing.T) {
 		TotalSteps:     5,
 		CompletedSteps: 3,
 		CurrentNode:    "node",
-	})
+	}, 0)
 
 	// Name should be truncated
 	assert.Contains(t, line, "~")
@@ -410,7 +410,7 @@ func TestProgressRenderer_FormatPlanLine_Complete(t *testing.T) {
 		TotalSteps:     4,
 		CompletedSteps: 4,
 		CurrentNode:    "lastStep",
-	})
+	}, 0)
 
 	assert.Contains(t, line, "4/4")
 	// Bar should be all filled (no unfilled '-' characters in the bar)
@@ -421,6 +421,38 @@ func TestProgressRenderer_FormatPlanLine_Complete(t *testing.T) {
 		bar := line[start+1 : end]
 		assert.NotContains(t, bar, "-", "bar should be fully filled")
 	}
+}
+
+func TestProgressRenderer_FormatPlanLine_CountAlignment(t *testing.T) {
+	r := &ProgressRenderer{termWidth: 100, nameWidth: 15}
+
+	// Two plans with different total steps: 9 vs 15.
+	// denomWidth=2 (width of "15"), so counts render as " 7/9 " and " 6/15".
+	denomWidth := 2
+
+	line9 := r.formatPlanLine(PlanProgressState{
+		PlanName:       "plan-short",
+		TotalSteps:     9,
+		CompletedSteps: 7,
+		CurrentNode:    "addPayment",
+	}, denomWidth)
+
+	line15 := r.formatPlanLine(PlanProgressState{
+		PlanName:       "plan-long",
+		TotalSteps:     15,
+		CompletedSteps: 6,
+		CurrentNode:    "addTraveler",
+	}, denomWidth)
+
+	// The slashes should be at the same column.
+	slashPos9 := strings.Index(line9, "/")
+	slashPos15 := strings.Index(line15, "/")
+	assert.Equal(t, slashPos9, slashPos15, "slashes should be aligned at the same column")
+
+	// The node names should start at the same column.
+	posShort := strings.Index(line9, "addPayment")
+	posLong := strings.Index(line15, "addTraveler")
+	assert.Equal(t, posShort, posLong, "step names should be aligned at the same column")
 }
 
 // --- ParallelProgressObserver tests ---
