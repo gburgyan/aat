@@ -152,7 +152,14 @@ make build
 # Or without make:
 # go build -o aat ./cmd/aat/
 
-# LLM-generated plan from natural language prompt
+# With manifest auto-discovery (from travelport/ directory):
+cd travelport/
+./aat prompt "book a flight from rome to new york"
+./aat run plan workflows/roundtrip-booking.yaml
+./aat run batch
+./aat run batch booking/
+
+# Or with explicit paths (from repo root):
 ./aat prompt \
   --env travelport/env.yaml \
   --graph travelport/graph.yaml \
@@ -166,26 +173,6 @@ make build
 #   --trace            capture planning pipeline trace for debugging
 #   --trace-dir DIR    trace output directory (default: traces/)
 #   --output DIR       archive output directory (default: runs/)
-
-# Execute a single pre-written plan
-./aat run plan travelport/workflows/roundtrip-booking.yaml \
-  --env travelport/env.yaml \
-  --graph travelport/graph.yaml \
-  --templates travelport/templates/ \
-  --domain travelport/domain.yaml
-
-# Execute all plans in configured plan directories as a batch
-./aat run batch \
-  --env travelport/env.yaml \
-  --graph travelport/graph.yaml \
-  --templates travelport/templates/ \
-  --domain travelport/domain.yaml
-
-# Execute plans under a specific subdirectory
-./aat run batch booking/ \
-  --env travelport/env.yaml \
-  --graph travelport/graph.yaml \
-  --templates travelport/templates/
 
 # Shared run flags (apply to both plan and batch):
 #   --output DIR       archive output directory (default: runs/)
@@ -216,7 +203,7 @@ AAT has two layers of observability: **run archives** capture execution, **plan 
 Every execution writes a JSON archive to the output directory (default `runs/`). Archives contain per-step request/response pairs, timing, status codes, and overall outcome. Sensitive headers are redacted.
 
 ```bash
-aat run plan plan.yaml --env env.yaml --output runs/
+aat run plan plan.yaml --output runs/
 # produces: runs/run-YYYYMMDD-HHMMSS-XXXXXXXX/archive.json
 
 aat run batch --output runs/
@@ -231,7 +218,7 @@ Key types: `archive.Archive`, `archive.Write`, `archive.Read`, `archive.Generate
 When `--trace` is passed to `aat prompt`, the `intent.Interpret()` pipeline captures every intermediate step as a JSON trace file. This is the primary tool for debugging LLM prompt engineering and plan generation issues.
 
 ```bash
-aat prompt --trace --trace-dir traces/ --env env.yaml --graph graph.yaml --templates tpl/ "book a flight"
+aat prompt --trace --trace-dir traces/ "book a flight"
 # produces: traces/trace-YYYYMMDD-HHMMSS-XXXXXXXX/plan-trace.json
 ```
 

@@ -1,6 +1,6 @@
 # AAT Quickstart: Petstore Example
 
-This example uses the public [Swagger Petstore v3 API](https://petstore3.swagger.io/) to demonstrate AAT's core workflow: define an API graph, write a test plan, and run it. No API keys or setup required.
+This example uses the public [Swagger Petstore v3 API](https://petstore3.swagger.io/) to demonstrate AAT's core workflow: define an API graph, write test plans, and run them. No API keys or setup required.
 
 ## Prerequisites
 
@@ -15,14 +15,17 @@ From the repository root:
 go build -o aat ./cmd/aat/
 ```
 
+> For the full experience (web UI, version info), use `make build` instead. The Petstore example works fine with a plain `go build`.
+
 ## Run the example
 
+From the `examples/petstore/` directory, the project manifest (`aat-project.yaml`) auto-discovers all config files — no extra flags needed:
+
 ```bash
-./aat run \
-  --plan examples/petstore/plan.yaml \
-  --env examples/petstore/env.yaml \
-  --graph examples/petstore/graph.yaml \
-  --templates examples/petstore/templates/
+cd examples/petstore
+
+# Run a single plan
+../../aat run plan plans/create-and-verify.yaml
 ```
 
 You should see output like:
@@ -35,16 +38,32 @@ You should see output like:
     deletePet              200  45ms
 
 PASSED (2/2 steps, 446ms)
-Archive: runs/run-XXXXXXXX-XXXXXX-XXXXXXXX/archive.json
+Archive: _output/runs/run-XXXXXXXX-XXXXXX-XXXXXXXX/archive.json
+```
+
+## Run all plans as a batch
+
+```bash
+../../aat run batch
+```
+
+This discovers and runs every plan in the `plans/` directory.
+
+## Validate the project
+
+Check that the graph, templates, plans, and workflows are all valid:
+
+```bash
+../../aat validate
 ```
 
 ## What happened
 
 AAT executed a two-step test plan:
 
-1. **createPet** — Sent a POST request to create a pet named "Buddy" with status "available". Verified the response returned HTTP 200 and included an `id` field.
-2. **getPet** — Used the `petId` from step 1 (passed automatically via the graph edge) to GET the pet. Verified the name and status match what we sent.
-3. **Cleanup** — Because `createPet` declares `cleanup: deletePet` in the graph, AAT automatically deleted the pet after the plan completed. No explicit cleanup step needed.
+1. **createPet** — Sent a POST request to create a pet with a name picked from the graph's default pool (e.g. "Buddy", "Luna", "Cooper") and status "available". Verified the response returned HTTP 200 and included an `id` field.
+2. **getPet** — Used the `petId` from step 1 to GET the pet. The data flow is wired at the graph level (`default: {from: createPet.petId}`), so neither the workflow nor the recipe needs to specify it. Verified the pet exists.
+3. **Cleanup** — Because `createPet` declares `cleanup: deletePet` in the graph, AAT automatically deleted the pet after the plan completed. The cleanup step's `petId` also resolves from `createPet` via a graph default — no explicit cleanup step needed.
 
 The full request/response details are in the archive JSON file.
 
@@ -52,60 +71,67 @@ The full request/response details are in the archive JSON file.
 
 | File | Purpose |
 |------|---------|
-| `graph.yaml` | Defines 4 API nodes (createPet, getPet, findByStatus, deletePet) and the data edges between them. This is the "map" of the API. |
+| `aat-project.yaml` | Project manifest — lets AAT auto-discover all config files so you don't need `--env`, `--graph`, `--templates` flags. |
+| `graph.yaml` | Defines 4 API nodes with default values, data-flow wiring, and 2 workflow templates. This is the "map" of the API. |
 | `templates/*.yaml` | HTTP request/response templates for each node. Define the method, path, headers, body, and response extraction. |
 | `env.yaml` | Environment config: base URL, auth (none), retry settings. |
-| `plan.yaml` | Test plan: which steps to execute, input values, and assertions to check. |
+| `plans/*.yaml` | Recipes: compact test plans that reference a workflow and add value/assertion overrides. |
+| `workflows/*.yaml` | Workflow templates: reusable step patterns that recipes instantiate at runtime. |
 | `domain.yaml` | Optional domain knowledge: pet name pools and concepts (used with `--domain` flag). |
 | `petstore-spec.yaml` | OpenAPI spec for the 4 operations (used for graph validation and scaffold generation). |
 
-### Data flow
+### Recipes and workflows
 
-The graph defines edges that carry data between steps automatically:
+Plans use the **recipe** format — a compact YAML that selects a workflow and adds overrides:
 
+```yaml
+# plans/create-and-verify.yaml
+kind: recipe
+selection:
+  workflow: Create and Verify
+  description: "Create a pet using pool defaults and verify it was stored correctly"
+overrides:
+  assertions:
+    createPet:
+      - type: status
+        expect: 200
+      - type: fieldExists
+        path: id
 ```
-createPet ──petId──→ getPet
-    │
-    │petId
-    ↓
-deletePet (cleanup)
-```
 
-When `createPet` runs, AAT extracts `petId` from the response. When `getPet` runs, AAT resolves its `petId` input by following the edge back to `createPet`'s output. No manual wiring needed in the plan.
+At runtime, AAT reconstitutes the recipe into a full plan by composing the workflow template with the overrides. Input values like `name` come from the graph's default pool (a random pet name each run), `status` defaults to "available", and data flow between steps (e.g. `petId` from `createPet` to `getPet`) is wired at the graph level via `default: {from: ...}`. The recipe only needs to add assertions.
 
 ## Try the second plan
 
-The second plan demonstrates array selection — finding a pet from a list:
+The second plan uses the "Search and Retrieve" workflow, which demonstrates array selection — finding a pet from a list:
 
 ```bash
-./aat run \
-  --plan examples/petstore/plan-find-and-verify.yaml \
+../../aat run plan plans/find-and-verify.yaml
+```
+
+The workflow template defines the structural complexity (array selection with `strategy: first`, `fromSelection: pet.petId`), while the recipe just adds assertions. Input defaults and data wiring come from the graph. This is how AAT keeps plans compact even for non-trivial scenarios.
+
+## Running without a manifest
+
+If you prefer explicit flags (or are running from a different directory):
+
+```bash
+./aat run plan examples/petstore/plans/create-and-verify.yaml \
   --env examples/petstore/env.yaml \
   --graph examples/petstore/graph.yaml \
   --templates examples/petstore/templates/
 ```
 
-This plan:
-
-1. **createPet** — Creates a pet named "Bella"
-2. **findByStatus** — Searches for all pets with status "available" (returns an array)
-3. **getPet** — Selects the first pet from the array and retrieves it by ID
-4. **deletePet** — Explicitly deletes the pet (showing the manual cleanup alternative)
-
-The `getPet` step uses a `selections` block with `strategy: first` to pick an element from the array output, then `fromSelection: pet.petId` to extract the pet's ID. This is how AAT handles list endpoints.
-
-## Validate the graph
-
-Check that the graph structure is valid and consistent with the OpenAPI spec:
+## Validate the graph against the OpenAPI spec
 
 ```bash
-./aat graph validate --graph examples/petstore/graph.yaml
+../../aat validate graph --strict
 ```
 
 You can also scaffold a graph from an OpenAPI spec:
 
 ```bash
-./aat generate --oas examples/petstore/petstore-spec.yaml --output-graph -
+../../aat generate --oas petstore-spec.yaml --output-graph -
 ```
 
 This produces a starting-point graph that you can refine with edges and custom output names.

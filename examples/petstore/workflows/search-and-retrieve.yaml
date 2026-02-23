@@ -1,0 +1,19 @@
+intent:
+  description: "Find pets by status and retrieve one by ID"
+
+execution:
+  steps:
+    - node: findByStatus
+      description: "Search for pets by status"
+
+    - node: getPet
+      dependsOn: [findByStatus]
+      isGoal: true
+      description: "Retrieve the first matching pet by ID"
+      selections:
+        pet:
+          from: findByStatus.pets
+          strategy: first
+      values:
+        petId:
+          fromSelection: pet.petId

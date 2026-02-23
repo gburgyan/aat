@@ -81,9 +81,7 @@ EOF (e.g., piped input that ends) is treated as `n`.
 Use `--yes` to skip the confirmation prompt and execute immediately:
 
 ```bash
-aat prompt "Create a pet and verify it" \
-  --env env.yaml --graph graph.yaml --templates templates/ \
-  --yes
+aat prompt "Create a pet and verify it" --yes
 ```
 
 This is useful for scripting or CI workflows where interactive confirmation isn't possible.
@@ -111,7 +109,6 @@ Use `--save` to write the generated plan to a file:
 
 ```bash
 aat prompt "Order the cheapest in-stock laptop" \
-  --env env.yaml --graph graph.yaml --templates templates/ \
   --save workflows/laptop-order.yaml
 ```
 
@@ -135,7 +132,6 @@ Pass `--domain` to give the LLM context about your API's business rules and vali
 
 ```bash
 aat prompt "Create a pet with a realistic name" \
-  --env env.yaml --graph graph.yaml --templates templates/ \
   --domain domain.yaml
 ```
 
@@ -151,9 +147,7 @@ See [Domain Knowledge](domain-knowledge.md) for the full reference.
 When plans don't come out right, use `--trace` to capture the full LLM planning pipeline:
 
 ```bash
-aat prompt "Order a product" \
-  --env env.yaml --graph graph.yaml --templates templates/ \
-  --trace
+aat prompt "Order a product" --trace
 ```
 
 This produces a trace file at `_output/traces/trace-YYYYMMDD-HHMMSS-XXXXXXXX/plan-trace.json` containing:
@@ -221,10 +215,8 @@ This produces more reliable plans for complex multi-step workflows. See [Workflo
 ## Full Example Session
 
 ```
-$ aat prompt "Create a pet and verify it can be retrieved" \
-    --env examples/petstore/env.yaml \
-    --graph examples/petstore/graph.yaml \
-    --templates examples/petstore/templates/
+$ cd examples/petstore
+$ aat prompt "Create a pet and verify it can be retrieved"
 
 aat: loading environment...
 aat: loaded environment "petstore"

@@ -1,0 +1,20 @@
+kind: recipe
+metadata:
+  created: 2026-02-11T12:00:00Z
+  prompt: "Create a pet and verify it exists"
+  graphVersion: "1.0.0"
+selection:
+  workflow: Create and Verify
+  description: "Create a pet using pool defaults and verify it was stored correctly"
+overrides:
+  assertions:
+    createPet:
+      - type: status
+        expect: 200
+      - type: fieldExists
+        path: id
+    getPet:
+      - type: status
+        expect: 200
+      - type: fieldExists
+        path: name

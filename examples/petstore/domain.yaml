@@ -3,23 +3,52 @@ concepts:
     description: "Whether a pet is available for adoption"
     applies_to: [status]
 
+  petIdentity:
+    description: "A pet's core attributes: name, category, and tags"
+    applies_to: [name, category]
+
 types:
   petName:
     description: "Common name for a pet"
+    format: string
     validation: "^[A-Za-z][A-Za-z ]{0,49}$"
     pool: petNames
 
+  petStatus:
+    description: "Availability status of a pet in the store"
+    format: string
+    validation: "^(available|pending|sold)$"
+    pool: petStatuses
+
+  petCategory:
+    description: "Animal category for a pet"
+    format: string
+    pool: petCategories
+
 valuePools:
   petNames:
+    description: "Pool of realistic pet names"
+    type: string
+    groups:
+      dogs: [Buddy, Max, Cooper, Rocky, Bear, Duke, Tucker]
+      cats: [Bella, Luna, Daisy, Sadie, Cleo, Willow, Pepper]
+      other: [Charlie, Coco, Ziggy, Mochi, Peanut]
+
+  petStatuses:
+    description: "Valid pet availability statuses"
     type: string
     values:
-      - Buddy
-      - Max
-      - Bella
-      - Charlie
-      - Luna
-      - Cooper
-      - Daisy
-      - Rocky
-      - Sadie
-      - Bear
+      - available
+      - pending
+      - sold
+
+  petCategories:
+    description: "Common pet animal categories"
+    type: string
+    values:
+      - Dogs
+      - Cats
+      - Birds
+      - Fish
+      - Reptiles
+      - Small Mammals

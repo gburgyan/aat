@@ -4,14 +4,14 @@ This guide takes you from zero to running AAT against your own API. It covers in
 
 ## 1. Install AAT
 
-**Prerequisites:** [Go 1.24+](https://go.dev/doc/install)
+**Prerequisites:** [Go 1.24+](https://go.dev/doc/install), [Node.js 18+](https://nodejs.org/) (for the web UI frontend), Make
 
 Clone and build:
 
 ```bash
 git clone https://github.com/gburgyan/aat.git
 cd aat
-go build -o aat ./cmd/aat/
+make build
 ```
 
 Move the binary somewhere on your `PATH`, or run it directly with `./aat`.
@@ -29,14 +29,11 @@ aat --help
 Before investing in your own setup, run the Petstore example to see AAT in action. This hits the public Swagger Petstore API — no keys needed:
 
 ```bash
-aat run \
-  --plan examples/petstore/plan.yaml \
-  --env examples/petstore/env.yaml \
-  --graph examples/petstore/graph.yaml \
-  --templates examples/petstore/templates/
+cd examples/petstore
+aat run plan plans/create-and-verify.yaml
 ```
 
-You should see each step execute and pass. See the [Petstore tutorial](../../examples/petstore/README.md) for a full walkthrough.
+The project manifest (`aat-project.yaml`) auto-discovers all config files. You should see each step execute and pass. See the [Petstore tutorial](../../examples/petstore/README.md) for a full walkthrough.
 
 ## 3. Project Structure
 
@@ -407,14 +404,13 @@ AAT shows the generated plan for review before executing. Use `--save workflows/
 With an `aat-project.yaml` manifest:
 
 ```bash
-aat run --plan workflows/create-and-verify.yaml
+aat run plan workflows/create-and-verify.yaml
 ```
 
 Or with explicit paths:
 
 ```bash
-aat run \
-  --plan workflows/create-and-verify.yaml \
+aat run plan workflows/create-and-verify.yaml \
   --env env.yaml \
   --graph graph.yaml \
   --templates templates/

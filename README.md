@@ -7,15 +7,12 @@ With an LLM configured, AAT can also generate test plans from natural language p
 ## Quick start
 
 ```bash
-# Build
-go build -o aat ./cmd/aat/
+# Build (compiles the Svelte frontend + Go binary with version metadata)
+make build
 
 # Run the Petstore example (no API keys needed)
-./aat run \
-  --plan examples/petstore/plan.yaml \
-  --env examples/petstore/env.yaml \
-  --graph examples/petstore/graph.yaml \
-  --templates examples/petstore/templates/
+cd examples/petstore
+../../aat run plan plans/create-and-verify.yaml
 ```
 
 See the [Petstore quickstart tutorial](examples/petstore/README.md) for a full walkthrough, or follow the [Getting Started guide](docs/user/getting-started.md) to set up AAT for your own API.
@@ -37,17 +34,19 @@ Data flows automatically between steps via graph edges. When step A produces an 
 
 | Command | Description |
 |---------|-------------|
-| `aat run --plan <file>` | Execute a test plan against a live API |
+| `aat run plan <file>` | Execute a single test plan against a live API |
+| `aat run batch [dir]` | Execute all plans in a directory |
 | `aat prompt "<text>"` | Generate a test plan from a natural language prompt (requires LLM config) |
+| `aat validate` | Validate graph, plans, and workflows |
+| `aat web` | Launch the web UI for browsing run archives |
 | `aat generate --oas <spec>` | Scaffold a graph and templates from an OpenAPI spec |
-| `aat graph validate --graph <file>` | Validate graph structure and OAS alignment |
 | `aat docs generate --graph <file>` | Generate Markdown documentation from a graph |
 | `aat mcp serve` | Start the MCP server for IDE integration |
 
 ### CI/CD mode
 
 ```bash
-./aat run --plan plan.yaml --env env.yaml --graph graph.yaml --templates tpl/ \
+./aat run plan plan.yaml --env env.yaml --graph graph.yaml --templates tpl/ \
   --json --quiet
 ```
 
@@ -59,17 +58,21 @@ Data flows automatically between steps via graph edges. When step A produces an 
 
 ## Building
 
-Requires Go 1.24 or later:
+Requires Go 1.24+, Node.js 18+, and Make:
 
 ```bash
-go build -o aat ./cmd/aat/
-go test ./...
+make build    # Compiles Svelte frontend, then Go binary with version/commit/date
+make test     # Runs go test ./...
+make clean    # Removes binary and frontend artifacts
 ```
+
+`make build` embeds the compiled web UI and injects version metadata via ldflags. A bare `go build ./cmd/aat/` works for development but skips the frontend and reports version as "dev".
 
 ## Documentation
 
 - [Getting Started](docs/user/getting-started.md) — install AAT and set it up for your own API
 - [Petstore Quickstart](examples/petstore/README.md) — runnable example with no setup
+- [Travelport Booking Example](docs/user/travelport-example.md) — real-world airline booking flow (requires [separate graph repo](https://github.com/gburgyan/aat-graph-travelport))
 - [Graph Authoring](docs/user/graph-authoring.md) — nodes, edges, conditions, OAS linking
 - [Templates](docs/user/templates.md) — HTTP request/response template format
 - [Plan Authoring](docs/user/plan-authoring.md) — test plan YAML schema and assertions
@@ -82,7 +85,7 @@ go test ./...
 
 ## Status
 
-AAT is in active development (Stage 2: Intelligence). The core engine, graph model, plan execution, validation, archiving, LLM-assisted planning, and MCP server are complete. See `docs/internal/progress.md` for detailed status.
+AAT is in active development (Stage 3a: CI/CD, Web UI & Polish). The core engine, graph model, plan execution, validation, archiving, LLM-assisted planning, web UI, and MCP server are complete. See `docs/internal/progress.md` for detailed status.
 
 ## License
 

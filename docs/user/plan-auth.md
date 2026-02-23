@@ -30,7 +30,7 @@ execution:
 Run it the same way as any other plan:
 
 ```bash
-aat run --plan workflows/customer-x-booking.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run plan workflows/customer-x-booking.yaml
 ```
 
 AAT authenticates with the plan's credentials instead of the environment's. The plan headers merge on top of environment headers.
@@ -141,8 +141,8 @@ execution:
 Different plans can test different customers against the same environment:
 
 ```bash
-aat run --plan workflows/customer-acme-booking.yaml --env production.yaml ...
-aat run --plan workflows/customer-globex-booking.yaml --env production.yaml ...
+aat run plan workflows/customer-acme-booking.yaml
+aat run plan workflows/customer-globex-booking.yaml
 ```
 
 ### API version testing
@@ -237,14 +237,13 @@ Generate a plan, save it, manually add auth/headers, then run it:
 ```bash
 # Generate and save (don't execute yet)
 aat prompt "Book a flight from Rome to New York" \
-  --env env.yaml --graph graph.yaml --templates templates/ \
   --save workflows/rome-to-ny.yaml
 
 # Edit the saved plan to add auth/headers
 # (see "Manual editing" below)
 
 # Run with the added credentials
-aat run --plan workflows/rome-to-ny.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run plan workflows/rome-to-ny.yaml
 ```
 
 ### 2. Adjust flow

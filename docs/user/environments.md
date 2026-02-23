@@ -21,7 +21,7 @@ auth:
 Run a plan against it:
 
 ```
-aat run --plan workflows/smoke.yaml --env test.yaml
+aat run plan workflows/smoke.yaml --env test.yaml
 ```
 
 The `--env` flag takes a direct file path to the environment YAML file.
@@ -400,7 +400,7 @@ If a template produces a path like `/11/air/search`, the rewrite transforms it t
 For persistent, shareable override sets, use overlay files with the `--env-overlay` CLI flag:
 
 ```bash
-aat run --plan plan.yaml --env env.yaml --env-overlay local-dev.yaml
+aat run plan plan.yaml --env env.yaml --env-overlay local-dev.yaml
 ```
 
 An overlay file contains only the `overrides` section:

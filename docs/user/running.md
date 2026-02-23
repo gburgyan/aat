@@ -7,14 +7,13 @@ AAT executes API test plans against a live environment. A single `aat run` comma
 If your project has an `aat-project.yaml` manifest (see [Project Discovery](#project-discovery)):
 
 ```
-aat run --plan workflows/booking_flow.yaml
+aat run plan workflows/booking_flow.yaml
 ```
 
 Or specify paths explicitly:
 
 ```
-aat run \
-  --plan workflows/booking_flow.yaml \
+aat run plan workflows/booking_flow.yaml \
   --env environments/staging.yaml \
   --graph graph.yaml \
   --templates templates/
@@ -22,13 +21,21 @@ aat run \
 
 > **Looking for LLM-assisted plan generation?** See [LLM-Assisted Planning](prompt-workflow.md) for the `aat prompt` command, which generates plans from natural language prompts.
 
-## Command: `aat run`
+## Commands
 
-### Flags
+AAT has two run subcommands:
+
+```
+aat run plan <name-or-path> [flags]    Execute a single test plan
+aat run batch [directory] [flags]      Execute all plans in a directory
+```
+
+The `plan` subcommand takes a positional argument (the plan file path). The `batch` subcommand optionally takes a subdirectory to filter which plans to run.
+
+### Shared Flags
 
 | Flag | Required | Default | Description |
 |------|----------|---------|-------------|
-| `--plan` | yes | | Path to the plan YAML file |
 | `--env` | auto | | Path to the environment YAML file |
 | `--graph` | auto | | Path to the graph YAML file |
 | `--templates` | auto | | Path to the templates directory |
@@ -39,6 +46,9 @@ aat run \
 | `--quiet` | no | `false` | Suppress progress messages, show only final result |
 | `--override` | no | | Route a node to a different URL: `nodeName=http://url` (repeatable) |
 | `--env-overlay` | no | | Path to an overlay file with additional overrides |
+| `--retries` | no | `0` | Max plan-level retries on failure |
+| `--layer` | no | | Layer names to include (repeatable) |
+| `--layer-group` | no | | Layer group for batch permutation matrix (repeatable) |
 
 **Auto-resolved flags:** `--env`, `--graph`, and `--templates` are resolved automatically when an `aat-project.yaml` manifest is found (see [Project Discovery](#project-discovery)). Explicit flags always take priority.
 
@@ -62,7 +72,7 @@ AAT supports three output modes, selected by the `--json` and `--quiet` flags. E
 The default mode prints progress messages as the run proceeds, a step-by-step summary, and the archive path. This is what you use when running interactively from a terminal.
 
 ```
-$ aat run --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+$ aat run plan plan.yaml
 
 aat: loading environment...
 aat: loaded environment "staging"
@@ -116,7 +126,7 @@ When assertions fail:
 Quiet mode suppresses all progress messages and the step-by-step breakdown. Only the final result line and archive path are printed. Use this in CI logs where you want a clean pass/fail signal without verbose output.
 
 ```
-$ aat run --quiet --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+$ aat run plan plan.yaml --quiet
 
 PASSED (6/6 steps)
 Archive: _output/runs/run-20260210-143022-a1b2c3d4/archive.json
@@ -125,7 +135,7 @@ Archive: _output/runs/run-20260210-143022-a1b2c3d4/archive.json
 On failure:
 
 ```
-$ aat run --quiet --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+$ aat run plan plan.yaml --quiet
 
 FAILED: step "addOffer" returned status 400
 Archive: _output/runs/run-20260210-143048-e5f6a7b8/archive.json
@@ -134,7 +144,7 @@ Archive: _output/runs/run-20260210-143048-e5f6a7b8/archive.json
 On infrastructure error (e.g., invalid plan):
 
 ```
-$ aat run --quiet --plan bad_plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+$ aat run plan bad_plan.yaml --quiet
 
 aat: plan validation: unknown node "nonExistentNode"
 ```
@@ -144,7 +154,7 @@ aat: plan validation: unknown node "nonExistentNode"
 JSON mode outputs a single machine-readable JSON object to stdout. All progress messages and human-readable summaries are suppressed (`--json` implies `--quiet`). Use this when you need to parse results programmatically -- in CI/CD pipelines, monitoring scripts, or downstream tooling.
 
 ```
-$ aat run --json --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+$ aat run plan plan.yaml --json
 
 {
   "outcome": "passed",
@@ -215,7 +225,7 @@ $ aat run --json --plan plan.yaml --env env.yaml --graph graph.yaml --templates 
 Failed run:
 
 ```
-$ aat run --json --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+$ aat run plan plan.yaml --json
 
 {
   "outcome": "failed",
@@ -256,7 +266,7 @@ $ aat run --json --plan plan.yaml --env env.yaml --graph graph.yaml --templates 
 Infrastructure error (e.g., missing file, invalid plan):
 
 ```
-$ aat run --json --plan nonexistent.yaml --env env.yaml --graph graph.yaml --templates templates/
+$ aat run plan nonexistent.yaml --json
 
 {
   "outcome": "error",
@@ -317,7 +327,7 @@ With a single exit code, your pipeline can't tell whether tests failed or the te
 ```yaml
 # GitHub Actions example
 - name: Run API tests
-  run: aat run --plan plan.yaml --env ci.yaml --graph graph.yaml --templates templates/
+  run: aat run plan plan.yaml --env ci.yaml --graph graph.yaml --templates templates/
   continue-on-error: true
   id: aat
 
@@ -352,9 +362,8 @@ jobs:
 
       - name: Run API tests
         run: |
-          aat run \
+          aat run plan workflows/booking_flow.yaml \
             --json \
-            --plan workflows/booking_flow.yaml \
             --env environments/ci.yaml \
             --graph graph.yaml \
             --templates templates/ \
@@ -382,7 +391,7 @@ jobs:
 api_tests:
   stage: test
   script:
-    - aat run --json --plan plan.yaml --env ci.yaml --graph graph.yaml --templates templates/ > result.json
+    - aat run plan plan.yaml --json --env ci.yaml --graph graph.yaml --templates templates/ > result.json
     - jq '.outcome' result.json
   artifacts:
     when: always
@@ -401,8 +410,8 @@ api_tests:
 ```bash
 #!/bin/bash
 
-aat run --quiet \
-  --plan plan.yaml \
+aat run plan plan.yaml \
+  --quiet \
   --env production.yaml \
   --graph graph.yaml \
   --templates templates/
@@ -437,7 +446,7 @@ aat run --json ... | jq -r '.archive_path'
 
 ## Project Discovery
 
-AAT can automatically resolve `--env`, `--graph`, `--templates`, and `--domain` from a project manifest, so you only need `--plan` on each invocation.
+AAT can automatically resolve `--env`, `--graph`, `--templates`, and `--domain` from a project manifest, so you only need the plan path on each invocation.
 
 ### How it works
 
@@ -468,10 +477,10 @@ All paths are relative to the manifest file. With this in place:
 
 ```bash
 # Before: every flag required
-aat run --plan workflows/test.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run plan workflows/test.yaml --env env.yaml --graph graph.yaml --templates templates/
 
 # After: only the plan is needed
-aat run --plan workflows/test.yaml
+aat run plan workflows/test.yaml
 ```
 
 ### Using `AAT_PROJECT`
@@ -480,12 +489,18 @@ Set the env var to point to your project directory (or manifest file):
 
 ```bash
 export AAT_PROJECT=~/projects/my-api
-aat run --plan workflows/test.yaml
+aat run plan workflows/test.yaml
 ```
 
 ### User-level default project
 
-Create `~/.config/aat/config.yaml` (Linux/Mac) or `%AppData%/aat/config.yaml` (Windows):
+Create a config file at the platform-appropriate location:
+
+| Platform | Path |
+|----------|------|
+| macOS | `~/Library/Application Support/aat/config.yaml` |
+| Linux | `~/.config/aat/config.yaml` |
+| Windows | `%AppData%\aat\config.yaml` |
 
 ```yaml
 default_project: /home/user/projects/my-api
@@ -507,13 +522,13 @@ The `--mode` flag controls how AAT resolves input values when explicit values ar
 
 ```
 # Strict (default) -- fully deterministic
-aat run --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run plan plan.yaml
 
 # Lean -- LLM fills in gaps
-aat run --mode lean --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run plan plan.yaml --mode lean
 
 # Adaptive -- LLM + constraint relaxation
-aat run --mode adaptive --plan plan.yaml --env env.yaml --graph graph.yaml --templates templates/
+aat run plan plan.yaml --mode adaptive
 ```
 
 ## Multi-Host Routing
@@ -526,11 +541,11 @@ The fastest way to reroute a node -- no file editing required:
 
 ```bash
 # Route searchFlights to localhost
-aat run --plan plan.yaml --env env.yaml \
+aat run plan plan.yaml \
   --override searchFlights=http://localhost:8080
 
 # Multiple overrides
-aat run --plan plan.yaml --env env.yaml \
+aat run plan plan.yaml \
   --override searchFlights=http://localhost:8080 \
   --override priceOffer=http://localhost:8081
 ```
@@ -556,7 +571,7 @@ overrides:
 For override sets that you want to share or swap without editing the base environment:
 
 ```bash
-aat run --plan plan.yaml --env env.yaml --env-overlay local-dev.yaml
+aat run plan plan.yaml --env-overlay local-dev.yaml
 ```
 
 Where `local-dev.yaml` contains just overrides:
@@ -578,7 +593,7 @@ You're debugging why `searchFlights` returns unexpected results. Run it locally 
 
 ```bash
 # Start your local service on port 8080, then:
-aat run --plan workflows/booking_flow.yaml --env staging.yaml \
+aat run plan workflows/booking_flow.yaml \
   --override searchFlights=http://localhost:8080
 ```
 
@@ -587,7 +602,7 @@ aat run --plan workflows/booking_flow.yaml --env staging.yaml \
 Route pricing calls to staging while everything else hits production:
 
 ```bash
-aat run --plan workflows/booking_flow.yaml --env production.yaml \
+aat run plan workflows/booking_flow.yaml \
   --env-overlay staging-pricing.yaml
 ```
 
@@ -605,7 +620,7 @@ overrides:
 Your production API uses `/11/air/search` but your local service uses `/api/v2/air/search`:
 
 ```bash
-aat run --plan workflows/search_test.yaml --env production.yaml \
+aat run plan workflows/search_test.yaml \
   --env-overlay local-search.yaml
 ```
 
@@ -624,8 +639,10 @@ overrides:
 ## Building
 
 ```
-go build -o aat ./cmd/aat/
+make build
 ```
+
+This compiles the Svelte frontend and builds the Go binary with version/commit/date metadata. A bare `go build ./cmd/aat/` skips the frontend and version injection.
 
 ## Archives
 
@@ -659,7 +676,7 @@ Before execution begins, AAT validates that each node's declared outputs match t
 
 ### Plan
 
-The plan (`--plan`) specifies what to execute: which graph nodes to run, in what order (via `dependsOn`), with what input values, retry policies, and assertions. Plans can provide literal values, reference upstream outputs, or use selection strategies (first, last, random, min, max, match, llm) on array outputs.
+The plan (positional argument to `aat run plan`) specifies what to execute: which graph nodes to run, in what order (via `dependsOn`), with what input values, retry policies, and assertions. Plans can provide literal values, reference upstream outputs, or use selection strategies (first, last, random, min, max, match, llm) on array outputs.
 
 ### Environment
 

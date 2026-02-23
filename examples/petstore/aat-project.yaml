@@ -1,0 +1,10 @@
+name: petstore
+description: Swagger Petstore API quickstart example
+tags: [quickstart, petstore]
+graph: graph.yaml
+templates: templates/
+domain: domain.yaml
+environment: env.yaml
+workflows: workflows/
+plans: plans/
+archives: _output/runs

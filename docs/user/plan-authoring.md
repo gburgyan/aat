@@ -1,42 +1,406 @@
 # Plan Authoring
 
-A plan defines a test scenario: which API operations to execute, what input values to use, and what to assert about the responses. Plans can be hand-written in YAML or generated from a natural language prompt with `aat prompt`.
+Plans define test scenarios in AAT. There are two representations:
 
-## Quick Start
+- **Recipes** — compact YAML (often 10-20 lines) that capture a workflow selection plus targeted overrides. This is the primary format.
+- **Full plans** — expanded YAML with every step, value, selection, and assertion spelled out. This is what the engine actually executes.
 
-A minimal two-step plan:
+Recipes are the recommended way to author plans. `aat prompt --save` produces them, and `aat run plan` accepts both formats. At runtime, recipes are reconstituted into full plans deterministically by replaying the composition pipeline.
+
+## Recipes
+
+### Quick Start
+
+Here is a real recipe that books a round-trip flight:
 
 ```yaml
-intent:
-  goal: getPet
-  description: "Create a pet and verify it exists"
-
-execution:
-  steps:
-    - node: createPet
-      values:
-        name: "Buddy"
-        status: "available"
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
-
-    - node: getPet
-      dependsOn: [createPet]
-      isGoal: true
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
-          - type: fieldEquals
-            path: "name"
-            expect: "Buddy"
+kind: recipe
+metadata:
+    created: 2026-02-22T10:19:48Z
+    prompt: book a two leg trip
+    graphVersion: 1.0.0
+selection:
+    workflow: Booking
+    description: Book a flight using a 2-leg round-trip search and reference pricing.
+    choices:
+        payment: Cash
+        trip-search: Round-Trip
 ```
 
-## Schema Overview
+That's 12 lines. It selects the `Booking` workflow, fills two slot choices (trip type and payment method), and lets everything else use defaults. At runtime, this reconstitutes into a ~10-step plan with search, pricing, traveler, payment, commit, and cleanup steps.
 
-A plan has six top-level sections:
+### Recipe Schema
+
+A recipe has four top-level fields:
+
+```yaml
+kind: recipe              # required — distinguishes recipes from full plans
+
+metadata:                 # optional — provenance
+  created: ...
+  prompt: ...
+  graphVersion: ...
+
+selection:                # required — workflow composition choices
+  workflow: ...
+  description: ...
+  layers: [...]
+  choices: {...}
+  addons: [...]
+  repetitions: {...}
+
+overrides:                # optional — targeted value/assertion overrides
+  values: {...}
+  selections: {...}
+  assertions: {...}
+  descriptions: {...}
+```
+
+#### `selection` Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `workflow` | yes | Base workflow name (matched case-insensitively) |
+| `description` | no | Human-readable description of the test scenario |
+| `layers` | no | List of layer names to apply (see [Layers](#layers)) |
+| `choices` | no | Slot name to option name map (see [Slots](#slots)) |
+| `addons` | no | List of addon workflow names to compose in |
+| `repetitions` | no | Map of node name to repeat count for multiplicity |
+
+### Workflow and Choices
+
+The `selection.workflow` field picks a base workflow. If the workflow defines slots (polymorphic choice points), use `selection.choices` to fill them:
+
+```yaml
+selection:
+    workflow: Booking
+    choices:
+        trip-search: Round-Trip     # could also be One-Way, Multi-City 3-Leg, etc.
+        payment: Card               # could also be Cash
+```
+
+Omitted choices use the slot's declared default. For example, if `payment` defaults to `Cash` and you omit it, cash payment is used.
+
+### Adding Addons
+
+Addons splice optional sub-workflows into the base at declared insertion points. List them in `selection.addons`:
+
+```yaml
+kind: recipe
+metadata:
+    prompt: book a trip with extras, then cancel
+selection:
+    workflow: Booking
+    description: Book a round-trip with document overrides and seat selection, then cancel.
+    choices:
+        payment: Card
+        trip-search: Round-Trip
+    addons:
+        - Document Overrides
+        - Seat Selection
+        - Retrieve Booking
+        - Fare Rules Check
+        - Cancel Booking
+```
+
+Each addon is composed into the plan at its declared `after:` insertion point. Multiple addons at the same insertion point are chained in priority order.
+
+### Value Overrides
+
+Use `overrides.values` to set specific input values. Keys use `stepID.inputName` format:
+
+```yaml
+kind: recipe
+metadata:
+    prompt: book a round trip flight from nashville to seattle
+selection:
+    workflow: Booking
+    description: Book a round-trip from Nashville to Seattle.
+    choices:
+        payment: Cash
+        trip-search: Round-Trip
+overrides:
+    values:
+        searchFlights2Leg.leg1Origin: BNA
+        searchFlights2Leg.leg1Destination: SEA
+        searchFlights2Leg.leg2Origin: SEA
+        searchFlights2Leg.leg2Destination: BNA
+```
+
+Override values replace what the graph defaults as augmented by layers would provide. Only override what you need — everything else resolves from the workflow template, graph defaults, and layers.
+
+### Selection and Assertion Overrides
+
+`overrides.selections` changes how array elements are picked for a named selection:
+
+```yaml
+overrides:
+    selections:
+        offering:
+            strategy: min
+            sortField: price
+```
+
+`overrides.assertions` adds assertions to specific steps:
+
+```yaml
+overrides:
+    assertions:
+        commitReservation:
+            - type: status
+              expect: 200
+            - type: fieldExists
+              path: locator
+```
+
+`overrides.descriptions` sets step descriptions:
+
+```yaml
+overrides:
+    descriptions:
+        searchFlights2Leg: "Search for round-trip flights BNA-SEA"
+```
+
+### Creating Recipes
+
+Three ways to create recipes:
+
+1. **`aat prompt --save`** — Generate from a natural language prompt. The LLM selects the workflow, choices, addons, and fills values. The recipe is saved to the file you specify.
+
+   ```bash
+   aat prompt --save plans/my-test.yaml \
+     "book a round trip from Nashville to Seattle with a credit card"
+   ```
+
+2. **Hand-write** — Create a YAML file with `kind: recipe` and fill in the selection and overrides.
+
+3. **Edit a saved recipe** — Start from an `aat prompt --save` output and tweak values, add addons, or change choices.
+
+### Running Recipes
+
+`aat run plan` auto-detects the format:
+
+```bash
+# Recipes are reconstituted into full plans at runtime
+aat run plan plans/round-trip.yaml
+
+# Full plans are executed directly
+aat run plan plans/legacy-full-plan.yaml
+```
+
+## The Composition Model
+
+Recipes are compact because the structural complexity lives in three reusable building blocks: **workflows**, **slots**, and **addons**.
+
+### Workflows
+
+A base workflow defines the structural skeleton of a test scenario. It is declared in the graph's `workflows` section and points to a template file:
+
+```yaml
+# In graph.yaml
+workflows:
+  - name: Booking
+    description: "Book a flight. Choose trip type and payment method."
+    template: workflows/booking-base.yaml
+    slots:
+      - name: trip-search
+        description: "How to search for and price flights"
+        options: [One-Way, Round-Trip, Multi-City 3-Leg, Multi-City 4-Leg]
+        default: One-Way
+      - name: payment
+        description: "Form of payment"
+        options: [Cash, Card]
+        default: Cash
+```
+
+The template file is a plan YAML with step ordering, data flow wiring, and cleanup already defined. See [Workflow Templates](workflow-templates.md) for the full template authoring guide.
+
+### Slots
+
+Slots are named choice points in a base workflow. The template uses `- slot: <name>` markers where options get spliced in:
+
+```yaml
+# workflows/booking-base.yaml (simplified)
+execution:
+  steps:
+    - node: createWorkbench
+
+    - slot: trip-search          # <-- replaced by chosen option's steps
+
+    - node: addTraveler
+      dependsOn: [trip-search]
+
+    - slot: payment              # <-- replaced by chosen option's steps
+      dependsOn: [trip-search]
+
+    - node: addPayment
+      dependsOn: [trip-search, payment, addTraveler]
+
+    - node: commitReservation
+      dependsOn: [addPayment]
+      isGoal: true
+
+  cleanup:
+    - node: ignoreWorkbench
+      runOn: always
+```
+
+Each slot option is a separate workflow with `kind: slot` and its own template file:
+
+```yaml
+# In graph.yaml
+- name: Round-Trip
+  kind: slot
+  description: "Round-trip: leg-based search with BuildNext + reference pricing"
+  template: workflows/slots/trip-search/roundtrip.yaml
+
+- name: Cash
+  kind: slot
+  description: "Cash form of payment"
+  template: workflows/slots/payment/cash.yaml
+```
+
+When a recipe selects `choices: { trip-search: Round-Trip, payment: Cash }`, the composition pipeline replaces each `- slot:` marker with the corresponding option's steps.
+
+### Addons
+
+Addons are optional sub-workflows that splice into a base workflow at a declared insertion point. They are declared with `kind: addon` in graph.yaml:
+
+```yaml
+- name: Seat Selection
+  kind: addon
+  after: [priceOfferFullPayload, priceOfferReference]
+  description: "Search seat map and add seat offer"
+  template: workflows/addons/seat-selection.yaml
+  wire:
+    offerListIdentifier: $after.offerIdentifierValue
+    offerId: $after.offerId
+
+- name: Cancel Booking
+  kind: addon
+  after: commitReservation
+  priority: 90
+  description: "Cancel the reservation after booking"
+  template: workflows/addons/cancel-addon.yaml
+  wire:
+    locator: commitReservation.locator
+```
+
+Key addon fields:
+
+| Field | Description |
+|-------|-------------|
+| `after` | Node(s) in the base plan to splice after (string or list; first match wins) |
+| `wire` | Explicit input wiring overrides. `$after.field` resolves to the matched after node. `MANUAL` leaves input for the LLM. |
+| `priority` | Ordering when multiple addons share the same insertion point (lower runs first) |
+
+Addon templates use `AUTOWIRE` for inputs that come from the base workflow. During composition, these are automatically resolved to matching outputs from upstream steps.
+
+### How Reconstitution Works
+
+When `aat run plan` receives a recipe, it replays the composition pipeline:
+
+1. **Load base template** — Parse the workflow's plan YAML
+2. **Fill slots** — Replace `- slot:` markers with the chosen option's steps
+3. **Compose addons** — Splice each addon's steps after its `after:` node, auto-wire inputs, chain dependencies
+4. **Expand repetitions** — Replicate steps for multiplicity (e.g., `addItem` x3 becomes `addItem_1`, `addItem_2`, `addItem_3`)
+5. **Apply overrides** — Merge recipe's `overrides.values`, `overrides.selections`, and `overrides.assertions` into the skeleton
+6. **Post-process** — Fix dependency chains, normalize selection configs, add cleanup steps
+7. **Resolve layers** — Apply layer defaults between graph defaults and plan values
+8. **Validate** — Structural validation against the graph
+
+The result is a fully-wired plan ready for engine execution. This pipeline is deterministic — the same recipe always produces the same plan (given the same graph and templates).
+
+## Layers
+
+### What Are Layers
+
+Layers are named sets of input default overrides. They sit between graph defaults and plan values in the resolution priority chain:
+
+```
+graph defaults  →  layer overrides  →  plan values  →  runtime resolution
+```
+
+Layers let you vary test data without duplicating recipes. For example, a `european` layer swaps airport codes to European cities, while a `near-term` layer sets departure dates to 2-5 days from today.
+
+### Layer File Format
+
+Each layer is a YAML file in the project's `layers/` directory:
+
+```yaml
+# layers/near-term.yaml — bare keys apply to all nodes with that input
+name: near-term
+description: Near-term travel dates (2-5 days out)
+inputs:
+  departureDate:
+    pool: ["{{today + 2 days}}", "{{today + 3 days}}", "{{today + 5 days}}"]
+  returnDate:
+    pool: ["{{today + 9 days}}", "{{today + 10 days}}", "{{today + 12 days}}"]
+```
+
+```yaml
+# layers/european.yaml — qualified keys target specific node.input pairs
+name: european
+description: European airport codes for intercontinental routes
+inputs:
+  searchFlights.origin: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+  searchFlights.destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+  searchFlights2Leg.leg1Origin: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+  searchFlights2Leg.leg1Destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+```
+
+Layer inputs support two key formats:
+
+- **Bare keys** (e.g., `departureDate`) — apply to every node that has an input with that name
+- **Qualified keys** (e.g., `searchFlights.origin`) — target a specific node's input
+
+Within a single layer, qualified entries take priority over bare entries for the same node. Values can be bare scalars (shorthand for a single-element pool), lists (shorthand for a pool), or the full mapping form with `value`, `pool`, `poolStrategy`, `constraint`, `from`, and `select`.
+
+### Using Layers
+
+**In recipes** — list layer names in `selection.layers`:
+
+```yaml
+selection:
+    workflow: Booking
+    layers: [european, near-term]
+    choices:
+        trip-search: Round-Trip
+```
+
+**Via CLI** — use the `--layer` flag (repeatable):
+
+```bash
+aat run plan plans/round-trip.yaml --layer european --layer near-term
+```
+
+Layers stack in order — later layers override earlier ones. CLI layers are appended after recipe layers.
+
+### Layer Groups and Permutation Testing
+
+The `--layer-group` flag enables cartesian product testing across layer sets. Each `--layer-group` defines a group of interchangeable layers, and `aat run batch` runs every combination:
+
+```bash
+aat run batch \
+  --layer-group "european,international" \
+  --layer-group "near-term"
+```
+
+This runs each plan in the batch twice: once with `[european, near-term]` and once with `[international, near-term]`. With multiple groups, the combinations multiply — useful for systematic coverage across regions, date ranges, and payment methods.
+
+## Full Plan Reference
+
+Full plans are the expanded format that the engine executes. You rarely need to write them by hand, but understanding the format helps with debugging and advanced scenarios.
+
+### When You Need Full Plans
+
+- **Debugging** — Inspect the reconstituted plan to understand what the engine sees
+- **Edge cases** — Scenarios that don't fit the workflow/recipe model
+- **Migration** — Plans written before the recipe format existed
+
+### Schema Overview
+
+A full plan has six top-level sections:
 
 ```yaml
 metadata:        # optional — provenance information
@@ -64,174 +428,29 @@ execution:       # required — what to execute
   cleanup: [...]
 ```
 
-## Metadata
-
-Metadata records when and how the plan was created. It's informational and doesn't affect execution.
-
-```yaml
-metadata:
-  created: 2026-02-11T12:00:00Z
-  prompt: "Create a pet and verify it exists"
-  graphVersion: "1.0.0"
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `created` | timestamp | When the plan was created |
-| `prompt` | string | The natural language prompt that generated this plan (if any) |
-| `graphVersion` | string | Version of the graph this plan was designed for |
-
-## Intent
-
-Intent describes the high-level goal. It guides LLM-assisted plan generation and serves as documentation for human readers.
-
-```yaml
-intent:
-  goal: getPet
-  description: "Create a new pet, then verify it was stored correctly"
-  constraints:
-    hard:
-      - type: status
-        name: "success"
-        description: "All steps must return 2xx"
-    soft:
-      - type: value
-        name: "prefer_available"
-        description: "Prefer available pets"
-        applies_to: ["createPet.status"]
-    free:
-      - "Any pet name is acceptable"
-```
-
-| Field | Description |
-|-------|-------------|
-| `goal` | The graph node that represents the test's primary objective |
-| `description` | Human-readable description of what the plan tests |
-| `constraints` | Classified requirements (see below) |
-
-### Constraints
-
-Constraints are classified by enforcement level:
-
-| Level | Behavior |
-|-------|----------|
-| `hard` | Must be satisfied. Failure stops execution. |
-| `soft` | Preferred but can be relaxed in `adaptive` mode if they cause failures. |
-| `free` | Informational. No enforcement. |
-
-Each hard/soft constraint has:
-
-| Field | Description |
-|-------|-------------|
-| `type` | Constraint category (e.g., `status`, `value`, `timing`) |
-| `name` | Short identifier |
-| `description` | What the constraint requires |
-| `applies_to` | List of `node.input` references this constraint targets |
-
-## Execution Steps
+### Execution Steps
 
 Steps are the core of a plan. Each step targets a graph node and specifies how to resolve its inputs.
-
-```yaml
-execution:
-  steps:
-    - node: createPet
-      description: "Create a new pet"
-      values:
-        name: "Buddy"
-        status: "available"
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
-```
-
-### Step Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
 | `node` | yes | Graph node to execute |
-| `id` | no | Unique step identifier (defaults to `node` if omitted). Required when the same node appears multiple times. |
+| `id` | no | Unique step identifier (defaults to `node`). Required when the same node appears multiple times. |
 | `dependsOn` | no | List of step IDs that must complete first |
 | `description` | no | Human-readable purpose of this step |
-| `isGoal` | no | Marks this as a goal step (used by plan validation) |
+| `isGoal` | no | Marks this as a goal step |
 | `values` | no | Input value specifications |
 | `selections` | no | Named element selections from upstream arrays |
 | `retry` | no | Retry configuration |
-| `fallback` | no | Fallback behavior after retries are exhausted |
+| `fallback` | no | Fallback behavior after retries |
 | `assertions` | no | Response assertions |
 | `expectFailure` | no | Negative test: expect specific error status codes |
 
-### Step Ordering with `dependsOn`
+Steps execute in topological order based on `dependsOn` declarations. AAT also infers ordering from graph edges — if step B uses an output from step A (via `from`), step A runs first even without an explicit `dependsOn`.
 
-Steps execute in topological order based on `dependsOn` declarations. Steps without dependencies run first. AAT also infers ordering from graph edges -- if step B uses an output from step A (via an edge), step A runs first even without an explicit `dependsOn`.
+#### Step Aliasing
 
-The `dependsOn` list uses **step IDs**, not node names. When a step has no explicit `id`, its step ID is the same as its `node` name, so simple plans work as expected:
-
-```yaml
-steps:
-  - node: createPet
-    # step ID is "createPet" (same as node)
-
-  - node: getPet
-    dependsOn: [createPet]
-    # runs after createPet completes
-```
-
-When using step aliasing (see below), `dependsOn` must reference the explicit `id`:
-
-```yaml
-steps:
-  - id: add_item_1
-    node: addItem
-    values:
-      productId: "prod-101"
-      quantity: 2
-
-  - id: add_item_2
-    node: addItem
-    dependsOn: [add_item_1]
-    values:
-      productId: "prod-202"
-      quantity: 1
-```
-
-## Step Aliasing
-
-By default, each step's identity is its `node` name, and each node can only appear once. **Step aliasing** lets you execute the same graph node multiple times by giving each step a unique `id`:
-
-```yaml
-steps:
-  - id: add_item_1
-    node: addItem
-    dependsOn: [createCart]
-    values:
-      productId: "prod-101"
-      quantity: 2
-
-  - id: add_item_2
-    node: addItem
-    dependsOn: [add_item_1]
-    values:
-      productId: "prod-202"
-      quantity: 1
-```
-
-### When to Use Step Aliasing
-
-- **Multiple items**: Call `addItem` once per product in a cart
-- **Multi-step searches**: Call `searchProducts` once per category
-- **Repeated operations**: Any scenario where the same API operation runs with different data
-
-### Rules for Aliased Steps
-
-1. **Explicit `id` required**: When a graph node appears in more than one step, every step using that node must have a unique `id`.
-
-2. **All references use step IDs**: `dependsOn`, `from`, and selection `from` references must use the step's `id`, not its `node` name.
-
-3. **Explicit values required**: Graph-edge auto-wiring is disabled for aliased nodes (since the engine can't determine which step instance to wire from). Every input must use an explicit `from`, `fromSelection`, or literal value.
-
-4. **Separate outputs**: Each aliased step stores its outputs under its own step ID. Downstream steps reference them by step ID:
+When the same graph node appears multiple times, give each step a unique `id`:
 
 ```yaml
 steps:
@@ -241,7 +460,6 @@ steps:
     values:
       cartId: {from: createCart.cartId}
       productId: "prod-101"
-      quantity: 2
 
   - id: add_item_2
     node: addItem
@@ -249,21 +467,11 @@ steps:
     values:
       cartId: {from: createCart.cartId}
       productId: "prod-202"
-      quantity: 1
-
-  - node: checkout
-    dependsOn: [add_item_2]
-    values:
-      cartId: {from: createCart.cartId}
-      lineItem1: {from: add_item_1.lineItemId}    # references step ID
-      lineItem2: {from: add_item_2.lineItemId}
 ```
 
-### Backward Compatibility
+All references (`dependsOn`, `from`, `fromSelection`) use step IDs (which default to node names when `id` is not set).
 
-Step aliasing is fully backward compatible. If no step has an explicit `id`, everything works exactly as before -- each step's identity is its `node` name, `dependsOn` references node names, and graph-edge auto-wiring resolves normally.
-
-## Values
+### Values
 
 Each entry in `values` specifies how to resolve a node input. The simplest form is a bare scalar:
 
@@ -286,32 +494,24 @@ values:
     from: createPet.petId
   offeringId:
     fromSelection: offering.offeringId
-  origin:
-    default: "DEN"
-    select:
-      strategy: first
-      from: searchResults.offerings
-      filter: "price < 500"
 ```
-
-### Value Fields
 
 | Field | Description |
 |-------|-------------|
-| `default` | Literal value to use. For bare scalars (`name: "Buddy"`), this is the only field set. |
-| `from` | Reference to an upstream step's output (e.g., `createPet.petId`). Uses step IDs (which default to node names). |
+| `default` | Literal value. For bare scalars (`name: "Buddy"`), this is the only field set. |
+| `from` | Reference to an upstream step's output (e.g., `createPet.petId`). |
 | `fromSelection` | Reference to a named selection (e.g., `offering.offeringId`). See [Named Selections](#named-selections). |
-| `fromResolved` | Reference to another input's resolved value within the same step (e.g., `leg1Destination`). See [Value Flow](value-flow.md#intra-step-references-fromresolved). |
-| `select` | Inline selection config for picking from an array output. See [Selection Strategies](#selection-strategies). |
-| `pool` | List of alternative values to try if the default fails, or curated values to pick from randomly. |
+| `fromResolved` | Reference to another input's resolved value within the same step. See [Value Flow](value-flow.md#intra-step-references-fromresolved). |
+| `select` | Inline selection config for picking from an array output. |
+| `pool` | List of alternative values to try or pick from. |
 | `poolStrategy` | How to pick from the pool: `random` (default) or `sequential`. |
-| `constraint` | Predicate expression that the resolved value must satisfy. |
+| `constraint` | Predicate expression the resolved value must satisfy. |
 
 For a deep dive into value resolution, see [Value Flow](value-flow.md).
 
-## Named Selections
+### Named Selections
 
-When a step needs multiple fields from the same array element, use named selections to ensure coordinated extraction:
+When a step needs multiple fields from the same array element, use named selections:
 
 ```yaml
 - node: getPet
@@ -325,22 +525,18 @@ When a step needs multiple fields from the same array element, use named selecti
       fromSelection: pet.petId
 ```
 
-The `selections` block picks an element from an array output. Then `fromSelection` references extract specific fields from that element. The format is `selectionName.fieldName`, where `fieldName` matches an `elementField` defined on the array output in the graph.
-
-### Selection Fields
+The `selections` block picks an element from an array output. Then `fromSelection` extracts specific fields from that element using `selectionName.fieldName`.
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `from` | yes | Source array: `stepID.outputName` (step ID defaults to node name when `id` is not set) |
-| `strategy` | no | How to pick an element (default: `first`). See [Selection Strategies](#selection-strategies). |
+| `from` | yes | Source array: `stepID.outputName` |
+| `strategy` | no | How to pick an element (default: `first`) |
 | `filter` | no | Predicate to narrow candidates before selection |
 | `index` | no | Specific index for `index` strategy |
 | `sortField` | no | Field to sort by for `min`/`max` strategies |
 | `prompt` | no | Selection criteria for `llm` strategy |
 
-## Selection Strategies
-
-Selections pick one element from an array output. Seven strategies are available:
+### Selection Strategies
 
 | Strategy | Description | Required Fields |
 |----------|-------------|-----------------|
@@ -353,41 +549,9 @@ Selections pick one element from an array output. Seven strategies are available
 | `match` | First element matching a filter | `filter` |
 | `llm` | LLM chooses based on a prompt | `prompt` |
 
-Examples:
+### Assertions
 
-```yaml
-# Pick the cheapest product
-selections:
-  product:
-    from: listProducts.products
-    strategy: min
-    sortField: price
-
-# Pick a product the LLM thinks is best
-selections:
-  product:
-    from: listProducts.products
-    strategy: llm
-    prompt: "Select a popular in-stock product under $50"
-
-# Pick a specific index
-selections:
-  product:
-    from: listProducts.products
-    strategy: index
-    index: 2
-
-# Filter then pick first
-selections:
-  product:
-    from: listProducts.products
-    strategy: first
-    filter: "category == 'electronics'"
-```
-
-## Assertions
-
-Assertions verify that a step's response meets expectations. AAT supports five mechanical assertion types.
+Assertions verify that a step's response meets expectations. Five mechanical types are supported:
 
 ```yaml
 assertions:
@@ -405,119 +569,63 @@ assertions:
       ref: "PetResponse"
 ```
 
-### Assertion Types
+| Type | Description | Required Fields |
+|------|-------------|-----------------|
+| `status` | HTTP status code check | `expect` (integer) |
+| `fieldExists` | JSON field presence (gjson path) | `path` |
+| `fieldEquals` | JSON field value check | `path`, `expect` |
+| `predicate` | Expression evaluation against response body | `expr` |
+| `schema` | Schema validation (placeholder — not yet implemented) | `ref` |
 
-#### `status` -- HTTP Status Code
-
-Checks the response status code.
-
-```yaml
-- type: status
-  expect: 200
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `expect` | yes | Expected HTTP status code (integer) |
-
-#### `fieldExists` -- JSON Field Presence
-
-Checks that a field exists and is not null in the response body.
-
-```yaml
-- type: fieldExists
-  path: "id"
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `path` | yes | JSON path to check (gjson syntax) |
-
-#### `fieldEquals` -- JSON Field Value
-
-Checks that a field equals an expected value.
-
-```yaml
-- type: fieldEquals
-  path: "name"
-  expect: "Buddy"
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `path` | yes | JSON path to the field |
-| `expect` | yes | Expected value (string, number, or boolean) |
-
-Note: `fieldEquals` uses the `path` and `expect` fields (not `value`). The `value` field exists in the schema for backward compatibility but `expect` is preferred.
-
-#### `predicate` -- Expression Evaluation
-
-Evaluates a predicate expression against the response body parsed as a JSON object.
-
-```yaml
-- type: predicate
-  expr: "price > 0 && price < 10000"
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `expr` | yes | Predicate expression to evaluate |
-
-Predicate expressions support comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`), logical operators (`&&`, `||`, `!`), and field access on the response body. See [Value Flow](value-flow.md) for the full expression syntax.
-
-#### `schema` -- Schema Validation
-
-Validates the response against a schema reference. This is a placeholder for future implementation -- currently all schema assertions pass with a "not yet implemented" note.
-
-```yaml
-- type: schema
-  ref: "PetResponse"
-```
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `ref` | yes | Schema reference name |
-
-### Semantic Assertions
-
-Plans can also include semantic assertions -- free-text descriptions evaluated by the LLM:
+Semantic assertions are free-text descriptions evaluated by the LLM:
 
 ```yaml
 assertions:
   semantic:
     - "The response should contain a valid order confirmation"
-    - "All price values should be positive"
 ```
 
-Semantic assertions require an LLM to be configured and are not evaluated in `strict` mode.
+### Negative Testing with `expectFailure`
 
-## Negative Testing with `expectFailure`
-
-Use `expectFailure` to assert that a step fails with specific HTTP status codes. This is for testing error handling, validation, and authorization.
+Use `expectFailure` to assert that a step fails with specific HTTP status codes:
 
 ```yaml
 - node: getPet
-  description: "Verify deleted pet returns 404"
   dependsOn: [deletePet]
   expectFailure:
     status: [404]
     description: "Pet should not exist after deletion"
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `status` | yes | List of expected HTTP status codes |
-| `description` | no | Why this failure is expected |
+When `expectFailure` is set, the step **passes** if the response status matches any listed code, and **fails** on success or unexpected errors. Retries and adaptive relaxation are skipped.
 
-When `expectFailure` is set:
-- The step **passes** if the response status matches any of the listed codes
-- The step **fails** if the response returns a success status or an unexpected error status
-- Retries are skipped (failures are expected, not transient)
-- Adaptive mode constraint relaxation is skipped
+### Intent and Constraints
 
-## Retry Configuration
+```yaml
+intent:
+  goal: commitReservation
+  description: "Book a flight and verify the reservation"
+  constraints:
+    hard:
+      - type: status
+        name: "all_success"
+        description: "All non-negative steps must return 2xx"
+    soft:
+      - type: value
+        name: "prefer_available"
+        description: "Prefer available flights"
+        applies_to: ["searchFlights.status"]
+    free:
+      - "Any airline is acceptable"
+```
 
-Configure per-step retry behavior:
+| Constraint Level | Behavior |
+|------------------|----------|
+| `hard` | Must be satisfied. Failure stops execution. |
+| `soft` | Preferred but can be relaxed in `adaptive` mode. |
+| `free` | Informational. No enforcement. |
+
+### Retry and Fallback
 
 ```yaml
 - node: listProducts
@@ -525,44 +633,18 @@ Configure per-step retry behavior:
     max: 3
     on: [server, timeout]
     failOn: [client]
-```
-
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `max` | yes | -- | Maximum retry attempts |
-| `on` | no | all retryable | Error categories to retry on |
-| `failOn` | no | none | Error categories that immediately fail (no retry) |
-
-Error categories: `server` (5xx), `client` (4xx), `timeout`, `network`.
-
-## Fallback Configuration
-
-Define what happens when a step fails after all retries:
-
-```yaml
-- node: listProducts
   fallback:
     action: skip
-    maxAttempts: 2
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `action` | yes | What to do: `skip` (continue without this step) or `fail` (stop the plan) |
-| `maxAttempts` | no | Maximum fallback attempts |
+Retry `on` categories: `server` (5xx), `client` (4xx), `timeout`, `network`. The `fallback.action` is `skip` (continue without this step) or `fail` (stop the plan).
 
-## Verification Steps
+### Verification and Cleanup Steps
 
-Verification steps run after the main execution flow. They're used for post-condition checks that don't affect the main workflow.
+**Verification steps** run after the main execution flow for post-condition checks:
 
 ```yaml
 execution:
-  steps:
-    - node: createPet
-      values:
-        name: "Buddy"
-        status: "available"
-
   verification:
     - node: getPet
       purpose: "Confirm pet was persisted"
@@ -573,41 +655,25 @@ execution:
             expect: "Buddy"
 ```
 
-| Field | Required | Description |
-|-------|----------|-------------|
-| `node` | yes | Graph node to execute |
-| `purpose` | no | Why this verification exists |
-| `assertions` | no | Assertions to check |
-
-Verification steps receive their inputs from the main execution steps via graph edges, just like regular steps.
-
-## Cleanup Steps
-
-Cleanup steps run after everything else, including on failure. They're used to tear down test data.
+**Cleanup steps** run after everything else, including on failure:
 
 ```yaml
 execution:
   cleanup:
     - node: deletePet
-      runOn: always
+      runOn: always    # always | failure | success
 ```
 
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `node` | yes | -- | Graph node to execute |
-| `runOn` | no | `always` | When to run: `always`, `failure`, `success` |
+Both receive inputs from main execution steps via graph edges.
 
-Cleanup steps also receive inputs from the main execution via graph edges. The graph can also declare cleanup via the `cleanup` field on nodes, which AAT adds automatically.
+### Complete Example
 
-## Complete Example
-
-Here's a fully annotated plan showing most features:
+A fully annotated full plan:
 
 ```yaml
 metadata:
   created: 2026-02-11T12:00:00Z
-  prompt: "Create a pet, find it by status, then verify and clean up"
-  graphVersion: "1.0.0"
+  prompt: "Create a pet, find it, then clean up"
 
 intent:
   goal: getPet
@@ -634,18 +700,12 @@ execution:
 
     - node: findByStatus
       dependsOn: [createPet]
-      description: "Find all available pets"
       values:
         status: "available"
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
 
     - node: getPet
       dependsOn: [findByStatus]
       isGoal: true
-      description: "Retrieve the first pet from the list by ID"
       selections:
         pet:
           from: findByStatus.pets
@@ -660,85 +720,16 @@ execution:
           - type: fieldExists
             path: "name"
 
+  cleanup:
     - node: deletePet
-      dependsOn: [createPet]
-      description: "Clean up: delete the pet we created"
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
+      runOn: always
 ```
-
-## Advanced: Multi-Selection from One Array
-
-When an API returns results for multiple logical items in a single array (e.g., a product search returning items from different categories), use multiple named selections with filters to pick different elements:
-
-```yaml
-- node: createBundle
-  dependsOn: [listProducts]
-  selections:
-    mainProduct:
-      from: listProducts.products
-      strategy: match
-      filter: "category == 'electronics'"
-    accessory:
-      from: listProducts.products
-      strategy: match
-      filter: "category == 'accessories'"
-  values:
-    mainProductId: {fromSelection: mainProduct.productId}
-    mainProductName: {fromSelection: mainProduct.name}
-    accessoryId: {fromSelection: accessory.productId}
-    accessoryName: {fromSelection: accessory.name}
-```
-
-Both selections draw from the same array output but use different filters to pick different elements. The `fromSelection` references then extract fields from each independently.
-
-## Advanced: Step Aliasing for Repeated Operations
-
-Step aliasing enables patterns where the same API operation runs multiple times with different data. For example, adding several items to a cart:
-
-```yaml
-execution:
-  steps:
-    - node: createCart
-
-    - id: add_item_electronics
-      node: addItem
-      dependsOn: [createCart]
-      description: "Add a laptop to the cart"
-      values:
-        cartId: {from: createCart.cartId}
-        productId: "prod-101"
-        quantity: 1
-
-    - id: add_item_accessory
-      node: addItem
-      dependsOn: [add_item_electronics]
-      description: "Add a carrying case"
-      values:
-        cartId: {from: createCart.cartId}
-        productId: "prod-202"
-        quantity: 1
-
-    - id: add_item_warranty
-      node: addItem
-      dependsOn: [add_item_accessory]
-      description: "Add extended warranty"
-      values:
-        cartId: {from: createCart.cartId}
-        productId: "prod-303"
-        quantity: 1
-```
-
-Each step executes the same `addItem` graph node with different inputs. Downstream steps reference specific items by step ID (e.g., `add_item_electronics.lineItemId`).
 
 ## See Also
 
-- [Plan-Level Auth & Headers](plan-auth.md) -- embedding credentials and custom headers in plans
+- [Workflow Templates](workflow-templates.md) -- authoring base and addon workflow templates
 - [Value Flow](value-flow.md) -- expressions, constraint resolution, selection strategies in depth
 - [Running Tests](running.md) -- executing plans with `aat run`
 - [LLM-Assisted Planning](prompt-workflow.md) -- generating plans from prompts with `aat prompt`
-- [Workflow Templates](workflow-templates.md) -- pre-built plan skeletons attached to graph workflows
-- [Templates](templates.md) -- how HTTP adapter templates map to graph nodes
-- [Petstore Example](../../examples/petstore/README.md) -- runnable example plans
+- [Plan-Level Auth & Headers](plan-auth.md) -- embedding credentials and custom headers
+- [Graph Authoring](graph-authoring.md) -- graph structure, workflows, and slots

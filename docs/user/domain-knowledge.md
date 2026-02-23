@@ -48,14 +48,13 @@ Or with explicit paths:
 
 ```bash
 aat prompt "Create a pet and verify it exists" \
-  --env env.yaml --graph graph.yaml --templates templates/ \
   --domain domain.yaml
 ```
 
 Or with `aat run` in lean/adaptive mode:
 
 ```bash
-aat run --plan plan.yaml --domain domain.yaml --mode lean
+aat run plan plan.yaml --domain domain.yaml --mode lean
 ```
 
 ## Schema Reference

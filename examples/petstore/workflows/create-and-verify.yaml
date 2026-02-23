@@ -1,0 +1,12 @@
+intent:
+  description: "Create a pet and verify it was stored correctly"
+
+execution:
+  steps:
+    - node: createPet
+      description: "Create a new pet"
+
+    - node: getPet
+      dependsOn: [createPet]
+      isGoal: true
+      description: "Verify the pet exists with correct data"

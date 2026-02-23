@@ -1,0 +1,18 @@
+kind: recipe
+metadata:
+  created: 2026-02-11T12:00:00Z
+  prompt: "Find pets by status and retrieve one"
+  graphVersion: "1.0.0"
+selection:
+  workflow: Search and Retrieve
+  description: "Search for available pets and retrieve the first match by ID"
+overrides:
+  assertions:
+    findByStatus:
+      - type: status
+        expect: 200
+    getPet:
+      - type: status
+        expect: 200
+      - type: fieldExists
+        path: name

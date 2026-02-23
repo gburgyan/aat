@@ -12,6 +12,8 @@ nodes:
       - name: name
         type: string
         description: "Name of the pet"
+        default:
+          pool: [Buddy, Max, Bella, Charlie, Luna, Cooper, Daisy, Rocky]
       - name: status
         type: enum[available, pending, sold]
         description: "Availability status"
@@ -38,6 +40,8 @@ nodes:
       - name: petId
         type: integer
         description: "Pet ID to look up"
+        default:
+          from: createPet.petId
     outputs:
       - name: petId
         type: integer
@@ -58,6 +62,7 @@ nodes:
       - name: status
         type: enum[available, pending, sold]
         description: "Status to filter by"
+        default: available
     outputs:
       - name: pets
         type: pet[]
@@ -79,4 +84,15 @@ nodes:
       - name: petId
         type: integer
         description: "Pet ID to delete"
+        default:
+          from: createPet.petId
     outputs: []
+
+workflows:
+  - name: Create and Verify
+    description: "Create a pet and verify it was stored correctly"
+    template: workflows/create-and-verify.yaml
+
+  - name: Search and Retrieve
+    description: "Find pets by status and retrieve one by ID"
+    template: workflows/search-and-retrieve.yaml

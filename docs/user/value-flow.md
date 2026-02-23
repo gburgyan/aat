@@ -289,7 +289,7 @@ llm:
 Or override with `--mode` on the command line:
 
 ```
-aat run --plan plan.yaml --env env.yaml --graph graph.yaml --templates tpl/ --mode adaptive
+aat run plan plan.yaml --mode adaptive
 ```
 
 ### How LLM Value Selection Works
@@ -478,6 +478,106 @@ values:
   # sortBy not specified → uses graph default "relevance"
 ```
 
+## Data Layers
+
+Data layers are named sets of input default overrides stored in separate YAML files. They sit between graph defaults and plan values in the resolution priority chain, letting you swap test data profiles without modifying plans or the graph.
+
+### Layer YAML Format
+
+Each layer file declares a `name`, optional `description`, and an `inputs` map:
+
+```yaml
+name: european
+description: European airport codes for intercontinental routes
+inputs:
+  searchFlights.origin: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+  searchFlights.destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+  searchFlights2Leg.leg1Origin: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+  searchFlights2Leg.leg1Destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+  searchFlights2Leg.leg2Destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+```
+
+Entries in `inputs` can be bare (just the input name) or qualified (`nodeName.inputName`):
+
+- **Bare entries** like `departureDate` apply to every node that has a `departureDate` input.
+- **Qualified entries** like `searchFlights.origin` target a specific node. Within the same layer, qualified entries take priority over bare entries for the same input.
+
+Values follow the same format as graph input defaults — a bare scalar, a list (pool), or a structured object with `pool`, `constraint`, `poolStrategy`, etc.
+
+### Examples
+
+The travelport project includes several layers that illustrate common use cases:
+
+**Regional airport pools** (`european.yaml`) — replaces airport code pools with European cities:
+
+```yaml
+name: european
+description: European airport codes for intercontinental routes
+inputs:
+  searchFlights.origin: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+  searchFlights.destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
+```
+
+**Payment card test data** (`amex.yaml`) — injects American Express test card numbers:
+
+```yaml
+name: amex
+description: American Express test card numbers and CVVs
+inputs:
+  addFormOfPaymentCard.cardNumber:
+    pool: ["371449635398431", "378282246310005", "340000000000009"]
+  addFormOfPaymentCard.cardCode: AX
+  addFormOfPaymentCard.cvv:
+    pool: ["1234", "5678", "9012"]
+```
+
+**Dynamic date pools** (`near-term.yaml`) — uses expressions to keep travel dates fresh:
+
+```yaml
+name: near-term
+description: Near-term travel dates (2-5 days out)
+inputs:
+  departureDate:
+    pool: ["{{today + 2 days}}", "{{today + 3 days}}", "{{today + 5 days}}"]
+  returnDate:
+    pool: ["{{today + 9 days}}", "{{today + 10 days}}", "{{today + 12 days}}"]
+```
+
+Note that `near-term` uses bare input names (`departureDate`, `returnDate`) so it applies to every node with those inputs.
+
+### Layer Stacking
+
+Multiple layers can be applied at once. Later layers override earlier ones when both set the same input:
+
+```
+aat run plan plan.yaml --layer european --layer near-term
+```
+
+Here, `european` sets airport codes and `near-term` sets travel dates. If both layers set the same input for the same node, `near-term` wins because it appears later.
+
+### Batch Permutation Matrix
+
+For batch execution, `--layer-group` generates a cartesian product of layer combinations so each plan runs once with every combination:
+
+```
+aat run batch --layer-group "european,international" --layer-group "amex,visa"
+```
+
+This runs every plan four times: european+amex, european+visa, international+amex, international+visa. See [Running AAT](running.md) for full details on batch layer groups.
+
+### Project Manifest
+
+Declare the layers directory in your `aat-project.yaml`:
+
+```yaml
+name: my-project
+graph: graph.yaml
+templates: templates/
+layers: layers/
+```
+
+When a manifest is present, `--layer` resolves layer names from this directory automatically.
+
 ## Resolution Priority
 
 When AAT resolves an input value, it checks these sources in order:
@@ -491,11 +591,12 @@ When AAT resolves an input value, it checks these sources in order:
    - If the constraint fails, try each `pool` value
    - If all pool values fail, ask the LLM (lean/adaptive modes only)
    - If everything fails and the constraint is soft, relax it and accept the first tried value (adaptive mode, or lean with relaxation tracker)
-5. **Graph default** — default defined in the graph schema
-6. **Optional** — if the input is marked optional, it's skipped
-7. **Error** — required input with no value fails the step
+5. **Data layer override** — value from a `--layer` file matching this node+input
+6. **Graph default** — default defined in the graph schema
+7. **Optional** — if the input is marked optional, it's skipped
+8. **Error** — required input with no value fails the step
 
-The first source that provides a value wins. This means edges (data flow between steps) always take priority over plan-provided literals.
+The first source that provides a value wins. This means edges (data flow between steps) always take priority over plan-provided literals. When layers are applied, they override graph defaults for matching inputs. Plan values still take priority over layers — layers only fill in inputs the plan doesn't explicitly specify.
 
 ## Putting It All Together
 
@@ -570,6 +671,8 @@ In this plan:
 - `addShipping` gets literal values for the shipping method
 - `checkout` receives scalar references from multiple upstream steps (wired by the graph edges, not shown in the plan since the engine resolves them automatically)
 - `cancelOrder` runs as cleanup regardless of success or failure
+
+Running this plan with a data layer adds another dimension — for example, `--layer near-term` would inject date pools for any date inputs that the plan leaves unspecified, without changing the plan file itself.
 
 ## Debugging Value Resolution
 
@@ -654,3 +757,9 @@ Array selection decisions are recorded in the `selections` array:
 ```
 
 If a filter was relaxed, `filterRelaxed: true` appears. For LLM-assisted selection, the `llmCall` field contains the full exchange.
+
+## See Also
+
+- [Workflow Templates](workflow-templates.md) — how slots and addons compose plans from reusable workflow definitions
+- [Running AAT](running.md) — batch execution, layer groups, CI/CD integration
+- [Plan Authoring](plan-authoring.md) — full plan YAML reference
