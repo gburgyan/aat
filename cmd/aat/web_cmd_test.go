@@ -36,6 +36,13 @@ func TestBuildViewURL(t *testing.T) {
 		want       string
 	}{
 		{
+			name:       "empty ref (run list)",
+			port:       9119,
+			ref:        "",
+			archiveDir: "",
+			want:       "http://localhost:9119",
+		},
+		{
 			name:       "latest (no archive dir)",
 			port:       9119,
 			ref:        "latest",

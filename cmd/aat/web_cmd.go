@@ -72,7 +72,7 @@ var webViewCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
-		ref := "latest"
+		ref := ""
 		if len(args) > 0 {
 			ref = args[0]
 		}
@@ -264,6 +264,9 @@ func webViewTraceCommand(port int, traceRef string, archiveDir string, tracesDir
 // It checks directory contents to determine the type rather than relying on
 // name prefixes, supporting named/renamed directories.
 func buildViewURL(port int, ref string, archiveDir string) string {
+	if ref == "" {
+		return fmt.Sprintf("http://localhost:%d", port)
+	}
 	if archiveDir != "" {
 		batchPath := filepath.Join(archiveDir, ref, "batch.json")
 		if _, err := os.Stat(batchPath); err == nil {
