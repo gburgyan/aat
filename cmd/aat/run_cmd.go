@@ -23,6 +23,7 @@ func init() {
 	runCmd.PersistentFlags().StringSlice("override", nil, "node=url override (repeatable, e.g. searchFlights=http://localhost:8080)")
 	runCmd.PersistentFlags().String("env-overlay", "", "path to environment overlay YAML file")
 	runCmd.PersistentFlags().Int("retries", 0, "max plan-level retries on failure (0 = no retries)")
+	runCmd.PersistentFlags().StringSlice("layer", nil, "data layer to apply (repeatable, e.g. --layer european --layer amex)")
 
 	runCmd.AddCommand(runPlanCmd)
 }

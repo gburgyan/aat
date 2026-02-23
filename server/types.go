@@ -27,6 +27,7 @@ type RunListEntry struct {
 	Attempt       int       `json:"attempt,omitempty"`
 	TotalAttempts int       `json:"totalAttempts,omitempty"`
 	Name          string    `json:"name,omitempty"`
+	Layers        []string  `json:"layers,omitempty"`
 }
 
 // RunDetail is the full overview of a single run.
@@ -51,6 +52,7 @@ type RunDetail struct {
 	TotalAttempts   int              `json:"totalAttempts,omitempty"`
 	Attempts        []AttemptSummary `json:"attempts,omitempty"`
 	Name            string           `json:"name,omitempty"`
+	Layers          []string         `json:"layers,omitempty"`
 }
 
 // AttemptSummary captures the outcome of a single retry attempt.
@@ -250,17 +252,18 @@ type ResponseBodyErrorDetail struct {
 
 // BatchListEntry is a summary of a batch run for list display.
 type BatchListEntry struct {
-	BatchID        string    `json:"batchId"`
-	Timestamp      time.Time `json:"timestamp"`
-	Outcome        string    `json:"outcome"`
-	TotalRuns      int       `json:"totalRuns"`
-	PassedRuns     int       `json:"passedRuns"`
-	FailedRuns     int       `json:"failedRuns"`
-	ErrorRuns      int       `json:"errorRuns"`
-	TotalDurationMs int64   `json:"totalDurationMs"`
-	Source         string    `json:"source,omitempty"`
-	ToolVersion    string    `json:"toolVersion,omitempty"`
-	Name           string    `json:"name,omitempty"`
+	BatchID         string    `json:"batchId"`
+	Timestamp       time.Time `json:"timestamp"`
+	Outcome         string    `json:"outcome"`
+	TotalRuns       int       `json:"totalRuns"`
+	PassedRuns      int       `json:"passedRuns"`
+	FailedRuns      int       `json:"failedRuns"`
+	ErrorRuns       int       `json:"errorRuns"`
+	TotalDurationMs int64     `json:"totalDurationMs"`
+	Source          string    `json:"source,omitempty"`
+	ToolVersion     string    `json:"toolVersion,omitempty"`
+	Name            string    `json:"name,omitempty"`
+	Layers          []string  `json:"layers,omitempty"`
 }
 
 // BatchDetail is the full overview of a batch run.
@@ -278,19 +281,21 @@ type BatchDetail struct {
 	ToolVersion     string            `json:"toolVersion,omitempty"`
 	Runs            []BatchRunSummary `json:"runs"`
 	Name            string            `json:"name,omitempty"`
+	Layers          []string          `json:"layers,omitempty"`
 }
 
 // BatchRunSummary is a compact view of a single run within a batch.
 type BatchRunSummary struct {
-	PlanName    string `json:"planName"`
-	RunID       string `json:"runId"`
-	Outcome     string `json:"outcome"`
-	StepCount   int    `json:"stepCount"`
-	PassedCount int    `json:"passedCount"`
-	FailedCount int    `json:"failedCount"`
-	DurationMs  int64  `json:"durationMs"`
-	Error       string `json:"error,omitempty"`
-	Attempts    int    `json:"attempts,omitempty"`
+	PlanName    string   `json:"planName"`
+	RunID       string   `json:"runId"`
+	Outcome     string   `json:"outcome"`
+	StepCount   int      `json:"stepCount"`
+	PassedCount int      `json:"passedCount"`
+	FailedCount int      `json:"failedCount"`
+	DurationMs  int64    `json:"durationMs"`
+	Error       string   `json:"error,omitempty"`
+	Attempts    int      `json:"attempts,omitempty"`
+	Layers      []string `json:"layers,omitempty"`
 }
 
 // RenameRequest is the JSON body for rename endpoints.

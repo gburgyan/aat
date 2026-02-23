@@ -11,13 +11,22 @@ import (
 // from-references and translates node-name from-refs to step-ID from-refs.
 // The original plan is not modified.
 func Instantiate(p *Plan, g *graph.Graph) *Plan {
+	return InstantiateWithLayers(p, g, nil)
+}
+
+// InstantiateWithLayers deep-copies a plan and merges input defaults into step
+// values, using layered defaults (if provided) in place of graph defaults.
+// The layeredDefaults map is keyed by "nodeName.inputName". When a layered
+// default exists for a (node, input) pair, it takes priority over the graph
+// default. When layeredDefaults is nil, this behaves identically to Instantiate.
+func InstantiateWithLayers(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) *Plan {
 	if p == nil || g == nil {
 		return nil
 	}
 
 	cp := deepCopyPlan(p)
-	injectGraphDefaultDeps(cp, g)
-	mergeGraphDefaults(cp, g)
+	injectGraphDefaultDeps(cp, g, layeredDefaults)
+	mergeGraphDefaultsWithLayers(cp, g, layeredDefaults)
 	return cp
 }
 
@@ -25,7 +34,13 @@ func Instantiate(p *Plan, g *graph.Graph) *Plan {
 // It instantiates the plan (merging graph defaults) and validates the result.
 // Returns the instantiated plan on success.
 func InstantiateAndValidate(p *Plan, g *graph.Graph) (*Plan, error) {
-	inst := Instantiate(p, g)
+	return InstantiateAndValidateWithLayers(p, g, nil)
+}
+
+// InstantiateAndValidateWithLayers instantiates a plan with layered defaults
+// and validates the result. See InstantiateWithLayers for details.
+func InstantiateAndValidateWithLayers(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) (*Plan, error) {
+	inst := InstantiateWithLayers(p, g, layeredDefaults)
 	if inst == nil {
 		return nil, &ValidationError{Errors: []string{"plan or graph is nil"}}
 	}
@@ -35,10 +50,11 @@ func InstantiateAndValidate(p *Plan, g *graph.Graph) (*Plan, error) {
 	return inst, nil
 }
 
-// mergeGraphDefaults merges graph-level input defaults into step values
-// for any inputs the plan doesn't explicitly specify. From-references
-// are translated from node names to step IDs for composed plans.
-func mergeGraphDefaults(p *Plan, g *graph.Graph) {
+// mergeGraphDefaultsWithLayers merges input defaults into step values for any
+// inputs the plan doesn't explicitly specify. When layeredDefaults is non-nil,
+// it takes priority over graph-level defaults. From-references are translated
+// from node names to step IDs for composed plans.
+func mergeGraphDefaultsWithLayers(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) {
 	for i, step := range p.Execution.Steps {
 		node, ok := g.Nodes[step.Node]
 		if !ok {
@@ -55,11 +71,20 @@ func mergeGraphDefaults(p *Plan, g *graph.Graph) {
 				continue
 			}
 
-			if input.Default == nil || !input.Default.HasValue() {
+			// Check layered defaults first, then graph defaults.
+			effectiveDefault := input.Default
+			if layeredDefaults != nil {
+				key := step.Node + "." + input.Name
+				if ld, ok := layeredDefaults[key]; ok {
+					effectiveDefault = ld
+				}
+			}
+
+			if effectiveDefault == nil || !effectiveDefault.HasValue() {
 				continue
 			}
 
-			sv := inputDefaultToStepValue(input.Default)
+			sv := inputDefaultToStepValue(effectiveDefault)
 
 			// Translate from-ref node names to step IDs for composed plans
 			if sv.From != "" {
@@ -152,10 +177,10 @@ func resolveNodeToStepID(nodeName string, p *Plan) string {
 }
 
 // injectGraphDefaultDeps scans plan steps for inputs that rely on graph-level
-// default `from` references and auto-adds the referenced step to dependsOn.
-// This ensures topological sort respects implicit data flow from graph defaults.
-// Must be called before topological sort.
-func injectGraphDefaultDeps(p *Plan, g *graph.Graph) {
+// (or layered) default `from` references and auto-adds the referenced step to
+// dependsOn. This ensures topological sort respects implicit data flow from
+// graph defaults. Must be called before topological sort.
+func injectGraphDefaultDeps(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) {
 	if p == nil || g == nil {
 		return
 	}
@@ -183,12 +208,21 @@ func injectGraphDefaultDeps(p *Plan, g *graph.Graph) {
 				continue
 			}
 
-			if input.Default == nil || input.Default.From == "" {
+			// Check layered defaults first, then graph defaults.
+			effectiveDefault := input.Default
+			if layeredDefaults != nil {
+				key := step.Node + "." + input.Name
+				if ld, ok := layeredDefaults[key]; ok {
+					effectiveDefault = ld
+				}
+			}
+
+			if effectiveDefault == nil || effectiveDefault.From == "" {
 				continue
 			}
 
 			// Extract the node name from the from reference
-			fromNodeName := splitFromNodeName(input.Default.From)
+			fromNodeName := splitFromNodeName(effectiveDefault.From)
 			if fromNodeName == "" {
 				continue
 			}

@@ -18,6 +18,7 @@ export interface RunListEntry {
   attempt?: number;
   totalAttempts?: number;
   name?: string;
+  layers?: string[];
 }
 
 export interface RunDetail {
@@ -41,6 +42,7 @@ export interface RunDetail {
   totalAttempts?: number;
   attempts?: AttemptSummary[];
   name?: string;
+  layers?: string[];
 }
 
 export interface AttemptSummary {
@@ -277,6 +279,7 @@ export interface BatchListEntry {
   source?: string;
   toolVersion?: string;
   name?: string;
+  layers?: string[];
 }
 
 export interface BatchDetail {
@@ -293,6 +296,7 @@ export interface BatchDetail {
   toolVersion?: string;
   runs: BatchRunSummary[];
   name?: string;
+  layers?: string[];
 }
 
 export interface BatchRunSummary {
@@ -305,6 +309,7 @@ export interface BatchRunSummary {
   durationMs: number;
   error?: string;
   attempts?: number;
+  layers?: string[];
 }
 
 export interface RenameResponse {

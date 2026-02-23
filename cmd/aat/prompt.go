@@ -79,6 +79,8 @@ var promptCmd = &cobra.Command{
 			promptText = args[0]
 		}
 
+		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
+
 		pa := &promptArgs{
 			Prompt:        promptText,
 			EnvPath:       resolved.EnvPath,
@@ -91,6 +93,8 @@ var promptCmd = &cobra.Command{
 			AutoConfirm:   autoConfirm,
 			TracePlan:     tracePlan,
 			TraceDir:      traceDir,
+			Layers:        layerFlags,
+			LayersDir:     resolved.LayersDir,
 		}
 
 		return promptCommand(context.Background(), pa, os.Stdin)
@@ -109,6 +113,7 @@ func init() {
 	promptCmd.Flags().Bool("yes", false, "skip confirmation prompt")
 	promptCmd.Flags().Bool("trace", false, "capture planning pipeline trace for debugging")
 	promptCmd.Flags().String("trace-dir", "_output/traces", "directory for plan trace output")
+	promptCmd.Flags().StringSlice("layer", nil, "data layer to apply (repeatable, e.g. --layer european --layer amex)")
 }
 
 // promptArgs holds parsed CLI flags for the prompt command.
@@ -124,6 +129,8 @@ type promptArgs struct {
 	AutoConfirm   bool
 	TracePlan     bool
 	TraceDir      string
+	Layers        []string
+	LayersDir     string
 }
 
 // promptCommand executes the full prompt-to-execution pipeline.
@@ -194,6 +201,7 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 		Client:      llmClient,
 		EnableTrace: args.TracePlan,
 		GraphDir:    filepath.Dir(args.GraphPath),
+		Layers:      args.Layers,
 	})
 
 	// Write trace if present (even on error — partial traces aid debugging).
@@ -321,17 +329,31 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		}
 	}
 
+	// Compute layered defaults if layers are specified
+	var layeredDefaults map[string]*graph.InputDefault
+	if len(args.Layers) > 0 && args.LayersDir != "" {
+		layers, layerErr := graph.ResolveLayerNames(args.Layers, args.LayersDir)
+		if layerErr != nil {
+			return fmt.Errorf("loading layers: %w", layerErr)
+		}
+		layeredDefaults, layerErr = graph.ApplyLayers(g, args.Layers, layers)
+		if layerErr != nil {
+			return fmt.Errorf("applying layers: %w", layerErr)
+		}
+	}
+
 	// Create engine and run
 	observer := &CLIProgressObserver{out: os.Stdout}
 	eng := engine.NewEngine(g, registry, router).
 		WithDomain(kb).
-		WithProgress(observer)
+		WithProgress(observer).
+		WithLayers(layeredDefaults)
 	fmt.Printf("aat: executing plan (%d steps)...\n\n", len(p.Execution.Steps))
 
 	result := eng.Run(ctx, p)
 
 	// Write archive
-	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir)
+	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir, args.Layers)
 	if archiveErr != nil {
 		return archiveErr
 	}

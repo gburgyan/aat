@@ -38,6 +38,7 @@ func BuildRunSummary(a *Archive) *RunSummary {
 		PlanName:      extractPlanName(a),
 		Attempt:       a.Metadata.Attempt,
 		TotalAttempts: a.Metadata.TotalAttempts,
+		Layers:        a.Metadata.Layers,
 	}
 }
 

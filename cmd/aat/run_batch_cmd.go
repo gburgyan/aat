@@ -52,6 +52,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		envOverlay, _ := cmd.Flags().GetString("env-overlay")
 		parallel, _ := cmd.Flags().GetInt("parallel")
 		retries, _ := cmd.Flags().GetInt("retries")
+		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -67,6 +68,8 @@ With an absolute path, treats it as a standalone plan directory.`,
 				Overrides:     overrideFlags,
 				EnvOverlay:    envOverlay,
 				MaxRetries:    retries,
+				Layers:        layerFlags,
+				LayersDir:     resolved.LayersDir,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,
@@ -306,6 +309,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			Timestamp:   batchStart,
 			Source:      source,
 			ToolVersion: "0.1.0",
+			Layers:      args.runArgs.Layers,
 		},
 		Runs: batchEntries,
 		Result: archive.BatchResult{
@@ -527,6 +531,9 @@ func buildPlanResult(planName string, res *runResult) (BatchRunResult, archive.B
 		br.Attempts = res.attempts
 		be.Attempts = res.attempts
 	}
+
+	// Propagate per-run effective layers
+	be.Layers = res.layers
 
 	return br, be
 }

@@ -37,6 +37,7 @@ var runPlanCmd = &cobra.Command{
 		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
 		envOverlay, _ := cmd.Flags().GetString("env-overlay")
 		retries, _ := cmd.Flags().GetInt("retries")
+		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -52,6 +53,8 @@ var runPlanCmd = &cobra.Command{
 			Overrides:     overrideFlags,
 			EnvOverlay:    envOverlay,
 			MaxRetries:    retries,
+			Layers:        layerFlags,
+			LayersDir:     resolved.LayersDir,
 		}
 
 		code := executeRun(ra)

@@ -288,6 +288,93 @@ func TestRoundTrip_WithExpectFailure(t *testing.T) {
 	assert.True(t, loaded.Steps[0].ExpectFailure.Passed)
 }
 
+func TestRoundTrip_WithLayers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "layers.json")
+
+	a := &Archive{
+		Metadata: ArchiveMetadata{
+			Version: "1",
+			RunID:   "run-layers",
+			Layers:  []string{"european", "amex"},
+		},
+		Steps:  []StepRecord{},
+		Result: ArchiveResult{Outcome: "passed"},
+	}
+
+	err := Write(a, path)
+	require.NoError(t, err)
+
+	loaded, err := Read(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"european", "amex"}, loaded.Metadata.Layers)
+}
+
+func TestRoundTrip_WithoutLayers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "no-layers.json")
+
+	a := &Archive{
+		Metadata: ArchiveMetadata{
+			Version: "1",
+			RunID:   "run-no-layers",
+		},
+		Steps:  []StepRecord{},
+		Result: ArchiveResult{Outcome: "passed"},
+	}
+
+	err := Write(a, path)
+	require.NoError(t, err)
+
+	loaded, err := Read(path)
+	require.NoError(t, err)
+
+	assert.Nil(t, loaded.Metadata.Layers)
+}
+
+func TestBatchRoundTrip_WithLayers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "batch.json")
+
+	b := &BatchArchive{
+		Metadata: BatchMetadata{
+			Version: "1",
+			BatchID: "batch-layers",
+			Layers:  []string{"european"},
+		},
+		Runs: []BatchRunEntry{
+			{
+				PlanName: "test-plan",
+				RunID:    "run-1",
+				Outcome:  "passed",
+				Layers:   []string{"european", "amex"},
+			},
+			{
+				PlanName: "test-plan-2",
+				RunID:    "run-2",
+				Outcome:  "passed",
+			},
+		},
+		Result: BatchResult{
+			Outcome:   "passed",
+			TotalRuns: 2,
+			PassedRuns: 2,
+		},
+	}
+
+	err := WriteBatch(b, path)
+	require.NoError(t, err)
+
+	loaded, err := ReadBatch(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, []string{"european"}, loaded.Metadata.Layers)
+	require.Len(t, loaded.Runs, 2)
+	assert.Equal(t, []string{"european", "amex"}, loaded.Runs[0].Layers)
+	assert.Nil(t, loaded.Runs[1].Layers)
+}
+
 func TestRoundTrip_WithError(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "error.json")

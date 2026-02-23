@@ -27,6 +27,7 @@ type ArchiveMetadata struct {
 	ToolVersion      string     `json:"toolVersion"`
 	Attempt          int        `json:"attempt,omitempty"`       // 1-indexed attempt number
 	TotalAttempts    int        `json:"totalAttempts,omitempty"` // total attempts (omitted if 1)
+	Layers           []string   `json:"layers,omitempty"`        // effective layers applied to this run
 }
 
 // StepRecord captures the execution trace for a single step.
@@ -155,6 +156,7 @@ type RunSummary struct {
 	PlanName      string    `json:"planName,omitempty"`
 	Attempt       int       `json:"attempt,omitempty"`
 	TotalAttempts int       `json:"totalAttempts,omitempty"`
+	Layers        []string  `json:"layers,omitempty"`
 }
 
 // ArchiveResult captures the overall outcome of a run.
@@ -177,19 +179,21 @@ type BatchMetadata struct {
 	Timestamp   time.Time `json:"timestamp"`
 	Source      string    `json:"source,omitempty"` // directory filter or "all"
 	ToolVersion string    `json:"toolVersion,omitempty"`
+	Layers      []string  `json:"layers,omitempty"` // CLI layers applied at the batch level
 }
 
 // BatchRunEntry is a summary of a single run within a batch.
 type BatchRunEntry struct {
-	PlanName    string `json:"planName"`
-	RunID       string `json:"runId"`
-	Outcome     string `json:"outcome"`
-	StepCount   int    `json:"stepCount"`
-	PassedCount int    `json:"passedCount"`
-	FailedCount int    `json:"failedCount"`
-	DurationMs  int64  `json:"durationMs"`
-	Error       string `json:"error,omitempty"`
-	Attempts    int    `json:"attempts,omitempty"` // total attempts (omitted if 1)
+	PlanName    string   `json:"planName"`
+	RunID       string   `json:"runId"`
+	Outcome     string   `json:"outcome"`
+	StepCount   int      `json:"stepCount"`
+	PassedCount int      `json:"passedCount"`
+	FailedCount int      `json:"failedCount"`
+	DurationMs  int64    `json:"durationMs"`
+	Error       string   `json:"error,omitempty"`
+	Attempts    int      `json:"attempts,omitempty"` // total attempts (omitted if 1)
+	Layers      []string `json:"layers,omitempty"`   // effective layers for this run
 }
 
 // BatchResult captures the aggregate outcome of a batch.

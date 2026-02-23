@@ -32,6 +32,8 @@ type runArgs struct {
 	Overrides     []string // "nodeName=http://url" pairs
 	EnvOverlay    string   // path to overlay YAML
 	MaxRetries    int      // max plan-level retries (0 = no retries)
+	Layers        []string // layer names to apply
+	LayersDir     string   // directory containing layer files
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -82,8 +84,9 @@ type runResult struct {
 	summary     *RunSummary
 	archivePath string
 	err         error
-	setupErr    bool // true when error occurred before engine execution
-	attempts    int  // total attempts (1 = no retries)
+	setupErr    bool     // true when error occurred before engine execution
+	attempts    int      // total attempts (1 = no retries)
+	layers      []string // effective layers applied to this run
 }
 
 // exitCodeInfra is the exit code for infrastructure/config errors.
@@ -319,18 +322,18 @@ func addResolvedOverride(router *engine.ExecutorRouter, ov config.ResolvedOverri
 
 // writeRunArchive creates a run archive in the output directory and returns
 // the archive path. It collects secrets from the environment for redaction.
-func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string) (string, error) {
+func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string, layers []string) (string, error) {
 	secrets := env.CollectSecrets()
 	if p.Auth != nil {
 		for k, v := range config.CollectAuthSecrets(p.Auth) {
 			secrets[k] = v
 		}
 	}
-	return writeRunArchiveWithSecrets(result, p, env, g, outputDir, secrets)
+	return writeRunArchiveWithSecrets(result, p, env, g, outputDir, secrets, layers)
 }
 
 // writeRunArchiveWithSecrets creates a run archive using a pre-built secrets set.
-func writeRunArchiveWithSecrets(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string, secrets map[string]bool) (string, error) {
+func writeRunArchiveWithSecrets(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string, secrets map[string]bool, layers []string) (string, error) {
 	runID := archive.GenerateRunID()
 	meta := archive.ArchiveMetadata{
 		Version:      "1.0.0",
@@ -340,6 +343,7 @@ func writeRunArchiveWithSecrets(result *engine.RunResult, p *plan.Plan, env *con
 		Environment:  env.Name,
 		GraphVersion: g.Version,
 		ToolVersion:  "0.1.0",
+		Layers:       layers,
 	}
 	arc := engine.ToArchive(result, meta, env.APIBaseURL, secrets)
 	archivePath := filepath.Join(outputDir, runID, "archive.json")
@@ -524,6 +528,11 @@ type runContext struct {
 	// Override configuration (from env-file, overlay, CLI flags)
 	Overrides  []string // CLI --override flags
 	EnvOverlay string   // path to overlay YAML
+
+	// Layer configuration
+	Layers          []string                    // layer names from CLI flags
+	LayersDir       string                      // directory containing layer files
+	AvailableLayers map[string]*graph.Layer      // pre-loaded layers (nil until needed)
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -573,7 +582,7 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 	}
 	logf("aat: loaded %d templates\n", count)
 
-	return &runContext{
+	rctx := &runContext{
 		Env:        env,
 		Graph:      g,
 		Registry:   registry,
@@ -582,7 +591,21 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		Secrets:    env.CollectSecrets(),
 		Overrides:  args.Overrides,
 		EnvOverlay: args.EnvOverlay,
-	}, nil
+		Layers:     args.Layers,
+		LayersDir:  args.LayersDir,
+	}
+
+	// Pre-load layers if directory is configured and layers are requested
+	if rctx.LayersDir != "" && len(rctx.Layers) > 0 {
+		layers, err := graph.ResolveLayerNames(rctx.Layers, rctx.LayersDir)
+		if err != nil {
+			return nil, fmt.Errorf("loading layers: %w", err)
+		}
+		rctx.AvailableLayers = layers
+		logf("aat: loaded %d layers\n", len(layers))
+	}
+
+	return rctx, nil
 }
 
 // loadAndRunPlan parses a plan file, then executes it using the shared runContext.
@@ -602,13 +625,47 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		return &runResult{setupErr: true, err: fmt.Errorf("loading plan: %w", err)}
 	}
 
+	// Compute layered defaults if layers are active
+	var layeredDefaults map[string]*graph.InputDefault
+	if len(rctx.Layers) > 0 && rctx.AvailableLayers != nil {
+		var layerErr error
+		layeredDefaults, layerErr = graph.ApplyLayers(rctx.Graph, rctx.Layers, rctx.AvailableLayers)
+		if layerErr != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("applying layers: %w", layerErr)}
+		}
+	}
+
 	var p *plan.Plan
+	var effectiveLayers []string
 	switch v := parsed.(type) {
 	case *plan.Plan:
 		p = v
+		effectiveLayers = rctx.Layers
 	case *plan.Recipe:
 		logf("aat: reconstituting recipe %q...\n", v.Selection.Workflow)
-		reconstituted, reconErr := intent.Reconstitute(v, rctx.Graph, rctx.GraphDir)
+		// Merge CLI layers after recipe layers
+		recipeLayers := v.Selection.Layers
+		if len(rctx.Layers) > 0 {
+			seen := make(map[string]bool, len(recipeLayers))
+			for _, l := range recipeLayers {
+				seen[l] = true
+			}
+			for _, l := range rctx.Layers {
+				if !seen[l] {
+					recipeLayers = append(recipeLayers, l)
+				}
+			}
+			v.Selection.Layers = recipeLayers
+		}
+		effectiveLayers = v.Selection.Layers
+		var reconOpts []intent.ReconstituteOption
+		if rctx.LayersDir != "" {
+			reconOpts = append(reconOpts, intent.WithLayersDir(rctx.LayersDir))
+		}
+		if rctx.AvailableLayers != nil {
+			reconOpts = append(reconOpts, intent.WithAvailableLayers(rctx.AvailableLayers))
+		}
+		reconstituted, reconErr := intent.Reconstitute(v, rctx.Graph, rctx.GraphDir, reconOpts...)
 		if reconErr != nil {
 			return &runResult{setupErr: true, err: fmt.Errorf("reconstituting recipe: %w", reconErr)}
 		}
@@ -617,8 +674,8 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		return &runResult{setupErr: true, err: fmt.Errorf("unexpected parse result type %T", parsed)}
 	}
 
-	// 2. Validate plan against graph
-	if _, err := plan.InstantiateAndValidate(p, rctx.Graph); err != nil {
+	// 2. Validate plan against graph (with layers)
+	if _, err := plan.InstantiateAndValidateWithLayers(p, rctx.Graph, layeredDefaults); err != nil {
 		return &runResult{setupErr: true, err: fmt.Errorf("plan validation: %w", err)}
 	}
 
@@ -700,7 +757,8 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	// 6. Create engine and run
 	eng := engine.NewEngine(rctx.Graph, rctx.Registry, router).
 		WithDomain(rctx.KB).
-		WithProgress(observer)
+		WithProgress(observer).
+		WithLayers(layeredDefaults)
 	logf("aat: executing plan (%d steps)...\n\n", len(p.Execution.Steps))
 
 	result := eng.Run(ctx, p)
@@ -731,6 +789,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		ToolVersion:   "0.1.0",
 		Attempt:       attempt,
 		TotalAttempts: totalAttempts,
+		Layers:        effectiveLayers,
 	}
 	arc := engine.ToArchive(result, meta, rctx.Env.APIBaseURL, secrets)
 	archivePath := filepath.Join(runDir, "archive.json")
@@ -749,5 +808,6 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		summary:     summary,
 		archivePath: archivePath,
 		err:         result.Error,
+		layers:      effectiveLayers,
 	}
 }

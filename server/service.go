@@ -716,6 +716,7 @@ func summaryToRunListEntry(s *archive.RunSummary) RunListEntry {
 		PlanName:      s.PlanName,
 		Attempt:       s.Attempt,
 		TotalAttempts: s.TotalAttempts,
+		Layers:        s.Layers,
 	}
 }
 
@@ -743,6 +744,7 @@ func toRunListEntry(a *archive.Archive) RunListEntry {
 		PlanName:      extractPlanName(a),
 		Attempt:       a.Metadata.Attempt,
 		TotalAttempts: a.Metadata.TotalAttempts,
+		Layers:        a.Metadata.Layers,
 	}
 }
 
@@ -758,6 +760,7 @@ func toBatchListEntry(b *archive.BatchArchive) BatchListEntry {
 		TotalDurationMs: b.Result.TotalDurationMs,
 		Source:          b.Metadata.Source,
 		ToolVersion:     b.Metadata.ToolVersion,
+		Layers:          b.Metadata.Layers,
 	}
 }
 
@@ -774,6 +777,7 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 			DurationMs:  r.DurationMs,
 			Error:       r.Error,
 			Attempts:    r.Attempts,
+			Layers:      r.Layers,
 		}
 	}
 
@@ -790,6 +794,7 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 		Source:          b.Metadata.Source,
 		ToolVersion:     b.Metadata.ToolVersion,
 		Runs:            runs,
+		Layers:          b.Metadata.Layers,
 	}
 }
 
@@ -847,6 +852,7 @@ func toRunDetail(a *archive.Archive) *RunDetail {
 		Cleanup:         cleanup,
 		Attempt:         a.Metadata.Attempt,
 		TotalAttempts:   a.Metadata.TotalAttempts,
+		Layers:          a.Metadata.Layers,
 	}
 }
 

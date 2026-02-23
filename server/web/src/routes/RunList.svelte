@@ -176,6 +176,11 @@
               {#if item.entry.totalAttempts && item.entry.totalAttempts > 1}
                 <span class="retry-badge" title="Took {item.entry.totalAttempts} attempts">{item.entry.totalAttempts} attempts</span>
               {/if}
+              {#if item.entry.layers && item.entry.layers.length > 0}
+                {#each item.entry.layers as layer}
+                  <span class="layer-badge" title="Layer: {layer}">{layer}</span>
+                {/each}
+              {/if}
             </td>
             <td class="cell-steps">
               <span class="steps-passed">{item.entry.passedCount}</span>{#if item.entry.failedCount > 0}<span class="steps-separator"> / </span><span class="steps-failed">{item.entry.failedCount}</span>{/if}
@@ -209,6 +214,11 @@
                 {/if}
               {:else}
                 {batchLabel(item.entry)}
+              {/if}
+              {#if item.entry.layers && item.entry.layers.length > 0}
+                {#each item.entry.layers as layer}
+                  <span class="layer-badge" title="Layer: {layer}">{layer}</span>
+                {/each}
               {/if}
             </td>
             <td class="cell-steps">
@@ -315,6 +325,18 @@
     letter-spacing: 0.03em;
     color: var(--color-warning, #f59e0b);
     background: rgba(245, 158, 11, 0.12);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    margin-left: 0.4rem;
+    vertical-align: baseline;
+  }
+  .layer-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--color-primary, #6366f1);
+    background: rgba(99, 102, 241, 0.12);
     padding: 0.1rem 0.35rem;
     border-radius: 3px;
     margin-left: 0.4rem;

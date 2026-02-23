@@ -7,6 +7,28 @@ import (
 	"github.com/gburgyan/aat/plan"
 )
 
+// ReconstituteOption is a functional option for Reconstitute.
+type ReconstituteOption func(*reconstituteConfig)
+
+type reconstituteConfig struct {
+	layersDir       string
+	availableLayers map[string]*graph.Layer
+}
+
+// WithLayersDir specifies where to find layer files during reconstitution.
+func WithLayersDir(dir string) ReconstituteOption {
+	return func(c *reconstituteConfig) {
+		c.layersDir = dir
+	}
+}
+
+// WithAvailableLayers provides pre-loaded layers for reconstitution.
+func WithAvailableLayers(layers map[string]*graph.Layer) ReconstituteOption {
+	return func(c *reconstituteConfig) {
+		c.availableLayers = layers
+	}
+}
+
 // Reconstitute replays the composition pipeline from a compact Recipe to
 // produce a full Plan. The steps mirror what Interpret does after Call 1/2:
 //  1. Convert RecipeSelection → WorkflowSelection
@@ -15,10 +37,15 @@ import (
 //  4. Convert RecipeOverrides → TargetedResponse
 //  5. applyTargetedResponse (with unfedInputSet)
 //  6. PostProcess
-//  7. plan.InstantiateAndValidate
-func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string) (*plan.Plan, error) {
+//  7. Apply layers (if any) and plan.InstantiateAndValidate
+func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...ReconstituteOption) (*plan.Plan, error) {
 	if recipe == nil {
 		return nil, fmt.Errorf("reconstitute: recipe is nil")
+	}
+
+	var cfg reconstituteConfig
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
 	// 1. Convert to internal types.
@@ -70,8 +97,27 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string) (*plan.P
 	// 6. PostProcess.
 	PostProcess(skeleton, g, &ws, recipe.Metadata.Prompt)
 
-	// 7. Validate.
-	if _, err := plan.InstantiateAndValidate(skeleton, g); err != nil {
+	// 7. Resolve layers and validate.
+	var layeredDefaults map[string]*graph.InputDefault
+	if len(ws.Layers) > 0 {
+		available := cfg.availableLayers
+		if available == nil && cfg.layersDir != "" {
+			var err error
+			available, err = graph.ResolveLayerNames(ws.Layers, cfg.layersDir)
+			if err != nil {
+				return nil, fmt.Errorf("reconstitute: loading layers: %w", err)
+			}
+		}
+		if available != nil {
+			var err error
+			layeredDefaults, err = graph.ApplyLayers(g, ws.Layers, available)
+			if err != nil {
+				return nil, fmt.Errorf("reconstitute: applying layers: %w", err)
+			}
+		}
+	}
+
+	if _, err := plan.InstantiateAndValidateWithLayers(skeleton, g, layeredDefaults); err != nil {
 		return nil, fmt.Errorf("reconstitute: validating plan: %w", err)
 	}
 
@@ -84,6 +130,7 @@ func recipeSelectionToWorkflowSelection(rs plan.RecipeSelection) WorkflowSelecti
 	return WorkflowSelection{
 		Workflow:    rs.Workflow,
 		Description: rs.Description,
+		Layers:      rs.Layers,
 		Choices:     rs.Choices,
 		Addons:      rs.Addons,
 		Repetitions: rs.Repetitions,
@@ -139,6 +186,7 @@ func WorkflowSelectionToRecipeSelection(ws *WorkflowSelection) plan.RecipeSelect
 	return plan.RecipeSelection{
 		Workflow:    ws.Workflow,
 		Description: ws.Description,
+		Layers:      ws.Layers,
 		Choices:     ws.Choices,
 		Addons:      ws.Addons,
 		Repetitions: ws.Repetitions,

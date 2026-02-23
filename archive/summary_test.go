@@ -306,6 +306,76 @@ func TestStepRecordPassed(t *testing.T) {
 	}
 }
 
+func TestBuildRunSummary_WithLayers(t *testing.T) {
+	a := &Archive{
+		Metadata: ArchiveMetadata{
+			RunID:  "run-layers",
+			Layers: []string{"european", "amex"},
+		},
+		Steps: []StepRecord{
+			{Node: "step1", DurationMs: 100, Inputs: map[string]any{}},
+		},
+		Result: ArchiveResult{Outcome: "passed"},
+	}
+
+	s := BuildRunSummary(a)
+
+	assert.Equal(t, []string{"european", "amex"}, s.Layers)
+}
+
+func TestBuildRunSummary_NilLayers(t *testing.T) {
+	a := &Archive{
+		Metadata: ArchiveMetadata{RunID: "run-no-layers"},
+		Result:   ArchiveResult{Outcome: "passed"},
+	}
+
+	s := BuildRunSummary(a)
+
+	assert.Nil(t, s.Layers)
+}
+
+func TestWriteReadSummary_RoundTrip_WithLayers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+
+	original := &RunSummary{
+		RunID:   "run-layers-rt",
+		Outcome: "passed",
+		Layers:  []string{"european", "amex"},
+	}
+
+	err := WriteSummary(original, path)
+	require.NoError(t, err)
+
+	loaded, err := ReadSummary(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, original.Layers, loaded.Layers)
+}
+
+func TestWriteReadSummary_RoundTrip_NilLayers(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+
+	original := &RunSummary{
+		RunID:   "run-no-layers-rt",
+		Outcome: "passed",
+	}
+
+	err := WriteSummary(original, path)
+	require.NoError(t, err)
+
+	loaded, err := ReadSummary(path)
+	require.NoError(t, err)
+
+	assert.Nil(t, loaded.Layers)
+
+	// Verify omitempty: no "layers" key in the JSON
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), `"layers"`)
+}
+
 func TestWriteArchive_CreatesSummaryJSON(t *testing.T) {
 	dir := t.TempDir()
 	runDir := filepath.Join(dir, "run-test-summary")

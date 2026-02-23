@@ -33,6 +33,11 @@ type Engine struct {
 	// Nil means no notifications (zero overhead).
 	Observer ProgressObserver
 
+	// layeredDefaults holds data-layer overrides for graph input defaults.
+	// Keyed by "nodeName.inputName". When set, these take priority over
+	// graph-level defaults during plan instantiation.
+	layeredDefaults map[string]*graph.InputDefault
+
 	// plan is set during Run() for constraint-aware resolution.
 	plan *plan.Plan
 }
@@ -59,6 +64,12 @@ func (e *Engine) WithProgress(obs ProgressObserver) *Engine {
 	return e
 }
 
+// WithLayers sets data-layer overrides for graph input defaults.
+func (e *Engine) WithLayers(ld map[string]*graph.InputDefault) *Engine {
+	e.layeredDefaults = ld
+	return e
+}
+
 // Run executes a plan: validates, sorts steps topologically, runs each in order,
 // and executes cleanup on completion.
 func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
@@ -69,8 +80,8 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		}
 	}()
 
-	// 1. Instantiate + validate: merge graph defaults, inject deps, validate
-	instantiatedPlan, err := plan.InstantiateAndValidate(p, e.graph)
+	// 1. Instantiate + validate: merge graph defaults (with layers), inject deps, validate
+	instantiatedPlan, err := plan.InstantiateAndValidateWithLayers(p, e.graph, e.layeredDefaults)
 	if err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}

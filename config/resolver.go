@@ -14,6 +14,7 @@ type ProjectPaths struct {
 	EnvPath       string
 	DomainPath    string
 	WorkflowsDir  string
+	LayersDir     string
 	PlanDirs      []string
 	ArchiveDir    string
 	TracesDir     string
@@ -76,6 +77,9 @@ func ResolveProjectPaths(overrides ProjectPaths) (*ProjectPaths, error) {
 	if overrides.WorkflowsDir != "" {
 		result.WorkflowsDir = overrides.WorkflowsDir
 	}
+	if overrides.LayersDir != "" {
+		result.LayersDir = overrides.LayersDir
+	}
 	if len(overrides.PlanDirs) > 0 {
 		result.PlanDirs = overrides.PlanDirs
 	}
@@ -119,6 +123,9 @@ func applyManifest(result *ProjectPaths, pathOrDir string) {
 	}
 	if m.WorkflowsDir != "" {
 		result.WorkflowsDir = m.WorkflowsDir
+	}
+	if m.LayersDir != "" {
+		result.LayersDir = m.LayersDir
 	}
 	if len(m.PlanDirs) > 0 {
 		result.PlanDirs = []string(m.PlanDirs)

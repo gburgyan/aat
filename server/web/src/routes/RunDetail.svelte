@@ -201,6 +201,16 @@
           <span class="meta-value meta-mono">{run.toolVersion}</span>
         </div>
       {/if}
+      {#if run.layers && run.layers.length > 0}
+        <div class="run-detail-meta-item">
+          <span class="meta-label">Layers</span>
+          <span class="meta-value">
+            {#each run.layers as layer}
+              <span class="layer-badge">{layer}</span>
+            {/each}
+          </span>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -424,5 +434,16 @@
   .run-attempt-nav a:hover {
     color: var(--color-primary-hover, #818cf8);
     text-decoration: underline;
+  }
+  .layer-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--color-primary, #6366f1);
+    background: rgba(99, 102, 241, 0.12);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    margin-right: 0.3rem;
   }
 </style>

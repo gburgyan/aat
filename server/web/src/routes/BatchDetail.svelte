@@ -179,6 +179,16 @@
           <span class="meta-value meta-mono">{batch.toolVersion}</span>
         </div>
       {/if}
+      {#if batch.layers && batch.layers.length > 0}
+        <div class="run-detail-meta-item">
+          <span class="meta-label">Layers</span>
+          <span class="meta-value">
+            {#each batch.layers as layer}
+              <span class="layer-badge">{layer}</span>
+            {/each}
+          </span>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -210,6 +220,11 @@
               {run.planName || run.runId}
               {#if run.attempts && run.attempts > 1}
                 <span class="retry-badge" title="Took {run.attempts} attempts">{run.attempts} attempts</span>
+              {/if}
+              {#if run.layers && run.layers.length > 0}
+                {#each run.layers as layer}
+                  <span class="layer-badge" title="Layer: {layer}">{layer}</span>
+                {/each}
               {/if}
             </td>
             <td class="cell-steps">
@@ -342,6 +357,18 @@
     letter-spacing: 0.03em;
     color: var(--color-warning, #f59e0b);
     background: rgba(245, 158, 11, 0.12);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    margin-left: 0.4rem;
+    vertical-align: baseline;
+  }
+  .layer-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--color-primary, #6366f1);
+    background: rgba(99, 102, 241, 0.12);
     padding: 0.1rem 0.35rem;
     border-radius: 3px;
     margin-left: 0.4rem;

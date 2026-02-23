@@ -22,6 +22,7 @@ type Recipe struct {
 type RecipeSelection struct {
 	Workflow    string            `yaml:"workflow"`
 	Description string           `yaml:"description,omitempty"`
+	Layers      []string          `yaml:"layers,omitempty"`
 	Choices     map[string]string `yaml:"choices,omitempty"`
 	Addons      []string          `yaml:"addons,omitempty"`
 	Repetitions map[string]int    `yaml:"repetitions,omitempty"`

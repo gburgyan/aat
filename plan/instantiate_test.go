@@ -529,7 +529,7 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 			},
 		}
 
-		injectGraphDefaultDeps(p, g)
+		injectGraphDefaultDeps(p, g, nil)
 
 		// B should now depend on A
 		assert.Contains(t, p.Execution.Steps[1].DependsOn, "A")
@@ -574,7 +574,7 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 			},
 		}
 
-		injectGraphDefaultDeps(p, g)
+		injectGraphDefaultDeps(p, g, nil)
 
 		// B should NOT depend on A because plan provides explicit value
 		assert.Empty(t, p.Execution.Steps[1].DependsOn)
@@ -614,7 +614,7 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 			},
 		}
 
-		injectGraphDefaultDeps(p, g)
+		injectGraphDefaultDeps(p, g, nil)
 
 		// B should NOT depend on A because A is not in the plan
 		assert.Empty(t, p.Execution.Steps[0].DependsOn)
@@ -622,9 +622,9 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 
 	t.Run("nil plan and graph are safe", func(t *testing.T) {
 		// Should not panic
-		injectGraphDefaultDeps(nil, nil)
-		injectGraphDefaultDeps(nil, &graph.Graph{})
-		injectGraphDefaultDeps(&Plan{}, nil)
+		injectGraphDefaultDeps(nil, nil, nil)
+		injectGraphDefaultDeps(nil, &graph.Graph{}, nil)
+		injectGraphDefaultDeps(&Plan{}, nil, nil)
 	})
 
 	t.Run("does not duplicate existing dependency", func(t *testing.T) {
@@ -661,7 +661,7 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 			},
 		}
 
-		injectGraphDefaultDeps(p, g)
+		injectGraphDefaultDeps(p, g, nil)
 
 		// B should still have exactly one "A" dependency
 		count := 0

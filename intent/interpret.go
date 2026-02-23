@@ -20,8 +20,9 @@ type InterpretRequest struct {
 	Graph       *graph.Graph
 	KB          *domain.KnowledgeBase // may be nil
 	Client      llm.Client
-	EnableTrace bool   // when true, pipeline observability data is captured in the result
-	GraphDir    string // directory containing graph file; for resolving template paths
+	EnableTrace bool     // when true, pipeline observability data is captured in the result
+	GraphDir    string   // directory containing graph file; for resolving template paths
+	Layers      []string // layer names to apply (from CLI flags)
 }
 
 // InterpretResult holds the outputs of prompt-to-plan transformation.
@@ -40,6 +41,7 @@ type InterpretResult struct {
 type WorkflowSelection struct {
 	Workflow    string            `json:"workflow"`
 	Description string            `json:"description"`
+	Layers      []string          `json:"layers,omitempty"`
 	Choices     map[string]string `json:"choices,omitempty"`     // slot name → option name
 	Addons      []string          `json:"addons,omitempty"`
 	Repetitions map[string]int    `json:"repetitions,omitempty"`
@@ -142,6 +144,19 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	}
 
 	ws := sr.Selection
+
+	// Merge CLI-specified layers into the selection.
+	if len(req.Layers) > 0 {
+		seen := make(map[string]bool, len(ws.Layers))
+		for _, l := range ws.Layers {
+			seen[l] = true
+		}
+		for _, l := range req.Layers {
+			if !seen[l] {
+				ws.Layers = append(ws.Layers, l)
+			}
+		}
+	}
 
 	if trace != nil {
 		if sr.RetriedFrom != nil {
