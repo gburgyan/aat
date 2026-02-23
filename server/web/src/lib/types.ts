@@ -312,6 +312,12 @@ export interface RenameResponse {
   name: string;
 }
 
+export interface ImportResponse {
+  ref: string;
+  name: string;
+  type: 'run' | 'batch';
+}
+
 export type UnifiedListEntry =
   | { kind: 'run'; entry: RunListEntry; timestamp: string }
   | { kind: 'batch'; entry: BatchListEntry; timestamp: string };

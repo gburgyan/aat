@@ -1,11 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -264,4 +267,104 @@ func (s *Server) handleUnnameBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, RenameResponse{Ref: newRef, Name: displayName(newRef)})
+}
+
+func (s *Server) handleExportRun(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var buf bytes.Buffer
+	filename, err := s.service.ExportRun(id, &buf)
+	if err != nil {
+		if errors.Is(err, ErrRunNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "export_error", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, sanitizeHeaderValue(filename)))
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	w.WriteHeader(http.StatusOK)
+	io.Copy(w, &buf)
+}
+
+func (s *Server) handleExportBatch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var buf bytes.Buffer
+	filename, err := s.service.ExportBatch(id, &buf)
+	if err != nil {
+		if errors.Is(err, ErrBatchNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "export_error", err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, sanitizeHeaderValue(filename)))
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	w.WriteHeader(http.StatusOK)
+	io.Copy(w, &buf)
+}
+
+const maxUploadSize = 100 * 1024 * 1024 // 100MB
+
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	// Limit upload size.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		if err.Error() == "http: request body too large" {
+			writeError(w, http.StatusRequestEntityTooLarge, "file_too_large", "file exceeds 100MB limit")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "missing_file", "missing 'file' field in multipart form")
+		return
+	}
+	defer file.Close()
+
+	// Read into buffer for ReaderAt access.
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, file); err != nil {
+		if strings.Contains(err.Error(), "http: request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "file_too_large", "file exceeds 100MB limit")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid_archive", "failed to read uploaded file")
+		return
+	}
+
+	data := buf.Bytes()
+	reader := bytes.NewReader(data)
+
+	ref, archiveType, err := s.service.ImportArchive(reader, int64(len(data)), header.Filename)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "already exists") {
+			writeError(w, http.StatusConflict, "name_conflict", errMsg)
+			return
+		}
+		if strings.Contains(errMsg, "invalid archive name") {
+			writeError(w, http.StatusBadRequest, "invalid_filename", errMsg)
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid_archive", errMsg)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, ImportResponse{
+		Ref:  ref,
+		Name: ref,
+		Type: archiveType,
+	})
+}
+
+// sanitizeHeaderValue removes characters that could cause header injection.
+func sanitizeHeaderValue(s string) string {
+	return strings.NewReplacer(`"`, "", "\r", "", "\n", "").Replace(s)
 }

@@ -40,6 +40,7 @@ func init() {
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(webCmd)
+	rootCmd.AddCommand(importCmd)
 }
 
 func main() {

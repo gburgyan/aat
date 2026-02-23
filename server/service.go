@@ -3,6 +3,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -441,6 +442,82 @@ func formatDuration(ms int64) string {
 	}
 	secs := remainMs / 1000
 	return fmt.Sprintf("%dm %ds", mins, secs)
+}
+
+// --- export/import ---
+
+// ExportRun streams the run directory as a zip to w and returns the suggested filename.
+func (s *ArchiveService) ExportRun(id string, w io.Writer) (string, error) {
+	dir, err := s.resolveRunDir(id)
+	if err != nil {
+		return "", err
+	}
+	if err := archive.ExportDir(dir, w); err != nil {
+		return "", fmt.Errorf("exporting run %q: %w", id, err)
+	}
+	name := displayName(id)
+	if name == "" {
+		name = id
+	}
+	return name + ".aar", nil
+}
+
+// ExportBatch streams the batch directory as a zip to w and returns the suggested filename.
+func (s *ArchiveService) ExportBatch(id string, w io.Writer) (string, error) {
+	dir := filepath.Join(s.archiveDir, id)
+	if !isBatchDir(dir) {
+		return "", fmt.Errorf("batch %q: %w", id, ErrBatchNotFound)
+	}
+	if err := archive.ExportDir(dir, w); err != nil {
+		return "", fmt.Errorf("exporting batch %q: %w", id, err)
+	}
+	name := displayName(id)
+	if name == "" {
+		name = id
+	}
+	return name + ".aab", nil
+}
+
+// ImportArchive imports a zip archive into the archive directory.
+func (s *ArchiveService) ImportArchive(data io.ReaderAt, size int64, filename string) (ref string, archiveType string, err error) {
+	name, err := archive.SanitizeArchiveName(filename)
+	if err != nil {
+		return "", "", err
+	}
+	dirName, archiveType, err := archive.ImportArchive(data, size, name, s.archiveDir)
+	if err != nil {
+		return "", "", err
+	}
+	return dirName, archiveType, nil
+}
+
+// resolveRunDir returns the filesystem path to a run directory (standalone or batch member).
+func (s *ArchiveService) resolveRunDir(id string) (string, error) {
+	// Try standalone.
+	dir := filepath.Join(s.archiveDir, id)
+	if isRunDir(dir) {
+		return dir, nil
+	}
+
+	// Scan batch directories.
+	entries, err := os.ReadDir(s.archiveDir)
+	if err != nil {
+		return "", fmt.Errorf("run %q: %w", id, ErrRunNotFound)
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		batchPath := filepath.Join(s.archiveDir, e.Name())
+		if !isBatchDir(batchPath) {
+			continue
+		}
+		runPath := filepath.Join(batchPath, id)
+		if isRunDir(runPath) {
+			return runPath, nil
+		}
+	}
+	return "", fmt.Errorf("run %q: %w", id, ErrRunNotFound)
 }
 
 // --- naming helpers ---

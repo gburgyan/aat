@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RunListEntry, BatchListEntry, UnifiedListEntry } from '../lib/types';
-  import { fetchRuns, fetchBatches } from '../lib/api';
+  import { fetchRuns, fetchBatches, exportRunUrl, exportBatchUrl, importArchive } from '../lib/api';
   import { navigate, encPath } from '../lib/router';
   import { formatDuration, timeAgo, formatTimestamp } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
@@ -10,6 +10,9 @@
   let loading = $state(true);
   let error = $state('');
   let savedFilter = $state(false);
+  let importing = $state(false);
+  let importError = $state('');
+  let fileInput: HTMLInputElement;
 
   async function load() {
     loading = true;
@@ -59,6 +62,33 @@
     }
   }
 
+  function triggerImport() {
+    fileInput?.click();
+  }
+
+  async function handleFileSelect(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    input.value = '';
+
+    importing = true;
+    importError = '';
+    try {
+      const result = await importArchive(file);
+      await load();
+      if (result.type === 'batch') {
+        navigate(`/batches/${encPath(result.ref)}`);
+      } else {
+        navigate(`/runs/${encPath(result.ref)}`);
+      }
+    } catch (e) {
+      importError = e instanceof Error ? e.message : 'Import failed';
+    } finally {
+      importing = false;
+    }
+  }
+
   function displayName(run: RunListEntry): string {
     return run.name || run.planName || run.runId;
   }
@@ -79,7 +109,21 @@
     class:active={savedFilter}
     onclick={() => toggleFilter(true)}
   >Saved</button>
+  <div class="filter-spacer"></div>
+  <button class="filter-btn import-btn" onclick={triggerImport} disabled={importing}>
+    {importing ? 'Importing...' : 'Import'}
+  </button>
+  <input
+    bind:this={fileInput}
+    type="file"
+    accept=".aar,.aab"
+    style="display:none"
+    onchange={handleFileSelect}
+  />
 </div>
+{#if importError}
+  <div class="import-error">{importError}</div>
+{/if}
 
 {#if loading}
   <LoadingSpinner />
@@ -106,6 +150,7 @@
         <th>Steps</th>
         <th>Duration</th>
         <th>When</th>
+        <th class="col-actions"></th>
       </tr>
     </thead>
     <tbody>
@@ -137,6 +182,14 @@
             </td>
             <td class="cell-duration">{formatDuration(item.entry.durationMs)}</td>
             <td class="cell-when" title={formatTimestamp(item.entry.timestamp)}>{timeAgo(item.entry.timestamp)}</td>
+            <td class="cell-actions">
+              <a
+                href={exportRunUrl(item.entry.runId)}
+                class="download-btn"
+                title="Export run"
+                onclick={(e: MouseEvent) => e.stopPropagation()}
+              >&#8595;</a>
+            </td>
           </tr>
         {:else}
           <tr
@@ -164,6 +217,14 @@
             </td>
             <td class="cell-duration">{formatDuration(item.entry.totalDurationMs)}</td>
             <td class="cell-when" title={formatTimestamp(item.entry.timestamp)}>{timeAgo(item.entry.timestamp)}</td>
+            <td class="cell-actions">
+              <a
+                href={exportBatchUrl(item.entry.batchId)}
+                class="download-btn"
+                title="Export batch"
+                onclick={(e: MouseEvent) => e.stopPropagation()}
+              >&#8595;</a>
+            </td>
           </tr>
         {/if}
       {/each}
@@ -176,6 +237,18 @@
     display: flex;
     gap: 0.25rem;
     margin-bottom: 0.75rem;
+    align-items: center;
+  }
+  .filter-spacer {
+    flex: 1;
+  }
+  .import-btn {
+    margin-left: auto;
+  }
+  .import-error {
+    font-size: 0.8rem;
+    color: var(--color-error, #ef4444);
+    margin-bottom: 0.5rem;
   }
   .filter-btn {
     padding: 0.3rem 0.75rem;
@@ -246,5 +319,28 @@
     border-radius: 3px;
     margin-left: 0.4rem;
     vertical-align: baseline;
+  }
+  .col-actions {
+    width: 2rem;
+  }
+  .cell-actions {
+    text-align: center;
+    width: 2rem;
+  }
+  .download-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    font-size: 1rem;
+    color: var(--color-text-muted, #9ca3af);
+    text-decoration: none;
+    border-radius: 3px;
+    transition: all 0.15s ease;
+  }
+  .download-btn:hover {
+    color: var(--color-primary, #6366f1);
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
   }
 </style>

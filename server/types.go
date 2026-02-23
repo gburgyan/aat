@@ -303,3 +303,10 @@ type RenameResponse struct {
 	Ref  string `json:"ref"`
 	Name string `json:"name"`
 }
+
+// ImportResponse is the JSON response from the import endpoint.
+type ImportResponse struct {
+	Ref  string `json:"ref"`
+	Name string `json:"name"`
+	Type string `json:"type"` // "run" or "batch"
+}

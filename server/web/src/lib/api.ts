@@ -1,4 +1,4 @@
-import type { RunListEntry, RunDetail, StepDetail, TraceListEntry, TraceDetail, BatchListEntry, BatchDetail, ApiError, RenameResponse } from './types';
+import type { RunListEntry, RunDetail, StepDetail, TraceListEntry, TraceDetail, BatchListEntry, BatchDetail, ApiError, RenameResponse, ImportResponse } from './types';
 
 export class ApiRequestError extends Error {
   status: number;
@@ -108,4 +108,31 @@ export function renameBatch(id: string, name: string): Promise<RenameResponse> {
 
 export function unnameBatch(id: string): Promise<RenameResponse> {
   return mutate<RenameResponse>(`/api/batches/${encodeURIComponent(id)}/name`, 'DELETE');
+}
+
+export function exportRunUrl(id: string): string {
+  return `/api/runs/${encodeURIComponent(id)}/export`;
+}
+
+export function exportBatchUrl(id: string): string {
+  return `/api/batches/${encodeURIComponent(id)}/export`;
+}
+
+export async function importArchive(file: File): Promise<ImportResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/api/import', { method: 'POST', body: form });
+  if (!res.ok) {
+    let code = 'unknown';
+    let message = res.statusText;
+    try {
+      const err: { error: string; code: string } = await res.json();
+      code = err.code;
+      message = err.error;
+    } catch {
+      // use defaults
+    }
+    throw new ApiRequestError(res.status, code, message);
+  }
+  return res.json() as Promise<ImportResponse>;
 }

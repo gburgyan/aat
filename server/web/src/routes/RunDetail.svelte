@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RunDetail } from '../lib/types';
-  import { fetchRun, fetchAttempt, renameRun, unnameRun } from '../lib/api';
+  import { fetchRun, fetchAttempt, renameRun, unnameRun, exportRunUrl } from '../lib/api';
   import { navigate, encPath } from '../lib/router';
   import { formatDuration, timeAgo, formatTimestamp } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
@@ -113,6 +113,7 @@
           {:else}
             <button class="name-btn save-btn" onclick={startRename} title="Save this run">Save</button>
           {/if}
+          <a href={exportRunUrl(runId)} class="name-btn export-btn" title="Export as .aar">Export</a>
         {/if}
       </div>
     </div>
@@ -245,9 +246,12 @@
     margin-left: auto;
   }
   .name-btn {
+    display: inline-flex;
+    align-items: center;
     padding: 0.25rem 0.6rem;
     font-size: 0.8rem;
     font-weight: 500;
+    line-height: 1.4;
     border: 1px solid var(--color-border, #374151);
     background: transparent;
     color: var(--color-text-muted, #9ca3af);
@@ -267,6 +271,10 @@
     background: rgba(16, 185, 129, 0.12);
   }
   .unsave-btn {
+    font-size: 0.75rem;
+  }
+  .export-btn {
+    text-decoration: none;
     font-size: 0.75rem;
   }
   .edit-btn {
