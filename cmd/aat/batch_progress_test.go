@@ -479,6 +479,27 @@ func TestParallelProgressObserver_OnRunComplete(t *testing.T) {
 	assert.Greater(t, snap.DurationMs, int64(0))
 }
 
+func TestProgressRenderer_AddPlan_NoLineInflation(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewProgressRenderer(&buf, 80)
+
+	// Add 5 plans in quick succession (simulating parallel goroutines).
+	// Before the fix, r.lines would be 1+2+3+4+5 = 15 instead of 5.
+	for i := 0; i < 5; i++ {
+		s := &PlanProgressState{
+			PlanName:   "plan-" + string(rune('a'+i)),
+			PlanIndex:  i,
+			TotalSteps: 10,
+		}
+		r.AddPlan(s)
+	}
+
+	r.mu.Lock()
+	assert.Equal(t, 5, r.lines, "r.lines should equal the number of active plans, not accumulate")
+	assert.Equal(t, 5, len(r.plans))
+	r.mu.Unlock()
+}
+
 // --- Race condition test ---
 
 func TestProgressRenderer_ConcurrentRefresh(t *testing.T) {

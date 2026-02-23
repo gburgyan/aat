@@ -206,6 +206,7 @@ func (r *ProgressRenderer) AddPlan(state *PlanProgressState) {
 	if len(state.PlanName) > r.nameWidth {
 		r.nameWidth = len(state.PlanName)
 	}
+	r.eraseLocked()
 	r.renderLocked()
 }
 
