@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { RunDetail } from '../lib/types';
-  import { fetchRun, fetchAttempt } from '../lib/api';
-  import { navigate } from '../lib/router';
+  import { fetchRun, fetchAttempt, renameRun, unnameRun } from '../lib/api';
+  import { navigate, encPath } from '../lib/router';
   import { formatDuration, timeAgo, formatTimestamp } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
   import OutcomeBadge from '../components/OutcomeBadge.svelte';
@@ -17,6 +17,9 @@
   let run = $state<RunDetail | null>(null);
   let loading = $state(true);
   let error = $state('');
+  let renaming = $state(false);
+  let renameInput = $state('');
+  let renameError = $state('');
 
   async function load(id: string, attemptNum?: number) {
     loading = true;
@@ -36,6 +39,58 @@
   });
 
   let displayName = $derived(run?.planName || runId);
+  let isSaved = $derived(!!run?.name);
+
+  function startRename() {
+    renameInput = run?.name || run?.planName || '';
+    renaming = true;
+    renameError = '';
+  }
+
+  function cancelRename() {
+    renaming = false;
+    renameError = '';
+  }
+
+  async function submitRename() {
+    renameError = '';
+    try {
+      const result = await renameRun(runId, renameInput);
+      renaming = false;
+      navigate(`/runs/${encPath(result.ref)}`);
+    } catch (e) {
+      renameError = e instanceof Error ? e.message : 'Rename failed';
+    }
+  }
+
+  async function saveWithoutNaming() {
+    renameError = '';
+    try {
+      const result = await renameRun(runId, '');
+      renaming = false;
+      navigate(`/runs/${encPath(result.ref)}`);
+    } catch (e) {
+      renameError = e instanceof Error ? e.message : 'Save failed';
+    }
+  }
+
+  async function unsave() {
+    try {
+      const result = await unnameRun(runId);
+      navigate(`/runs/${encPath(result.ref)}`);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Unsave failed';
+    }
+  }
+
+  function handleRenameKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      submitRename();
+    } else if (e.key === 'Escape') {
+      cancelRename();
+    }
+  }
 </script>
 
 {#if loading}
@@ -50,11 +105,51 @@
     <div class="run-detail-title-row">
       <OutcomeBadge outcome={run.outcome} size="md" />
       <h1 class="run-detail-title">{displayName}</h1>
+      <div class="name-actions">
+        {#if !attempt}
+          {#if isSaved}
+            <button class="name-btn edit-btn" onclick={startRename} title="Edit name">&#9998;</button>
+            <button class="name-btn unsave-btn" onclick={unsave} title="Unsave">Unsave</button>
+          {:else}
+            <button class="name-btn save-btn" onclick={startRename} title="Save this run">Save</button>
+          {/if}
+        {/if}
+      </div>
     </div>
+
+    {#if renaming}
+      <div class="rename-form">
+        <input
+          type="text"
+          class="rename-input"
+          bind:value={renameInput}
+          onkeydown={handleRenameKeydown}
+          placeholder="Enter a name..."
+        />
+        <button class="rename-submit" onclick={submitRename}>
+          {isSaved ? 'Rename' : 'Save'}
+        </button>
+        {#if !isSaved}
+          <button class="rename-submit rename-noname" onclick={saveWithoutNaming} title="Save without naming (keeps original ID)">
+            Save as-is
+          </button>
+        {/if}
+        <button class="rename-cancel" onclick={cancelRename}>Cancel</button>
+        {#if renameError}
+          <span class="rename-error">{renameError}</span>
+        {/if}
+      </div>
+    {/if}
+
+    {#if isSaved && run.name}
+      <div class="run-saved-name">
+        Saved as <strong>{run.name}</strong>
+      </div>
+    {/if}
 
     {#if attempt}
       <div class="run-attempt-nav">
-        <a href="/runs/{runId}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/runs/${runId}`); }}>Back to final run</a>
+        <a href="/runs/{encPath(runId)}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/runs/${encPath(runId)}`); }}>Back to final run</a>
         &mdash; viewing attempt #{attempt}
       </div>
     {:else if run.totalAttempts && run.totalAttempts > 1}
@@ -66,8 +161,8 @@
     {#if run.batchId}
       <div class="run-batch-link">
         Part of batch <a
-          href="/batches/{run.batchId}"
-          onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/batches/${run.batchId}`); }}
+          href="/batches/{encPath(run.batchId)}"
+          onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/batches/${encPath(run.batchId)}`); }}
         >{run.batchId}</a>
       </div>
     {/if}
@@ -130,7 +225,7 @@
         <tbody>
           {#each run.attempts as att (att.attempt)}
             <tr class="attempt-row-clickable"
-                onclick={() => navigate(`/runs/${runId}/attempts/${att.attempt}`)}>
+                onclick={() => navigate(`/runs/${encPath(runId)}/attempts/${att.attempt}`)}>
               <td>#{att.attempt}</td>
               <td><OutcomeBadge outcome={att.outcome} size="sm" /></td>
               <td class="attempt-error">{att.error || '-'}</td>
@@ -143,6 +238,105 @@
 {/if}
 
 <style>
+  .name-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+  }
+  .name-btn {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    border: 1px solid var(--color-border, #374151);
+    background: transparent;
+    color: var(--color-text-muted, #9ca3af);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .name-btn:hover {
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
+    color: var(--color-text, #f3f4f6);
+  }
+  .save-btn {
+    color: var(--color-success, #10b981);
+    border-color: var(--color-success, #10b981);
+  }
+  .save-btn:hover {
+    background: rgba(16, 185, 129, 0.12);
+  }
+  .unsave-btn {
+    font-size: 0.75rem;
+  }
+  .edit-btn {
+    font-size: 0.9rem;
+    padding: 0.2rem 0.4rem;
+  }
+  .rename-form {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .rename-input {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.85rem;
+    border: 1px solid var(--color-border, #374151);
+    background: var(--color-bg-secondary, #1f2937);
+    color: var(--color-text, #f3f4f6);
+    border-radius: 4px;
+    min-width: 200px;
+  }
+  .rename-input:focus {
+    outline: none;
+    border-color: var(--color-primary, #6366f1);
+  }
+  .rename-submit {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    border: 1px solid var(--color-primary, #6366f1);
+    background: var(--color-primary, #6366f1);
+    color: #fff;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .rename-submit:hover {
+    background: var(--color-primary-hover, #818cf8);
+  }
+  .rename-noname {
+    background: transparent;
+    color: var(--color-text-muted, #9ca3af);
+    border-color: var(--color-border, #374151);
+  }
+  .rename-noname:hover {
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
+    color: var(--color-text, #f3f4f6);
+  }
+  .rename-cancel {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    border: 1px solid var(--color-border, #374151);
+    background: transparent;
+    color: var(--color-text-muted, #9ca3af);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .rename-cancel:hover {
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
+    color: var(--color-text, #f3f4f6);
+  }
+  .rename-error {
+    font-size: 0.8rem;
+    color: var(--color-error, #ef4444);
+  }
+  .run-saved-name {
+    font-size: 0.85rem;
+    color: var(--color-success, #10b981);
+    margin-bottom: 0.5rem;
+  }
   .run-batch-link {
     font-size: 0.85rem;
     color: var(--color-text-muted, #9ca3af);

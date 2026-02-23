@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { TraceListEntry } from '../lib/types';
   import { fetchTraces } from '../lib/api';
-  import { navigate } from '../lib/router';
+  import { navigate, encPath } from '../lib/router';
   import { formatDuration, timeAgo, formatTimestamp } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
 
@@ -26,7 +26,7 @@
   });
 
   function goToTrace(traceId: string) {
-    navigate(`/traces/${traceId}`);
+    navigate(`/traces/${encPath(traceId)}`);
   }
 
   function handleRowKeydown(e: KeyboardEvent, traceId: string) {

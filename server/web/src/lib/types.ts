@@ -17,6 +17,7 @@ export interface RunListEntry {
   batchId?: string;
   attempt?: number;
   totalAttempts?: number;
+  name?: string;
 }
 
 export interface RunDetail {
@@ -39,6 +40,7 @@ export interface RunDetail {
   attempt?: number;
   totalAttempts?: number;
   attempts?: AttemptSummary[];
+  name?: string;
 }
 
 export interface AttemptSummary {
@@ -274,6 +276,7 @@ export interface BatchListEntry {
   totalDurationMs: number;
   source?: string;
   toolVersion?: string;
+  name?: string;
 }
 
 export interface BatchDetail {
@@ -289,6 +292,7 @@ export interface BatchDetail {
   source?: string;
   toolVersion?: string;
   runs: BatchRunSummary[];
+  name?: string;
 }
 
 export interface BatchRunSummary {
@@ -301,6 +305,11 @@ export interface BatchRunSummary {
   durationMs: number;
   error?: string;
   attempts?: number;
+}
+
+export interface RenameResponse {
+  ref: string;
+  name: string;
 }
 
 export type UnifiedListEntry =

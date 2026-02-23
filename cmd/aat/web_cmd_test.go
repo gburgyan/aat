@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -16,53 +18,70 @@ import (
 )
 
 func TestBuildViewURL(t *testing.T) {
+	// Create a temp dir with a batch directory for content-based detection.
+	dir := t.TempDir()
+	batchDir := filepath.Join(dir, "batch-20260220-143022-abc12345")
+	require.NoError(t, os.MkdirAll(batchDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(batchDir, "batch.json"), []byte("{}"), 0o644))
+
+	namedBatchDir := filepath.Join(dir, "my-batch")
+	require.NoError(t, os.MkdirAll(namedBatchDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(namedBatchDir, "batch.json"), []byte("{}"), 0o644))
+
 	tests := []struct {
-		name string
-		port int
-		ref  string
-		want string
+		name       string
+		port       int
+		ref        string
+		archiveDir string
+		want       string
 	}{
 		{
-			name: "latest",
-			port: 9119,
-			ref:  "latest",
-			want: "http://localhost:9119/runs/latest",
+			name:       "latest (no archive dir)",
+			port:       9119,
+			ref:        "latest",
+			archiveDir: "",
+			want:       "http://localhost:9119/runs/latest",
 		},
 		{
-			name: "specific run ID",
-			port: 9119,
-			ref:  "run-20260220-143022-abc12345",
-			want: "http://localhost:9119/runs/run-20260220-143022-abc12345",
+			name:       "specific run ID",
+			port:       9119,
+			ref:        "run-20260220-143022-abc12345",
+			archiveDir: dir,
+			want:       "http://localhost:9119/runs/run-20260220-143022-abc12345",
 		},
 		{
-			name: "custom port",
-			port: 8080,
-			ref:  "latest",
-			want: "http://localhost:8080/runs/latest",
+			name:       "custom port",
+			port:       8080,
+			ref:        "latest",
+			archiveDir: "",
+			want:       "http://localhost:8080/runs/latest",
 		},
 		{
-			name: "custom port with run ID",
-			port: 3000,
-			ref:  "my-run",
-			want: "http://localhost:3000/runs/my-run",
+			name:       "named run (no batch.json)",
+			port:       3000,
+			ref:        "my-run",
+			archiveDir: dir,
+			want:       "http://localhost:3000/runs/my-run",
 		},
 		{
-			name: "batch ref",
-			port: 9119,
-			ref:  "batch-20260220-143022-abc12345",
-			want: "http://localhost:9119/batches/batch-20260220-143022-abc12345",
+			name:       "batch ref (detected by batch.json)",
+			port:       9119,
+			ref:        "batch-20260220-143022-abc12345",
+			archiveDir: dir,
+			want:       "http://localhost:9119/batches/batch-20260220-143022-abc12345",
 		},
 		{
-			name: "batch ref custom port",
-			port: 8080,
-			ref:  "batch-abc",
-			want: "http://localhost:8080/batches/batch-abc",
+			name:       "named batch (detected by batch.json)",
+			port:       8080,
+			ref:        "my-batch",
+			archiveDir: dir,
+			want:       "http://localhost:8080/batches/my-batch",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildViewURL(tt.port, tt.ref)
+			got := buildViewURL(tt.port, tt.ref, tt.archiveDir)
 			assert.Equal(t, tt.want, got)
 		})
 	}
@@ -348,13 +367,13 @@ func TestWebViewCommand_OpensCorrectURL(t *testing.T) {
 	defer func() { openURLFunc = orig }()
 
 	// Verify buildViewURL + openURLFunc integration.
-	url := buildViewURL(portInt, "latest")
+	url := buildViewURL(portInt, "latest", "")
 	err := openURLFunc(url)
 	require.NoError(t, err)
 	assert.Equal(t, fmt.Sprintf("http://localhost:%d/runs/latest", portInt), opened)
 
 	// Also verify with a specific run ID.
-	url = buildViewURL(portInt, "run-abc123")
+	url = buildViewURL(portInt, "run-abc123", "")
 	err = openURLFunc(url)
 	require.NoError(t, err)
 	assert.Equal(t, fmt.Sprintf("http://localhost:%d/runs/run-abc123", portInt), opened)

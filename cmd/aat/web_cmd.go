@@ -7,8 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -224,7 +224,7 @@ func webViewCommand(port int, ref string, archiveDir string, tracesDir string) e
 
 	if err := checkServerHealth(baseURL); err == nil {
 		// Server already running — just open the URL.
-		url := buildViewURL(port, ref)
+		url := buildViewURL(port, ref, archiveDir)
 		return openURLFunc(url)
 	}
 
@@ -233,7 +233,7 @@ func webViewCommand(port int, ref string, archiveDir string, tracesDir string) e
 	return webServeCommand(&webArgs{
 		Port:       port,
 		Open:       true,
-		OpenURL:    buildViewURL(port, ref),
+		OpenURL:    buildViewURL(port, ref, archiveDir),
 		ArchiveDir: archiveDir,
 		TracesDir:  tracesDir,
 	})
@@ -261,10 +261,14 @@ func webViewTraceCommand(port int, traceRef string, archiveDir string, tracesDir
 }
 
 // buildViewURL constructs the URL for viewing a run or batch in the frontend.
-// Refs with a "batch-" prefix route to the batch detail page.
-func buildViewURL(port int, ref string) string {
-	if strings.HasPrefix(ref, "batch-") {
-		return fmt.Sprintf("http://localhost:%d/batches/%s", port, ref)
+// It checks directory contents to determine the type rather than relying on
+// name prefixes, supporting named/renamed directories.
+func buildViewURL(port int, ref string, archiveDir string) string {
+	if archiveDir != "" {
+		batchPath := filepath.Join(archiveDir, ref, "batch.json")
+		if _, err := os.Stat(batchPath); err == nil {
+			return fmt.Sprintf("http://localhost:%d/batches/%s", port, ref)
+		}
 	}
 	return fmt.Sprintf("http://localhost:%d/runs/%s", port, ref)
 }

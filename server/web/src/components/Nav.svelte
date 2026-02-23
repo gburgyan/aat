@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Route } from '../lib/router';
-  import { navigate } from '../lib/router';
+  import { navigate, encPath } from '../lib/router';
 
   interface Props {
     route: Route;
@@ -67,8 +67,8 @@
       </li>
       <li>
         <a
-          href="/runs/{route.runId}"
-          onclick={(e: MouseEvent) => handleClick(e, `/runs/${route.runId}`)}
+          href="/runs/{encPath(route.runId)}"
+          onclick={(e: MouseEvent) => handleClick(e, `/runs/${encPath(route.runId)}`)}
         >{route.runId}</a>
       </li>
       <li class="breadcrumb-active">{route.stepId}</li>

@@ -37,7 +37,9 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 
-	runs, err := s.service.ListRuns(limit)
+	savedOnly := r.URL.Query().Get("saved") == "true"
+
+	runs, err := s.service.ListRuns(limit, savedOnly)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -103,7 +105,9 @@ func (s *Server) handleListBatches(w http.ResponseWriter, r *http.Request) {
 		limit = n
 	}
 
-	batches, err := s.service.ListBatches(limit)
+	savedOnly := r.URL.Query().Get("saved") == "true"
+
+	batches, err := s.service.ListBatches(limit, savedOnly)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -188,4 +192,76 @@ func (s *Server) handleGetStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, step)
+}
+
+func (s *Server) handleRenameRun(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req RenameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", "invalid JSON body")
+		return
+	}
+
+	newRef, err := s.service.RenameRun(id, req.Name)
+	if err != nil {
+		if errors.Is(err, ErrRunNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, "rename_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, RenameResponse{Ref: newRef, Name: displayName(newRef)})
+}
+
+func (s *Server) handleUnnameRun(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	newRef, err := s.service.UnnameRun(id)
+	if err != nil {
+		if errors.Is(err, ErrRunNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, "rename_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, RenameResponse{Ref: newRef, Name: displayName(newRef)})
+}
+
+func (s *Server) handleRenameBatch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	var req RenameRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_body", "invalid JSON body")
+		return
+	}
+
+	newRef, err := s.service.RenameBatch(id, req.Name)
+	if err != nil {
+		if errors.Is(err, ErrBatchNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, "rename_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, RenameResponse{Ref: newRef, Name: displayName(newRef)})
+}
+
+func (s *Server) handleUnnameBatch(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+
+	newRef, err := s.service.UnnameBatch(id)
+	if err != nil {
+		if errors.Is(err, ErrBatchNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, "rename_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, RenameResponse{Ref: newRef, Name: displayName(newRef)})
 }

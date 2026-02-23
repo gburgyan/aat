@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { StepSummary } from '../lib/types';
-  import { navigate } from '../lib/router';
+  import { navigate, encPath } from '../lib/router';
   import { formatDuration, httpStatusCategory } from '../lib/format';
 
   interface Props {
@@ -25,8 +25,8 @@
 
   function goToStep(stepId: string) {
     const url = attempt
-      ? `/runs/${runId}/attempts/${attempt}/steps/${stepId}`
-      : `/runs/${runId}/steps/${stepId}`;
+      ? `/runs/${encPath(runId)}/attempts/${attempt}/steps/${encPath(stepId)}`
+      : `/runs/${encPath(runId)}/steps/${encPath(stepId)}`;
     navigate(url);
   }
 

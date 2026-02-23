@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ExtractionDetail } from '../lib/types';
-  import { navigate } from '../lib/router';
+  import { navigate, encPath } from '../lib/router';
   import JsonViewer from './JsonViewer.svelte';
 
   interface Props {
@@ -13,8 +13,8 @@
 
   function stepHref(stepId: string): string {
     return attempt
-      ? `/runs/${runId}/attempts/${attempt}/steps/${stepId}`
-      : `/runs/${runId}/steps/${stepId}`;
+      ? `/runs/${encPath(runId)}/attempts/${attempt}/steps/${encPath(stepId)}`
+      : `/runs/${encPath(runId)}/steps/${encPath(stepId)}`;
   }
 
   function goToStep(e: MouseEvent, stepId: string) {

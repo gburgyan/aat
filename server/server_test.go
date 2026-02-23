@@ -15,13 +15,15 @@ import (
 func TestIntegration_FullLifecycle(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create 2 archives
+	// Create 2 archives with different timestamps for deterministic sort order.
 	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed",
 		makeStepFull("SearchOffers", 200),
 	)
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	a2 := makeArchive("run-20260102-100000-aaaa0002", "failed",
 		makeStep("BookOffer", 500, 200),
 	)
+	a2.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
 	a2.Steps[0].Error = "server error"
 	writeArchive(t, dir, a1)
 	writeArchive(t, dir, a2)

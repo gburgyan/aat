@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gburgyan/aat/archive"
 	"github.com/stretchr/testify/assert"
@@ -28,9 +30,15 @@ func serveRequest(s *Server, method, path string) *httptest.ResponseRecorder {
 
 func TestHandleListRuns_Success(t *testing.T) {
 	dir := t.TempDir()
-	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n1", 200, 100)))
-	writeArchive(t, dir, makeArchive("run-20260102-100000-aaaa0002", "passed", makeStep("n2", 200, 200)))
-	writeArchive(t, dir, makeArchive("run-20260103-100000-aaaa0003", "failed", makeStep("n3", 500, 300)))
+	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n1", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	a2 := makeArchive("run-20260102-100000-aaaa0002", "passed", makeStep("n2", 200, 200))
+	a2.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	a3 := makeArchive("run-20260103-100000-aaaa0003", "failed", makeStep("n3", 500, 300))
+	a3.Metadata.Timestamp = time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a1)
+	writeArchive(t, dir, a2)
+	writeArchive(t, dir, a3)
 
 	s := newTestServer(dir)
 	rec := serveRequest(s, "GET", "/api/runs")
@@ -125,8 +133,12 @@ func TestHandleListRuns_NegativeLimit(t *testing.T) {
 
 func TestHandleLatestRun_Redirect(t *testing.T) {
 	dir := t.TempDir()
-	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100)))
-	writeArchive(t, dir, makeArchive("run-20260103-100000-aaaa0003", "passed", makeStep("n", 200, 100)))
+	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	a3 := makeArchive("run-20260103-100000-aaaa0003", "passed", makeStep("n", 200, 100))
+	a3.Metadata.Timestamp = time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a1)
+	writeArchive(t, dir, a3)
 
 	s := newTestServer(dir)
 	rec := serveRequest(s, "GET", "/api/runs/latest")
@@ -480,6 +492,187 @@ func TestHandleGetAttemptStep_NotFound(t *testing.T) {
 	var errResp apiError
 	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
 	assert.Equal(t, "not_found", errResp.Code)
+}
+
+// --- handleListRuns with saved filter ---
+
+func TestHandleListRuns_SavedFilter(t *testing.T) {
+	dir := t.TempDir()
+	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n1", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	a2 := makeArchive("run-20260102-100000-aaaa0002", "passed", makeStep("n2", 200, 200))
+	a2.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a1)
+	writeArchive(t, dir, a2)
+
+	svc := NewArchiveService(dir)
+	_, err := svc.RenameRun("run-20260101-100000-aaaa0001", "saved-run")
+	require.NoError(t, err)
+
+	s := newTestServer(dir)
+
+	// Without saved filter — returns all runs.
+	rec := serveRequest(s, "GET", "/api/runs")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var allRuns []RunListEntry
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&allRuns))
+	assert.Len(t, allRuns, 2)
+
+	// With saved=true filter — only named runs.
+	rec = serveRequest(s, "GET", "/api/runs?saved=true")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var savedRuns []RunListEntry
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&savedRuns))
+	require.Len(t, savedRuns, 1)
+	assert.Equal(t, "saved-run", savedRuns[0].RunID)
+}
+
+func TestHandleListBatches_SavedFilter(t *testing.T) {
+	dir := t.TempDir()
+	b1 := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	b1.Metadata.Timestamp = time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC)
+	b2 := makeBatchArchive("batch-20260202-100000-aaaa0002", "failed",
+		archive.BatchRunEntry{PlanName: "plan2", RunID: "run-2", Outcome: "failed", DurationMs: 200},
+	)
+	b2.Metadata.Timestamp = time.Date(2026, 2, 2, 10, 0, 0, 0, time.UTC)
+	writeBatchArchive(t, dir, b1)
+	writeBatchArchive(t, dir, b2)
+
+	svc := NewArchiveService(dir)
+	_, err := svc.RenameBatch("batch-20260201-100000-aaaa0001", "nightly")
+	require.NoError(t, err)
+
+	s := newTestServer(dir)
+
+	// Without filter — all batches.
+	rec := serveRequest(s, "GET", "/api/batches")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var allBatches []BatchListEntry
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&allBatches))
+	assert.Len(t, allBatches, 2)
+
+	// With saved=true.
+	rec = serveRequest(s, "GET", "/api/batches?saved=true")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	var savedBatches []BatchListEntry
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&savedBatches))
+	require.Len(t, savedBatches, 1)
+	assert.Equal(t, "nightly", savedBatches[0].BatchID)
+}
+
+// --- handleRenameRun / handleUnnameRun ---
+
+func TestHandleRenameRun_Success(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100)))
+
+	s := newTestServer(dir)
+	body := strings.NewReader(`{"name":"my-run"}`)
+	req := httptest.NewRequest("PUT", "/api/runs/run-20260101-100000-aaaa0001/name", body)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RenameResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "my-run", resp.Ref)
+	assert.Equal(t, "my-run", resp.Name)
+}
+
+func TestHandleRenameRun_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	s := newTestServer(dir)
+	body := strings.NewReader(`{"name":"my-run"}`)
+	req := httptest.NewRequest("PUT", "/api/runs/run-nonexistent/name", body)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+}
+
+func TestHandleRenameRun_InvalidBody(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100)))
+
+	s := newTestServer(dir)
+	body := strings.NewReader(`not json`)
+	req := httptest.NewRequest("PUT", "/api/runs/run-20260101-100000-aaaa0001/name", body)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+func TestHandleUnnameRun_Success(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100)))
+
+	// First rename.
+	svc := NewArchiveService(dir)
+	newRef, err := svc.RenameRun("run-20260101-100000-aaaa0001", "my-run")
+	require.NoError(t, err)
+
+	s := newTestServer(dir)
+	req := httptest.NewRequest("DELETE", "/api/runs/"+newRef+"/name", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RenameResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "run-20260101-100000-aaaa0001", resp.Ref)
+	assert.Equal(t, "", resp.Name)
+}
+
+// --- handleRenameBatch / handleUnnameBatch ---
+
+func TestHandleRenameBatch_Success(t *testing.T) {
+	dir := t.TempDir()
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	s := newTestServer(dir)
+	body := strings.NewReader(`{"name":"nightly"}`)
+	req := httptest.NewRequest("PUT", "/api/batches/batch-20260201-100000-aaaa0001/name", body)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RenameResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "nightly", resp.Ref)
+	assert.Equal(t, "nightly", resp.Name)
+}
+
+func TestHandleUnnameBatch_Success(t *testing.T) {
+	dir := t.TempDir()
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	newRef, err := svc.RenameBatch("batch-20260201-100000-aaaa0001", "nightly")
+	require.NoError(t, err)
+
+	s := newTestServer(dir)
+	req := httptest.NewRequest("DELETE", "/api/batches/"+newRef+"/name", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var resp RenameResponse
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
+	assert.Equal(t, "batch-20260201-100000-aaaa0001", resp.Ref)
+	assert.Equal(t, "", resp.Name)
 }
 
 // Verify unknown archive dirs at the handler level don't crash.

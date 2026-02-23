@@ -120,15 +120,18 @@ func TestListRuns_SortedNewestFirst(t *testing.T) {
 	dir := t.TempDir()
 
 	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node1", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	a2 := makeArchive("run-20260102-100000-aaaa0002", "passed", makeStep("node2", 200, 200))
+	a2.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
 	a3 := makeArchive("run-20260103-100000-aaaa0003", "failed", makeStep("node3", 500, 300))
+	a3.Metadata.Timestamp = time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC)
 
 	writeArchive(t, dir, a1)
 	writeArchive(t, dir, a2)
 	writeArchive(t, dir, a3)
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	require.Len(t, runs, 3)
 
@@ -143,21 +146,21 @@ func TestListRuns_SortedNewestFirst(t *testing.T) {
 func TestListRuns_EmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	assert.NoError(t, err)
 	assert.Nil(t, runs)
 }
 
 func TestListRuns_NotConfigured(t *testing.T) {
 	svc := NewArchiveService("")
-	_, err := svc.ListRuns(0)
+	_, err := svc.ListRuns(0, false)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not configured")
 }
 
 func TestListRuns_NonexistentDirectory(t *testing.T) {
 	svc := NewArchiveService("/tmp/nonexistent-aat-test-dir-12345")
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	assert.NoError(t, err)
 	assert.Nil(t, runs)
 }
@@ -173,7 +176,7 @@ func TestListRuns_Limit(t *testing.T) {
 	}
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(2)
+	runs, err := svc.ListRuns(2, false)
 	require.NoError(t, err)
 	assert.Len(t, runs, 2)
 }
@@ -189,7 +192,7 @@ func TestListRuns_LimitZero(t *testing.T) {
 	}
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	assert.Len(t, runs, 3)
 }
@@ -205,7 +208,7 @@ func TestListRuns_SkipsNonRunDirs(t *testing.T) {
 	require.NoError(t, createDir(filepath.Join(dir, "traces")))
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	assert.Len(t, runs, 1)
 	assert.Equal(t, "run-20260101-100000-aaaa0001", runs[0].RunID)
@@ -223,7 +226,7 @@ func TestListRuns_SkipsCorruptArchive(t *testing.T) {
 	require.NoError(t, writeFile(filepath.Join(corruptDir, "archive.json"), []byte("not json")))
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	assert.Len(t, runs, 1)
 	assert.Equal(t, "run-20260101-100000-aaaa0001", runs[0].RunID)
@@ -241,7 +244,7 @@ func TestListRuns_StepCounts(t *testing.T) {
 	writeArchive(t, dir, a)
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 
@@ -258,7 +261,7 @@ func TestListRuns_DurationIncludesCleanup(t *testing.T) {
 	writeArchive(t, dir, a)
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 
@@ -278,7 +281,7 @@ func TestListRuns_PlanNameFromPrompt(t *testing.T) {
 	writeArchive(t, dir, a)
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	assert.Equal(t, "book a flight from rome to new york", runs[0].PlanName)
 }
@@ -293,7 +296,7 @@ func TestListRuns_PlanNameFallback(t *testing.T) {
 	writeArchive(t, dir, a)
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	assert.Equal(t, "booking flow", runs[0].PlanName)
 }
@@ -305,7 +308,7 @@ func TestListRuns_NoPlan(t *testing.T) {
 	writeArchive(t, dir, a)
 
 	svc := NewArchiveService(dir)
-	runs, err := svc.ListRuns(0)
+	runs, err := svc.ListRuns(0, false)
 	require.NoError(t, err)
 	assert.Equal(t, "", runs[0].PlanName)
 }
@@ -315,9 +318,16 @@ func TestListRuns_NoPlan(t *testing.T) {
 func TestLatestRunID_ReturnsNewest(t *testing.T) {
 	dir := t.TempDir()
 
-	writeArchive(t, dir, makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100)))
-	writeArchive(t, dir, makeArchive("run-20260103-100000-aaaa0003", "passed", makeStep("n", 200, 100)))
-	writeArchive(t, dir, makeArchive("run-20260102-100000-aaaa0002", "passed", makeStep("n", 200, 100)))
+	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	a3 := makeArchive("run-20260103-100000-aaaa0003", "passed", makeStep("n", 200, 100))
+	a3.Metadata.Timestamp = time.Date(2026, 1, 3, 10, 0, 0, 0, time.UTC)
+	a2 := makeArchive("run-20260102-100000-aaaa0002", "passed", makeStep("n", 200, 100))
+	a2.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+
+	writeArchive(t, dir, a1)
+	writeArchive(t, dir, a3)
+	writeArchive(t, dir, a2)
 
 	svc := NewArchiveService(dir)
 	id, err := svc.LatestRunID()
@@ -1251,7 +1261,7 @@ func writeBatchMemberArchive(t *testing.T, dir string, batchID string, a *archiv
 func TestListBatches_EmptyDirectory(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewArchiveService(dir)
-	batches, err := svc.ListBatches(0)
+	batches, err := svc.ListBatches(0, false)
 	assert.NoError(t, err)
 	assert.Nil(t, batches)
 }
@@ -1262,14 +1272,16 @@ func TestListBatches_SortedNewestFirst(t *testing.T) {
 	b1 := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
 		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
 	)
+	b1.Metadata.Timestamp = time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC)
 	b2 := makeBatchArchive("batch-20260202-100000-aaaa0002", "failed",
 		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-2", Outcome: "failed", DurationMs: 200},
 	)
+	b2.Metadata.Timestamp = time.Date(2026, 2, 2, 10, 0, 0, 0, time.UTC)
 	writeBatchArchive(t, dir, b1)
 	writeBatchArchive(t, dir, b2)
 
 	svc := NewArchiveService(dir)
-	batches, err := svc.ListBatches(0)
+	batches, err := svc.ListBatches(0, false)
 	require.NoError(t, err)
 	require.Len(t, batches, 2)
 
@@ -1292,7 +1304,7 @@ func TestListBatches_Limit(t *testing.T) {
 	}
 
 	svc := NewArchiveService(dir)
-	batches, err := svc.ListBatches(2)
+	batches, err := svc.ListBatches(2, false)
 	require.NoError(t, err)
 	assert.Len(t, batches, 2)
 }
@@ -1311,7 +1323,7 @@ func TestListBatches_SkipsCorruptBatchJSON(t *testing.T) {
 	require.NoError(t, writeFile(filepath.Join(corruptDir, "batch.json"), []byte("not json")))
 
 	svc := NewArchiveService(dir)
-	batches, err := svc.ListBatches(0)
+	batches, err := svc.ListBatches(0, false)
 	require.NoError(t, err)
 	assert.Len(t, batches, 1)
 	assert.Equal(t, "batch-20260201-100000-aaaa0001", batches[0].BatchID)
@@ -1319,7 +1331,7 @@ func TestListBatches_SkipsCorruptBatchJSON(t *testing.T) {
 
 func TestListBatches_NotConfigured(t *testing.T) {
 	svc := NewArchiveService("")
-	_, err := svc.ListBatches(0)
+	_, err := svc.ListBatches(0, false)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not configured")
 }
@@ -1334,7 +1346,7 @@ func TestListBatches_Fields(t *testing.T) {
 	writeBatchArchive(t, dir, b)
 
 	svc := NewArchiveService(dir)
-	batches, err := svc.ListBatches(0)
+	batches, err := svc.ListBatches(0, false)
 	require.NoError(t, err)
 	require.Len(t, batches, 1)
 
@@ -1695,6 +1707,429 @@ func TestGetAttemptStep_AttemptNotFound(t *testing.T) {
 	_, err := svc.GetAttemptStep(runID, 99, "node")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+// --- naming helpers ---
+
+func TestIsNamed(t *testing.T) {
+	tests := []struct {
+		dirName string
+		want    bool
+	}{
+		{"run-20260101-100000-aaaa0001", false},
+		{"batch-20260101-100000-aaaa0001", false},
+		{"my-debug-session", true},
+		{"!run-20260101-100000-aaaa0001", true},
+		{"!my-custom-name", true},
+		{"flight-booking-test", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.dirName, func(t *testing.T) {
+			assert.Equal(t, tt.want, isNamed(tt.dirName))
+		})
+	}
+}
+
+func TestDisplayName(t *testing.T) {
+	tests := []struct {
+		dirName string
+		want    string
+	}{
+		{"run-20260101-100000-aaaa0001", ""},
+		{"batch-20260101-100000-aaaa0001", ""},
+		{"my-debug-session", "my-debug-session"},
+		{"!run-20260101-100000-aaaa0001", "run-20260101-100000-aaaa0001"},
+		{"!my-custom-name", "my-custom-name"},
+		{"flight-booking-test", "flight-booking-test"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.dirName, func(t *testing.T) {
+			assert.Equal(t, tt.want, displayName(tt.dirName))
+		})
+	}
+}
+
+func TestIsRunDir(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a run dir with archive.json.
+	runDir := filepath.Join(dir, "my-run")
+	require.NoError(t, createDir(runDir))
+	require.NoError(t, writeFile(filepath.Join(runDir, "archive.json"), []byte("{}")))
+
+	// Create a batch dir with only batch.json.
+	batchDir := filepath.Join(dir, "my-batch")
+	require.NoError(t, createDir(batchDir))
+	require.NoError(t, writeFile(filepath.Join(batchDir, "batch.json"), []byte("{}")))
+
+	// Create an empty dir.
+	emptyDir := filepath.Join(dir, "empty")
+	require.NoError(t, createDir(emptyDir))
+
+	assert.True(t, isRunDir(runDir))
+	assert.False(t, isRunDir(batchDir))
+	assert.False(t, isRunDir(emptyDir))
+}
+
+func TestIsBatchDir(t *testing.T) {
+	dir := t.TempDir()
+
+	runDir := filepath.Join(dir, "my-run")
+	require.NoError(t, createDir(runDir))
+	require.NoError(t, writeFile(filepath.Join(runDir, "archive.json"), []byte("{}")))
+
+	batchDir := filepath.Join(dir, "my-batch")
+	require.NoError(t, createDir(batchDir))
+	require.NoError(t, writeFile(filepath.Join(batchDir, "batch.json"), []byte("{}")))
+
+	assert.False(t, isBatchDir(runDir))
+	assert.True(t, isBatchDir(batchDir))
+}
+
+func TestValidateDirName(t *testing.T) {
+	assert.NoError(t, validateDirName("my-run"))
+	assert.NoError(t, validateDirName("flight-booking"))
+	assert.NoError(t, validateDirName(""))
+	assert.Error(t, validateDirName("path/with/slash"))
+	assert.Error(t, validateDirName("path\\with\\backslash"))
+	assert.Error(t, validateDirName("null\x00byte"))
+	assert.Error(t, validateDirName("."))
+	assert.Error(t, validateDirName(".."))
+}
+
+// --- RenameRun / UnnameRun ---
+
+func TestRenameRun_CustomName(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	newRef, err := svc.RenameRun("run-20260101-100000-aaaa0001", "my-debug-run")
+	require.NoError(t, err)
+	assert.Equal(t, "my-debug-run", newRef)
+
+	// Old dir should not exist.
+	_, err = os.Stat(filepath.Join(dir, "run-20260101-100000-aaaa0001"))
+	assert.True(t, os.IsNotExist(err))
+
+	// New dir should exist with archive.json.
+	assert.True(t, isRunDir(filepath.Join(dir, "my-debug-run")))
+}
+
+func TestRenameRun_NameStartingWithRunPrefix(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	newRef, err := svc.RenameRun("run-20260101-100000-aaaa0001", "run-custom-name")
+	require.NoError(t, err)
+	assert.Equal(t, "!run-custom-name", newRef)
+
+	assert.True(t, isRunDir(filepath.Join(dir, "!run-custom-name")))
+}
+
+func TestRenameRun_SaveWithoutNaming(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	newRef, err := svc.RenameRun("run-20260101-100000-aaaa0001", "")
+	require.NoError(t, err)
+	assert.Equal(t, "!run-20260101-100000-aaaa0001", newRef)
+
+	assert.True(t, isRunDir(filepath.Join(dir, "!run-20260101-100000-aaaa0001")))
+}
+
+func TestRenameRun_Collision(t *testing.T) {
+	dir := t.TempDir()
+	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a1)
+
+	// Create a conflicting directory.
+	require.NoError(t, createDir(filepath.Join(dir, "my-run")))
+
+	svc := NewArchiveService(dir)
+	_, err := svc.RenameRun("run-20260101-100000-aaaa0001", "my-run")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+}
+
+func TestRenameRun_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewArchiveService(dir)
+
+	_, err := svc.RenameRun("run-nonexistent", "my-run")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+func TestRenameRun_InvalidName(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	_, err := svc.RenameRun("run-20260101-100000-aaaa0001", "path/slash")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "path separators")
+}
+
+func TestRenameRun_NoopSameRef(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	// Rename to a name that produces the same directory name (e.g. the ! prefix already exists).
+	svc := NewArchiveService(dir)
+	// Save without naming first.
+	newRef, err := svc.RenameRun("run-20260101-100000-aaaa0001", "")
+	require.NoError(t, err)
+	assert.Equal(t, "!run-20260101-100000-aaaa0001", newRef)
+
+	// Now try to save without naming again — should be a no-op.
+	newRef, err = svc.RenameRun("!run-20260101-100000-aaaa0001", "")
+	require.NoError(t, err)
+	assert.Equal(t, "!run-20260101-100000-aaaa0001", newRef)
+}
+
+func TestUnnameRun_RestoresOriginalID(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	// First rename.
+	newRef, err := svc.RenameRun("run-20260101-100000-aaaa0001", "my-run")
+	require.NoError(t, err)
+	assert.Equal(t, "my-run", newRef)
+
+	// Now unname.
+	restoredRef, err := svc.UnnameRun("my-run")
+	require.NoError(t, err)
+	assert.Equal(t, "run-20260101-100000-aaaa0001", restoredRef)
+
+	// Original dir should exist again.
+	assert.True(t, isRunDir(filepath.Join(dir, "run-20260101-100000-aaaa0001")))
+}
+
+func TestUnnameRun_AlreadyUnnamed(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	restoredRef, err := svc.UnnameRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+	assert.Equal(t, "run-20260101-100000-aaaa0001", restoredRef)
+}
+
+func TestUnnameRun_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewArchiveService(dir)
+
+	_, err := svc.UnnameRun("nonexistent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+// --- RenameBatch / UnnameBatch ---
+
+func TestRenameBatch_CustomName(t *testing.T) {
+	dir := t.TempDir()
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	newRef, err := svc.RenameBatch("batch-20260201-100000-aaaa0001", "nightly-regression")
+	require.NoError(t, err)
+	assert.Equal(t, "nightly-regression", newRef)
+
+	assert.True(t, isBatchDir(filepath.Join(dir, "nightly-regression")))
+}
+
+func TestRenameBatch_NameStartingWithBatchPrefix(t *testing.T) {
+	dir := t.TempDir()
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	newRef, err := svc.RenameBatch("batch-20260201-100000-aaaa0001", "batch-special")
+	require.NoError(t, err)
+	assert.Equal(t, "!batch-special", newRef)
+}
+
+func TestUnnameBatch_RestoresOriginalID(t *testing.T) {
+	dir := t.TempDir()
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	newRef, err := svc.RenameBatch("batch-20260201-100000-aaaa0001", "nightly")
+	require.NoError(t, err)
+
+	restoredRef, err := svc.UnnameBatch(newRef)
+	require.NoError(t, err)
+	assert.Equal(t, "batch-20260201-100000-aaaa0001", restoredRef)
+}
+
+// --- ListRuns with savedOnly ---
+
+func TestListRuns_SavedOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create two unnamed runs.
+	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	a2 := makeArchive("run-20260102-100000-aaaa0002", "passed", makeStep("node", 200, 100))
+	a2.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a1)
+	writeArchive(t, dir, a2)
+
+	svc := NewArchiveService(dir)
+
+	// No saved runs yet.
+	runs, err := svc.ListRuns(0, true)
+	require.NoError(t, err)
+	assert.Nil(t, runs)
+
+	// Rename one run.
+	_, err = svc.RenameRun("run-20260101-100000-aaaa0001", "saved-run")
+	require.NoError(t, err)
+
+	// Now savedOnly should return 1.
+	runs, err = svc.ListRuns(0, true)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "saved-run", runs[0].RunID)
+	assert.Equal(t, "saved-run", runs[0].Name)
+
+	// All runs should return 2.
+	runs, err = svc.ListRuns(0, false)
+	require.NoError(t, err)
+	assert.Len(t, runs, 2)
+}
+
+func TestListBatches_SavedOnly(t *testing.T) {
+	dir := t.TempDir()
+
+	b1 := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	b1.Metadata.Timestamp = time.Date(2026, 2, 1, 10, 0, 0, 0, time.UTC)
+	b2 := makeBatchArchive("batch-20260202-100000-aaaa0002", "failed",
+		archive.BatchRunEntry{PlanName: "plan2", RunID: "run-2", Outcome: "failed", DurationMs: 200},
+	)
+	b2.Metadata.Timestamp = time.Date(2026, 2, 2, 10, 0, 0, 0, time.UTC)
+	writeBatchArchive(t, dir, b1)
+	writeBatchArchive(t, dir, b2)
+
+	svc := NewArchiveService(dir)
+
+	// No saved batches yet.
+	batches, err := svc.ListBatches(0, true)
+	require.NoError(t, err)
+	assert.Nil(t, batches)
+
+	// Rename one batch.
+	_, err = svc.RenameBatch("batch-20260201-100000-aaaa0001", "nightly")
+	require.NoError(t, err)
+
+	// Now savedOnly should return 1.
+	batches, err = svc.ListBatches(0, true)
+	require.NoError(t, err)
+	require.Len(t, batches, 1)
+	assert.Equal(t, "nightly", batches[0].BatchID)
+	assert.Equal(t, "nightly", batches[0].Name)
+}
+
+// --- Named run/batch discovery in list ---
+
+func TestListRuns_NamedRunsDetectedByContent(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a run under a custom name (no run- prefix).
+	customDir := filepath.Join(dir, "my-custom-run")
+	require.NoError(t, createDir(customDir))
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	require.NoError(t, archive.Write(a, filepath.Join(customDir, "archive.json")))
+
+	svc := NewArchiveService(dir)
+	runs, err := svc.ListRuns(0, false)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "my-custom-run", runs[0].RunID)
+	assert.Equal(t, "my-custom-run", runs[0].Name)
+}
+
+func TestListRuns_BangPrefixedRunDetected(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a run under !-prefixed name.
+	bangDir := filepath.Join(dir, "!run-20260101-100000-aaaa0001")
+	require.NoError(t, createDir(bangDir))
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	require.NoError(t, archive.Write(a, filepath.Join(bangDir, "archive.json")))
+
+	svc := NewArchiveService(dir)
+	runs, err := svc.ListRuns(0, false)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "!run-20260101-100000-aaaa0001", runs[0].RunID)
+	assert.Equal(t, "run-20260101-100000-aaaa0001", runs[0].Name)
+}
+
+// --- GetRun/GetBatch set Name ---
+
+func TestGetRun_SetsNameForNamedRun(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	_, err := svc.RenameRun("run-20260101-100000-aaaa0001", "my-saved-run")
+	require.NoError(t, err)
+
+	run, err := svc.GetRun("my-saved-run")
+	require.NoError(t, err)
+	assert.Equal(t, "my-saved-run", run.RunID)
+	assert.Equal(t, "my-saved-run", run.Name)
+}
+
+func TestGetRun_EmptyNameForUnnamed(t *testing.T) {
+	dir := t.TempDir()
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+	assert.Equal(t, "", run.Name)
+}
+
+func TestGetBatch_SetsNameForNamedBatch(t *testing.T) {
+	dir := t.TempDir()
+	b := makeBatchArchive("batch-20260201-100000-aaaa0001", "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: "run-1", Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	_, err := svc.RenameBatch("batch-20260201-100000-aaaa0001", "nightly")
+	require.NoError(t, err)
+
+	detail, err := svc.GetBatch("nightly")
+	require.NoError(t, err)
+	assert.Equal(t, "nightly", detail.BatchID)
+	assert.Equal(t, "nightly", detail.Name)
 }
 
 // --- file helpers ---

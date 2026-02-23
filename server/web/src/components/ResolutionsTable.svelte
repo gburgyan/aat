@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ResolutionDetail } from '../lib/types';
-  import { navigate } from '../lib/router';
+  import { navigate, encPath } from '../lib/router';
 
   interface Props {
     resolutions: ResolutionDetail[];
@@ -12,8 +12,8 @@
 
   function stepHref(stepId: string): string {
     return attempt
-      ? `/runs/${runId}/attempts/${attempt}/steps/${stepId}`
-      : `/runs/${runId}/steps/${stepId}`;
+      ? `/runs/${encPath(runId)}/attempts/${attempt}/steps/${encPath(stepId)}`
+      : `/runs/${encPath(runId)}/steps/${encPath(stepId)}`;
   }
 
   function goToStep(e: MouseEvent, stepId: string) {

@@ -26,6 +26,7 @@ type RunListEntry struct {
 	BatchID       string    `json:"batchId,omitempty"`
 	Attempt       int       `json:"attempt,omitempty"`
 	TotalAttempts int       `json:"totalAttempts,omitempty"`
+	Name          string    `json:"name,omitempty"`
 }
 
 // RunDetail is the full overview of a single run.
@@ -49,6 +50,7 @@ type RunDetail struct {
 	Attempt         int              `json:"attempt,omitempty"`
 	TotalAttempts   int              `json:"totalAttempts,omitempty"`
 	Attempts        []AttemptSummary `json:"attempts,omitempty"`
+	Name            string           `json:"name,omitempty"`
 }
 
 // AttemptSummary captures the outcome of a single retry attempt.
@@ -258,6 +260,7 @@ type BatchListEntry struct {
 	TotalDurationMs int64   `json:"totalDurationMs"`
 	Source         string    `json:"source,omitempty"`
 	ToolVersion    string    `json:"toolVersion,omitempty"`
+	Name           string    `json:"name,omitempty"`
 }
 
 // BatchDetail is the full overview of a batch run.
@@ -274,6 +277,7 @@ type BatchDetail struct {
 	Source          string            `json:"source,omitempty"`
 	ToolVersion     string            `json:"toolVersion,omitempty"`
 	Runs            []BatchRunSummary `json:"runs"`
+	Name            string            `json:"name,omitempty"`
 }
 
 // BatchRunSummary is a compact view of a single run within a batch.
@@ -287,4 +291,15 @@ type BatchRunSummary struct {
 	DurationMs  int64  `json:"durationMs"`
 	Error       string `json:"error,omitempty"`
 	Attempts    int    `json:"attempts,omitempty"`
+}
+
+// RenameRequest is the JSON body for rename endpoints.
+type RenameRequest struct {
+	Name string `json:"name"`
+}
+
+// RenameResponse is the JSON response from rename/unname endpoints.
+type RenameResponse struct {
+	Ref  string `json:"ref"`
+	Name string `json:"name"`
 }

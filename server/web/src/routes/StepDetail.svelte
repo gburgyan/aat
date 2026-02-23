@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { StepDetail } from '../lib/types';
   import { fetchStep, fetchAttemptStep } from '../lib/api';
-  import { navigate } from '../lib/router';
+  import { navigate, encPath } from '../lib/router';
   import { formatDuration, httpStatusCategory } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
   import Tabs from '../components/Tabs.svelte';
@@ -24,12 +24,12 @@
 
   function stepUrl(sid: string): string {
     return attempt
-      ? `/runs/${runId}/attempts/${attempt}/steps/${sid}`
-      : `/runs/${runId}/steps/${sid}`;
+      ? `/runs/${encPath(runId)}/attempts/${attempt}/steps/${encPath(sid)}`
+      : `/runs/${encPath(runId)}/steps/${encPath(sid)}`;
   }
 
   function runUrl(): string {
-    return attempt ? `/runs/${runId}/attempts/${attempt}` : `/runs/${runId}`;
+    return attempt ? `/runs/${encPath(runId)}/attempts/${attempt}` : `/runs/${encPath(runId)}`;
   }
 
   let step = $state<StepDetail | null>(null);

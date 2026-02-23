@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -12,6 +13,9 @@ import (
 	"github.com/gburgyan/aat/archive"
 	"gopkg.in/yaml.v3"
 )
+
+// autoGenPrefixRe matches auto-generated run/batch directory prefixes.
+var autoGenPrefixRe = regexp.MustCompile(`^(run|batch)-`)
 
 // ArchiveService provides read access to run archives for the web API.
 type ArchiveService struct {
@@ -25,8 +29,9 @@ func NewArchiveService(archiveDir string) *ArchiveService {
 
 // ListRuns scans the archive directory for run directories, reads each archive,
 // and returns summaries sorted newest-first. limit=0 means no limit.
+// When savedOnly is true, only named/saved runs are returned.
 // Unreadable archives are skipped silently.
-func (s *ArchiveService) ListRuns(limit int) ([]RunListEntry, error) {
+func (s *ArchiveService) ListRuns(limit int, savedOnly bool) ([]RunListEntry, error) {
 	if s.archiveDir == "" {
 		return nil, fmt.Errorf("archive directory not configured")
 	}
@@ -39,39 +44,55 @@ func (s *ArchiveService) ListRuns(limit int) ([]RunListEntry, error) {
 		return nil, fmt.Errorf("reading archive directory: %w", err)
 	}
 
-	// Filter directories with "run-" prefix
-	var runDirs []os.DirEntry
+	// Content-based scanning: check for archive.json (skip batch-only dirs).
+	type runEntry struct {
+		entry RunListEntry
+	}
+	var all []runEntry
 	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "run-") {
-			runDirs = append(runDirs, e)
+		if !e.IsDir() {
+			continue
 		}
-	}
-
-	// Sort descending by name (timestamp-based = newest first)
-	sort.Slice(runDirs, func(i, j int) bool {
-		return runDirs[i].Name() > runDirs[j].Name()
-	})
-
-	// Apply limit
-	if limit > 0 && len(runDirs) > limit {
-		runDirs = runDirs[:limit]
-	}
-
-	var results []RunListEntry
-	for _, dir := range runDirs {
-		a, err := s.loadArchive(dir.Name())
+		if !isRunDir(filepath.Join(s.archiveDir, e.Name())) {
+			continue
+		}
+		if savedOnly && !isNamed(e.Name()) {
+			continue
+		}
+		a, err := s.loadArchive(e.Name())
 		if err != nil {
 			continue
 		}
-		results = append(results, toRunListEntry(a))
+		entry := toRunListEntry(a)
+		entry.RunID = e.Name()
+		entry.Name = displayName(e.Name())
+		all = append(all, runEntry{entry: entry})
 	}
 
+	// Sort by metadata timestamp, newest first.
+	sort.Slice(all, func(i, j int) bool {
+		return all[i].entry.Timestamp.After(all[j].entry.Timestamp)
+	})
+
+	// Apply limit.
+	if limit > 0 && len(all) > limit {
+		all = all[:limit]
+	}
+
+	if len(all) == 0 {
+		return nil, nil
+	}
+
+	results := make([]RunListEntry, len(all))
+	for i, re := range all {
+		results[i] = re.entry
+	}
 	return results, nil
 }
 
 // LatestRunID returns the RunID of the most recent archive, or "" if none exist.
 func (s *ArchiveService) LatestRunID() (string, error) {
-	runs, err := s.ListRuns(1)
+	runs, err := s.ListRuns(1, false)
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +109,9 @@ func (s *ArchiveService) GetRun(id string) (*RunDetail, error) {
 		return nil, err
 	}
 	detail := toRunDetail(a)
+	detail.RunID = id
 	detail.BatchID = batchID
+	detail.Name = displayName(id)
 
 	// Load attempt summaries if this was a retried run.
 	if a.Metadata.TotalAttempts > 1 {
@@ -220,14 +243,17 @@ func (s *ArchiveService) loadArchiveWithContext(id string) (*archive.Archive, st
 		return nil, "", fmt.Errorf("reading archive %q: %w", id, err)
 	}
 
-	// Not found as standalone — scan batch directories.
+	// Not found as standalone — scan batch directories (any dir with batch.json).
 	entries, dirErr := os.ReadDir(s.archiveDir)
 	if dirErr != nil {
 		return nil, "", fmt.Errorf("run %q: %w", id, ErrRunNotFound)
 	}
 
 	for _, e := range entries {
-		if !e.IsDir() || !strings.HasPrefix(e.Name(), "batch-") {
+		if !e.IsDir() {
+			continue
+		}
+		if !isBatchDir(filepath.Join(s.archiveDir, e.Name())) {
 			continue
 		}
 		batchRunPath := filepath.Join(s.archiveDir, e.Name(), id, "archive.json")
@@ -242,8 +268,9 @@ func (s *ArchiveService) loadArchiveWithContext(id string) (*archive.Archive, st
 
 // ListBatches scans the archive directory for batch directories, reads each batch.json,
 // and returns summaries sorted newest-first. limit=0 means no limit.
+// When savedOnly is true, only named/saved batches are returned.
 // Unreadable batch archives are skipped silently.
-func (s *ArchiveService) ListBatches(limit int) ([]BatchListEntry, error) {
+func (s *ArchiveService) ListBatches(limit int, savedOnly bool) ([]BatchListEntry, error) {
 	if s.archiveDir == "" {
 		return nil, fmt.Errorf("archive directory not configured")
 	}
@@ -256,15 +283,31 @@ func (s *ArchiveService) ListBatches(limit int) ([]BatchListEntry, error) {
 		return nil, fmt.Errorf("reading archive directory: %w", err)
 	}
 
-	var batchDirs []os.DirEntry
+	type batchDirInfo struct {
+		dirName   string
+		timestamp time.Time
+	}
+	var batchDirs []batchDirInfo
 	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "batch-") {
-			batchDirs = append(batchDirs, e)
+		if !e.IsDir() {
+			continue
 		}
+		if !isBatchDir(filepath.Join(s.archiveDir, e.Name())) {
+			continue
+		}
+		if savedOnly && !isNamed(e.Name()) {
+			continue
+		}
+		b, err := s.loadBatchArchive(e.Name())
+		if err != nil {
+			continue
+		}
+		batchDirs = append(batchDirs, batchDirInfo{dirName: e.Name(), timestamp: b.Metadata.Timestamp})
 	}
 
+	// Sort by metadata timestamp, newest first.
 	sort.Slice(batchDirs, func(i, j int) bool {
-		return batchDirs[i].Name() > batchDirs[j].Name()
+		return batchDirs[i].timestamp.After(batchDirs[j].timestamp)
 	})
 
 	if limit > 0 && len(batchDirs) > limit {
@@ -272,12 +315,15 @@ func (s *ArchiveService) ListBatches(limit int) ([]BatchListEntry, error) {
 	}
 
 	var results []BatchListEntry
-	for _, dir := range batchDirs {
-		b, err := s.loadBatchArchive(dir.Name())
+	for _, bd := range batchDirs {
+		b, err := s.loadBatchArchive(bd.dirName)
 		if err != nil {
 			continue
 		}
-		results = append(results, toBatchListEntry(b))
+		entry := toBatchListEntry(b)
+		entry.BatchID = bd.dirName
+		entry.Name = displayName(bd.dirName)
+		results = append(results, entry)
 	}
 
 	return results, nil
@@ -289,7 +335,10 @@ func (s *ArchiveService) GetBatch(id string) (*BatchDetail, error) {
 	if err != nil {
 		return nil, err
 	}
-	return toBatchDetail(b), nil
+	detail := toBatchDetail(b)
+	detail.BatchID = id
+	detail.Name = displayName(id)
+	return detail, nil
 }
 
 // loadBatchArchive reads a batch archive by batch ID. Returns ErrBatchNotFound
@@ -392,6 +441,168 @@ func formatDuration(ms int64) string {
 	}
 	secs := remainMs / 1000
 	return fmt.Sprintf("%dm %ds", mins, secs)
+}
+
+// --- naming helpers ---
+
+// isNamed returns true if the directory name represents a named/saved run or batch.
+// A directory is named if it doesn't match the auto-generated run-/batch- prefix pattern,
+// or if it starts with "!".
+func isNamed(dirName string) bool {
+	if strings.HasPrefix(dirName, "!") {
+		return true
+	}
+	return !autoGenPrefixRe.MatchString(dirName)
+}
+
+// displayName returns the display name for a directory.
+// For named dirs: strips the "!" prefix if present, returns the dir name.
+// For unnamed dirs: returns empty string.
+func displayName(dirName string) string {
+	if strings.HasPrefix(dirName, "!") {
+		return dirName[1:]
+	}
+	if !autoGenPrefixRe.MatchString(dirName) {
+		return dirName
+	}
+	return ""
+}
+
+// isRunDir checks if a directory contains an archive.json file (standalone run).
+func isRunDir(path string) bool {
+	_, err := os.Stat(filepath.Join(path, "archive.json"))
+	return err == nil
+}
+
+// isBatchDir checks if a directory contains a batch.json file.
+func isBatchDir(path string) bool {
+	_, err := os.Stat(filepath.Join(path, "batch.json"))
+	return err == nil
+}
+
+// RenameRun renames a run directory to give it a user-friendly name.
+// Returns the new directory name (routing reference).
+func (s *ArchiveService) RenameRun(currentRef, newName string) (string, error) {
+	return s.renameDir(currentRef, newName, "archive.json")
+}
+
+// UnnameRun restores a run directory to its original auto-generated name.
+// Returns the original directory name.
+func (s *ArchiveService) UnnameRun(currentRef string) (string, error) {
+	return s.unnameDir(currentRef, "archive.json")
+}
+
+// RenameBatch renames a batch directory to give it a user-friendly name.
+// Returns the new directory name (routing reference).
+func (s *ArchiveService) RenameBatch(currentRef, newName string) (string, error) {
+	return s.renameDir(currentRef, newName, "batch.json")
+}
+
+// UnnameBatch restores a batch directory to its original auto-generated name.
+// Returns the original directory name.
+func (s *ArchiveService) UnnameBatch(currentRef string) (string, error) {
+	return s.unnameDir(currentRef, "batch.json")
+}
+
+// renameDir handles the common rename logic for runs and batches.
+func (s *ArchiveService) renameDir(currentRef, newName, metadataFile string) (string, error) {
+	oldPath := filepath.Join(s.archiveDir, currentRef)
+	if _, err := os.Stat(oldPath); err != nil {
+		return "", fmt.Errorf("directory %q: %w", currentRef, ErrRunNotFound)
+	}
+
+	if err := validateDirName(newName); err != nil {
+		return "", err
+	}
+
+	// Compute new directory name.
+	var newDirName string
+	if newName == "" {
+		// Save with original ID: read metadata to get original ID.
+		origID, err := s.getOriginalID(currentRef, metadataFile)
+		if err != nil {
+			return "", err
+		}
+		newDirName = "!" + origID
+	} else if autoGenPrefixRe.MatchString(newName) {
+		// Name starts with run- or batch-: prefix with !
+		newDirName = "!" + newName
+	} else {
+		newDirName = newName
+	}
+
+	// Check for collision.
+	if newDirName == currentRef {
+		return currentRef, nil
+	}
+	newPath := filepath.Join(s.archiveDir, newDirName)
+	if _, err := os.Stat(newPath); err == nil {
+		return "", fmt.Errorf("directory %q already exists", newDirName)
+	}
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return "", fmt.Errorf("renaming %q to %q: %w", currentRef, newDirName, err)
+	}
+
+	return newDirName, nil
+}
+
+// unnameDir restores a directory to its original auto-generated name.
+func (s *ArchiveService) unnameDir(currentRef, metadataFile string) (string, error) {
+	oldPath := filepath.Join(s.archiveDir, currentRef)
+	if _, err := os.Stat(oldPath); err != nil {
+		return "", fmt.Errorf("directory %q: %w", currentRef, ErrRunNotFound)
+	}
+
+	origID, err := s.getOriginalID(currentRef, metadataFile)
+	if err != nil {
+		return "", err
+	}
+
+	if origID == currentRef {
+		return currentRef, nil
+	}
+
+	newPath := filepath.Join(s.archiveDir, origID)
+	if _, err := os.Stat(newPath); err == nil {
+		return "", fmt.Errorf("directory %q already exists", origID)
+	}
+
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return "", fmt.Errorf("restoring %q to %q: %w", currentRef, origID, err)
+	}
+
+	return origID, nil
+}
+
+// getOriginalID reads the metadata file to extract the original auto-generated ID.
+func (s *ArchiveService) getOriginalID(dirName, metadataFile string) (string, error) {
+	if metadataFile == "batch.json" {
+		b, err := s.loadBatchArchive(dirName)
+		if err != nil {
+			return "", err
+		}
+		return b.Metadata.BatchID, nil
+	}
+	a, err := s.loadArchive(dirName)
+	if err != nil {
+		return "", err
+	}
+	return a.Metadata.RunID, nil
+}
+
+// validateDirName checks that a name is safe for use as a directory name.
+func validateDirName(name string) error {
+	if strings.ContainsAny(name, "/\\") {
+		return fmt.Errorf("name must not contain path separators")
+	}
+	if strings.Contains(name, "\x00") {
+		return fmt.Errorf("name must not contain null bytes")
+	}
+	if name == "." || name == ".." {
+		return fmt.Errorf("name must not be . or ..")
+	}
+	return nil
 }
 
 // --- conversion: archive → view model ---
