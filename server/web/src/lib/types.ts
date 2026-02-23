@@ -297,6 +297,7 @@ export interface BatchDetail {
   runs: BatchRunSummary[];
   name?: string;
   layers?: string[];
+  layerGroups?: string[][];
 }
 
 export interface BatchRunSummary {
@@ -310,6 +311,7 @@ export interface BatchRunSummary {
   error?: string;
   attempts?: number;
   layers?: string[];
+  permutation?: string;
 }
 
 export interface RenameResponse {

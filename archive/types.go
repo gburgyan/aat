@@ -174,12 +174,13 @@ type BatchArchive struct {
 
 // BatchMetadata captures provenance and context for a batch run.
 type BatchMetadata struct {
-	Version     string    `json:"version"`
-	BatchID     string    `json:"batchId"`
-	Timestamp   time.Time `json:"timestamp"`
-	Source      string    `json:"source,omitempty"` // directory filter or "all"
-	ToolVersion string    `json:"toolVersion,omitempty"`
-	Layers      []string  `json:"layers,omitempty"` // CLI layers applied at the batch level
+	Version     string     `json:"version"`
+	BatchID     string     `json:"batchId"`
+	Timestamp   time.Time  `json:"timestamp"`
+	Source      string     `json:"source,omitempty"` // directory filter or "all"
+	ToolVersion string     `json:"toolVersion,omitempty"`
+	Layers      []string   `json:"layers,omitempty"`   // CLI layers applied at the batch level
+	LayerGroups [][]string `json:"layerGroups,omitempty"` // layer groups for permutation
 }
 
 // BatchRunEntry is a summary of a single run within a batch.
@@ -192,8 +193,9 @@ type BatchRunEntry struct {
 	FailedCount int      `json:"failedCount"`
 	DurationMs  int64    `json:"durationMs"`
 	Error       string   `json:"error,omitempty"`
-	Attempts    int      `json:"attempts,omitempty"` // total attempts (omitted if 1)
-	Layers      []string `json:"layers,omitempty"`   // effective layers for this run
+	Attempts    int      `json:"attempts,omitempty"`    // total attempts (omitted if 1)
+	Layers      []string `json:"layers,omitempty"`      // effective layers for this run
+	Permutation string   `json:"permutation,omitempty"` // permutation label for grouping
 }
 
 // BatchResult captures the aggregate outcome of a batch.

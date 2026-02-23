@@ -517,7 +517,7 @@ func TestBuildPlanResult_WithSummary(t *testing.T) {
 		archivePath: "/tmp/runs/run-123/archive.json",
 	}
 
-	br, be := buildPlanResult("test-plan", res)
+	br, be := buildPlanResult("test-plan", "", res)
 	assert.Equal(t, "test-plan", br.PlanName)
 	assert.Equal(t, "passed", br.Outcome)
 	assert.Equal(t, 3, br.StepCount)
@@ -530,12 +530,30 @@ func TestBuildPlanResult_WithSummary(t *testing.T) {
 	assert.Equal(t, "run-123", be.RunID)
 }
 
+func TestBuildPlanResult_WithPermutation(t *testing.T) {
+	res := &runResult{
+		summary: &RunSummary{
+			Outcome: "passed",
+			Summary: SummaryStats{TotalSteps: 2, PassedSteps: 2, DurationMs: 100},
+		},
+		archivePath: "/tmp/runs/run-456/archive.json",
+		layers:      []string{"near-term", "european"},
+	}
+
+	br, be := buildPlanResult("test-plan", "european", res)
+	assert.Equal(t, "test-plan", br.PlanName)
+	assert.Equal(t, "european", br.Permutation)
+	assert.Equal(t, []string{"near-term", "european"}, br.Layers)
+	assert.Equal(t, "european", be.Permutation)
+	assert.Equal(t, []string{"near-term", "european"}, be.Layers)
+}
+
 func TestBuildPlanResult_WithError(t *testing.T) {
 	res := &runResult{
 		err: assert.AnError,
 	}
 
-	br, be := buildPlanResult("bad-plan", res)
+	br, be := buildPlanResult("bad-plan", "", res)
 	assert.Equal(t, "error", br.Outcome)
 	assert.Contains(t, br.Error, "assert.AnError")
 	assert.Equal(t, "error", be.Outcome)
@@ -544,7 +562,7 @@ func TestBuildPlanResult_WithError(t *testing.T) {
 func TestBuildPlanResult_NilSummary(t *testing.T) {
 	res := &runResult{}
 
-	br, be := buildPlanResult("nil-plan", res)
+	br, be := buildPlanResult("nil-plan", "", res)
 	assert.Equal(t, "error", br.Outcome)
 	assert.Equal(t, "error", be.Outcome)
 }

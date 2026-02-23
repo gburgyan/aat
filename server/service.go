@@ -778,6 +778,7 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 			Error:       r.Error,
 			Attempts:    r.Attempts,
 			Layers:      r.Layers,
+			Permutation: r.Permutation,
 		}
 	}
 
@@ -795,6 +796,7 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 		ToolVersion:     b.Metadata.ToolVersion,
 		Runs:            runs,
 		Layers:          b.Metadata.Layers,
+		LayerGroups:     b.Metadata.LayerGroups,
 	}
 }
 

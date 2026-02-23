@@ -14,6 +14,7 @@ import (
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
+	"github.com/gburgyan/aat/graph"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -53,6 +54,8 @@ With an absolute path, treats it as a standalone plan directory.`,
 		parallel, _ := cmd.Flags().GetInt("parallel")
 		retries, _ := cmd.Flags().GetInt("retries")
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
+		layerGroupFlags, _ := cmd.Flags().GetStringSlice("layer-group")
+		layerGroups := parseLayerGroups(layerGroupFlags)
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -70,6 +73,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 				MaxRetries:    retries,
 				Layers:        layerFlags,
 				LayersDir:     resolved.LayersDir,
+				LayerGroups:   layerGroups,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,
@@ -88,6 +92,8 @@ func init() {
 	runBatchCmd.Flags().Bool("json", false, "output machine-readable JSON batch summary to stdout")
 	runBatchCmd.Flags().Bool("quiet", false, "suppress progress messages, show only per-plan summary lines")
 	runBatchCmd.Flags().Int("parallel", 1, "number of plans to execute concurrently (default 1 = sequential)")
+	runBatchCmd.Flags().StringSlice("layer-group", nil,
+		"layer group for permutation (comma-separated names, repeatable)")
 
 	runCmd.AddCommand(runBatchCmd)
 }
@@ -111,15 +117,17 @@ type BatchSummary struct {
 
 // BatchRunResult is a per-plan entry in the batch JSON summary.
 type BatchRunResult struct {
-	PlanName    string `json:"plan_name"`
-	Outcome     string `json:"outcome"`
-	StepCount   int    `json:"step_count"`
-	PassedSteps int    `json:"passed_steps"`
-	FailedSteps int    `json:"failed_steps"`
-	DurationMs  int64  `json:"duration_ms"`
-	Error       string `json:"error,omitempty"`
-	ArchivePath string `json:"archive_path,omitempty"`
-	Attempts    int    `json:"attempts,omitempty"` // total attempts (omitted if 1)
+	PlanName    string   `json:"plan_name"`
+	Outcome     string   `json:"outcome"`
+	StepCount   int      `json:"step_count"`
+	PassedSteps int      `json:"passed_steps"`
+	FailedSteps int      `json:"failed_steps"`
+	DurationMs  int64    `json:"duration_ms"`
+	Error       string   `json:"error,omitempty"`
+	ArchivePath string   `json:"archive_path,omitempty"`
+	Attempts    int      `json:"attempts,omitempty"`    // total attempts (omitted if 1)
+	Layers      []string `json:"layers,omitempty"`      // effective layers for this run
+	Permutation string   `json:"permutation,omitempty"` // permutation label for grouping
 }
 
 // BatchStats is the aggregate counts in the batch JSON summary.
@@ -173,17 +181,18 @@ func executeBatch(ba *batchArgs) int {
 
 	if ba.Quiet && res.summary != nil {
 		for _, r := range res.summary.Runs {
+			name := specDisplayName(r.PlanName, r.Permutation)
 			attemptSuffix := ""
 			if r.Attempts > 1 {
 				attemptSuffix = fmt.Sprintf(" (%d attempts)", r.Attempts)
 			}
 			switch r.Outcome {
 			case "passed":
-				fmt.Fprintf(os.Stdout, "%s: PASSED%s\n", r.PlanName, attemptSuffix)
+				fmt.Fprintf(os.Stdout, "%s: PASSED%s\n", name, attemptSuffix)
 			case "failed":
-				fmt.Fprintf(os.Stdout, "%s: FAILED: %s%s\n", r.PlanName, r.Error, attemptSuffix)
+				fmt.Fprintf(os.Stdout, "%s: FAILED: %s%s\n", name, r.Error, attemptSuffix)
 			case "error":
-				fmt.Fprintf(os.Stdout, "%s: ERROR: %s%s\n", r.PlanName, r.Error, attemptSuffix)
+				fmt.Fprintf(os.Stdout, "%s: ERROR: %s%s\n", name, r.Error, attemptSuffix)
 			}
 		}
 		fmt.Fprintf(os.Stdout, "Batch: %d/%d PASSED",
@@ -225,6 +234,82 @@ func batchExitCode(res *batchResult) int {
 	return 0
 }
 
+// batchRunSpec describes a single (plan, permutation) pair in the run matrix.
+type batchRunSpec struct {
+	entry       config.PlanEntry
+	layers      []string // effective layers for this run (base + permutation)
+	permutation string   // permutation label for display/grouping ("" when no layer groups)
+}
+
+// buildRunMatrix generates the list of batchRunSpec entries. When layer groups
+// are present, every plan is crossed with every permutation (cartesian product).
+// Otherwise, each plan gets a single entry with the base layers.
+func buildRunMatrix(plans []config.PlanEntry, baseLayers []string, layerGroups [][]string) []batchRunSpec {
+	if len(layerGroups) == 0 {
+		// No permutations — one spec per plan, no permutation label.
+		specs := make([]batchRunSpec, len(plans))
+		for i, entry := range plans {
+			specs[i] = batchRunSpec{
+				entry:  entry,
+				layers: baseLayers,
+			}
+		}
+		return specs
+	}
+
+	perms := graph.GenerateLayerPermutations(layerGroups)
+	specs := make([]batchRunSpec, 0, len(plans)*len(perms))
+	for _, entry := range plans {
+		for _, perm := range perms {
+			// Combine base layers + permutation layers, deduplicating.
+			effective := mergeLayerNames(baseLayers, perm.Layers)
+			specs = append(specs, batchRunSpec{
+				entry:       entry,
+				layers:      effective,
+				permutation: perm.Label,
+			})
+		}
+	}
+	return specs
+}
+
+// mergeLayerNames combines base and extra layer names, deduplicating while
+// preserving order (base first, then extras).
+func mergeLayerNames(base, extra []string) []string {
+	if len(extra) == 0 {
+		if len(base) == 0 {
+			return nil
+		}
+		result := make([]string, len(base))
+		copy(result, base)
+		return result
+	}
+	seen := make(map[string]bool, len(base)+len(extra))
+	var result []string
+	for _, name := range base {
+		if !seen[name] {
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	for _, name := range extra {
+		if !seen[name] {
+			seen[name] = true
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+// specDisplayName returns the display name for a batchRunSpec. When a permutation
+// label is present, it appends " [label]" to the plan name.
+func specDisplayName(planName string, permutation string) string {
+	if permutation == "" {
+		return planName
+	}
+	return fmt.Sprintf("%s [%s]", planName, permutation)
+}
+
 // batchCommand executes the batch pipeline.
 func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchResult {
 	logf := func(format string, a ...any) {
@@ -247,38 +332,46 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		}
 	}
 
-	logf("aat: batch run — %d plans", len(plans))
+	// 2. Build the run matrix (plans × permutations)
+	specs := buildRunMatrix(plans, args.runArgs.Layers, args.runArgs.LayerGroups)
+
+	if len(args.runArgs.LayerGroups) > 0 {
+		permCount := len(specs) / len(plans)
+		logf("aat: batch run — %d plans x %d permutations = %d total runs", len(plans), permCount, len(specs))
+	} else {
+		logf("aat: batch run — %d plans", len(plans))
+	}
 	if args.Parallel > 1 {
 		logf(" (parallel=%d)", args.Parallel)
 	}
 	logf("\n\n")
 
-	// 2. Load shared infrastructure once
+	// 3. Load shared infrastructure once
 	rctx, err := loadRunContext(ctx, &args.runArgs, logf)
 	if err != nil {
 		return &batchResult{setupErr: true, err: err}
 	}
 
-	// 3. Generate batch ID and create batch directory
+	// 4. Generate batch ID and create batch directory
 	batchID := archive.GenerateBatchID()
 	batchDir := filepath.Join(args.OutputDir, batchID)
 
 	logf("\n")
 
-	// 4. Execute plans
+	// 5. Execute plans
 	batchStart := time.Now()
 	var runs []BatchRunResult
 	var batchEntries []archive.BatchRunEntry
 
 	if args.Parallel > 1 {
-		runs, batchEntries = batchParallel(ctx, rctx, plans, batchDir, args, out)
+		runs, batchEntries = batchParallel(ctx, rctx, specs, batchDir, args, out)
 	} else {
-		runs, batchEntries = batchSequential(ctx, rctx, plans, batchDir, args, out)
+		runs, batchEntries = batchSequential(ctx, rctx, specs, batchDir, args, out)
 	}
 
 	totalDur := time.Since(batchStart)
 
-	// 5. Compute aggregate stats
+	// 6. Compute aggregate stats
 	stats := BatchStats{
 		TotalPlans: len(runs),
 		DurationMs: totalDur.Milliseconds(),
@@ -301,7 +394,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		aggregateOutcome = "failed"
 	}
 
-	// 6. Write batch.json
+	// 7. Write batch.json
 	batchArchive := &archive.BatchArchive{
 		Metadata: archive.BatchMetadata{
 			Version:     "1.0.0",
@@ -310,6 +403,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			Source:      source,
 			ToolVersion: "0.1.0",
 			Layers:      args.runArgs.Layers,
+			LayerGroups: args.runArgs.LayerGroups,
 		},
 		Runs: batchEntries,
 		Result: archive.BatchResult{
@@ -327,7 +421,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		logf("aat: warning: failed to write batch.json: %s\n", err)
 	}
 
-	// 7. Print aggregate summary
+	// 8. Print aggregate summary
 	logf("\nBatch: %d/%d PASSED", stats.PassedPlans, stats.TotalPlans)
 	if stats.FailedPlans > 0 {
 		logf(", %d FAILED", stats.FailedPlans)
@@ -352,29 +446,33 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	}
 }
 
-// batchSequential executes plans one at a time with streaming step output.
-func batchSequential(ctx context.Context, rctx *runContext, plans []config.PlanEntry, batchDir string, args *batchArgs, out io.Writer) ([]BatchRunResult, []archive.BatchRunEntry) {
+// batchSequential executes specs one at a time with streaming step output.
+func batchSequential(ctx context.Context, rctx *runContext, specs []batchRunSpec, batchDir string, args *batchArgs, out io.Writer) ([]BatchRunResult, []archive.BatchRunEntry) {
 	var runs []BatchRunResult
 	var batchEntries []archive.BatchRunEntry
 	noopLogf := func(string, ...any) {}
 
-	for _, entry := range plans {
-		planName := planBaseName(entry.Name)
+	for _, spec := range specs {
+		planName := planBaseName(spec.entry.Name)
+		displayName := specDisplayName(planName, spec.permutation)
+
+		// Create a shallow copy of rctx with per-spec layers
+		specCtx := specRunContext(rctx, spec.layers)
 
 		// Create streaming observer for sequential mode (unless output suppressed)
 		var observer engine.ProgressObserver
 		if out != io.Discard {
-			observer = NewBatchStreamObserver(out, planName)
+			observer = NewBatchStreamObserver(out, displayName)
 		}
 
 		var res *runResult
 		if args.MaxRetries > 0 {
-			res = loadAndRunPlanWithRetries(ctx, rctx, entry.FullPath, batchDir, args.MaxRetries, observer, noopLogf)
+			res = loadAndRunPlanWithRetries(ctx, specCtx, spec.entry.FullPath, batchDir, args.MaxRetries, observer, noopLogf)
 		} else {
-			res = loadAndRunPlan(ctx, rctx, entry.FullPath, batchDir, observer, noopLogf)
+			res = loadAndRunPlan(ctx, specCtx, spec.entry.FullPath, batchDir, observer, noopLogf)
 		}
 
-		br, be := buildPlanResult(planName, res)
+		br, be := buildPlanResult(planName, spec.permutation, res)
 		runs = append(runs, br)
 		batchEntries = append(batchEntries, be)
 
@@ -383,11 +481,11 @@ func batchSequential(ctx context.Context, rctx *runContext, plans []config.PlanE
 			dur := formatDuration(time.Duration(br.DurationMs) * time.Millisecond)
 			switch br.Outcome {
 			case "passed":
-				fmt.Fprintf(out, "  %s  PASSED (%d steps, %s)\n", planName, br.StepCount, dur)
+				fmt.Fprintf(out, "  %s  PASSED (%d steps, %s)\n", displayName, br.StepCount, dur)
 			case "failed":
-				fmt.Fprintf(out, "  %s  FAILED (%d steps, %s)\n", planName, br.StepCount, dur)
+				fmt.Fprintf(out, "  %s  FAILED (%d steps, %s)\n", displayName, br.StepCount, dur)
 			case "error":
-				fmt.Fprintf(out, "  %s  ERROR: %s\n", planName, br.Error)
+				fmt.Fprintf(out, "  %s  ERROR: %s\n", displayName, br.Error)
 			}
 		}
 
@@ -397,14 +495,16 @@ func batchSequential(ctx context.Context, rctx *runContext, plans []config.PlanE
 	return runs, batchEntries
 }
 
-// batchParallel executes plans concurrently using errgroup with a concurrency limit.
-func batchParallel(ctx context.Context, rctx *runContext, plans []config.PlanEntry, batchDir string, args *batchArgs, out io.Writer) ([]BatchRunResult, []archive.BatchRunEntry) {
-	n := len(plans)
+// batchParallel executes specs concurrently using errgroup with a concurrency limit.
+func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, batchDir string, args *batchArgs, out io.Writer) ([]BatchRunResult, []archive.BatchRunEntry) {
+	n := len(specs)
 	results := make([]runResult, n)
+	displayNames := make([]string, n)
 	planNames := make([]string, n)
 
-	for i, entry := range plans {
-		planNames[i] = planBaseName(entry.Name)
+	for i, spec := range specs {
+		planNames[i] = planBaseName(spec.entry.Name)
+		displayNames[i] = specDisplayName(planNames[i], spec.permutation)
 	}
 
 	// Detect terminal for progress rendering
@@ -420,16 +520,19 @@ func batchParallel(ctx context.Context, rctx *runContext, plans []config.PlanEnt
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(args.Parallel)
 
-	for i, entry := range plans {
-		i, entry := i, entry // capture loop vars
+	for i, spec := range specs {
+		i, spec := i, spec // capture loop vars
 
 		g.Go(func() error {
 			noopLogf := func(string, ...any) {}
 
+			// Create a shallow copy of rctx with per-spec layers
+			specCtx := specRunContext(rctx, spec.layers)
+
 			var observer engine.ProgressObserver
 			if renderer != nil {
 				state := &PlanProgressState{
-					PlanName:  planNames[i],
+					PlanName:  displayNames[i],
 					PlanIndex: i,
 					StartTime: time.Now(),
 				}
@@ -439,9 +542,9 @@ func batchParallel(ctx context.Context, rctx *runContext, plans []config.PlanEnt
 
 			var res *runResult
 			if args.MaxRetries > 0 {
-				res = loadAndRunPlanWithRetries(gctx, rctx, entry.FullPath, batchDir, args.MaxRetries, observer, noopLogf)
+				res = loadAndRunPlanWithRetries(gctx, specCtx, spec.entry.FullPath, batchDir, args.MaxRetries, observer, noopLogf)
 			} else {
-				res = loadAndRunPlan(gctx, rctx, entry.FullPath, batchDir, observer, noopLogf)
+				res = loadAndRunPlan(gctx, specCtx, spec.entry.FullPath, batchDir, observer, noopLogf)
 			}
 
 			if res != nil {
@@ -449,8 +552,8 @@ func batchParallel(ctx context.Context, rctx *runContext, plans []config.PlanEnt
 			}
 
 			// Build result line for completion
-			br, _ := buildPlanResult(planNames[i], res)
-			resultLine := formatBatchResultLine(planNames[i], br)
+			br, _ := buildPlanResult(planNames[i], spec.permutation, res)
+			resultLine := formatBatchResultLine(displayNames[i], br)
 
 			if renderer != nil {
 				// Find the state from the observer and complete it
@@ -474,11 +577,11 @@ func batchParallel(ctx context.Context, rctx *runContext, plans []config.PlanEnt
 		renderer.Finish()
 	}
 
-	// Build final results in original plan order
+	// Build final results in original spec order
 	var runs []BatchRunResult
 	var batchEntries []archive.BatchRunEntry
-	for i := range plans {
-		br, be := buildPlanResult(planNames[i], &results[i])
+	for i, spec := range specs {
+		br, be := buildPlanResult(planNames[i], spec.permutation, &results[i])
 		runs = append(runs, br)
 		batchEntries = append(batchEntries, be)
 	}
@@ -486,14 +589,25 @@ func batchParallel(ctx context.Context, rctx *runContext, plans []config.PlanEnt
 	return runs, batchEntries
 }
 
+// specRunContext creates a shallow copy of runContext with layers overridden
+// for a specific batchRunSpec. This ensures each spec gets its own layer set
+// while sharing all other infrastructure.
+func specRunContext(rctx *runContext, layers []string) *runContext {
+	cp := *rctx
+	cp.Layers = layers
+	return &cp
+}
+
 // buildPlanResult constructs BatchRunResult and BatchRunEntry from a runResult.
-func buildPlanResult(planName string, res *runResult) (BatchRunResult, archive.BatchRunEntry) {
+func buildPlanResult(planName, permutation string, res *runResult) (BatchRunResult, archive.BatchRunEntry) {
 	br := BatchRunResult{
 		PlanName:    planName,
 		ArchivePath: res.archivePath,
+		Permutation: permutation,
 	}
 	be := archive.BatchRunEntry{
-		PlanName: planName,
+		PlanName:    planName,
+		Permutation: permutation,
 	}
 
 	if res.summary != nil {
@@ -534,23 +648,46 @@ func buildPlanResult(planName string, res *runResult) (BatchRunResult, archive.B
 
 	// Propagate per-run effective layers
 	be.Layers = res.layers
+	br.Layers = res.layers
 
 	return br, be
 }
 
 // formatBatchResultLine formats a single plan result as a display line.
-func formatBatchResultLine(planName string, br BatchRunResult) string {
+func formatBatchResultLine(displayName string, br BatchRunResult) string {
 	dur := formatDuration(time.Duration(br.DurationMs) * time.Millisecond)
 	switch br.Outcome {
 	case "passed":
-		return fmt.Sprintf("  %s  PASSED (%d steps, %s)", planName, br.StepCount, dur)
+		return fmt.Sprintf("  %s  PASSED (%d steps, %s)", displayName, br.StepCount, dur)
 	case "failed":
-		return fmt.Sprintf("  %s  FAILED (%d steps, %s)", planName, br.StepCount, dur)
+		return fmt.Sprintf("  %s  FAILED (%d steps, %s)", displayName, br.StepCount, dur)
 	case "error":
-		return fmt.Sprintf("  %s  ERROR: %s", planName, br.Error)
+		return fmt.Sprintf("  %s  ERROR: %s", displayName, br.Error)
 	default:
-		return fmt.Sprintf("  %s  %s", planName, br.Outcome)
+		return fmt.Sprintf("  %s  %s", displayName, br.Outcome)
 	}
+}
+
+// parseLayerGroups splits comma-separated layer group flags into groups.
+// Each flag value becomes a group of layer names.
+func parseLayerGroups(flags []string) [][]string {
+	if len(flags) == 0 {
+		return nil
+	}
+	groups := make([][]string, 0, len(flags))
+	for _, flag := range flags {
+		var names []string
+		for _, name := range strings.Split(flag, ",") {
+			name = strings.TrimSpace(name)
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+		if len(names) > 0 {
+			groups = append(groups, names)
+		}
+	}
+	return groups
 }
 
 // discoverBatchPlans finds plans based on the filter path.

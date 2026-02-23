@@ -282,6 +282,7 @@ type BatchDetail struct {
 	Runs            []BatchRunSummary `json:"runs"`
 	Name            string            `json:"name,omitempty"`
 	Layers          []string          `json:"layers,omitempty"`
+	LayerGroups     [][]string        `json:"layerGroups,omitempty"`
 }
 
 // BatchRunSummary is a compact view of a single run within a batch.
@@ -296,6 +297,7 @@ type BatchRunSummary struct {
 	Error       string   `json:"error,omitempty"`
 	Attempts    int      `json:"attempts,omitempty"`
 	Layers      []string `json:"layers,omitempty"`
+	Permutation string   `json:"permutation,omitempty"`
 }
 
 // RenameRequest is the JSON body for rename endpoints.

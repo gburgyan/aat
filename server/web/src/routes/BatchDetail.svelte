@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { BatchDetail } from '../lib/types';
+  import type { BatchDetail, BatchRunSummary, Outcome } from '../lib/types';
   import { fetchBatch, renameBatch, unnameBatch, exportBatchUrl } from '../lib/api';
   import { navigate, encPath } from '../lib/router';
   import { formatDuration, timeAgo, formatTimestamp } from '../lib/format';
@@ -18,11 +18,13 @@
   let renaming = $state(false);
   let renameInput = $state('');
   let renameError = $state('');
+  let collapsedGroups = $state<Set<string>>(new Set());
 
   async function load(id: string) {
     loading = true;
     error = '';
     batch = null;
+    collapsedGroups = new Set();
     try {
       batch = await fetchBatch(id);
     } catch (e) {
@@ -49,6 +51,48 @@
 
   let displayLabel = $derived(batch?.source || batchId);
   let isSaved = $derived(!!batch?.name);
+  let hasPermutations = $derived(
+    batch?.layerGroups != null && batch.layerGroups.length > 0
+  );
+
+  interface PermutationGroup {
+    label: string;
+    runs: BatchRunSummary[];
+    outcome: Outcome;
+  }
+
+  let permutationGroups = $derived.by((): PermutationGroup[] => {
+    if (!batch || !hasPermutations) return [];
+    const groupMap = new Map<string, BatchRunSummary[]>();
+    for (const run of batch.runs) {
+      const key = run.permutation || '(base)';
+      if (!groupMap.has(key)) groupMap.set(key, []);
+      groupMap.get(key)!.push(run);
+    }
+    // Sort groups: (base) first, then alphabetical
+    const labels = [...groupMap.keys()].sort((a, b) => {
+      if (a === '(base)') return -1;
+      if (b === '(base)') return 1;
+      return a.localeCompare(b);
+    });
+    return labels.map(label => {
+      const runs = groupMap.get(label)!;
+      const hasError = runs.some(r => r.outcome === 'error');
+      const hasFailed = runs.some(r => r.outcome === 'failed');
+      const outcome: Outcome = hasError ? 'error' : hasFailed ? 'failed' : 'passed';
+      return { label, runs, outcome };
+    });
+  });
+
+  function toggleGroup(label: string) {
+    const next = new Set(collapsedGroups);
+    if (next.has(label)) {
+      next.delete(label);
+    } else {
+      next.add(label);
+    }
+    collapsedGroups = next;
+  }
 
   function startRename() {
     renameInput = batch?.name || batch?.source || '';
@@ -196,6 +240,56 @@
     <div class="empty-state">
       <p>No runs in this batch</p>
     </div>
+  {:else if hasPermutations}
+    {#each permutationGroups as group (group.label)}
+      <div class="permutation-group">
+        <button
+          class="permutation-header"
+          onclick={() => toggleGroup(group.label)}
+        >
+          <span class="permutation-toggle">{collapsedGroups.has(group.label) ? '\u25b6' : '\u25bc'}</span>
+          <OutcomeBadge outcome={group.outcome} size="sm" />
+          <span class="permutation-label">{group.label}</span>
+          <span class="permutation-count">{group.runs.length} runs</span>
+        </button>
+        {#if !collapsedGroups.has(group.label)}
+          <table class="run-table permutation-table">
+            <thead>
+              <tr>
+                <th>Outcome</th>
+                <th>Plan</th>
+                <th>Steps</th>
+                <th>Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each group.runs as run (run.runId)}
+                <tr
+                  class="run-row"
+                  role="link"
+                  tabindex="0"
+                  onclick={() => goToRun(run.runId)}
+                  onkeydown={(e: KeyboardEvent) => handleRowKeydown(e, run.runId)}
+                >
+                  <td><OutcomeBadge outcome={run.outcome} size="sm" /></td>
+                  <td class="cell-plan" title={run.planName || run.runId}>
+                    {run.planName || run.runId}
+                    {#if run.attempts && run.attempts > 1}
+                      <span class="retry-badge" title="Took {run.attempts} attempts">{run.attempts} attempts</span>
+                    {/if}
+                  </td>
+                  <td class="cell-steps">
+                    <span class="steps-passed">{run.passedCount}</span>{#if run.failedCount > 0}<span class="steps-separator"> / </span><span class="steps-failed">{run.failedCount}</span>{/if}
+                    <span class="steps-separator"> of {run.stepCount}</span>
+                  </td>
+                  <td class="cell-duration">{formatDuration(run.durationMs)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+    {/each}
   {:else}
     <table class="run-table">
       <thead>
@@ -373,5 +467,46 @@
     border-radius: 3px;
     margin-left: 0.4rem;
     vertical-align: baseline;
+  }
+  .permutation-group {
+    margin-bottom: 0.75rem;
+  }
+  .permutation-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: var(--color-bg-secondary, #1f2937);
+    border: 1px solid var(--color-border, #374151);
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--color-text, #f3f4f6);
+    font-size: 0.9rem;
+    text-align: left;
+    transition: background 0.15s ease;
+  }
+  .permutation-header:hover {
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
+  }
+  .permutation-toggle {
+    font-size: 0.7rem;
+    color: var(--color-text-muted, #9ca3af);
+    width: 1em;
+    text-align: center;
+  }
+  .permutation-label {
+    font-weight: 600;
+  }
+  .permutation-count {
+    font-size: 0.75rem;
+    color: var(--color-text-muted, #9ca3af);
+    margin-left: auto;
+  }
+  .permutation-table {
+    margin-top: 0;
+    border-top: none;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
   }
 </style>

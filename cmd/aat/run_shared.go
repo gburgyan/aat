@@ -29,11 +29,12 @@ type runArgs struct {
 	DomainPath    string
 	JSON          bool
 	Quiet         bool
-	Overrides     []string // "nodeName=http://url" pairs
-	EnvOverlay    string   // path to overlay YAML
-	MaxRetries    int      // max plan-level retries (0 = no retries)
-	Layers        []string // layer names to apply
-	LayersDir     string   // directory containing layer files
+	Overrides     []string   // "nodeName=http://url" pairs
+	EnvOverlay    string     // path to overlay YAML
+	MaxRetries    int        // max plan-level retries (0 = no retries)
+	Layers        []string   // layer names to apply
+	LayersDir     string     // directory containing layer files
+	LayerGroups   [][]string // layer groups for permutation (batch only)
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -595,14 +596,18 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		LayersDir:  args.LayersDir,
 	}
 
-	// Pre-load layers if directory is configured and layers are requested
-	if rctx.LayersDir != "" && len(rctx.Layers) > 0 {
-		layers, err := graph.ResolveLayerNames(rctx.Layers, rctx.LayersDir)
-		if err != nil {
-			return nil, fmt.Errorf("loading layers: %w", err)
+	// Pre-load layers if directory is configured and any layers are referenced
+	// (from --layer flags and/or --layer-group flags).
+	if rctx.LayersDir != "" {
+		allNames := collectAllLayerNames(args.Layers, args.LayerGroups)
+		if len(allNames) > 0 {
+			layers, err := graph.ResolveLayerNames(allNames, rctx.LayersDir)
+			if err != nil {
+				return nil, fmt.Errorf("loading layers: %w", err)
+			}
+			rctx.AvailableLayers = layers
+			logf("aat: loaded %d layers\n", len(layers))
 		}
-		rctx.AvailableLayers = layers
-		logf("aat: loaded %d layers\n", len(layers))
 	}
 
 	return rctx, nil
@@ -810,4 +815,26 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		err:         result.Error,
 		layers:      effectiveLayers,
 	}
+}
+
+// collectAllLayerNames returns the union of layer names from base layers and
+// all layer groups. Used to pre-load all layers that any permutation might need.
+func collectAllLayerNames(baseLayers []string, layerGroups [][]string) []string {
+	seen := make(map[string]bool)
+	var names []string
+	for _, name := range baseLayers {
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, group := range layerGroups {
+		for _, name := range group {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+	return names
 }
