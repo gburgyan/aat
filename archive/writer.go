@@ -8,9 +8,20 @@ import (
 )
 
 // Write serializes an Archive as indented JSON and writes it to the given path.
-// Parent directories are created if they don't exist.
+// Parent directories are created if they don't exist. A lightweight summary.json
+// is also written alongside the archive for fast listing. Summary write failures
+// are silently ignored since the archive itself was written successfully.
 func Write(a *Archive, path string) error {
-	return writeJSON(a, path)
+	if err := writeJSON(a, path); err != nil {
+		return err
+	}
+
+	// Best-effort: write summary.json alongside the archive.
+	summary := BuildRunSummary(a)
+	summaryPath := filepath.Join(filepath.Dir(path), "summary.json")
+	_ = WriteSummary(summary, summaryPath)
+
+	return nil
 }
 
 // WriteBatch serializes a BatchArchive as indented JSON to the given path.

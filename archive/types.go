@@ -142,6 +142,21 @@ type ValueResolutionRecord struct {
 	Tried        []any  `json:"tried,omitempty"`
 }
 
+// RunSummary is a lightweight summary of a run, written alongside the full
+// archive as summary.json to avoid reading multi-megabyte archives for listing.
+type RunSummary struct {
+	RunID         string    `json:"runId"`
+	Timestamp     time.Time `json:"timestamp"`
+	Outcome       string    `json:"outcome"`
+	StepCount     int       `json:"stepCount"`
+	PassedCount   int       `json:"passedCount"`
+	FailedCount   int       `json:"failedCount"`
+	DurationMs    int64     `json:"durationMs"`
+	PlanName      string    `json:"planName,omitempty"`
+	Attempt       int       `json:"attempt,omitempty"`
+	TotalAttempts int       `json:"totalAttempts,omitempty"`
+}
+
 // ArchiveResult captures the overall outcome of a run.
 type ArchiveResult struct {
 	Outcome string `json:"outcome"`

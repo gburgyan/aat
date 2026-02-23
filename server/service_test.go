@@ -2132,6 +2132,81 @@ func TestGetBatch_SetsNameForNamedBatch(t *testing.T) {
 	assert.Equal(t, "nightly", detail.Name)
 }
 
+// --- summary-based listing ---
+
+func TestListRuns_UsesSummaryWhenAvailable(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write an archive (which also creates summary.json).
+	a := makeArchive("run-20260222-100000-aaaa0001", "passed", makeStep("node1", 200, 100))
+	a.Metadata.Timestamp = time.Date(2026, 2, 22, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a)
+
+	// Verify summary.json was created.
+	summaryPath := filepath.Join(dir, "run-20260222-100000-aaaa0001", "summary.json")
+	_, err := os.Stat(summaryPath)
+	require.NoError(t, err, "summary.json should be created alongside archive.json")
+
+	svc := NewArchiveService(dir)
+	runs, err := svc.ListRuns(0, false)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+
+	assert.Equal(t, "run-20260222-100000-aaaa0001", runs[0].RunID)
+	assert.Equal(t, "passed", runs[0].Outcome)
+	assert.Equal(t, 1, runs[0].StepCount)
+	assert.Equal(t, 1, runs[0].PassedCount)
+	assert.Equal(t, 0, runs[0].FailedCount)
+}
+
+func TestListRuns_FallsBackWithoutSummary(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write an archive, then delete the summary.json to simulate old archives.
+	a := makeArchive("run-20260222-100000-aaaa0001", "passed", makeStep("node1", 200, 100))
+	a.Metadata.Timestamp = time.Date(2026, 2, 22, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a)
+
+	summaryPath := filepath.Join(dir, "run-20260222-100000-aaaa0001", "summary.json")
+	err := os.Remove(summaryPath)
+	require.NoError(t, err)
+
+	svc := NewArchiveService(dir)
+	runs, err := svc.ListRuns(0, false)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+
+	assert.Equal(t, "run-20260222-100000-aaaa0001", runs[0].RunID)
+	assert.Equal(t, "passed", runs[0].Outcome)
+	assert.Equal(t, 1, runs[0].StepCount)
+}
+
+func TestListRuns_MixedSummaryAndFallback(t *testing.T) {
+	dir := t.TempDir()
+
+	// Run with summary.
+	a1 := makeArchive("run-20260222-100000-aaaa0001", "passed", makeStep("node1", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 2, 22, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a1)
+
+	// Run without summary (simulating old archive).
+	a2 := makeArchive("run-20260222-110000-aaaa0002", "failed", makeStep("node2", 500, 200))
+	a2.Metadata.Timestamp = time.Date(2026, 2, 22, 11, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a2)
+	os.Remove(filepath.Join(dir, "run-20260222-110000-aaaa0002", "summary.json"))
+
+	svc := NewArchiveService(dir)
+	runs, err := svc.ListRuns(0, false)
+	require.NoError(t, err)
+	require.Len(t, runs, 2)
+
+	// Newest first.
+	assert.Equal(t, "run-20260222-110000-aaaa0002", runs[0].RunID)
+	assert.Equal(t, "failed", runs[0].Outcome)
+	assert.Equal(t, "run-20260222-100000-aaaa0001", runs[1].RunID)
+	assert.Equal(t, "passed", runs[1].Outcome)
+}
+
 // --- file helpers ---
 
 func createDir(path string) error {

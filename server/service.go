@@ -60,11 +60,11 @@ func (s *ArchiveService) ListRuns(limit int, savedOnly bool) ([]RunListEntry, er
 		if savedOnly && !isNamed(e.Name()) {
 			continue
 		}
-		a, err := s.loadArchive(e.Name())
+		summary, err := s.readRunSummary(e.Name())
 		if err != nil {
 			continue
 		}
-		entry := toRunListEntry(a)
+		entry := summaryToRunListEntry(summary)
 		entry.RunID = e.Name()
 		entry.Name = displayName(e.Name())
 		all = append(all, runEntry{entry: entry})
@@ -285,8 +285,8 @@ func (s *ArchiveService) ListBatches(limit int, savedOnly bool) ([]BatchListEntr
 	}
 
 	type batchDirInfo struct {
-		dirName   string
-		timestamp time.Time
+		dirName string
+		batch   *archive.BatchArchive
 	}
 	var batchDirs []batchDirInfo
 	for _, e := range entries {
@@ -303,12 +303,12 @@ func (s *ArchiveService) ListBatches(limit int, savedOnly bool) ([]BatchListEntr
 		if err != nil {
 			continue
 		}
-		batchDirs = append(batchDirs, batchDirInfo{dirName: e.Name(), timestamp: b.Metadata.Timestamp})
+		batchDirs = append(batchDirs, batchDirInfo{dirName: e.Name(), batch: b})
 	}
 
 	// Sort by metadata timestamp, newest first.
 	sort.Slice(batchDirs, func(i, j int) bool {
-		return batchDirs[i].timestamp.After(batchDirs[j].timestamp)
+		return batchDirs[i].batch.Metadata.Timestamp.After(batchDirs[j].batch.Metadata.Timestamp)
 	})
 
 	if limit > 0 && len(batchDirs) > limit {
@@ -317,11 +317,7 @@ func (s *ArchiveService) ListBatches(limit int, savedOnly bool) ([]BatchListEntr
 
 	var results []BatchListEntry
 	for _, bd := range batchDirs {
-		b, err := s.loadBatchArchive(bd.dirName)
-		if err != nil {
-			continue
-		}
-		entry := toBatchListEntry(b)
+		entry := toBatchListEntry(bd.batch)
 		entry.BatchID = bd.dirName
 		entry.Name = displayName(bd.dirName)
 		results = append(results, entry)
@@ -680,6 +676,47 @@ func validateDirName(name string) error {
 		return fmt.Errorf("name must not be . or ..")
 	}
 	return nil
+}
+
+// --- summary helpers ---
+
+// readRunSummary tries to read summary.json for a run directory. If the summary
+// file is missing or unreadable, it falls back to reading the full archive and
+// computing the summary on-the-fly.
+func (s *ArchiveService) readRunSummary(dirName string) (*archive.RunSummary, error) {
+	summaryPath := filepath.Join(s.archiveDir, dirName, "summary.json")
+	summary, err := archive.ReadSummary(summaryPath)
+	if err == nil {
+		return summary, nil
+	}
+
+	// Fallback: read full archive and compute summary.
+	a, err := s.loadArchive(dirName)
+	if err != nil {
+		return nil, err
+	}
+	summary = archive.BuildRunSummary(a)
+
+	// Lazy backfill: write the summary so subsequent loads are fast.
+	_ = archive.WriteSummary(summary, summaryPath)
+
+	return summary, nil
+}
+
+// summaryToRunListEntry maps a RunSummary to a RunListEntry.
+func summaryToRunListEntry(s *archive.RunSummary) RunListEntry {
+	return RunListEntry{
+		RunID:         s.RunID,
+		Timestamp:     s.Timestamp,
+		Outcome:       s.Outcome,
+		StepCount:     s.StepCount,
+		PassedCount:   s.PassedCount,
+		FailedCount:   s.FailedCount,
+		DurationMs:    s.DurationMs,
+		PlanName:      s.PlanName,
+		Attempt:       s.Attempt,
+		TotalAttempts: s.TotalAttempts,
+	}
 }
 
 // --- conversion: archive → view model ---
