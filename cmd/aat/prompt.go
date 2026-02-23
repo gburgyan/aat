@@ -162,11 +162,13 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 		return fmt.Errorf("environment %q has no LLM configuration (llm.endpoint is required for prompt command)", env.Name)
 	}
 
-	// 3. Authenticate
-	apiConfig, err := env.BuildAPIConfig(ctx)
+	// 3. Authenticate (via cached provider)
+	authProvider := config.NewAuthProvider(env.Auth)
+	token, err := authProvider.Authenticate(ctx)
 	if err != nil {
-		return fmt.Errorf("building API config: %w", err)
+		return fmt.Errorf("authenticating: %w", err)
 	}
+	apiConfig := env.BuildAPIConfigFromToken(token, env.Auth, nil)
 	fmt.Printf("aat: authenticated via %s\n", env.Auth.Type)
 
 	// 4. Load graph
@@ -272,32 +274,33 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 	}
 
 	// 11. Execute
-	return executePlan(ctx, p, g, args, apiConfig, env, kb, llmClient)
+	return executePlan(ctx, p, g, args, apiConfig, env, kb, llmClient, authProvider)
 }
 
 // executePlan loads templates, creates the engine, runs the plan, and writes an archive.
-func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, apiConfig *config.APIConfig, env *config.Environment, kb *domain.KnowledgeBase, llmClient llm.Client) error {
+func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, apiConfig *config.APIConfig, env *config.Environment, kb *domain.KnowledgeBase, llmClient llm.Client, authProvider *config.AuthProvider) error {
 	// If the plan has its own auth (e.g., user manually edited after --save), re-authenticate
-	if p.Auth != nil {
+	planOverridesAuth := p.Auth != nil
+	if planOverridesAuth {
 		effectiveAuth := *p.Auth
 		fmt.Printf("aat: plan has its own auth (%s), re-authenticating...\n", effectiveAuth.Type)
-		var err error
-		apiConfig, err = env.BuildAPIConfigFromAuth(ctx, effectiveAuth, p.Headers)
+		token, err := config.Authenticate(ctx, effectiveAuth)
 		if err != nil {
-			return fmt.Errorf("building API config from plan auth: %w", err)
+			return fmt.Errorf("authenticating with plan auth: %w", err)
 		}
+		apiConfig = env.BuildAPIConfigFromToken(token, effectiveAuth, p.Headers)
 	} else if len(p.Headers) > 0 {
-		// Plan has extra headers but no auth override — rebuild with plan headers merged
-		var err error
-		apiConfig, err = env.BuildAPIConfigFromAuth(ctx, env.Auth, p.Headers)
+		// Plan has extra headers but no auth override — use cached token, rebuild with plan headers
+		token, err := authProvider.Authenticate(ctx)
 		if err != nil {
-			return fmt.Errorf("building API config with plan headers: %w", err)
+			return fmt.Errorf("authenticating: %w", err)
 		}
+		apiConfig = env.BuildAPIConfigFromToken(token, env.Auth, p.Headers)
 	}
 
 	// Determine effective auth for override inheritance
 	effectiveAuth := env.Auth
-	if p.Auth != nil {
+	if planOverridesAuth {
 		effectiveAuth = *p.Auth
 	}
 
@@ -320,9 +323,15 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 
 	// Apply env-file overrides (inherit plan auth if present)
 	if len(env.Overrides) > 0 {
-		resolvedOverrides, err := env.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
-		if err != nil {
-			return fmt.Errorf("building overrides: %w", err)
+		var resolvedOverrides []config.ResolvedOverride
+		var overrideErr error
+		if planOverridesAuth {
+			resolvedOverrides, overrideErr = env.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		} else {
+			resolvedOverrides, overrideErr = env.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, authProvider)
+		}
+		if overrideErr != nil {
+			return fmt.Errorf("building overrides: %w", overrideErr)
 		}
 		for _, ov := range resolvedOverrides {
 			addResolvedOverride(router, ov)

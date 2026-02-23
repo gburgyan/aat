@@ -191,6 +191,75 @@ func (env *Environment) BuildOverrideConfigsWithAuth(ctx context.Context, baseHe
 	return resolved, nil
 }
 
+// BuildOverrideConfigsWithProvider is like BuildOverrideConfigsWithAuth but uses
+// an AuthProvider for overrides that inherit the default auth, avoiding redundant
+// token requests. Overrides with their own explicit Auth still call Authenticate
+// directly.
+func (env *Environment) BuildOverrideConfigsWithProvider(ctx context.Context, baseHeaders map[string]string, provider *AuthProvider) ([]ResolvedOverride, error) {
+	if len(env.Overrides) == 0 {
+		return nil, nil
+	}
+
+	resolved := make([]ResolvedOverride, 0, len(env.Overrides))
+	for i, ov := range env.Overrides {
+		var token *OAuthToken
+		var auth AuthConfig
+		var err error
+
+		if ov.Auth != nil {
+			// Explicit auth on override — authenticate directly.
+			auth = *ov.Auth
+			token, err = Authenticate(ctx, auth)
+		} else {
+			// Inherit default auth via the cached provider.
+			auth = provider.Config()
+			token, err = provider.Authenticate(ctx)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("authenticating override %d (%s): %w", i, ov.Match, err)
+		}
+
+		// Merge headers: start with base, overlay override-specific, then auth
+		headers := make(map[string]string)
+		for k, v := range baseHeaders {
+			headers[k] = v
+		}
+		for k, v := range ov.Headers {
+			headers[k] = v
+		}
+		if token != nil {
+			switch auth.Type {
+			case "apikey":
+				headers[auth.HeaderName] = token.AccessToken
+			default:
+				headers["Authorization"] = "Bearer " + token.AccessToken
+			}
+		} else {
+			// auth type "none" — remove any inherited auth header
+			if ov.Auth != nil && (ov.Auth.Type == "none" || ov.Auth.Type == "") {
+				delete(headers, "Authorization")
+			}
+		}
+
+		baseURL := ov.BaseURL
+		if baseURL == "" {
+			baseURL = env.APIBaseURL
+		}
+
+		resolved = append(resolved, ResolvedOverride{
+			Pattern: ov.Match,
+			APIConfig: APIConfig{
+				BaseURL: baseURL,
+				Headers: headers,
+				Values:  make(map[string]string),
+			},
+			PathRewrite: ov.PathRewrite,
+		})
+	}
+
+	return resolved, nil
+}
+
 // CollectSecrets resolves all SecretRef values from the environment and returns
 // them as a set. This is used for value-matching redaction in archives.
 // Resolution errors are silently ignored (missing env var = no secret to redact).
@@ -251,7 +320,14 @@ func (env *Environment) BuildAPIConfigFromAuth(ctx context.Context, auth AuthCon
 	if err != nil {
 		return nil, fmt.Errorf("authenticating: %w", err)
 	}
+	return env.BuildAPIConfigFromToken(token, auth, extraHeaders), nil
+}
 
+// BuildAPIConfigFromToken builds a flat APIConfig from a pre-obtained token.
+// This is a pure function — no network calls, no context needed.
+// Header merge order: env headers → extraHeaders → auth headers.
+// extraHeaders may be nil. token may be nil (e.g., auth type "none").
+func (env *Environment) BuildAPIConfigFromToken(token *OAuthToken, auth AuthConfig, extraHeaders map[string]string) *APIConfig {
 	headers := make(map[string]string)
 
 	// 1. Environment static headers (base)
@@ -278,5 +354,5 @@ func (env *Environment) BuildAPIConfigFromAuth(ctx context.Context, auth AuthCon
 		BaseURL: env.APIBaseURL,
 		Headers: headers,
 		Values:  make(map[string]string),
-	}, nil
+	}
 }

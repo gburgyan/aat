@@ -1017,3 +1017,112 @@ func TestCollectAuthSecrets_UnresolvableIgnored(t *testing.T) {
 	secrets := CollectAuthSecrets(auth)
 	assert.Empty(t, secrets)
 }
+
+// --- BuildAPIConfigFromToken tests ---
+
+func TestBuildAPIConfigFromToken_Bearer(t *testing.T) {
+	env := &Environment{
+		APIBaseURL: "https://api.example.com",
+		Headers:    map[string]string{"X-Env": "env-val"},
+	}
+	token := &OAuthToken{AccessToken: "my-token", TokenType: "Bearer"}
+	auth := AuthConfig{Type: "bearer"}
+
+	cfg := env.BuildAPIConfigFromToken(token, auth, map[string]string{"X-Plan": "plan-val"})
+	assert.Equal(t, "https://api.example.com", cfg.BaseURL)
+	assert.Equal(t, "Bearer my-token", cfg.Headers["Authorization"])
+	assert.Equal(t, "env-val", cfg.Headers["X-Env"])
+	assert.Equal(t, "plan-val", cfg.Headers["X-Plan"])
+	assert.NotNil(t, cfg.Values)
+}
+
+func TestBuildAPIConfigFromToken_APIKey(t *testing.T) {
+	env := &Environment{
+		APIBaseURL: "https://api.example.com",
+	}
+	token := &OAuthToken{AccessToken: "key-123", TokenType: "apikey"}
+	auth := AuthConfig{Type: "apikey", HeaderName: "X-Api-Key"}
+
+	cfg := env.BuildAPIConfigFromToken(token, auth, nil)
+	assert.Equal(t, "key-123", cfg.Headers["X-Api-Key"])
+	_, hasAuth := cfg.Headers["Authorization"]
+	assert.False(t, hasAuth)
+}
+
+func TestBuildAPIConfigFromToken_NilToken(t *testing.T) {
+	env := &Environment{
+		APIBaseURL: "https://api.example.com",
+		Headers:    map[string]string{"X-Env": "val"},
+	}
+
+	cfg := env.BuildAPIConfigFromToken(nil, AuthConfig{Type: "none"}, nil)
+	assert.Equal(t, "val", cfg.Headers["X-Env"])
+	assert.Len(t, cfg.Headers, 1)
+}
+
+// --- BuildOverrideConfigsWithProvider tests ---
+
+func TestBuildOverrideConfigsWithProvider_InheritCached(t *testing.T) {
+	env := &Environment{
+		APIBaseURL: "https://api.example.com",
+		Overrides: []HostOverride{
+			{Match: "node1", BaseURL: "http://localhost:8080"},
+			{Match: "node2"}, // inherits baseURL too
+		},
+	}
+
+	provider := NewAuthProvider(AuthConfig{
+		Type: "bearer",
+		Credentials: map[string]SecretRef{
+			"token": {Source: "literal", Value: "cached-tok"},
+		},
+	})
+
+	resolved, err := env.BuildOverrideConfigsWithProvider(context.Background(), map[string]string{"Accept": "application/json"}, provider)
+	require.NoError(t, err)
+	require.Len(t, resolved, 2)
+	assert.Equal(t, "Bearer cached-tok", resolved[0].APIConfig.Headers["Authorization"])
+	assert.Equal(t, "Bearer cached-tok", resolved[1].APIConfig.Headers["Authorization"])
+	assert.Equal(t, "application/json", resolved[0].APIConfig.Headers["Accept"])
+	assert.Equal(t, "https://api.example.com", resolved[1].APIConfig.BaseURL)
+}
+
+func TestBuildOverrideConfigsWithProvider_ExplicitAuthBypassesProvider(t *testing.T) {
+	env := &Environment{
+		APIBaseURL: "https://api.example.com",
+		Overrides: []HostOverride{
+			{
+				Match:   "node1",
+				BaseURL: "http://localhost:8080",
+				Auth: &AuthConfig{
+					Type: "bearer",
+					Credentials: map[string]SecretRef{
+						"token": {Source: "literal", Value: "override-tok"},
+					},
+				},
+			},
+		},
+	}
+
+	// Provider has a different token — should NOT be used for this override
+	provider := NewAuthProvider(AuthConfig{
+		Type: "bearer",
+		Credentials: map[string]SecretRef{
+			"token": {Source: "literal", Value: "provider-tok"},
+		},
+	})
+
+	resolved, err := env.BuildOverrideConfigsWithProvider(context.Background(), nil, provider)
+	require.NoError(t, err)
+	require.Len(t, resolved, 1)
+	assert.Equal(t, "Bearer override-tok", resolved[0].APIConfig.Headers["Authorization"])
+}
+
+func TestBuildOverrideConfigsWithProvider_Empty(t *testing.T) {
+	env := &Environment{APIBaseURL: "https://api.example.com"}
+	provider := NewAuthProvider(AuthConfig{Type: "none"})
+
+	resolved, err := env.BuildOverrideConfigsWithProvider(context.Background(), nil, provider)
+	require.NoError(t, err)
+	assert.Nil(t, resolved)
+}

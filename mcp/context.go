@@ -30,6 +30,7 @@ type ServerContext struct {
 	PlanDirs     []string
 	ArchiveDir   string
 	Environment  *config.Environment
+	AuthProvider *config.AuthProvider // cached default auth (nil if no environment)
 
 	// Metadata
 	Manifest      *ProjectManifest
@@ -84,6 +85,7 @@ func BuildServerContext(manifest *ProjectManifest) (*ServerContext, error) {
 			return nil, fmt.Errorf("loading environment: %w", err)
 		}
 		ctx.Environment = env
+		ctx.AuthProvider = config.NewAuthProvider(env.Auth)
 	}
 
 	// Set optional directory paths

@@ -519,12 +519,13 @@ func resolvePlanPath(planPath string, planDirs []string) string {
 // This allows batch execution to load environment, graph, templates, and domain
 // once and reuse them across multiple plan runs.
 type runContext struct {
-	Env      *config.Environment
-	Graph    *graph.Graph
-	Registry *adapter.Registry
-	KB       *domain.KnowledgeBase
-	GraphDir string // for recipe reconstitution
-	Secrets  map[string]bool
+	Env          *config.Environment
+	Graph        *graph.Graph
+	Registry     *adapter.Registry
+	KB           *domain.KnowledgeBase
+	GraphDir     string // for recipe reconstitution
+	Secrets      map[string]bool
+	AuthProvider *config.AuthProvider // cached default auth
 
 	// Override configuration (from env-file, overlay, CLI flags)
 	Overrides  []string // CLI --override flags
@@ -584,16 +585,17 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 	logf("aat: loaded %d templates\n", count)
 
 	rctx := &runContext{
-		Env:        env,
-		Graph:      g,
-		Registry:   registry,
-		KB:         kb,
-		GraphDir:   filepath.Dir(args.GraphPath),
-		Secrets:    env.CollectSecrets(),
-		Overrides:  args.Overrides,
-		EnvOverlay: args.EnvOverlay,
-		Layers:     args.Layers,
-		LayersDir:  args.LayersDir,
+		Env:          env,
+		Graph:        g,
+		Registry:     registry,
+		KB:           kb,
+		GraphDir:     filepath.Dir(args.GraphPath),
+		Secrets:      env.CollectSecrets(),
+		AuthProvider: config.NewAuthProvider(env.Auth),
+		Overrides:    args.Overrides,
+		EnvOverlay:   args.EnvOverlay,
+		Layers:       args.Layers,
+		LayersDir:    args.LayersDir,
 	}
 
 	// Pre-load layers if directory is configured and any layers are referenced
@@ -686,16 +688,23 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 
 	// 3. Determine effective auth: plan auth overrides env auth
 	effectiveAuth := rctx.Env.Auth
-	if p.Auth != nil {
+	planOverridesAuth := p.Auth != nil
+	if planOverridesAuth {
 		effectiveAuth = *p.Auth
 		logf("aat: using plan-level auth (%s)\n", effectiveAuth.Type)
 	}
 
-	// 4. Authenticate with effective auth, merging plan headers
-	apiConfig, err := rctx.Env.BuildAPIConfigFromAuth(ctx, effectiveAuth, p.Headers)
-	if err != nil {
-		return &runResult{setupErr: true, err: fmt.Errorf("building API config: %w", err)}
+	// 4. Authenticate — use cached provider for default auth, direct call for plan auth
+	var token *config.OAuthToken
+	if planOverridesAuth {
+		token, err = config.Authenticate(ctx, effectiveAuth)
+	} else {
+		token, err = rctx.AuthProvider.Authenticate(ctx)
 	}
+	if err != nil {
+		return &runResult{setupErr: true, err: fmt.Errorf("authenticating: %w", err)}
+	}
+	apiConfig := rctx.Env.BuildAPIConfigFromToken(token, effectiveAuth, p.Headers)
 	logf("aat: authenticated via %s\n", effectiveAuth.Type)
 
 	// 5. Create executor, environment config, and router
@@ -709,7 +718,12 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 
 	// 5a. Apply env-file overrides
 	if len(rctx.Env.Overrides) > 0 {
-		resolvedOverrides, err := rctx.Env.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		var resolvedOverrides []config.ResolvedOverride
+		if planOverridesAuth {
+			resolvedOverrides, err = rctx.Env.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		} else {
+			resolvedOverrides, err = rctx.Env.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, rctx.AuthProvider)
+		}
 		if err != nil {
 			return &runResult{setupErr: true, err: fmt.Errorf("building overrides: %w", err)}
 		}
@@ -724,11 +738,17 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		if err != nil {
 			return &runResult{setupErr: true, err: fmt.Errorf("loading overlay: %w", err)}
 		}
-		resolvedOverrides, err := (&config.Environment{
+		overlayEnv := &config.Environment{
 			APIBaseURL: rctx.Env.APIBaseURL,
 			Auth:       effectiveAuth,
 			Overrides:  overlayOverrides,
-		}).BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		}
+		var resolvedOverrides []config.ResolvedOverride
+		if planOverridesAuth {
+			resolvedOverrides, err = overlayEnv.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		} else {
+			resolvedOverrides, err = overlayEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, rctx.AuthProvider)
+		}
 		if err != nil {
 			return &runResult{setupErr: true, err: fmt.Errorf("building overlay overrides: %w", err)}
 		}

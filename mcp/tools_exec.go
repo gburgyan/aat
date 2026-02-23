@@ -87,15 +87,24 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 
 	// Determine effective auth: plan auth overrides env auth
 	effectiveAuth := s.ctx.Environment.Auth
-	if p.Auth != nil {
+	planOverridesAuth := p.Auth != nil
+	if planOverridesAuth {
 		effectiveAuth = *p.Auth
 	}
 
-	// Authenticate (fresh each call — tokens expire)
-	apiConfig, err := s.ctx.Environment.BuildAPIConfigFromAuth(ctx, effectiveAuth, p.Headers)
+	// Authenticate — use cached provider for default auth, direct call for plan auth
+	var token *config.OAuthToken
+	if planOverridesAuth {
+		token, err = config.Authenticate(ctx, effectiveAuth)
+	} else if s.ctx.AuthProvider != nil {
+		token, err = s.ctx.AuthProvider.Authenticate(ctx)
+	} else {
+		token, err = config.Authenticate(ctx, effectiveAuth)
+	}
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("authentication failed: %v", err)), nil
 	}
+	apiConfig := s.ctx.Environment.BuildAPIConfigFromToken(token, effectiveAuth, p.Headers)
 
 	// Create executor and environment config
 	executor := adapter.NewHTTPExecutor(apiConfig.BaseURL)
@@ -108,7 +117,12 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 
 	// Apply env-file overrides (inherit plan auth if present)
 	if len(s.ctx.Environment.Overrides) > 0 {
-		resolvedOverrides, err := s.ctx.Environment.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		var resolvedOverrides []config.ResolvedOverride
+		if planOverridesAuth || s.ctx.AuthProvider == nil {
+			resolvedOverrides, err = s.ctx.Environment.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		} else {
+			resolvedOverrides, err = s.ctx.Environment.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, s.ctx.AuthProvider)
+		}
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("building overrides: %v", err)), nil
 		}
