@@ -138,14 +138,14 @@ This produces a starting-point graph that you can refine with edges and custom o
 
 ## Next steps
 
-- [Graph Authoring Guide](../../docs/user/graph-authoring.md) — how to define nodes, edges, and conditions
+- [Graph Authoring Guide](../../docs/user/graphs.md) — how to define nodes, edges, and conditions
 - [Templates](../../docs/user/templates.md) — HTTP request/response template format
-- [Plan Authoring](../../docs/user/plan-authoring.md) — test plan YAML schema and assertions
+- [Plan Authoring](../../docs/user/plans.md) — test plan YAML schema and assertions
 - [Environments](../../docs/user/environments.md) — auth config, headers, LLM setup
-- [Domain Knowledge](../../docs/user/domain-knowledge.md) — concepts, types, value pools
+- [Domain Knowledge](../../docs/user/domain.md) — concepts, types, value pools
 - [Value Flow](../../docs/user/value-flow.md) — expressions, selections, constraint resolution
 - [Running Tests](../../docs/user/running.md) — CLI flags, CI/CD mode, archives
-- [LLM-Assisted Planning](../../docs/user/prompt-workflow.md) — generating plans from prompts
+- [LLM-Assisted Planning](../../docs/user/prompt.md) — generating plans from prompts
 
 ## Note about the Petstore API
 

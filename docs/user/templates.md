@@ -2,90 +2,87 @@
 
 Templates define how AAT translates graph node inputs into HTTP requests and extracts outputs from responses. Each template is a YAML file that maps to one graph node via its `adapter` name.
 
-## Quick Start
+## Overview
 
-A minimal template for a GET endpoint:
+Every node in the graph that makes an API call needs a corresponding template. The template specifies the HTTP method, path, headers, and body (with placeholders for dynamic values) on the request side, and extraction rules for pulling outputs from the JSON response. Templates are the bridge between the abstract graph model and concrete HTTP calls.
+
+## File Structure
+
+Templates live in a directory passed via `--templates` (or resolved from the [project manifest](project-setup.md)). AAT loads all `.yaml` and `.yml` files from this directory and registers each one by its `adapter` field. Subdirectories are ignored.
+
+The file name does not matter — only the `adapter` field links a template to a graph node. By convention, the file is named after the adapter (e.g., `listProducts.yaml` for `adapter: listProducts`), but this is not enforced.
+
+```
+templates/
+  listProducts.yaml      # adapter: listProducts
+  createOrder.yaml       # adapter: createOrder
+  cancelOrder.yaml       # adapter: cancelOrder
+```
+
+Each template's `adapter` field must be unique across all loaded templates — duplicate adapter names cause a load error.
+
+## Request Definition
+
+### Method and Path
 
 ```yaml
-adapter: getPet
+adapter: getProduct
 protocol: http
 
 request:
   method: GET
-  path: /pet/{{petId}}
-  headers:
-    Accept: application/json
-
-response:
-  extract:
-    petId: "id"
-    petName: "name"
-    petStatus: "status"
+  path: /products/{{productId}}
 ```
 
-## File Structure
+The `method` field accepts any HTTP method: GET, POST, PUT, DELETE, PATCH, etc. The `path` is appended to the environment's `apiBaseUrl` at execution time.
 
-Templates live in a directory passed via `--templates`. AAT loads all `.yaml` and `.yml` files from this directory and registers each one by its `adapter` name. The file name doesn't matter -- only the `adapter` field links a template to a graph node.
+The `protocol` field defaults to `"http"` and is the only supported value.
 
-## Schema Reference
+### Headers
 
 ```yaml
-adapter: <name>              # required — must match a graph node's adapter field
-protocol: http               # optional — defaults to "http" (only "http" is supported)
-
 request:
-  method: <HTTP method>      # required — GET, POST, PUT, DELETE, PATCH, etc.
-  path: <path>               # required — URL path (appended to environment base URL)
-  headers:                   # optional — request headers
+  method: POST
+  path: /orders
+  headers:
     Content-Type: application/json
-    X-Custom: "{{someInput}}"
-  body: |                    # optional — request body (typically for POST/PUT)
-    {
-      "field": "{{inputName}}"
-    }
-
-response:
-  extract:                   # optional — output extraction rules
-    outputName: "jsonPath"   #   scalar: bare string path
-    arrayOutput:             #   array with element transformation:
-      path: "jsonPath"       #     path to the array in response
-      fields:                #     element field mappings (optional)
-        fieldName: "jsonPath" #     logical name → gjson path within element
-  validate:                  # optional — response validation
-    schema: "schemaRef"
+    Accept: application/json
+    X-Custom-Header: "{{customValue}}"
 ```
 
-### Required Fields
+Headers support `{{placeholder}}` substitution. Static headers like `Content-Type` are set directly; dynamic headers use placeholders resolved from step inputs.
 
-| Field | Description |
-|-------|-------------|
-| `adapter` | Name linking this template to a graph node. Must be unique across templates. |
-| `request.method` | HTTP method (GET, POST, PUT, DELETE, etc.) |
-| `request.path` | URL path, appended to the environment's `apiBaseUrl` |
+### Body
 
-### Optional Fields
+```yaml
+request:
+  method: POST
+  path: /orders
+  headers:
+    Content-Type: application/json
+  body: |
+    {
+      "productId": "{{productId}}",
+      "quantity": {{quantity}},
+      "currency": "{{currency}}"
+    }
+```
 
-| Field | Default | Description |
-|-------|---------|-------------|
-| `protocol` | `"http"` | Protocol to use. Only `"http"` is currently supported. |
-| `request.headers` | none | Key-value pairs added to the request. Supports `{{placeholder}}` substitution. |
-| `request.body` | none | Request body string. Supports `{{placeholder}}` substitution. |
-| `response.extract` | none | Map of output names to extraction rules (string path or object with `path` + `fields`). |
-| `response.validate.schema` | none | Schema reference for response validation. |
+The body is a string template with `{{placeholder}}` substitution. Values are substituted using Go's `%v` formatting — string values in JSON should include surrounding quotes in the template; numeric values should not.
 
-## Placeholder Substitution
+## Placeholders
 
 Templates use `{{key}}` placeholders that are resolved at execution time. Whitespace inside braces is tolerated: `{{ key }}` works the same as `{{key}}`.
 
 ### Resolution Order
 
-1. **Step inputs** — Values resolved from the plan (literals, edge outputs, selections)
-2. **Environment config values** — Values from the environment's `values` map
+1. **Step inputs** — values resolved from the plan (literals, upstream step outputs, selections)
+2. **Environment config values** — values from the environment's `values` map
 
-If a placeholder can't be resolved from either source, AAT reports an error listing all unresolved placeholders:
+If a placeholder can't be resolved from either source, AAT reports an error:
 
 ```
-path substitution: unresolved placeholders: petId
+path substitution: unresolved placeholders: productId
 ```
 
 ### Placeholders in Different Fields
@@ -95,49 +92,162 @@ Placeholders work in `path`, `headers`, and `body`:
 ```yaml
 request:
   method: POST
-  path: /pets/{{petId}}/toys        # path parameter
+  path: /orders/{{orderId}}/items       # path parameter
   headers:
-    Authorization: Bearer {{token}}  # header value
+    Authorization: Bearer {{token}}     # header value
     X-Request-Id: "{{requestId}}"
-  body: |                            # body fields
+  body: |                               # body fields
     {
-      "name": "{{toyName}}",
-      "price": {{price}}
+      "productId": "{{productId}}",
+      "quantity": {{quantity}}
     }
 ```
 
-Values are substituted as strings using Go's `%v` formatting. For JSON bodies, string values in the body template should include quotes; numeric values should not.
+## Conditional Blocks
+
+Conditional blocks include or exclude sections of a template based on whether an input is present and non-empty.
+
+**Syntax:** `{{?key}}...{{/key}}`
+
+When `key` is present in the step inputs and has a non-empty value (non-empty string, non-nil value), the block content is included. Otherwise, the entire block — including the tags — is removed.
+
+```yaml
+body: |
+  {
+    "orderId": "{{orderId}}"
+    {{?giftWrap}},
+    "giftWrap": true,
+    "giftMessage": "{{giftMessage}}"
+    {{/giftWrap}}
+    {{?shippingPriority}},
+    "shipping": {
+      "priority": "{{shippingPriority}}"
+      {{?deliveryDate}},"requestedDate": "{{deliveryDate}}"{{/deliveryDate}}
+    }
+    {{/shippingPriority}}
+  }
+```
+
+In this example, the `shipping` block is only included when the plan supplies a `shippingPriority` value. Conditional blocks can be nested — the inner `{{?deliveryDate}}` block only appears if both `shippingPriority` and `deliveryDate` are provided.
+
+Conditional blocks are useful for optional API features like additional metadata, optional sub-resources, or feature flags:
+
+```yaml
+body: |
+  {
+    "customer": {
+      "name": "{{customerName}}",
+      "email": "{{email}}"
+      {{?billingAddress}},
+      "billingAddress": {
+        "street": "{{billingStreet}}",
+        "city": "{{billingCity}}",
+        "postalCode": "{{billingPostalCode}}"
+      }
+      {{/billingAddress}}
+      {{?promoCode}},
+      "promotion": {
+        "code": "{{promoCode}}"
+      }
+      {{/promoCode}}
+    }
+  }
+```
+
+Conditional blocks are expanded before placeholder substitution, so a block guarded by `{{?key}}` will have its `{{key}}` placeholder replaced only if the block is included.
+
+## Iteration Blocks
+
+Iteration blocks repeat a section of a template for each element in an array input.
+
+**Syntax:** `{{#key}}...{{/key}}`
+
+The block body is repeated for each element in the array, with iterations separated by commas. Inside the block:
+
+- **`{{.}}`** — the element value itself (for scalar arrays)
+- **`{{.fieldName}}`** — a named field from a map element
+
+```yaml
+body: |
+  {
+    "lineItems": [
+      {{#itemIds}}
+      {"itemId": "{{.}}"}
+      {{/itemIds}}
+    ]
+  }
+```
+
+If `itemIds` is `["item-1", "item-2", "item-3"]`, this produces:
+
+```json
+{
+  "lineItems": [
+    {"itemId": "item-1"},
+    {"itemId": "item-2"},
+    {"itemId": "item-3"}
+  ]
+}
+```
+
+Iteration blocks can be combined with conditional blocks — a conditional wrapping an iteration, or vice versa:
+
+```yaml
+body: |
+  {
+    "order": {
+      "primaryItem": "{{primaryItemId}}"
+      {{?additionalItemIds}},
+      "additionalItems": [
+        {{#additionalItemIds}}
+        {"itemId": "{{.}}"}
+        {{/additionalItemIds}}
+      ]
+      {{/additionalItemIds}}
+    }
+  }
+```
+
+## Input Classification
+
+Based on how inputs are used in the template, AAT classifies them as:
+
+- **Required** — appears in a regular `{{key}}` placeholder; must be resolved or the request fails
+- **Conditional** — appears only inside `{{?key}}...{{/key}}` blocks; the block is removed if the input is absent
+- **Iterable** — appears as the array in a `{{#key}}...{{/key}}` block; must be an array value
+
+This classification is used by validation to distinguish genuinely missing inputs from intentionally optional ones.
 
 ## Response Extraction
 
 The `response.extract` section defines how to pull values from a JSON response body. Each entry maps an output name (matching the graph node's output) to an extraction rule.
 
-### Scalar Extraction (String Form)
+### Scalar Extraction
 
 For scalar outputs, use a bare string path:
 
 ```yaml
 response:
   extract:
-    petId: "id"
-    petName: "name"
-    ownerEmail: "owner.email"
-    firstTag: "tags.0.name"
+    orderId: "id"
+    orderStatus: "status"
+    customerEmail: "customer.email"
+    firstItemName: "items.0.name"
 ```
 
-### Array Extraction with Element Transformation (Object Form)
+### Array Extraction
 
 For array outputs where downstream steps need to select individual elements by field name, use the object form with `path` and `fields`:
 
 ```yaml
 response:
   extract:
-    pets:
-      path: "$"
+    products:
+      path: "data.products"
       fields:
-        petId: "id"
-        petName: "name"
-        petStatus: "status"
+        productId: "id"
+        name: "name"
+        price: "pricing.retail"
 ```
 
 The `path` specifies where to find the array in the response. The `fields` map transforms each array element into a flat object with named keys. Each entry maps a logical field name (matching the graph's `elementFields`) to a gjson path within the element.
@@ -145,58 +255,57 @@ The `path` specifies where to find the array in the response. The `fields` map t
 Before transformation, a raw element might look like:
 
 ```json
-{"id": 42, "name": "Buddy", "status": "available", "photoUrls": [...]}
+{"id": "p-42", "name": "Widget", "pricing": {"retail": 19.99, "wholesale": 12.50}, "sku": "W-042"}
 ```
 
 After transformation, the engine sees:
 
 ```json
-{"petId": 42, "petName": "Buddy", "petStatus": "available"}
+{"productId": "p-42", "name": "Widget", "price": 19.99}
 ```
 
-This is especially valuable when the raw JSON uses deeply nested paths. For example, a Travelport offering element:
+This is especially valuable when the raw JSON uses deeply nested paths:
 
 ```yaml
 response:
   extract:
-    catalogProductOfferings:
-      path: "CatalogProductOfferingsResponse.CatalogProductOfferings.CatalogProductOffering"
+    results:
+      path: "response.data.searchResults"
       fields:
-        offeringId: "id"
-        productRef: "ProductBrandOptions.0.ProductBrandOffering.0.Product.0.productRef"
+        resultId: "id"
+        score: "metadata.relevance.score"
+        itemRef: "associations.0.items.0.ref"
 ```
 
-The template flattens the nested `productRef` path so plans and selection strategies reference it simply as `productRef`.
+The template flattens deeply nested paths so plans and selection strategies reference them by simple names like `score` or `itemRef`.
 
 When `fields` is omitted, the array elements are stored as-is (raw JSON objects). Selection strategies still work but must use gjson paths to access nested fields.
 
 ### Path Syntax
 
-Extraction paths (both string-form and within `fields`) use [gjson](https://github.com/tidwall/gjson) syntax with some normalization:
+Extraction paths use [gjson](https://github.com/tidwall/gjson) syntax with some normalization:
 
 | Path | Extracts | Notes |
 |------|----------|-------|
-| `"id"` | `{"id": 42}` → `42` | Simple field |
-| `"owner.email"` | `{"owner": {"email": "a@b.com"}}` → `"a@b.com"` | Nested field |
-| `"tags.0.name"` | `{"tags": [{"name": "cute"}]}` → `"cute"` | Array index |
+| `"id"` | `{"id": 42}` -> `42` | Simple field |
+| `"customer.email"` | `{"customer": {"email": "a@b.com"}}` -> `"a@b.com"` | Nested field |
+| `"items.0.name"` | `{"items": [{"name": "Widget"}]}` -> `"Widget"` | Array index |
 | `"$"` | entire body | Extracts the whole response as-is |
-
-### Path Normalization
 
 AAT normalizes paths before evaluation:
 
-- Leading `$.` is stripped: `$.owner.email` becomes `owner.email`
+- Leading `$.` is stripped: `$.customer.email` becomes `customer.email`
 - Lone `$` returns the entire response body
 - Bracket notation is converted: `[0]` becomes `.0`
 
-So `$.tags[0].name`, `tags[0].name`, and `tags.0.name` all work equivalently.
+So `$.items[0].name`, `items[0].name`, and `items.0.name` all work equivalently.
 
 ### Extraction Errors
 
-If an extract path doesn't match anything in the response, AAT reports an error:
+If an extract path doesn't match anything in the response:
 
 ```
-extract path "petId" (id) not found in response
+extract path "orderId" (id) not found in response
 ```
 
 The response body must be valid JSON for extraction to work. Non-JSON responses produce:
@@ -205,85 +314,111 @@ The response body must be valid JSON for extraction to work. Non-JSON responses 
 response body is not valid JSON
 ```
 
+## Lua Transforms
+
+Some APIs return complex structures where extracted outputs need post-processing — for example, responses that separate reference data from main results, requiring client-side joins to assemble complete records.
+
+The `response.transform` field takes an inline Lua script that post-processes the extracted outputs before they're stored. The script receives the extracted outputs as a mutable table and can query the raw response body for additional data.
+
+```yaml
+response:
+  extract:
+    results:
+      path: "data.results"
+      fields:
+        resultId: "id"
+        categoryRef: "refs.category"
+  transform: |
+    -- Resolve category references from the raw response
+    local categories = json_path("data.categories")
+    if not categories then return outputs end
+    -- ... enrich results with resolved category data ...
+    return outputs
+```
+
+See [Lua Transforms](lua-transforms.md) for the full guide covering the sandboxed runtime, available globals, and real-world examples.
+
 ## Header Merge Order
 
-When a request is built, headers come from two sources and are merged in this order:
+When a request is built, headers come from multiple sources and are merged in this order (later values override earlier ones for the same key):
 
-1. **Environment headers** — Static headers from the environment file's `headers` section (applied first)
-2. **Template headers** — Headers defined in the template (overlaid on top)
+1. **Environment headers** — static headers from the environment file's `headers` section
+2. **Template headers** — headers defined in the template's `request.headers`
+3. **Plan-level headers** — headers set on individual plan steps (see [Plans](plans.md))
+4. **Auth headers** — authentication headers added by the auth system (final precedence)
 
-Template headers override environment headers with the same key. Authentication headers (added by the auth system) are separate and take final precedence.
+This means you can set common headers like `Accept` in the environment, override per-template when needed, and let auth headers take final precedence.
 
-This means you can set common headers like `Accept` or `Content-Type` in the environment and override them per-template when needed.
+See [Environments](environments.md) for environment header configuration and [Plans](plans.md) for plan-level header overrides.
 
 ## Common Patterns
 
 ### GET with Path Parameter
 
 ```yaml
-adapter: getPet
+adapter: getProduct
 request:
   method: GET
-  path: /pet/{{petId}}
+  path: /products/{{productId}}
   headers:
     Accept: application/json
 response:
   extract:
-    petId: "id"
-    petName: "name"
+    productId: "id"
+    productName: "name"
 ```
 
 ### GET with Query Parameters (Array Response)
 
 ```yaml
-adapter: findByStatus
+adapter: listProducts
 request:
   method: GET
-  path: /pet/findByStatus?status={{status}}
+  path: /products?category={{category}}&limit={{maxResults}}
   headers:
     Accept: application/json
 response:
   extract:
-    pets:
-      path: "$"
+    products:
+      path: "data.products"
       fields:
-        petId: "id"
-        petName: "name"
-        petStatus: "status"
+        productId: "id"
+        name: "name"
+        price: "pricing.retail"
 ```
 
-Query parameters are part of the path string. Use `{{placeholder}}` substitution for dynamic values. The `fields` section transforms each array element so downstream selection strategies can reference `petId`, `petName`, etc. by name.
+Query parameters are part of the path string. The `fields` section transforms each array element so downstream selection strategies can reference `productId`, `name`, etc. by name.
 
 ### POST with JSON Body
 
 ```yaml
-adapter: createPet
+adapter: createOrder
 request:
   method: POST
-  path: /pet
+  path: /orders
   headers:
     Content-Type: application/json
     Accept: application/json
   body: |
     {
-      "name": "{{name}}",
-      "status": "{{status}}",
-      "photoUrls": []
+      "productId": "{{productId}}",
+      "quantity": {{quantity}},
+      "currency": "{{currency}}"
     }
 response:
   extract:
-    petId: "id"
-    petName: "name"
-    petStatus: "status"
+    orderId: "id"
+    orderStatus: "status"
+    totalAmount: "total.amount"
 ```
 
 ### DELETE with No Response Body
 
 ```yaml
-adapter: deletePet
+adapter: cancelOrder
 request:
   method: DELETE
-  path: /pet/{{petId}}
+  path: /orders/{{orderId}}
   headers:
     Accept: application/json
 response: {}
@@ -291,70 +426,49 @@ response: {}
 
 When there's nothing to extract, use an empty response object.
 
-### Extracting Array Responses
+## Validation
 
-For list endpoints, extract the array and optionally transform each element with `fields`:
-
-```yaml
-adapter: findByStatus
-request:
-  method: GET
-  path: /pet/findByStatus?status={{status}}
-  headers:
-    Accept: application/json
-response:
-  extract:
-    pets:
-      path: "$"
-      fields:
-        petId: "id"
-        petName: "name"
-        petStatus: "status"
-```
-
-Use `"$"` as the path to extract the entire response body (typical when the response is a top-level array). For nested arrays, use a gjson path like `"data.items"`.
-
-The `fields` section is optional but recommended when:
-- The graph declares `elementFields` on this output (for selection strategies)
-- The raw JSON field names differ from the logical names you want in plans
-- The element structure is deeply nested and you want a flat view
-
-Without `fields`, the raw JSON elements are stored as-is. The engine's selection system picks elements from this array using the strategies defined in the plan.
-
-## Loading Templates
-
-AAT loads templates from the directory specified by `--templates`:
+Use `aat validate graph` with `--templates` to check templates against the graph:
 
 ```bash
-aat run --templates templates/ ...
+aat validate graph --graph graph.yaml --templates templates/
 ```
 
-All `.yaml` and `.yml` files in the directory are parsed. Subdirectories are ignored. Each template's `adapter` field must be unique — duplicate adapter names cause a load error.
-
-Templates are matched to graph nodes by the `adapter` field on the node:
-
-```yaml
-# graph.yaml
-nodes:
-  getPet:
-    adapter: getPet    # ← matches template with adapter: getPet
-    ...
-```
-
-## Validating Templates Against the Graph
-
-Use `aat graph validate --templates` to check that graph-declared outputs match template extract keys:
-
-```bash
-aat graph validate --graph graph.yaml --templates templates/
-```
-
-This catches outputs declared in the graph that the template never extracts (will be nil at runtime) and extract keys in the template that the graph doesn't declare (dead extraction, likely a typo). See [Graph Authoring — Adapter output validation](graph-authoring.md#adapter-output-validation) for details.
+This catches:
+- **Graph output not extracted by template** — the node declares an output but the template has no extract entry, so the output will be nil at runtime
+- **Template extracts undeclared output** — the template extracts a key the graph doesn't declare (dead extraction, likely a typo)
+- **Element field mismatch** — for array outputs, the template's `fields` keys should match the graph's `elementFields` names
 
 This check also runs automatically at the start of `aat run`, so mismatches are caught before any API calls are made.
 
-## See Also
+See [Validation](validation.md) for the full reference covering all validation subcommands.
 
-- [Graph Authoring](graph-authoring.md) — how nodes reference templates via `adapter`
-- [Environments](environments.md) — base URL, headers, and config values
-- [Petstore Example](../../examples/petstore/README.md) — runnable templates in action
+## Schema Reference
+
+```yaml
+adapter: <name>              # required — must match a graph node's adapter field
+protocol: http               # optional — defaults to "http"
+
+request:
+  method: <HTTP method>      # required — GET, POST, PUT, DELETE, PATCH
+  path: <path>               # required — URL path (appended to environment base URL)
+  headers:                   # optional — request headers
+    Header-Name: value       #   supports {{placeholder}} substitution
+  body: |                    # optional — request body (typically for POST/PUT)
+    template with {{placeholders}}, {{?conditionals}}, and {{#iterations}}
+
+response:
+  extract:                   # optional — output extraction rules
+    scalarOutput: "path"     #   scalar: bare gjson path string
+    arrayOutput:             #   array with element transformation:
+      path: "path.to.array"  #     gjson path to the array in response
+      fields:                #     element field mappings
+        logicalName: "path"  #       logical name -> gjson path within element
+  transform: |               # optional — Lua post-processing script
+    -- receives `outputs` table and `json_path()` function
+    return outputs
+```
+
+---
+
+*Source: Restructured from `docs/user/templates.md` with new sections on conditional blocks, iteration blocks, input classification, and Lua transforms.*

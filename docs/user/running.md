@@ -1,695 +1,247 @@
-# Running AAT
+# Running Tests
 
-AAT executes API test plans against a live environment. A single `aat run` command loads your graph, templates, plan, and environment config, then executes the workflow end-to-end.
+AAT has two run commands: `aat run plan` executes a single plan, and `aat run batch` executes all plans in a directory. Both produce JSON archives that capture every request, response, and assertion for later inspection.
 
-## Quick Start
-
-If your project has an `aat-project.yaml` manifest (see [Project Discovery](#project-discovery)):
+## Running a Single Plan
 
 ```
-aat run plan workflows/booking_flow.yaml
+aat run plan <name-or-path>
 ```
 
-Or specify paths explicitly:
+The positional argument is either a file path or a plan name. AAT resolves names by searching the plan directories declared in your [manifest](project-setup.md), then falling back to the literal file path. A `.yaml` or `.yml` extension is optional when using names.
 
 ```
-aat run plan workflows/booking_flow.yaml \
-  --env environments/staging.yaml \
-  --graph graph.yaml \
-  --templates templates/
+$ aat run plan smoke-test
+  [1/3] listProducts            200    45ms
+  [2/3] createOrder             201   312ms
+  [3/3] getOrderStatus          200    28ms
+
+PASSED (3/3 steps, 385ms)
 ```
 
-> **Looking for LLM-assisted plan generation?** See [LLM-Assisted Planning](prompt-workflow.md) for the `aat prompt` command, which generates plans from natural language prompts.
+Each line shows the step index, node name, HTTP status code, and duration. Display outputs defined in the plan appear indented below their step.
 
-## Commands
-
-AAT has two run subcommands:
+## Running Batches
 
 ```
-aat run plan <name-or-path> [flags]    Execute a single test plan
-aat run batch [directory] [flags]      Execute all plans in a directory
+aat run batch [directory]
 ```
 
-The `plan` subcommand takes a positional argument (the plan file path). The `batch` subcommand optionally takes a subdirectory to filter which plans to run.
+Without arguments, AAT discovers all `.yaml` and `.yml` files in the plan directories declared in your manifest. With a directory argument, it scopes discovery to that subdirectory.
 
-### Shared Flags
+### Subdirectory Filtering
 
-| Flag | Required | Default | Description |
-|------|----------|---------|-------------|
-| `--env` | auto | | Path to the environment YAML file |
-| `--graph` | auto | | Path to the graph YAML file |
-| `--templates` | auto | | Path to the templates directory |
-| `--output` | no | `_output/runs` | Directory for archive output |
-| `--mode` | no | env config or `strict` | Execution mode: `strict`, `lean`, `adaptive` |
-| `--domain` | no | | Path to domain knowledge YAML file |
-| `--json` | no | `false` | Output machine-readable JSON summary to stdout |
-| `--quiet` | no | `false` | Suppress progress messages, show only final result |
-| `--override` | no | | Route a node to a different URL: `nodeName=http://url` (repeatable) |
-| `--env-overlay` | no | | Path to an overlay file with additional overrides |
-| `--retries` | no | `0` | Max plan-level retries on failure |
-| `--layer` | no | | Layer names to include (repeatable) |
-| `--layer-group` | no | | Layer group for batch permutation matrix (repeatable) |
+A relative path filters within the configured plan directories. An absolute path is used as a standalone directory.
 
-**Auto-resolved flags:** `--env`, `--graph`, and `--templates` are resolved automatically when an `aat-project.yaml` manifest is found (see [Project Discovery](#project-discovery)). Explicit flags always take priority.
+```
+# Run only plans under plans/orders/
+aat run batch orders/
 
-### What Happens
+# Run plans from an absolute path
+aat run batch /tmp/smoke-tests/
+```
 
-1. **Load environment** -- Parses the environment YAML and authenticates (e.g., OAuth2 token exchange).
-2. **Load graph** -- Parses and validates the API graph (nodes, edges, inputs, outputs).
-3. **Load plan** -- Parses the plan YAML (steps, values, assertions, retry config).
-4. **Validate plan** -- Validates plan references against the graph before execution begins.
-5. **Load templates** -- Scans the templates directory and registers all adapters.
-6. **Execute plan** -- Runs steps in topological order, resolving inputs from edges and plan values. Retries and assertions are applied per-step.
-7. **Print summary** -- Shows step-by-step results with status codes and timing.
-8. **Write archive** -- Saves the full run (requests, responses, outputs, selections) as JSON.
+### Parallel Execution
+
+By default, plans run sequentially. Use `--parallel` to run multiple plans concurrently.
+
+```
+aat run batch --parallel 4
+```
+
+In parallel mode, AAT displays a compact progress renderer that tracks all active plans. Sequential mode shows step-by-step output for each plan.
+
+### Layer Expansion
+
+Layers provide alternate test data for the same plan structure. The `--layer` flag adds a layer to every plan in the batch. The `--layer-group` flag creates a cartesian product — each plan runs once per combination of layer groups.
+
+```
+# Every plan runs with the "premium" layer applied
+aat run batch --layer premium
+
+# 2 plans x 2 groups = 4 runs
+aat run batch --layer-group "premium,standard" --layer-group "us,eu"
+```
+
+With two plans (`smoke-test.yaml`, `full-checkout.yaml`) and two layer groups of two values each, AAT runs eight total executions: each plan with each combination of (`premium`/`standard`) x (`us`/`eu`).
+
+See [Plans: Layers](plans.md#layers) for how layers are defined and how they override step values.
+
+## Shared Flags
+
+These flags apply to both `run plan` and `run batch`.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--manifest` | path | auto-discovered | Explicit path to `aat-project.yaml` |
+| `--env` | path | from manifest | Environment config file |
+| `--graph` | path | from manifest | API graph file |
+| `--templates` | path | from manifest | Templates directory |
+| `--domain` | path | from manifest | Domain knowledge file |
+| `--output` | path | `_output/runs` | Archive output directory |
+| `--override` | `NODE=URL` | — | Route a node to a different URL (repeatable) |
+| `--env-overlay` | path | — | Overlay YAML with additional environment overrides |
+| `--retries` | int | `0` | Max plan-level retries on failure |
+| `--layer` | string | — | Data layer to apply (repeatable) |
+| `--json` | bool | `false` | Machine-readable JSON summary to stdout |
+| `--quiet` | bool | `false` | Suppress progress, show final line only |
+
+The `run batch` command adds:
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--parallel` | int | `1` | Concurrency limit (1 = sequential) |
+| `--layer-group` | string | — | Comma-separated layer names for permutations (repeatable) |
+
+When a manifest is discoverable, `--env`, `--graph`, `--templates`, and `--domain` are optional. Explicit flags always override manifest paths. See [Project Setup: Auto-Discovery](project-setup.md#auto-discovery) for how manifest resolution works.
 
 ## Output Modes
 
-AAT supports three output modes, selected by the `--json` and `--quiet` flags. Each mode is designed for a different use case.
+### Default (Progress)
 
-### Default (interactive)
-
-The default mode prints progress messages as the run proceeds, a step-by-step summary, and the archive path. This is what you use when running interactively from a terminal.
+Without flags, AAT prints step-by-step progress as each step completes.
 
 ```
-$ aat run plan plan.yaml
-
-aat: loading environment...
-aat: loaded environment "staging"
-aat: authenticated via oauth2
-aat: loaded graph (7 nodes, 11 edges)
-aat: loaded 7 templates
-aat: executing plan (6 steps, mode=strict)...
-
-  [1/6] searchFlights        200  851ms
-  [2/6] createWorkbench      200  279ms
-  [3/6] priceOffer           200  535ms
-  [4/6] addOffer             200  722ms
-  [5/6] addTraveler          200  302ms
-  [6/6] commitBooking        200  2640ms
+$ aat run plan full-checkout
+  [1/5] listProducts            200    52ms
+  [2/5] createCart               201    98ms
+  [3/5] addToCart                200    45ms
+  [4/5] createOrder             201   287ms
+  [5/5] getOrderStatus          200    31ms
 
   cleanup:
-    ignoreWorkbench        400  167ms
+    cancelOrder                  200    64ms
 
-PASSED (6/6 steps, 5.5s)
-Archive: _output/runs/run-20260210-143022-a1b2c3d4/archive.json
+PASSED (5/5 steps, 513ms)
 ```
 
-When a step fails:
+Assertion failures append a marker to the step line. Display outputs appear indented below their step.
+
+### Quiet (`--quiet`)
+
+Suppresses all progress output. Prints a single summary line when the run finishes.
 
 ```
-  [1/4] searchFlights        200  643ms
-  [2/4] createWorkbench      200  205ms
-  [3/4] addOffer             400  312ms
-
-  cleanup:
-    ignoreWorkbench        204  167ms
-
-FAILED: step "addOffer" returned status 400
-Archive: _output/runs/run-20260210-143048-e5f6a7b8/archive.json
+$ aat run plan smoke-test --quiet
+PASSED (3/3 steps, 385ms)
 ```
 
-When retries are exhausted:
+For batches, each plan gets one summary line:
 
 ```
-  [3/4] addOffer             ERROR [server] (after 2 retries)
+$ aat run batch --quiet
+smoke-test          PASSED  3 steps   385ms
+full-checkout       PASSED  5 steps   513ms
+return-flow         FAILED  4 steps   892ms
+
+FAILED (2/3 passed)
 ```
 
-When assertions fail:
+### JSON (`--json`)
+
+Writes a machine-readable JSON summary to stdout. Implies `--quiet` — no progress output is mixed with the JSON. See [CI/CD Integration](ci-cd.md) for the full JSON schema and pipeline integration patterns.
 
 ```
-  [2/4] priceOffer           200  535ms  ASSERTIONS FAILED
+$ aat run plan smoke-test --json
+{"outcome":"passed","steps":[...],"summary":{"total_steps":3,...},...}
 ```
-
-### Quiet mode (`--quiet`)
-
-Quiet mode suppresses all progress messages and the step-by-step breakdown. Only the final result line and archive path are printed. Use this in CI logs where you want a clean pass/fail signal without verbose output.
-
-```
-$ aat run plan plan.yaml --quiet
-
-PASSED (6/6 steps)
-Archive: _output/runs/run-20260210-143022-a1b2c3d4/archive.json
-```
-
-On failure:
-
-```
-$ aat run plan plan.yaml --quiet
-
-FAILED: step "addOffer" returned status 400
-Archive: _output/runs/run-20260210-143048-e5f6a7b8/archive.json
-```
-
-On infrastructure error (e.g., invalid plan):
-
-```
-$ aat run plan bad_plan.yaml --quiet
-
-aat: plan validation: unknown node "nonExistentNode"
-```
-
-### JSON mode (`--json`)
-
-JSON mode outputs a single machine-readable JSON object to stdout. All progress messages and human-readable summaries are suppressed (`--json` implies `--quiet`). Use this when you need to parse results programmatically -- in CI/CD pipelines, monitoring scripts, or downstream tooling.
-
-```
-$ aat run plan plan.yaml --json
-
-{
-  "outcome": "passed",
-  "steps": [
-    {
-      "name": "searchFlights",
-      "node": "searchFlights",
-      "status": 200,
-      "duration_ms": 851,
-      "passed": true,
-      "retries": 0,
-      "assertions_passed": 2,
-      "assertions_failed": 0
-    },
-    {
-      "name": "createWorkbench",
-      "node": "createWorkbench",
-      "status": 200,
-      "duration_ms": 279,
-      "passed": true,
-      "retries": 0,
-      "assertions_passed": 0,
-      "assertions_failed": 0
-    },
-    {
-      "name": "priceOffer",
-      "node": "priceOffer",
-      "status": 200,
-      "duration_ms": 535,
-      "passed": true,
-      "retries": 0,
-      "assertions_passed": 1,
-      "assertions_failed": 0
-    },
-    {
-      "name": "addOffer",
-      "node": "addOffer",
-      "status": 200,
-      "duration_ms": 722,
-      "passed": true,
-      "retries": 0,
-      "assertions_passed": 0,
-      "assertions_failed": 0
-    }
-  ],
-  "cleanup": [
-    {
-      "name": "ignoreWorkbench",
-      "node": "ignoreWorkbench",
-      "status": 204,
-      "duration_ms": 167,
-      "passed": true,
-      "retries": 0,
-      "assertions_passed": 0,
-      "assertions_failed": 0
-    }
-  ],
-  "summary": {
-    "total_steps": 4,
-    "passed_steps": 4,
-    "failed_steps": 0,
-    "duration_ms": 2387
-  },
-  "archive_path": "_output/runs/run-20260210-143022-a1b2c3d4/archive.json"
-}
-```
-
-Failed run:
-
-```
-$ aat run plan plan.yaml --json
-
-{
-  "outcome": "failed",
-  "error": "step \"addOffer\" returned status 400",
-  "steps": [
-    {
-      "name": "searchFlights",
-      "node": "searchFlights",
-      "status": 200,
-      "duration_ms": 643,
-      "passed": true,
-      "retries": 0,
-      "assertions_passed": 0,
-      "assertions_failed": 0
-    },
-    {
-      "name": "addOffer",
-      "node": "addOffer",
-      "status": 400,
-      "duration_ms": 312,
-      "passed": false,
-      "error": "status 400",
-      "retries": 0,
-      "assertions_passed": 0,
-      "assertions_failed": 0
-    }
-  ],
-  "summary": {
-    "total_steps": 2,
-    "passed_steps": 1,
-    "failed_steps": 1,
-    "duration_ms": 955
-  },
-  "archive_path": "_output/runs/run-20260210-143048-e5f6a7b8/archive.json"
-}
-```
-
-Infrastructure error (e.g., missing file, invalid plan):
-
-```
-$ aat run plan nonexistent.yaml --json
-
-{
-  "outcome": "error",
-  "error": "loading plan: reading plan file: open nonexistent.yaml: no such file or directory"
-}
-```
-
-Note that infrastructure errors have no `steps`, `summary`, or `archive_path` because execution never started.
-
-#### JSON Schema Reference
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `outcome` | string | `"passed"`, `"failed"`, or `"error"` |
-| `error` | string | Error message (omitted when outcome is `"passed"`) |
-| `steps` | array | Per-step results (omitted on infrastructure errors) |
-| `cleanup` | array | Cleanup step results (omitted if no cleanup ran) |
-| `summary` | object | Aggregate statistics (omitted on infrastructure errors) |
-| `archive_path` | string | Path to the full archive JSON (omitted on infrastructure errors) |
-
-**Step fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string | Step name (same as `node` for now) |
-| `node` | string | Graph node that was executed |
-| `status` | int | HTTP status code (0 if no response) |
-| `duration_ms` | int | Step execution time in milliseconds |
-| `passed` | bool | Whether the step succeeded |
-| `error` | string | Error message (omitted on success) |
-| `retries` | int | Number of retries performed (0 = no retries) |
-| `assertions_passed` | int | Number of mechanical assertions that passed |
-| `assertions_failed` | int | Number of mechanical assertions that failed |
-
-**Summary fields:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `total_steps` | int | Total execution steps (excludes cleanup) |
-| `passed_steps` | int | Steps that passed |
-| `failed_steps` | int | Steps that failed |
-| `duration_ms` | int | Total duration across all steps and cleanup |
 
 ## Exit Codes
 
-AAT uses granular exit codes to distinguish test failures from infrastructure problems. This matters in CI pipelines where you may want different behavior for "tests failed" vs. "couldn't run."
-
 | Code | Meaning | When |
 |------|---------|------|
-| `0` | Passed | All steps completed successfully |
-| `1` | Test failure | A step returned 4xx/5xx, an assertion failed, or a negative assertion didn't match |
-| `2` | Infrastructure error | Config/parse errors, missing files, invalid plan, or an engine-level error |
+| `0` | Passed | All steps and assertions succeeded |
+| `1` | Failed | One or more steps or assertions failed |
+| `2` | Error | Infrastructure or setup error (bad config, network failure, invalid plan) |
 
-### Why this matters for CI
+These codes are deterministic and designed for CI/CD pipelines. See [CI/CD Integration: Exit Codes](ci-cd.md#exit-codes) for detailed scenarios.
 
-With a single exit code, your pipeline can't tell whether tests failed or the test runner is broken. With granular codes:
+## What Happens During Execution
 
-```yaml
-# GitHub Actions example
-- name: Run API tests
-  run: aat run plan plan.yaml --env ci.yaml --graph graph.yaml --templates templates/
-  continue-on-error: true
-  id: aat
+When you run a plan, AAT performs these steps in order:
 
-- name: Handle results
-  run: |
-    if [ "${{ steps.aat.outcome }}" = "failure" ]; then
-      exit_code=$?
-      if [ $exit_code -eq 1 ]; then
-        echo "Tests failed -- creating issue"
-      elif [ $exit_code -eq 2 ]; then
-        echo "Infrastructure error -- paging on-call"
-      fi
-    fi
-```
+1. **Load and validate** — parse the plan YAML, validate it against the graph
+2. **Authenticate** — obtain credentials using the environment's auth config
+3. **Resolve and execute** — for each step in topological order: resolve input values, execute the HTTP request, extract outputs, run assertions
+4. **Cleanup** — run cleanup steps in reverse order, even if main steps failed
+5. **Archive** — write the full execution trace to the output directory
 
-## CI/CD Integration
+### Step Execution Order
 
-### GitHub Actions
+Steps run in topological order based on `dependsOn` declarations. Steps with no dependencies run first. Steps that depend on earlier steps wait until their dependencies complete. Within a dependency level, steps run in plan declaration order.
 
-```yaml
-name: API Tests
-on:
-  schedule:
-    - cron: '0 */4 * * *'  # every 4 hours
-  workflow_dispatch:
+### Value Resolution at Runtime
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+Each step input is resolved through a priority chain: plan-provided values, then references to earlier step outputs, then domain value pools, then graph defaults. Expressions like `{{today + 7 days}}` and environment variable references like `{{env.API_REGION}}` are evaluated at resolution time.
 
-      - name: Run API tests
-        run: |
-          aat run plan workflows/booking_flow.yaml \
-            --json \
-            --env environments/ci.yaml \
-            --graph graph.yaml \
-            --templates templates/ \
-            --output ${{ runner.temp }}/runs \
-            > result.json
+See [Value Resolution](value-flow.md) for the full priority chain and resolution strategies.
 
-      - name: Check outcome
-        if: always()
-        run: |
-          outcome=$(jq -r '.outcome' result.json)
-          echo "Test outcome: $outcome"
-          echo "Passed: $(jq '.summary.passed_steps' result.json)/$(jq '.summary.total_steps' result.json)"
+### Cleanup
 
-      - name: Upload archive
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: aat-archive
-          path: ${{ runner.temp }}/runs/
-```
+Steps with `cleanup: true` run after all main steps complete, regardless of whether main steps passed or failed. Cleanup steps run in reverse declaration order. A failed cleanup step does not affect the run outcome — the outcome is determined by the main steps.
 
-### GitLab CI
+## Retries
 
-```yaml
-api_tests:
-  stage: test
-  script:
-    - aat run plan plan.yaml --json --env ci.yaml --graph graph.yaml --templates templates/ > result.json
-    - jq '.outcome' result.json
-  artifacts:
-    when: always
-    paths:
-      - runs/
-    reports:
-      junit: result.json  # not JUnit, but archived for inspection
-  allow_failure:
-    exit_codes:
-      - 1  # test failures are soft failures
-      # exit code 2 (infra) is a hard failure
-```
-
-### Shell Scripts
-
-```bash
-#!/bin/bash
-
-aat run plan plan.yaml \
-  --quiet \
-  --env production.yaml \
-  --graph graph.yaml \
-  --templates templates/
-
-case $? in
-  0) echo "All tests passed" ;;
-  1) echo "Test failure detected" ; notify_slack "API tests failed" ;;
-  2) echo "Infrastructure error" ; page_oncall "AAT can't run" ;;
-esac
-```
-
-### Parsing JSON Output
-
-The `--json` flag produces output that tools like `jq` can parse directly:
-
-```bash
-# Get the outcome
-aat run --json ... | jq -r '.outcome'
-
-# Get failed step names
-aat run --json ... | jq -r '.steps[] | select(.passed == false) | .name'
-
-# Get total duration
-aat run --json ... | jq '.summary.duration_ms'
-
-# Check if any assertions failed
-aat run --json ... | jq '[.steps[] | .assertions_failed] | add'
-
-# Get the archive path for further inspection
-aat run --json ... | jq -r '.archive_path'
-```
-
-## Project Discovery
-
-AAT can automatically resolve `--env`, `--graph`, `--templates`, and `--domain` from a project manifest, so you only need the plan path on each invocation.
-
-### How it works
-
-AAT looks for an `aat-project.yaml` file using a 4-level priority chain (later sources override earlier ones):
-
-1. **User config** — A `default_project` path in `~/.config/aat/config.yaml` (or platform equivalent)
-2. **`AAT_PROJECT` env var** — Points to a directory containing `aat-project.yaml`, or directly to a `.yaml` manifest file
-3. **CWD walk-up** — Starting from the current directory, walks up parent directories looking for `aat-project.yaml`
-4. **Explicit flags** — `--graph`, `--env`, `--templates`, `--domain` always win
-
-### Setting up a project manifest
-
-Create `aat-project.yaml` in your project root:
-
-```yaml
-name: my-api
-description: "My API test project"
-graph: graph.yaml
-templates: templates/
-environment: env.yaml
-domain: domain.yaml         # optional
-workflows: workflows/       # optional
-archives: _output/runs      # optional
-traces: _output/traces      # optional
-```
-
-All paths are relative to the manifest file. With this in place:
-
-```bash
-# Before: every flag required
-aat run plan workflows/test.yaml --env env.yaml --graph graph.yaml --templates templates/
-
-# After: only the plan is needed
-aat run plan workflows/test.yaml
-```
-
-### Using `AAT_PROJECT`
-
-Set the env var to point to your project directory (or manifest file):
-
-```bash
-export AAT_PROJECT=~/projects/my-api
-aat run plan workflows/test.yaml
-```
-
-### User-level default project
-
-Create a config file at the platform-appropriate location:
-
-| Platform | Path |
-|----------|------|
-| macOS | `~/Library/Application Support/aat/config.yaml` |
-| Linux | `~/.config/aat/config.yaml` |
-| Windows | `%AppData%\aat\config.yaml` |
-
-```yaml
-default_project: /home/user/projects/my-api
-```
-
-This is the lowest-priority source — any manifest found via CWD, `AAT_PROJECT`, or explicit flags overrides it.
-
-## Execution Modes
-
-The `--mode` flag controls how AAT resolves input values when explicit values aren't available. It overrides whatever is set in the environment config.
-
-| Mode | LLM Usage | Behavior |
-|------|-----------|----------|
-| `strict` | Never | Only uses plan values, edge outputs, and fallback pools. Fails if a value can't be resolved. |
-| `lean` | After pools exhausted | Tries all deterministic sources first, then asks the LLM as a last resort. |
-| `adaptive` | After pools + relaxation | Like `lean`, but also relaxes soft constraints and retries steps on 4xx errors. |
-
-`strict` is the default and is recommended for CI/CD where reproducibility matters. `lean` and `adaptive` require an LLM endpoint configured in the environment file.
+The `--retries` flag sets the maximum number of plan-level retries on failure. When a plan fails and retries remain, AAT re-executes the entire plan from scratch.
 
 ```
-# Strict (default) -- fully deterministic
-aat run plan plan.yaml
-
-# Lean -- LLM fills in gaps
-aat run plan plan.yaml --mode lean
-
-# Adaptive -- LLM + constraint relaxation
-aat run plan plan.yaml --mode adaptive
+aat run plan flaky-test --retries 2
 ```
 
-## Multi-Host Routing
+Each failed attempt is saved as `attempt-01.json`, `attempt-02.json`, etc. in the run directory. The final attempt (whether it passed or not) is saved as `archive.json`. Setup errors (invalid plan, missing config) are not retried.
 
-By default, every API call goes to the single `apiBaseUrl` from your environment file. When you need to route specific nodes to different servers, AAT provides three mechanisms (from quickest to most structured):
+A short delay separates retry attempts to avoid hammering the API.
 
-### CLI `--override` flag
+## Archives
 
-The fastest way to reroute a node -- no file editing required:
+Every execution produces a JSON archive in the output directory.
 
-```bash
-# Route searchFlights to localhost
-aat run plan plan.yaml \
-  --override searchFlights=http://localhost:8080
+### Single Run
 
-# Multiple overrides
-aat run plan plan.yaml \
-  --override searchFlights=http://localhost:8080 \
-  --override priceOffer=http://localhost:8081
+```
+_output/runs/
+  run-20260223-143052-a1b2c3d4/
+    archive.json
 ```
 
-CLI overrides use `auth: none` (the common case for local development servers). For overrides that need authentication, use the environment file or an overlay file.
+### Batch
 
-### Environment file `overrides` section
-
-For persistent, version-controlled overrides, add an `overrides` section to your environment YAML. See [environments.md](environments.md#overrides-multi-host-routing) for full documentation.
-
-```yaml
-overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
-    auth: { type: none }
-    pathRewrite:
-      strip: /11
-      prefix: /api/v2
+```
+_output/runs/
+  batch-20260223-150000-e5f6g7h8/
+    batch.json
+    run-20260223-150001-i9j0k1l2/
+      archive.json
+    run-20260223-150003-m3n4o5p6/
+      archive.json
 ```
 
-### Overlay files (`--env-overlay`)
+The batch directory contains a `batch.json` with aggregate results and a subdirectory per plan with its individual archive.
 
-For override sets that you want to share or swap without editing the base environment:
+### What Archives Contain
 
-```bash
-aat run plan plan.yaml --env-overlay local-dev.yaml
-```
+Archives capture the full execution trace: per-step request/response pairs (method, URL, headers, body), HTTP status codes, timing, extracted outputs, value resolution decisions, selection decisions, assertion results, and error classifications. Sensitive headers (`Authorization`, API keys) are automatically redacted.
 
-Where `local-dev.yaml` contains just overrides:
+Archives are safe to store as CI artifacts or share with teammates. See [Web UI and Archives](web-ui.md) for browsing and debugging with the archive viewer.
 
-```yaml
-overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
-    auth: { type: none }
-```
+## Building AAT
 
-Overlay overrides are appended to any overrides in the base environment file. See [environments.md](environments.md#overlay-files) for details.
-
-### Practical examples
-
-**Debug a single service locally:**
-
-You're debugging why `searchFlights` returns unexpected results. Run it locally while the rest of the workflow hits the real staging environment:
-
-```bash
-# Start your local service on port 8080, then:
-aat run plan workflows/booking_flow.yaml \
-  --override searchFlights=http://localhost:8080
-```
-
-**Compare staging vs. production for one operation:**
-
-Route pricing calls to staging while everything else hits production:
-
-```bash
-aat run plan workflows/booking_flow.yaml \
-  --env-overlay staging-pricing.yaml
-```
-
-Where `staging-pricing.yaml`:
-
-```yaml
-overrides:
-  - match: "price*"
-    baseUrl: https://api.staging.example.com
-    # auth inherited from production
-```
-
-**Handle local path differences:**
-
-Your production API uses `/11/air/search` but your local service uses `/api/v2/air/search`:
-
-```bash
-aat run plan workflows/search_test.yaml \
-  --env-overlay local-search.yaml
-```
-
-Where `local-search.yaml`:
-
-```yaml
-overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
-    auth: { type: none }
-    pathRewrite:
-      strip: /11
-      prefix: /api/v2
-```
-
-## Building
+Build the AAT binary with version information embedded:
 
 ```
 make build
 ```
 
-This compiles the Svelte frontend and builds the Go binary with version/commit/date metadata. A bare `go build ./cmd/aat/` skips the frontend and version injection.
+This compiles the Go binary with version, commit hash, and build date injected via linker flags, and builds the embedded web UI frontend.
 
-## Archives
+For a quick build without the frontend:
 
-Every run produces a JSON archive in the output directory (default `_output/runs/`). The archive contains:
-
-- Full plan snapshot
-- Per-step: request (method, URL, headers, body), response (status, headers, body), extracted outputs, selection decisions, value resolutions, timing, error classification
-- Headers are redacted (Authorization, API keys, etc.)
-- For `lean`/`adaptive` mode: LLM call records with prompts, token counts, and timing
-
-Archives are useful for debugging failed runs, comparing behavior across environments, and tracking regressions.
-
-The `--json` summary includes the `archive_path` field so scripts can locate the full archive:
-
-```bash
-archive=$(aat run --json ... | jq -r '.archive_path')
-cat "$archive" | jq '.steps[0].request'
+```
+go build -o aat ./cmd/aat/
 ```
 
-## Concepts
+The resulting binary is self-contained — no runtime dependencies, no external files needed beyond your project's YAML configuration.
 
-### Graph
+---
 
-The graph (`--graph`) defines the API's topology: which nodes (API operations) exist, what inputs/outputs they have, and how data flows between them via edges. Edges can be direct (scalar value pass-through) or select (choose from an array output).
-
-### Templates
-
-Templates (`--templates`) are YAML files that define how to build HTTP requests and extract responses for each node. They use `{{placeholder}}` substitution for inputs and gjson paths for output extraction.
-
-Before execution begins, AAT validates that each node's declared outputs match the extract keys in its template. This pre-flight check catches typos and stale renames before any API calls are made. You can also run this check standalone with `aat graph validate --templates`.
-
-### Plan
-
-The plan (positional argument to `aat run plan`) specifies what to execute: which graph nodes to run, in what order (via `dependsOn`), with what input values, retry policies, and assertions. Plans can provide literal values, reference upstream outputs, or use selection strategies (first, last, random, min, max, match, llm) on array outputs.
-
-### Environment
-
-The environment (`--env`) configures the target: base URL, authentication, custom headers, LLM config, and runtime settings. See [environments.md](environments.md) for details.
-
-### Domain Knowledge
-
-Optional domain knowledge (`--domain`) provides the LLM with context about your API's concepts, types, and valid value pools. Only used in `lean` and `adaptive` modes.
-
-## See Also
-
-- [Plan Authoring](plan-authoring.md) -- plan YAML schema reference
-- [Plan-Level Auth & Headers](plan-auth.md) -- embedding per-plan credentials and custom headers
-- [Environments](environments.md) -- environment config, auth types, overrides
-- [LLM-Assisted Planning](prompt-workflow.md) -- generating plans with `aat prompt`
-- [Project Validation](project-validation.md) -- validating the full project with `aat validate`
+*Source: `cmd/aat/run_plan_cmd.go`, `cmd/aat/run_batch_cmd.go`, `cmd/aat/run_shared.go`, `cmd/aat/progress.go`.*

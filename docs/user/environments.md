@@ -1,73 +1,49 @@
 # Environments
 
-An environment file tells AAT how to reach your API: where it lives, how to authenticate, and how the engine should behave. Each environment is a single YAML file.
+The environment file configures how AAT connects to your API at runtime — base URL, authentication, headers, LLM settings, and multi-host routing.
 
-## Quick Start
+## Overview
 
-Create a file called `test.yaml`:
-
-```yaml
-environment: test
-apiBaseUrl: https://api.example.com
-
-auth:
-  type: bearer
-  credentials:
-    token:
-      source: env
-      var: API_TOKEN
-```
-
-Run a plan against it:
-
-```
-aat run plan workflows/smoke.yaml --env test.yaml
-```
-
-The `--env` flag takes a direct file path to the environment YAML file.
+AAT separates **what to test** (graph, plans, templates) from **where to test** (environment). The environment file holds connection details for a specific target: API endpoints, credentials, static headers, and runtime settings. Switching between development, staging, and production is a matter of pointing to a different environment file via `--env` or the [project manifest](project-setup.md).
 
 ## File Structure
 
+An environment file is a YAML document with a top-level `environment` name and `apiBaseUrl`:
+
 ```yaml
-environment: <name>          # required — identifies this environment
-apiBaseUrl: <url>            # required — base URL for all API calls
+environment: dev
+apiBaseUrl: https://api.dev.example.com
 
-auth:                        # required — how to authenticate
-  type: <oauth2|apikey|bearer|none>
-  # ... type-specific fields (see below)
+auth:
+  type: none
+```
 
-headers:                     # optional — static headers added to every request
-  X-Custom-Header: value
+A more typical configuration includes authentication and headers:
 
-llm:                         # optional — LLM provider config
-  endpoint: <url>
-  apiKey:
-    source: env
-    var: LLM_API_KEY
-  model: gpt-5.2
-  mode: <strict|lean|adaptive>
+```yaml
+environment: staging
+apiBaseUrl: https://api.staging.example.com
 
-overrides:                   # optional — route specific nodes to different servers
-  - match: <pattern>
-    baseUrl: <url>
-    # auth, headers, pathRewrite — see Overrides section
+auth:
+  type: apikey
+  headerName: X-API-Key
+  credentials:
+    key:
+      source: env
+      var: STAGING_API_KEY
 
-settings:                    # optional — all have defaults
-  maxRunDuration: 120s
-  defaultRetries: 2
-  maxRelaxationDepth: 3
-  archiveFormat: json
-
-notes: Free-text notes.      # optional
+headers:
+  Accept: application/json
+  X-Client-Version: "2.1"
 ```
 
 ## Authentication
 
-The `auth` section controls how AAT authenticates API requests. Four types are supported.
+AAT supports four authentication types. Tokens are cached by an internal `AuthProvider` to avoid redundant auth calls — OAuth2 tokens are refreshed 30 seconds before expiry, while API key and bearer tokens are cached indefinitely.
 
-### `oauth2`
+### OAuth2
 
-Performs an OAuth2 Resource Owner Password Credentials (ROPC) token exchange. The resulting Bearer token is sent on every API request.
+Resource Owner Password Credentials (ROPC) flow. AAT exchanges credentials for a token at the specified `tokenUrl`:
 
 ```yaml
 auth:
@@ -88,27 +64,27 @@ auth:
       var: API_CLIENT_SECRET
 ```
 
-**Required fields:** `tokenUrl`, and credentials for `username`, `password`, `clientId`, `clientSecret`.
+Required credentials: `username`, `password`, `clientId`, `clientSecret`. All four must be present for OAuth2.
 
-### `apikey`
+### API Key
 
-Sends a static API key in a custom header.
+A static key sent as a custom header. The `headerName` field controls which header carries the key:
 
 ```yaml
 auth:
   type: apikey
-  headerName: X-Api-Key
+  headerName: X-API-Key
   credentials:
     key:
       source: env
-      var: API_KEY
+      var: INVENTORY_API_KEY
 ```
 
-**Required fields:** `headerName`, and credentials for `key`.
+Required: `credentials.key` and `headerName`.
 
-### `bearer`
+### Bearer Token
 
-Sends a static Bearer token in the `Authorization` header. Use this when you already have a token and don't need AAT to perform a token exchange.
+A pre-obtained token sent as `Authorization: Bearer <token>`:
 
 ```yaml
 auth:
@@ -116,397 +92,291 @@ auth:
   credentials:
     token:
       source: env
-      var: API_TOKEN
+      var: ANALYTICS_TOKEN
 ```
 
-**Required fields:** credentials for `token`.
+Required: `credentials.token`.
 
-### `none`
+### No Auth
 
-No authentication. Useful for public APIs or when auth is handled externally.
+For public APIs or when authentication is handled externally:
 
 ```yaml
 auth:
   type: none
 ```
 
+An empty or missing `type` field is treated as `none`.
+
 ## Custom Headers
 
-The `headers` section adds static headers to every API request. These are applied before authentication headers, so auth headers take precedence if there's a conflict.
+Static headers added to every request. These form the base layer — template and auth headers can override them:
 
 ```yaml
 headers:
-  XAUTH_TRAVELPORT_ACCESSGROUP: "36CFECCB-9A27-4A78-8B4D-7272F3830C20"
   Accept: application/json
-  Accept-Version: "11"
-  Content-Version: "11"
+  X-Client-Id: aat-test-runner
+  X-Request-Source: automated-testing
 ```
 
-Use this for API gateway headers, version headers, access group identifiers, or any other headers your API requires on every request.
+Header merge order (later values override earlier ones for the same key):
+
+1. **Environment headers** — this `headers` section
+2. **Template headers** — per-template `request.headers` (see [Templates](templates.md))
+3. **Plan-level headers** — per-step header overrides (see [Plans](plans.md))
+4. **Auth headers** — authentication headers (final precedence)
 
 ## Secrets
 
-Credentials are never stored as plain values in the YAML (though you can for local testing). Each credential is a `SecretRef` with two resolution strategies:
+Credentials and API keys are stored as `SecretRef` values. Each ref specifies a `source` and a resolution method:
 
-### Environment variable
-
-```yaml
-password:
-  source: env
-  var: API_PASSWORD
-```
-
-Reads the value from the `API_PASSWORD` environment variable at runtime. Fails with a clear error if the variable is not set.
-
-### Literal
+### Environment Variable (Recommended)
 
 ```yaml
-password:
-  source: literal
-  value: my-password
+credentials:
+  key:
+    source: env
+    var: MY_API_KEY
 ```
 
-Uses the value directly. Fine for local development; avoid committing literal secrets to version control.
+AAT resolves the value from the OS environment variable at runtime. If the variable is not set, authentication fails with a clear error message.
+
+### Literal Value
+
+```yaml
+credentials:
+  key:
+    source: literal
+    value: sk-test-1234567890
+```
+
+The value is stored directly in the YAML file. Use this only for local development — never commit literal secrets to version control.
+
+### Redaction
+
+All resolved secret values are automatically redacted from run archives. AAT collects secrets from auth credentials and the LLM API key, then scrubs matching values from archived headers and responses.
 
 ## LLM Configuration
 
-The `llm` section is optional. It configures the LLM provider used for plan generation and adaptive execution.
+The `llm` section configures the language model used by `aat prompt` for plan generation:
 
 ```yaml
 llm:
-  endpoint: https://api.openai.com/v1
+  endpoint: https://api.openai.com/v1/chat/completions
   apiKey:
     source: env
     var: OPENAI_API_KEY
   model: gpt-5.2
-  mode: lean
 ```
 
-### Execution modes
+| Field | Description |
+|-------|-------------|
+| `endpoint` | LLM API endpoint URL |
+| `apiKey` | Secret reference for the API key |
+| `model` | Model identifier to use |
+| `provider` | `"openai"` or `"anthropic"` — auto-detected from the endpoint URL when omitted |
 
-| Mode | Behavior |
-|------|----------|
-| `strict` | No LLM involvement during execution. Plans must be fully specified. |
-| `lean` | LLM assists only when the engine cannot resolve a value deterministically (default + fallback pool exhausted). |
-| `adaptive` | Same as `lean`, plus step-level recovery: relaxes soft constraints and retries steps on HTTP 4xx errors. See [value-flow.md](value-flow.md#soft-constraint-relaxation). |
-
-Default: `lean`.
+Provider auto-detection uses the endpoint hostname: URLs containing `anthropic` use the Anthropic protocol; all others default to OpenAI-compatible.
 
 ## Runtime Settings
 
-All settings have defaults and can be omitted entirely.
+Execution-time defaults for the engine:
 
 ```yaml
 settings:
   maxRunDuration: 120s
   defaultRetries: 2
-  maxRelaxationDepth: 3
   archiveFormat: json
 ```
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `maxRunDuration` | `120s` | Maximum wall-clock time for a single plan run. Accepts Go duration strings: `30s`, `5m`, `2h30m`. |
-| `defaultRetries` | `2` | Default retry count for steps that don't specify their own. |
-| `maxRelaxationDepth` | `3` | Maximum constraint relaxation depth before giving up. |
-| `archiveFormat` | `json` | Archive output format. `json` for readable files, `json.gz` for compressed. |
+| Field | Default | Description |
+|-------|---------|-------------|
+| `maxRunDuration` | `120s` | Maximum wall-clock time for a single plan run |
+| `defaultRetries` | `2` | Plan-level retry count on failure |
+| `archiveFormat` | `json` | Archive format: `json` or `json.gz` |
 
-## Minimal Example
+Duration values use Go duration syntax: `30s`, `5m`, `2h30m`, etc.
 
-The smallest valid environment file:
+## Multi-Host Routing
 
-```yaml
-environment: local
-apiBaseUrl: https://localhost:8080
-auth:
-  type: none
-```
-
-Everything else gets defaults: lean mode, 120s timeout, 2 retries, JSON archives.
-
-## Full Example
+When your API spans multiple services, use `overrides` to route specific nodes to different base URLs:
 
 ```yaml
-environment: staging
-apiBaseUrl: https://staging-api.example.com
-
-auth:
-  type: oauth2
-  tokenUrl: https://auth.example.com/oauth/token
-  credentials:
-    username:
-      source: env
-      var: STAGING_USERNAME
-    password:
-      source: env
-      var: STAGING_PASSWORD
-    clientId:
-      source: env
-      var: STAGING_CLIENT_ID
-    clientSecret:
-      source: env
-      var: STAGING_CLIENT_SECRET
-
-headers:
-  X-Api-Version: "2"
-  X-Tenant-Id: acme-corp
-
-llm:
-  endpoint: https://api.anthropic.com/v1
-  apiKey:
-    source: env
-    var: ANTHROPIC_API_KEY
-  model: claude-sonnet-4-5-20250929
-  mode: adaptive
-
-settings:
-  maxRunDuration: 5m
-  defaultRetries: 3
-  maxRelaxationDepth: 5
-  archiveFormat: json.gz
-
-overrides:                         # optional — route specific nodes differently
-  - match: searchFlights
-    baseUrl: http://localhost:8080
-    auth: { type: none }
-
-notes: |
-  Staging environment for pre-release testing.
-  Requires VPN access.
-```
-
-## Overrides (Multi-Host Routing)
-
-By default, AAT sends every API request to the single `apiBaseUrl`. The `overrides` section lets you route specific nodes to different servers -- with independent auth, headers, and path rewriting. This is essential for local development, mixed-environment testing, and handling infrastructure differences.
-
-### Basic example
-
-Route one node to localhost while everything else hits the real environment:
-
-```yaml
-environment: staging
-apiBaseUrl: https://api.staging.example.com
-
-auth:
-  type: oauth2
-  tokenUrl: https://auth.example.com/oauth/token
-  credentials:
-    username: { source: env, var: API_USERNAME }
-    password: { source: env, var: API_PASSWORD }
-    clientId: { source: env, var: API_CLIENT_ID }
-    clientSecret: { source: env, var: API_CLIENT_SECRET }
+apiBaseUrl: https://api.example.com
 
 overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
+  - match: "payment*"
+    baseUrl: https://payments.example.com
+  - match: "inventory*"
+    baseUrl: https://inventory.example.com
+    auth:
+      type: apikey
+      headerName: X-Inventory-Key
+      credentials:
+        key:
+          source: env
+          var: INVENTORY_KEY
+  - match: "notifications*"
+    baseUrl: https://notify.internal.example.com
     auth:
       type: none
-```
-
-Now `searchFlights` calls `http://localhost:8080` with no auth, while `priceOffer`, `addOffer`, and every other node still goes to `https://api.staging.example.com` with the OAuth2 token.
-
-### Override fields
-
-Each override entry supports these fields:
-
-```yaml
-overrides:
-  - match: <pattern>                # required — node name or glob
-    baseUrl: <url>                  # optional — override base URL (inherits top-level if omitted)
-    auth:                           # optional — override auth (inherits top-level if omitted)
-      type: <oauth2|apikey|bearer|none>
-      # ... same fields as top-level auth
-    headers:                        # optional — merged with top-level headers
-      X-Custom: value
-    pathRewrite:                    # optional — URL path transformation
-      strip: /prefix/to/remove
-      prefix: /prefix/to/add
-```
-
-### Pattern matching
-
-The `match` field supports exact node names and glob patterns:
-
-| Pattern | Matches |
-|---------|---------|
-| `searchFlights` | Only the `searchFlights` node |
-| `price*` | `priceOffer`, `priceTicket`, `priceBundle`, ... |
-| `step?` | `step1`, `step2`, but not `step12` |
-| `[abc]*` | Nodes starting with `a`, `b`, or `c` |
-
-When multiple patterns match a node, exact matches always win over globs. Among glob patterns, the first matching entry wins.
-
-### Auth inheritance
-
-Overrides that **omit** the `auth` field inherit the top-level authentication. This is the most common case -- you want the same token but a different server.
-
-```yaml
-# This override uses the same OAuth2 token as the top-level auth
-overrides:
-  - match: "price*"
-    baseUrl: https://api.staging.example.com
-```
-
-To explicitly **disable** auth for a node (e.g., a local service that doesn't need it):
-
-```yaml
-overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
-    auth:
-      type: none
-```
-
-### Header merge
-
-Override headers are merged with top-level headers. The override wins on conflict:
-
-```yaml
-headers:
-  Accept: application/json
-  X-Version: "11"
-
-overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
     headers:
-      X-Version: "12"         # overrides the top-level "11"
-      X-Debug: "true"         # added, not present at top-level
-    # Accept: application/json is inherited
+      X-Internal-Caller: aat
 ```
 
-### Path rewriting
+Each override matches node names using glob patterns. When a node matches:
 
-When different environments use different URL path structures, `pathRewrite` transforms the path at request time. This avoids maintaining duplicate templates.
+- **`baseUrl`** — replaces the top-level `apiBaseUrl`. If omitted, inherits the top-level base URL.
+- **`auth`** — replaces the top-level auth for that node. If omitted, inherits the top-level auth.
+- **`headers`** — merged with the environment-level headers (override-specific headers win on conflict).
+
+Overrides are evaluated in order. For nodes matching multiple patterns, the last match wins.
+
+### Path Rewriting
+
+Overrides can rewrite URL paths when the target service uses a different path structure:
 
 ```yaml
 overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
+  - match: "catalog*"
+    baseUrl: https://catalog.example.com
     pathRewrite:
-      strip: /11                     # remove this prefix from the template path
-      prefix: /api/v2               # add this prefix instead
+      strip: /api/v2
+      prefix: /v1
 ```
 
-If a template produces a path like `/11/air/search`, the rewrite transforms it to `/api/v2/air/search` before making the request.
+With this config, a template path of `/api/v2/products/{{productId}}` becomes `/v1/products/{{productId}}` when routed to the catalog service.
 
-**When to use path rewriting:**
-- Load balancers add version prefixes (`/11/`, `/v2/`)
-- Local services use different path structures than production
-- API gateways route by path prefix
+| Field | Description |
+|-------|-------------|
+| `strip` | Prefix to remove from the template path |
+| `prefix` | Prefix to add after stripping |
 
-### Overlay files
+Both fields are optional — you can strip without adding, add without stripping, or do both.
 
-For persistent, shareable override sets, use overlay files with the `--env-overlay` CLI flag:
+### Runtime Overrides
+
+Two mechanisms let you adjust routing without editing the environment file:
+
+**`--override` flag** — routes a specific node to a different URL:
 
 ```bash
-aat run plan plan.yaml --env env.yaml --env-overlay local-dev.yaml
+aat run plan checkout.yaml --override createPayment=https://sandbox.payments.example.com
 ```
 
-An overlay file contains only the `overrides` section:
+This flag is repeatable for multiple overrides.
+
+**`--env-overlay` flag** — merges a sparse overlay file on top of the base environment:
+
+```bash
+aat run plan checkout.yaml --env-overlay local-routing.yaml
+```
+
+See the Overlay Files section below.
+
+## Overlay Files
+
+An overlay file is a sparse YAML document containing only `overrides`. It merges with (appends to) the base environment's overrides:
 
 ```yaml
-# local-dev.yaml
+# local-routing.yaml
 overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
+  - match: "payment*"
+    baseUrl: https://localhost:8081
     auth:
       type: none
-    pathRewrite:
-      strip: /11
-      prefix: /api/v2
 ```
 
-Overlay overrides are **appended** to any overrides in the base environment file. This means:
-- The base env file defines the production routing
-- Each overlay adds or extends overrides for a specific scenario
-- You can share overlays across team members (e.g., `local-search.yaml`, `staging-pricing.yaml`)
+When both the base environment and an overlay define overrides for the same match pattern, the overlay's entry appears later in the list and takes precedence (last match wins).
 
-### Use cases
-
-**Local development:** Route one service to your local machine while calling real APIs for everything else.
-
-```yaml
-overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
-    auth: { type: none }
-```
-
-**Mixed environments:** Test a staging service against production dependencies.
-
-```yaml
-overrides:
-  - match: "price*"
-    baseUrl: https://api.staging.example.com
-    # inherits production auth
-```
-
-**Canary testing:** Point specific operations at a canary deployment.
-
-```yaml
-overrides:
-  - match: commitBooking
-    baseUrl: https://canary.api.example.com
-```
-
-**Path prefix differences:** Your local service doesn't have the load-balancer prefix.
-
-```yaml
-overrides:
-  - match: searchFlights
-    baseUrl: http://localhost:8080
-    pathRewrite:
-      strip: /11
-```
-
-**API gateway routing:** Different services behind different gateway paths.
-
-```yaml
-overrides:
-  - match: "search*"
-    baseUrl: https://gateway.example.com
-    pathRewrite:
-      prefix: /search-service
-
-  - match: "book*"
-    baseUrl: https://gateway.example.com
-    pathRewrite:
-      prefix: /booking-service
-```
-
-### Startup logging
-
-When overrides are active, AAT logs them at startup:
-
-```
-aat: override: searchFlights → http://localhost:8080 (auth: none, pathRewrite: strip=/11 prefix=/api/v2)
-aat: override: price* → https://api.staging.example.com (auth: inherited)
-```
+Overlays are useful for:
+- Routing specific services to local instances during development
+- Switching a subset of nodes to a sandbox environment
+- Adding temporary auth overrides for testing
 
 ## Validation
 
-AAT validates environment files on load and reports all errors at once:
+`aat validate` checks environment files for structural correctness:
 
+- `environment` name is required
+- `apiBaseUrl` is required
+- Auth type must be one of: `oauth2`, `apikey`, `bearer`, `none`
+- OAuth2 requires `tokenUrl` and all four credential fields
+- API key requires `credentials.key` and `headerName`
+- Bearer requires `credentials.token`
+- Override entries must have a `match` pattern
+- `archiveFormat` must be `json` or `json.gz`
+
+See [Validation](validation.md) for the full reference covering all validation subcommands.
+
+## Schema Reference
+
+```yaml
+# env.yaml — complete annotated example
+
+environment: staging                      # required — environment name
+apiBaseUrl: https://api.staging.example.com  # required — default base URL
+
+auth:                                     # authentication configuration
+  type: oauth2                            #   oauth2 | apikey | bearer | none
+  tokenUrl: https://auth.example.com/token  #   token endpoint (oauth2 only)
+  headerName: X-API-Key                   #   custom header name (apikey only)
+  credentials:                            #   named credential fields
+    username:                             #     oauth2: username, password, clientId, clientSecret
+      source: env                         #     source: env (recommended) or literal
+      var: API_USERNAME                   #     env var name (when source=env)
+    password:
+      source: env
+      var: API_PASSWORD
+    clientId:
+      source: env
+      var: API_CLIENT_ID
+    clientSecret:
+      source: env
+      var: API_CLIENT_SECRET
+    key:                                  #     apikey: key
+      source: env
+      var: API_KEY
+    token:                                #     bearer: token
+      source: env
+      var: BEARER_TOKEN
+
+headers:                                  # optional — static headers on every request
+  Accept: application/json
+  X-Client-Id: aat
+
+llm:                                      # LLM configuration (for aat prompt)
+  endpoint: https://api.openai.com/v1/chat/completions
+  apiKey:
+    source: env
+    var: OPENAI_API_KEY
+  model: gpt-4o
+  provider: openai                        # optional — auto-detected from endpoint
+
+settings:                                 # optional — runtime defaults
+  maxRunDuration: 120s                    #   max plan execution time (default: 120s)
+  defaultRetries: 2                       #   plan-level retries (default: 2)
+  archiveFormat: json                     #   json or json.gz (default: json)
+
+notes: "Staging environment for QA"       # optional — freeform notes
+
+overrides:                                # optional — per-node routing overrides
+  - match: "payment*"                     #   glob pattern matching node names
+    baseUrl: https://payments.example.com #   override base URL (optional)
+    auth:                                 #   override auth (optional, inherits top-level)
+      type: apikey
+      headerName: X-Payment-Key
+      credentials:
+        key:
+          source: env
+          var: PAYMENT_KEY
+    headers:                              #   additional headers (merged with env headers)
+      X-Payment-Version: "3"
+    pathRewrite:                          #   optional URL path rewriting
+      strip: /api/v2                      #     prefix to remove
+      prefix: /v1                         #     prefix to add
 ```
-environment validation failed:
-- auth.tokenUrl is required for oauth2
-- auth.credentials.clientId is required for oauth2
-- auth.credentials.clientSecret is required for oauth2
-```
 
-Validation checks:
-- `environment` (name) is present
-- `apiBaseUrl` is present
-- Auth type is one of: `oauth2`, `apikey`, `bearer`, `none`
-- Required credential keys are present for the auth type
-- `llm.mode` is valid if set
-- `archiveFormat` is valid if set
-- Override `match` patterns are non-empty
-- Override auth types are valid if specified
+---
 
-## See Also
-
-- [Plan-Level Auth & Headers](plan-auth.md) -- embedding per-plan credentials that override environment auth
-- [Running Tests](running.md) -- executing plans with `aat run`
-- [Plan Authoring](plan-authoring.md) -- full plan YAML schema reference
+*Source: `config/environment.go`, `config/auth.go`, `config/auth_provider.go`, `config/load.go`.*

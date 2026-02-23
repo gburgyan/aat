@@ -15,7 +15,7 @@ cd examples/petstore
 ../../aat run plan plans/create-and-verify.yaml
 ```
 
-See the [Petstore quickstart tutorial](examples/petstore/README.md) for a full walkthrough, or follow the [Getting Started guide](docs/user/getting-started.md) to set up AAT for your own API.
+See the [Petstore quickstart tutorial](examples/petstore/README.md) for a full walkthrough, or follow the [Quickstart guide](docs/user/quickstart.md) to set up AAT for your own API.
 
 ## How it works
 
@@ -70,17 +70,17 @@ make clean    # Removes binary and frontend artifacts
 
 ## Documentation
 
-- [Getting Started](docs/user/getting-started.md) — install AAT and set it up for your own API
+- [Quickstart](docs/user/quickstart.md) — install AAT and set it up for your own API
 - [Petstore Quickstart](examples/petstore/README.md) — runnable example with no setup
 - [Travelport Booking Example](docs/user/travelport-example.md) — real-world airline booking flow (requires [separate graph repo](https://github.com/gburgyan/aat-graph-travelport))
-- [Graph Authoring](docs/user/graph-authoring.md) — nodes, edges, conditions, OAS linking
+- [Graphs](docs/user/graphs.md) — nodes, edges, conditions, OAS linking
 - [Templates](docs/user/templates.md) — HTTP request/response template format
-- [Plan Authoring](docs/user/plan-authoring.md) — test plan YAML schema and assertions
+- [Plans](docs/user/plans.md) — test plan YAML schema and assertions
 - [Environments](docs/user/environments.md) — auth, headers, LLM configuration
-- [Domain Knowledge](docs/user/domain-knowledge.md) — concepts, types, value pools
+- [Domain Knowledge](docs/user/domain.md) — concepts, types, value pools
 - [Value Flow](docs/user/value-flow.md) — expressions, selections, constraints, resolution hierarchy
 - [Running Tests](docs/user/running.md) — CLI usage, archives, CI/CD integration
-- [LLM-Assisted Planning](docs/user/prompt-workflow.md) — generating plans from natural language
+- [LLM-Assisted Planning](docs/user/prompt.md) — generating plans from natural language
 - [MCP Server](docs/user/mcp-server.md) — IDE integration for AI-assisted workflows
 
 ## Status

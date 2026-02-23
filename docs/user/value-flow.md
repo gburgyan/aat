@@ -1,765 +1,361 @@
-# How Values Flow Between Steps
+# Value Resolution
 
-AAT plans describe multi-step API workflows where each step produces outputs that feed into later steps. This guide explains how input values are resolved — from simple literals to array selections and dynamic expressions.
-
-## The Basics: Literal Values
-
-The simplest case is a literal value written directly in the plan:
-
-```yaml
-steps:
-  - node: createPet
-    values:
-      name: "Buddy"
-      status: "available"
-      category: "dogs"
-```
-
-These values are passed directly to the step's template as-is.
-
-## Scalar References: Passing Outputs Forward
-
-When one step produces an output that another step needs, use a `from` reference:
-
-```yaml
-steps:
-  - node: createCart
-    # produces output: cartId
-
-  - node: addItem
-    dependsOn: [createCart]
-    values:
-      cartId:
-        from: createCart.cartId
-```
-
-The format is `stepID.outputName`. When a step has no explicit `id`, its step ID is the same as its `node` name, so `createCart.cartId` works in both cases. When using [step aliasing](plan-authoring.md#step-aliasing), use the explicit `id`:
-
-```yaml
-values:
-  productId:
-    from: add_item_1.productId    # references step with id: add_item_1
-```
-
-The referenced step must be listed in `dependsOn` so AAT knows to run it first.
-
-## Array Selection: Choosing From Multiple Results
-
-Many APIs return arrays — a product listing returns multiple items, a search endpoint returns multiple results. When a downstream step needs a value from one element of an array, you need a **selection strategy**.
-
-### Single-Field Selection
-
-When only one input comes from an array, use inline `from` + `select`:
-
-```yaml
-values:
-  productId:
-    from: listProducts.products
-    select:
-      strategy: first
-      field: productId
-```
-
-This says: "Take the `products` array from `listProducts`, pick the first element, and extract its `productId` field."
-
-### Named Selections: Multiple Fields From the Same Element
-
-Often you need several fields from the **same** array element. For example, adding an item to a cart requires both a `productId` and a `price` from the same product. Named selections guarantee they come from the same element:
-
-```yaml
-steps:
-  - node: addItem
-    dependsOn: [listProducts, createCart]
-    selections:
-      product:
-        from: listProducts.products
-        strategy: first
-    values:
-      productId:
-        fromSelection: product.productId
-      price:
-        fromSelection: product.price
-```
-
-The `selections` block picks one element from the array. Then each `fromSelection` reference extracts a different field from that same element. This avoids repeating the `from`/`select` block for each field and — critically — ensures both values come from the same array element, even when using non-deterministic strategies like `random` or `llm`.
-
-### Selection Strategies
-
-| Strategy | Description | Required Fields |
-|----------|-------------|-----------------|
-| `first` | First element (default) | — |
-| `last` | Last element | — |
-| `index` | Specific position | `index: N` |
-| `random` | Random element | — |
-| `min` | Element with lowest field value | `sortField: fieldName` |
-| `max` | Element with highest field value | `sortField: fieldName` |
-| `match` | First element matching a predicate | `filter: "expression"` |
-| `llm` | LLM chooses based on a prompt | `prompt: "description"` |
-
-Examples:
-
-```yaml
-# Cheapest product
-selections:
-  product:
-    from: listProducts.products
-    strategy: min
-    sortField: price
-
-# Only in-stock items
-selections:
-  product:
-    from: listProducts.products
-    strategy: match
-    filter: "inStock == true"
-
-# LLM picks the best option
-selections:
-  product:
-    from: listProducts.products
-    strategy: llm
-    prompt: "Choose a popular product under $50 with good reviews"
-```
-
-### Filtering
-
-The `filter` field uses predicate expressions to narrow the array before selection. This works with any strategy — you can filter to in-stock items and then pick the cheapest:
-
-```yaml
-# Inline selection with filter
-values:
-  productId:
-    from: listProducts.products
-    select:
-      strategy: min
-      sortField: price
-      filter: "inStock == true"
-      field: productId
-```
-
-## Intra-Step References: `fromResolved`
-
-Sometimes one input within a step should take its value from another input in the **same** step. For example, in a multi-city flight search, leg 2's origin should be wherever leg 1 arrives — you don't want independent random pools producing unrealistic itineraries like DEN→SFO, ATL→BOS.
-
-Use `fromResolved` to reference another input's resolved value:
-
-```yaml
-steps:
-  - node: searchFlights2Leg
-    values:
-      leg1Origin: {pool: [DEN, ORD, ATL, DFW]}
-      leg1Destination: {pool: [SFO, LAX, SEA, BOS]}
-      leg2Origin: {fromResolved: leg1Destination}
-      leg2Destination:
-        pool: [SFO, LAX, SEA, BOS]
-        constraint: "value != leg2Origin"
-```
-
-Here, `leg2Origin` will always equal whatever `leg1Destination` resolved to. The constraint on `leg2Destination` ensures no same-city legs (the destination differs from the origin).
-
-### Rules
-
-- The referenced input must appear **before** the current input in the graph node's input list (no forward references)
-- `fromResolved` is mutually exclusive with `from`, `fromSelection`, `default`, and `pool`
-- The referenced input must exist on the same graph node
-
-### Chaining
-
-You can chain `fromResolved` across multiple legs:
-
-```yaml
-values:
-  leg1Origin: {pool: [DEN, ORD, ATL]}
-  leg1Destination: {pool: [SFO, LAX, SEA]}
-  leg2Origin: {fromResolved: leg1Destination}
-  leg2Destination:
-    pool: [SFO, LAX, SEA]
-    constraint: "value != leg2Origin"
-  leg3Origin: {fromResolved: leg2Destination}
-  leg3Destination:
-    pool: [SFO, LAX, SEA]
-    constraint: "value != leg3Origin"
-```
-
-Each leg departs from the previous leg's destination, producing realistic multi-city itineraries.
-
-## Dynamic Expressions
-
-Values can include `{{...}}` expressions that are evaluated at runtime:
-
-```yaml
-values:
-  deliveryDate: "{{today + 7 days}}"
-  expiresAt: "{{today + 30 days}}"
-  orderRef: "TEST_{{today}}"
-```
-
-### Supported Expressions
-
-| Expression | Result | Example |
-|------------|--------|---------|
-| `{{today}}` | Current date (YYYY-MM-DD) | `2026-02-08` |
-| `{{today + N days}}` | Date offset from today | `2026-03-10` |
-| `{{today - N days}}` | Date offset backward | `2026-01-09` |
-| `{{env.VAR_NAME}}` | Environment variable | value of `$VAR_NAME` |
-| `{{inputName}}` | Reference to another resolved input | value of that input |
-| `{{inputName + N days}}` | Date arithmetic on a reference | date offset from reference |
-
-Expressions can appear inside larger strings:
-
-```yaml
-values:
-  label: "Order_{{productId}}_qty_{{quantity}}_{{deliveryDate}}"
-```
-
-When the entire value is a single expression (e.g., `"{{today + 30 days}}"`), it returns a typed value. When mixed with literal text, it returns a concatenated string.
-
-## Constraints and Value Pools
-
-Constraints validate that a resolved value meets a condition. Pools provide alternative values to try when the primary value fails the constraint, or a set of curated values to pick from randomly.
-
-```yaml
-values:
-  deliveryDate:
-    default: "{{today + 7 days}}"
-    constraint: "value >= today"
-    pool:
-      - "{{today + 10 days}}"
-      - "{{today + 14 days}}"
-      - "{{today + 21 days}}"
-```
-
-Resolution works like this:
-
-1. Evaluate `default` (including any expressions)
-2. Check the `constraint` predicate — `value` refers to the candidate
-3. If it passes, use it
-4. If it fails, try each value in `pool`
-5. Use the first one that passes the constraint
-
-The `poolStrategy` field controls the order: `"random"` (default) shuffles the pool; `"sequential"` tries values in declaration order.
-
-Pools can also be used without a default — this is common in workflow templates where each run should use a different value:
-
-```yaml
-values:
-  origin: {pool: [DEN, SFO, ORD, JFK, LAX]}
-  destination: {pool: [LHR, CDG, FRA, NRT]}
-```
-
-When no default is set, the engine picks directly from the pool (randomly by default).
-
-### Constraint Expressions
-
-Constraints are predicate expressions where `value` is the candidate and other resolved inputs are available by name:
-
-```yaml
-values:
-  expiresAt:
-    default: "{{today + 30 days}}"
-    constraint: "value > deliveryDate"
-```
-
-This ensures the expiration date is after the delivery date, regardless of what `deliveryDate` resolved to.
-
-## Execution Modes and LLM Fallback
-
-The resolution chain described above is deterministic — literal values, expressions, fallback pools. When all deterministic paths are exhausted and a value still can't be resolved, AAT can optionally delegate to an LLM. Whether this happens depends on the **execution mode** configured in your environment file.
-
-### Modes
-
-| Mode | Behavior |
-|------|----------|
-| `strict` | Never calls the LLM. If a value can't be resolved deterministically, the step fails. Use this when you need fully reproducible runs. |
-| `lean` | Calls the LLM only after all deterministic options are exhausted (default failed constraint, every pool value failed). This is the default mode for the `aat prompt` command. |
-| `adaptive` | Same as `lean`, plus step-level recovery: if a step gets an HTTP 4xx error and has soft constraints, AAT can relax constraints and retry the step. |
-
-Set the mode in your environment file:
-
-```yaml
-llm:
-  endpoint: https://api.openai.com/v1
-  apiKey:
-    source: env
-    var: OPENAI_API_KEY
-  model: gpt-5.2
-  mode: lean
-```
-
-Or override with `--mode` on the command line:
-
-```
-aat run plan plan.yaml --mode adaptive
-```
-
-### How LLM Value Selection Works
-
-When a step value has a constraint and all deterministic values fail it, AAT constructs a prompt with:
-
-- The input name, type, and description (from the graph)
-- The constraint expression
-- All values that were tried and rejected
-- Other inputs already resolved for this step (for context)
-- Domain knowledge (concepts, types, value pools) if a domain file is loaded
-
-The LLM returns a single value. If it passes the constraint, it's used. If it fails, the step fails.
-
-In the run archive, LLM-selected values have `"source": "llm"` and include the full prompt/response in the `llmCall` field:
-
-```json
-{
-  "inputName": "deliveryDate",
-  "source": "llm",
-  "finalValue": "2026-04-15",
-  "constraint": "value > today",
-  "constraintOK": true,
-  "tried": ["2025-12-01", "2025-11-15"],
-  "llmCall": {
-    "model": "gpt-5.2",
-    "durationMs": 842,
-    "inputTokens": 156,
-    "outputTokens": 8
-  }
-}
-```
-
-### LLM Array Selection
-
-In addition to scalar values, the LLM can select from arrays. Use `strategy: llm` with a `prompt` describing what to pick:
-
-```yaml
-selections:
-  product:
-    from: listProducts.products
-    strategy: llm
-    prompt: "Choose a popular in-stock product under $50"
-```
-
-The LLM sees a tabular summary of the array elements (using the node's `elementFields` for column selection) and returns an index. This works in both `lean` and `adaptive` modes.
-
-## Soft Constraint Relaxation
-
-In `adaptive` mode, AAT can **relax** soft constraints when resolution would otherwise fail. This is the key difference between `adaptive` and `lean`: adaptive can recover from constraint failures instead of stopping.
-
-### Hard vs Soft Constraints
-
-Plans classify constraints by enforcement level:
-
-```yaml
-intent:
-  goal: checkout
-  constraints:
-    hard:
-      - type: category
-        name: category_constraint
-        description: "Must select from electronics"
-        applies_to: [listProducts.category]
-    soft:
-      - type: pricing
-        name: price_preference
-        description: "Prefer items under $50"
-        applies_to: [addItem.price]
-    free:
-      - shipping method
-```
-
-- **Hard constraints** are never relaxed. If they can't be satisfied, the step fails.
-- **Soft constraints** can be relaxed as a last resort. When relaxed, the engine accepts a value that would normally fail the constraint.
-- **Free dimensions** have no constraints and accept any valid value.
-
-### When Relaxation Happens
-
-Relaxation can occur in three scenarios:
-
-**1. Value resolution exhausted.** The default value, every fallback pool value, and the LLM all failed a constraint. If the constraint is soft, AAT relaxes it and accepts the first value that passed expression evaluation (but failed the constraint check).
-
-```yaml
-values:
-  deliveryDate:
-    default: "{{today + 7 days}}"
-    constraint: "value > '2026-03-01' && value < '2026-03-31'"
-    fallbackPool:
-      - "{{today + 10 days}}"
-      - "{{today + 14 days}}"
-```
-
-If today is January and none of these dates fall in March, but the constraint is classified as soft, AAT relaxes it and uses the first date (today + 7 days) anyway.
-
-**2. Filter produces no matches.** A selection filter eliminates all array elements. If the filter corresponds to a soft constraint, AAT drops the filter and retries the selection on the full array.
-
-```yaml
-selections:
-  product:
-    from: listProducts.products
-    strategy: min
-    sortField: price
-    filter: "inStock == true"
-```
-
-If no products are in stock and the filter is tied to a soft constraint, AAT relaxes the filter and picks the cheapest from all products.
-
-**3. Step-level recovery (adaptive only).** The step executes but gets an HTTP 4xx error. AAT finds an unrelaxed soft constraint for this step, relaxes it, re-resolves inputs, and retries the step. This loop continues until the step succeeds or no more constraints can be relaxed.
-
-### Relaxation Budget
-
-Each step has a relaxation budget (default: 3, configurable via `settings.maxRelaxationDepth` in your environment file). This prevents runaway relaxation:
-
-- Each relaxation counts against the budget
-- The same constraint can't be relaxed twice (circular detection)
-- When the budget is exhausted, the step fails with whatever error triggered the last relaxation attempt
-
-### Relaxation in Archives
-
-Relaxation events appear in the run archive for full auditability:
-
-```json
-{
-  "node": "addItem",
-  "relaxations": [
-    {
-      "constraintName": "price_preference",
-      "inputRef": "addItem.price",
-      "reason": "resolution_exhausted",
-      "depth": 1
-    }
-  ],
-  "resolutions": [
-    {
-      "inputName": "price",
-      "source": "plan_default",
-      "finalValue": 79.99,
-      "constraint": "value < 50",
-      "constraintOK": false,
-      "relaxed": true,
-      "relaxedConstraint": "price_preference"
-    }
-  ]
-}
-```
-
-The `relaxed: true` flag and `relaxedConstraint` name make it clear that this value was accepted despite failing its constraint. The `reason` field on the relaxation record indicates which scenario triggered it: `resolution_exhausted`, `filter_empty`, or `step_failed`.
-
-## Type Coercion
-
-After a value is resolved, AAT coerces it to match the input's declared type in the graph. This handles common mismatches between expression results and API expectations:
-
-| Declared Type | Coercion |
-|--------------|----------|
-| `date` | Truncates datetime strings (`2026-03-15T00:00:00Z` becomes `2026-03-15`) |
-| `datetime` | Formats `time.Time` values as RFC3339 |
-| `integer` | Parses numeric strings; truncates floats |
-| `boolean` | Parses `"true"`/`"false"` strings |
-| `float` | Parses numeric strings |
-
-If coercion fails (e.g., `"abc"` for an integer input), the original value is passed through so the downstream API reports the mismatch.
-
-## Graph Defaults
-
-The graph can define default values for inputs. These are used when the plan doesn't provide a value and no edge feeds the input:
-
-```yaml
-# In the graph definition
-nodes:
-  listProducts:
-    inputs:
-      - name: pageSize
-        type: integer
-        default: 20
-      - name: sortBy
-        type: string
-        default: "relevance"
-```
-
-Plan values override graph defaults. If you want a larger page:
-
-```yaml
-values:
-  pageSize: 50
-  # sortBy not specified → uses graph default "relevance"
-```
-
-## Data Layers
-
-Data layers are named sets of input default overrides stored in separate YAML files. They sit between graph defaults and plan values in the resolution priority chain, letting you swap test data profiles without modifying plans or the graph.
-
-### Layer YAML Format
-
-Each layer file declares a `name`, optional `description`, and an `inputs` map:
-
-```yaml
-name: european
-description: European airport codes for intercontinental routes
-inputs:
-  searchFlights.origin: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
-  searchFlights.destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
-  searchFlights2Leg.leg1Origin: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
-  searchFlights2Leg.leg1Destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
-  searchFlights2Leg.leg2Destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
-```
-
-Entries in `inputs` can be bare (just the input name) or qualified (`nodeName.inputName`):
-
-- **Bare entries** like `departureDate` apply to every node that has a `departureDate` input.
-- **Qualified entries** like `searchFlights.origin` target a specific node. Within the same layer, qualified entries take priority over bare entries for the same input.
-
-Values follow the same format as graph input defaults — a bare scalar, a list (pool), or a structured object with `pool`, `constraint`, `poolStrategy`, etc.
-
-### Examples
-
-The travelport project includes several layers that illustrate common use cases:
-
-**Regional airport pools** (`european.yaml`) — replaces airport code pools with European cities:
-
-```yaml
-name: european
-description: European airport codes for intercontinental routes
-inputs:
-  searchFlights.origin: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
-  searchFlights.destination: [CDG, LHR, FRA, AMS, FCO, MAD, BCN]
-```
-
-**Payment card test data** (`amex.yaml`) — injects American Express test card numbers:
-
-```yaml
-name: amex
-description: American Express test card numbers and CVVs
-inputs:
-  addFormOfPaymentCard.cardNumber:
-    pool: ["371449635398431", "378282246310005", "340000000000009"]
-  addFormOfPaymentCard.cardCode: AX
-  addFormOfPaymentCard.cvv:
-    pool: ["1234", "5678", "9012"]
-```
-
-**Dynamic date pools** (`near-term.yaml`) — uses expressions to keep travel dates fresh:
-
-```yaml
-name: near-term
-description: Near-term travel dates (2-5 days out)
-inputs:
-  departureDate:
-    pool: ["{{today + 2 days}}", "{{today + 3 days}}", "{{today + 5 days}}"]
-  returnDate:
-    pool: ["{{today + 9 days}}", "{{today + 10 days}}", "{{today + 12 days}}"]
-```
-
-Note that `near-term` uses bare input names (`departureDate`, `returnDate`) so it applies to every node with those inputs.
-
-### Layer Stacking
-
-Multiple layers can be applied at once. Later layers override earlier ones when both set the same input:
-
-```
-aat run plan plan.yaml --layer european --layer near-term
-```
-
-Here, `european` sets airport codes and `near-term` sets travel dates. If both layers set the same input for the same node, `near-term` wins because it appears later.
-
-### Batch Permutation Matrix
-
-For batch execution, `--layer-group` generates a cartesian product of layer combinations so each plan runs once with every combination:
-
-```
-aat run batch --layer-group "european,international" --layer-group "amex,visa"
-```
-
-This runs every plan four times: european+amex, european+visa, international+amex, international+visa. See [Running AAT](running.md) for full details on batch layer groups.
-
-### Project Manifest
-
-Declare the layers directory in your `aat-project.yaml`:
-
-```yaml
-name: my-project
-graph: graph.yaml
-templates: templates/
-layers: layers/
-```
-
-When a manifest is present, `--layer` resolves layer names from this directory automatically.
+Every step input needs a value. AAT resolves values through a priority-based chain that tries each source in order, from the most specific (plan-provided) to the most general (graph defaults). Understanding this chain is key to writing effective plans and debugging unexpected results.
 
 ## Resolution Priority
 
-When AAT resolves an input value, it checks these sources in order:
+When the engine resolves an input for a step, it checks these sources in order and uses the first match:
 
-1. **Graph edge** — scalar output from an upstream step
-2. **Select edge** — array output with selection strategy
-3. **Named selection** — `fromSelection` reference to a pre-resolved element
-4. **Plan value** — literal, expression, or constraint+fallback from the plan YAML
-   - Evaluate the `default` value (including `{{...}}` expressions)
-   - Check the `constraint` predicate
-   - If the constraint fails, try each `pool` value
-   - If all pool values fail, ask the LLM (lean/adaptive modes only)
-   - If everything fails and the constraint is soft, relax it and accept the first tried value (adaptive mode, or lean with relaxation tracker)
-5. **Data layer override** — value from a `--layer` file matching this node+input
-6. **Graph default** — default defined in the graph schema
-7. **Optional** — if the input is marked optional, it's skipped
-8. **Error** — required input with no value fails the step
+| Priority | Source | Description |
+|----------|--------|-------------|
+| 1 | Named selection (`fromSelection`) | Reference to a pre-resolved array selection |
+| 2 | Intra-step reference (`fromResolved`) | Reference to an input resolved earlier in the same step |
+| 3 | Step output reference (`from`) | Value from a previous step's output, optionally with array `select` |
+| 4 | Plan default / expression / pool | Literal value, `{{...}}` expression, or fallback pool |
+| 5 | Graph default | Default value declared on the node's input in the graph |
+| 6 | Optional skip | Input is optional and no value was found — omit from request |
+| 7 | Error | Required input has no value |
 
-The first source that provides a value wins. This means edges (data flow between steps) always take priority over plan-provided literals. When layers are applied, they override graph defaults for matching inputs. Plan values still take priority over layers — layers only fill in inputs the plan doesn't explicitly specify.
+Priorities 4 and 5 are merged during plan instantiation — graph defaults (including value pools) are copied into the plan's step values before execution, so the engine sees them at priority 4. Layers (when applied) override graph defaults at the same level. This means a well-designed graph with pools on configurable inputs can handle most values automatically — plans only need to specify values that the test requires to be specific.
 
-## Putting It All Together
+The explicit-absence marker `{}` short-circuits this chain: it tells the engine to skip the input entirely, bypassing graph defaults and auto-wiring.
 
-Here's a complete plan that uses most of these features:
+## Literal Values
+
+The simplest value form is a bare scalar in the plan YAML:
 
 ```yaml
-metadata:
-  prompt: "Order the cheapest in-stock product"
-  graphVersion: "1.0.0"
-
-intent:
-  goal: checkout
-  description: "Browse products, add the cheapest to a cart, and complete checkout"
-
-execution:
-  steps:
-    - node: listProducts
-      description: "List available products"
-      values:
-        category: "electronics"
-        pageSize: 50
-
-    - node: createCart
-      description: "Create a shopping cart"
-
-    - node: addItem
-      dependsOn: [listProducts, createCart]
-      description: "Add the cheapest in-stock product to the cart"
-      selections:
-        product:
-          from: listProducts.products
-          strategy: min
-          sortField: price
-          filter: "inStock == true"
-      values:
-        productId:
-          fromSelection: product.productId
-        price:
-          fromSelection: product.price
-        cartId:
-          from: createCart.cartId
-
-    - node: addShipping
-      dependsOn: [createCart]
-      description: "Add standard shipping"
-      values:
-        cartId:
-          from: createCart.cartId
-        method: "standard"
-
-    - node: checkout
-      dependsOn: [addItem, addShipping]
-      isGoal: true
-      description: "Complete the order"
-      assertions:
-        mechanical:
-          - type: status
-            expect: 200
-          - type: fieldExists
-            path: "orderId"
-
-  cleanup:
-    - node: cancelOrder
-      runOn: always
+values:
+  category: "electronics"
+  maxResults: 20
+  enabled: true
+  threshold: 0.95
 ```
 
-In this plan:
+YAML type inference applies: quoted strings remain strings, unquoted numbers become integers or floats, `true`/`false` become booleans. When the graph declares a specific type for the input, the engine coerces the value (see [Type Coercion](#type-coercion)).
 
-- `listProducts` gets literal values for the search criteria
-- `addItem` uses a **named selection** to extract two fields (`productId`, `price`) from the same product
-- `addItem` also gets `cartId` via a **scalar reference** from `createCart`
-- `addShipping` gets literal values for the shipping method
-- `checkout` receives scalar references from multiple upstream steps (wired by the graph edges, not shown in the plan since the engine resolves them automatically)
-- `cancelOrder` runs as cleanup regardless of success or failure
+To explicitly mark an optional input as absent — preventing it from being filled by graph defaults or auto-wiring — use an empty map:
 
-Running this plan with a data layer adds another dimension — for example, `--layer near-term` would inject date pools for any date inputs that the plan leaves unspecified, without changing the plan file itself.
+```yaml
+values:
+  optionalFilter: {}
+```
+
+## References
+
+### Step Output References (from)
+
+The `from` field pulls a value from a previous step's output:
+
+```yaml
+values:
+  cartId: {from: createCart.cartId}
+```
+
+The syntax is `stepId.outputName`. The engine looks up the output value from the referenced step's execution results.
+
+When the referenced output is a scalar, the value is used directly. When the output is an array, you typically need a `select` block (see [Array Selection](#array-selection)) or a named selection to pick one element.
+
+### Dependency Inference
+
+Any `from` reference implies an execution dependency. During plan instantiation, the engine automatically adds the referenced step to `dependsOn` if it's not already listed. You can still declare `dependsOn` explicitly for clarity, but it's not required for `from` references.
+
+## Array Selection
+
+When a step input needs a value from an array output, a selection strategy picks one element.
+
+### Inline Selection (from + select)
+
+Add a `select` block alongside `from` for a self-contained selection:
+
+```yaml
+values:
+  productId:
+    from: searchProducts.products
+    select:
+      strategy: min
+      field: productId
+      sortField: price
+      filter: "inStock == true"
+```
+
+The `field` specifies which field to extract from the selected element. If `field` is omitted, the entire element is used as the value.
+
+### Named Selections
+
+For coordinated multi-field extraction — pulling several fields from the *same* array element — define a named selection in the step's `selections` block:
+
+```yaml
+  - node: addToCart
+    dependsOn: [searchProducts]
+    selections:
+      bestProduct:
+        from: searchProducts.products
+        strategy: min
+        sortField: price
+        filter: "inStock == true"
+    values:
+      productId: {fromSelection: bestProduct.productId}
+      productName: {fromSelection: bestProduct.name}
+      unitPrice: {fromSelection: bestProduct.price}
+```
+
+All three values come from the same element because they reference the same named selection. Without a named selection, three separate inline `select` blocks could each pick a *different* element.
+
+The `fromSelection` syntax is `selectionName.fieldName`. If the field part is omitted, the entire selected element is used.
+
+### Selection Strategies
+
+| Strategy | Required Fields | Description |
+|----------|----------------|-------------|
+| `first` | *(none)* | First element (after filtering). This is the default. |
+| `last` | *(none)* | Last element (after filtering) |
+| `index` | `index` | Element at the specified zero-based index (after filtering) |
+| `random` | *(none)* | Random element (after filtering) |
+| `min` | `sortField` | Element with the smallest value of `sortField` |
+| `max` | `sortField` | Element with the largest value of `sortField` |
+| `match` | `filter` | First element matching the filter predicate (no pre-filtering) |
+
+For `min` and `max`, the `sortField` must resolve to a numeric value. The `field` parameter (if set) determines which field to extract from the winning element.
+
+### Filtering
+
+A `filter` expression narrows the array *before* the strategy is applied. The predicate runs against each element, keeping only those that evaluate to true:
+
+```yaml
+select:
+  strategy: first
+  filter: "status == 'available' && price < 1000"
+```
+
+If filtering removes all elements, the selection fails with an error.
+
+For the `match` strategy, the filter serves as both the narrowing predicate and the selection criterion — it returns the first matching element without pre-filtering.
+
+### Coordinated Multi-Field Extraction
+
+When you need multiple fields from the same array element, always use a named selection:
+
+```yaml
+selections:
+  chosenItem:
+    from: listItems.items
+    strategy: first
+    filter: "category == 'premium'"
+values:
+  itemId: {fromSelection: chosenItem.id}
+  itemName: {fromSelection: chosenItem.name}
+  itemPrice: {fromSelection: chosenItem.price}
+```
+
+This guarantees that `itemId`, `itemName`, and `itemPrice` all come from the same element.
+
+## Intra-Step References
+
+`fromResolved` references a value that was resolved earlier in the same step:
+
+```yaml
+values:
+  outboundOrigin: "JFK"
+  outboundDestination: "LAX"
+  returnOrigin: {fromResolved: outboundDestination}
+  returnDestination: {fromResolved: outboundOrigin}
+```
+
+This is useful when inputs are logically related — a return trip reverses the origin and destination. The referenced input must appear before the referencing input in the node's declared input order (inputs are resolved in declaration order).
+
+## Dynamic Expressions
+
+Expressions use `{{...}}` delimiters and are evaluated at execution time.
+
+### Date Expressions
+
+```yaml
+values:
+  departureDate: "{{today}}"              # today's date (YYYY-MM-DD)
+  returnDate: "{{today + 7 days}}"        # 7 days from today
+  pastDate: "{{today - 30 days}}"         # 30 days ago
+```
+
+Date expressions always produce `YYYY-MM-DD` format strings.
+
+### Environment Variables
+
+```yaml
+values:
+  apiKey: "{{env.API_KEY}}"
+  region: "{{env.TEST_REGION}}"
+```
+
+Environment variables are read from the OS environment. An error is raised if the variable is not set or empty.
+
+### Reference Arithmetic
+
+```yaml
+values:
+  departureDate: "2026-03-15"
+  returnDate: "{{departureDate + 7 days}}"
+```
+
+Reference arithmetic operates on a previously resolved input's value. The referenced value must be a date string in `YYYY-MM-DD` format.
+
+### Mixed Expressions
+
+Expressions can be embedded in literal strings:
+
+```yaml
+values:
+  searchQuery: "flights departing {{today + 3 days}}"
+  correlationId: "test-{{env.BUILD_ID}}-run"
+```
+
+When an expression is the entire value (no surrounding text), the result retains its native type (e.g., a date string). When embedded in text, the result is always a string.
+
+## Fallback Pools
+
+A pool provides alternative values when the default isn't suitable. The engine tries each pool entry (evaluating any expressions) and returns the first valid one:
+
+```yaml
+values:
+  currency:
+    default: "EUR"
+    pool: ["USD", "GBP", "JPY", "CHF"]
+```
+
+Pool iteration order depends on `poolStrategy`:
+
+| Strategy | Behavior |
+|----------|----------|
+| `random` | Shuffled order (default) |
+| `sequential` | Declaration order |
+
+If the default value is provided, it is tried first. If it doesn't work, the engine iterates through the pool.
+
+## Type Coercion
+
+The engine coerces resolved values based on the graph input's declared type:
+
+| Input Type | Coercion Rules |
+|-----------|----------------|
+| `date` | Datetime strings (`2026-01-15T00:00:00Z`) are truncated to date (`2026-01-15`); `time.Time` values are formatted as `YYYY-MM-DD` |
+| `datetime` | `time.Time` values are formatted as RFC3339 |
+| `integer` | String digits are parsed to int; floats are truncated |
+| `boolean` | String `"true"`/`"false"` are parsed to bool |
+| `float` | String numbers are parsed to float64 |
+
+Coercion is best-effort — if parsing fails, the original value is passed through so the downstream API can report the type mismatch.
+
+## Predicate Expression Syntax
+
+Predicate expressions are used in selection filters and `predicate` assertions. They support standard comparison and logical operators:
+
+### Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `==` | Equal | `status == "active"` |
+| `!=` | Not equal | `type != "archived"` |
+| `<` | Less than | `price < 100` |
+| `>` | Greater than | `quantity > 0` |
+| `<=` | Less than or equal | `rating <= 5.0` |
+| `>=` | Greater than or equal | `stock >= 10` |
+| `&&` | Logical AND | `inStock == true && price < 50` |
+| `\|\|` | Logical OR | `status == "active" \|\| status == "pending"` |
+| `!` | Logical NOT | `!isExpired` |
+| `in` | Membership | `category in ["electronics", "books"]` |
+
+### Value Types
+
+- **Strings**: `"quoted"` (double quotes required)
+- **Numbers**: `42`, `3.14` (integer and float)
+- **Booleans**: `true`, `false`
+- **Identifiers**: `fieldName`, `nested.path` (dot notation for nested fields)
+- **Parentheses**: `(a || b) && c`
+
+Predicates evaluate against a context map. In selection filters, the context is the array element. In `predicate` assertions, the context is the response body parsed as a map.
 
 ## Debugging Value Resolution
 
-Every run produces a JSON archive in the output directory. The archive includes a `resolutions` array for each step showing exactly how each input was resolved:
+Every input resolution is recorded in the run archive with a `ValueResolution` entry:
 
-```json
-{
-  "node": "addItem",
-  "resolutions": [
-    {
-      "inputName": "productId",
-      "source": "named_selection",
-      "finalValue": "prod-101",
-      "fromStep": "listProducts",
-      "fromOutput": "products"
-    },
-    {
-      "inputName": "deliveryDate",
-      "source": "expression",
-      "expression": "{{today + 7 days}}",
-      "finalValue": "2026-02-23"
-    }
-  ]
-}
+| Field | Description |
+|-------|-------------|
+| `inputName` | Which input was resolved |
+| `source` | How it was resolved: `plan_default`, `expression`, `fallback_pool`, `plan_from`, `select_edge`, `named_selection`, `from_resolved`, `graph_default`, `optional_skip` |
+| `rawValue` | Value before expression evaluation |
+| `finalValue` | Value after evaluation and type coercion |
+| `expression` | The `{{...}}` template if evaluated |
+| `poolIndex` | Which pool entry was used (-1 if not from pool) |
+| `poolSize` | Total pool size |
+| `tried` | Values that were tried and rejected before the winning value |
+
+Array selections are recorded as `SelectionDecision` entries:
+
+| Field | Description |
+|-------|-------------|
+| `sourceNode` | Step that produced the array |
+| `sourceField` | Output name of the array |
+| `sourceSize` | Array size before filtering |
+| `filteredSize` | Array size after filtering |
+| `strategy` | Selection strategy used |
+| `selectedIndex` | Index of the selected element |
+| `filterExpr` | Filter predicate if applied |
+| `selectionName` | Named selection name (if applicable) |
+
+Use the [Web UI](web-ui.md) to inspect these records in the step detail view, or read the archive JSON directly.
+
+## Common Patterns
+
+### Date Expressions for Testing
+
+```yaml
+values:
+  departureDate: "{{today + 3 days}}"
+  returnDate: "{{today + 10 days}}"
 ```
 
-### Resolution Sources
+### Named Selection with Multi-Field Extraction
 
-The `source` field tells you which resolution path was used:
-
-| Source | Meaning |
-|--------|---------|
-| `edge` | Scalar output from an upstream step via a graph edge |
-| `select_edge` | Selected from an upstream array output |
-| `named_selection` | Extracted from a pre-resolved named selection |
-| `plan_default` | Literal value from the plan YAML |
-| `expression` | Computed from a `{{...}}` expression |
-| `fallback_pool` | Default failed its constraint; this pool value passed |
-| `graph_default` | No plan value; used the graph's default |
-| `llm` | All deterministic paths failed; LLM provided the value |
-| `optional_skip` | Input is optional and had no value |
-
-### Reading the Audit Trail
-
-When a constraint fails and fallback values are tried, the archive records every attempt:
-
-```json
-{
-  "inputName": "deliveryDate",
-  "source": "fallback_pool",
-  "rawValue": "{{today + 10 days}}",
-  "finalValue": "2026-03-06",
-  "constraint": "value > '2026-03-01'",
-  "constraintOK": true,
-  "poolIndex": 0,
-  "poolSize": 3,
-  "tried": ["2026-02-23"]
-}
+```yaml
+selections:
+  bestOffer:
+    from: searchProducts.products
+    strategy: min
+    sortField: price
+    filter: "inStock == true && rating >= 4.0"
+values:
+  productId: {fromSelection: bestOffer.productId}
+  productName: {fromSelection: bestOffer.name}
+  unitPrice: {fromSelection: bestOffer.price}
 ```
 
-The `tried` array shows values that were evaluated but rejected. `poolIndex` tells you which pool entry succeeded. Together these make it easy to trace why a particular value was chosen.
+### Pool with Expressions
 
-For LLM-assisted values, the `llmCall` object captures the full prompt, response, model, token counts, and timing.
-
-For relaxed constraints, look for `relaxed: true` and the `relaxedConstraint` name. The step-level `relaxations` array shows all constraints relaxed during that step and the reason each was triggered.
-
-### Selections
-
-Array selection decisions are recorded in the `selections` array:
-
-```json
-{
-  "inputName": "productId",
-  "sourceNode": "listProducts",
-  "sourceField": "products",
-  "sourceSize": 50,
-  "filteredSize": 12,
-  "filterExpr": "inStock == true",
-  "strategy": "min",
-  "selectedIndex": 3
-}
+```yaml
+values:
+  departureDate:
+    pool: ["{{today + 2 days}}", "{{today + 5 days}}", "{{today + 10 days}}"]
+    poolStrategy: random
 ```
 
-If a filter was relaxed, `filterRelaxed: true` appears. For LLM-assisted selection, the `llmCall` field contains the full exchange.
+### Intra-Step Reference Chaining
 
-## See Also
+```yaml
+values:
+  outboundOrigin: "JFK"
+  outboundDestination: "LAX"
+  returnOrigin: {fromResolved: outboundDestination}
+  returnDestination: {fromResolved: outboundOrigin}
+```
 
-- [Workflow Templates](workflow-templates.md) — how slots and addons compose plans from reusable workflow definitions
-- [Running AAT](running.md) — batch execution, layer groups, CI/CD integration
-- [Plan Authoring](plan-authoring.md) — full plan YAML reference
+### Explicit Absence to Override Defaults
+
+```yaml
+values:
+  # Suppress the optional discount code — don't use the graph default
+  discountCode: {}
+```
+
+---
+
+*Source: resolution logic in `engine/resolve.go`, selection strategies in `engine/selection.go`, expressions in `plan/expr.go`, predicates in `plan/predicate.go`, type coercion in `engine/resolve.go`.*
