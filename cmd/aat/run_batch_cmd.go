@@ -54,7 +54,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		parallel, _ := cmd.Flags().GetInt("parallel")
 		retries, _ := cmd.Flags().GetInt("retries")
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
-		layerGroupFlags, _ := cmd.Flags().GetStringSlice("layer-group")
+		layerGroupFlags, _ := cmd.Flags().GetStringArray("layer-group")
 		layerGroups := parseLayerGroups(layerGroupFlags)
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
@@ -92,7 +92,7 @@ func init() {
 	runBatchCmd.Flags().Bool("json", false, "output machine-readable JSON batch summary to stdout")
 	runBatchCmd.Flags().Bool("quiet", false, "suppress progress messages, show only per-plan summary lines")
 	runBatchCmd.Flags().Int("parallel", 1, "number of plans to execute concurrently (default 1 = sequential)")
-	runBatchCmd.Flags().StringSlice("layer-group", nil,
+	runBatchCmd.Flags().StringArray("layer-group", nil,
 		"layer group for permutation (comma-separated names, repeatable)")
 
 	runCmd.AddCommand(runBatchCmd)
