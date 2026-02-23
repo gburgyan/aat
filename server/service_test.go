@@ -1487,6 +1487,216 @@ func TestGetRun_StandaloneHasNoBatchID(t *testing.T) {
 	assert.Equal(t, "", run.BatchID)
 }
 
+// --- loadAttemptSummaries ---
+
+func TestLoadAttemptSummaries_ReadsAttemptFromMetadata(t *testing.T) {
+	dir := t.TempDir()
+	batchID := "batch-20260201-100000-aaaa0001"
+	runID := "run-20260201-100000-bbbb0001"
+	runDir := filepath.Join(dir, batchID, runID)
+	require.NoError(t, createDir(runDir))
+
+	// Write attempt files with correct Attempt metadata.
+	for i := 1; i <= 4; i++ {
+		a := makeArchive(runID, "failed", makeStep("node", 500, 100))
+		a.Metadata.Attempt = i
+		a.Metadata.TotalAttempts = 5
+		path := filepath.Join(runDir, fmt.Sprintf("attempt-%02d.json", i))
+		require.NoError(t, archive.Write(a, path))
+	}
+
+	svc := NewArchiveService(dir)
+	attempts := svc.loadAttemptSummaries(runID, batchID)
+
+	require.Len(t, attempts, 4)
+	for i, att := range attempts {
+		assert.Equal(t, i+1, att.Attempt, "attempt %d should have number %d", i, i+1)
+		assert.Equal(t, fmt.Sprintf("attempt-%02d.json", i+1), att.FileName)
+		assert.Equal(t, "failed", att.Outcome)
+	}
+}
+
+func TestLoadAttemptSummaries_SortOrder(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+	runDir := filepath.Join(dir, runID)
+	require.NoError(t, createDir(runDir))
+
+	// Write in reverse order to verify sorting by Attempt metadata.
+	for _, i := range []int{3, 1, 2} {
+		a := makeArchive(runID, "failed", makeStep("node", 500, 100))
+		a.Metadata.Attempt = i
+		a.Metadata.TotalAttempts = 4
+		path := filepath.Join(runDir, fmt.Sprintf("attempt-%02d.json", i))
+		require.NoError(t, archive.Write(a, path))
+	}
+
+	svc := NewArchiveService(dir)
+	attempts := svc.loadAttemptSummaries(runID, "")
+
+	require.Len(t, attempts, 3)
+	assert.Equal(t, 1, attempts[0].Attempt)
+	assert.Equal(t, 2, attempts[1].Attempt)
+	assert.Equal(t, 3, attempts[2].Attempt)
+}
+
+func TestLoadAttemptSummaries_Empty(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+	runDir := filepath.Join(dir, runID)
+	require.NoError(t, createDir(runDir))
+
+	svc := NewArchiveService(dir)
+	attempts := svc.loadAttemptSummaries(runID, "")
+	assert.Nil(t, attempts)
+}
+
+// --- GetAttempt ---
+
+func TestGetAttempt_LoadsCorrectFile(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+
+	// Write the final archive.
+	finalArchive := makeArchive(runID, "passed", makeStep("node", 200, 100))
+	finalArchive.Metadata.Attempt = 3
+	finalArchive.Metadata.TotalAttempts = 3
+	writeArchive(t, dir, finalArchive)
+
+	// Write attempt-02.json in the run directory.
+	attemptArchive := makeArchive(runID, "failed", makeStep("node", 500, 80))
+	attemptArchive.Metadata.Attempt = 2
+	attemptArchive.Metadata.TotalAttempts = 3
+	attemptArchive.Result.Error = "step failed"
+	attemptPath := filepath.Join(dir, runID, "attempt-02.json")
+	require.NoError(t, archive.Write(attemptArchive, attemptPath))
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetAttempt(runID, 2)
+	require.NoError(t, err)
+
+	assert.Equal(t, runID, detail.RunID)
+	assert.Equal(t, "failed", detail.Outcome)
+	assert.Equal(t, 2, detail.Attempt)
+	assert.Equal(t, 3, detail.TotalAttempts)
+	assert.Equal(t, "", detail.BatchID)
+}
+
+func TestGetAttempt_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+
+	// Write the final archive only — no attempt files.
+	writeArchive(t, dir, makeArchive(runID, "passed", makeStep("node", 200, 100)))
+
+	svc := NewArchiveService(dir)
+	_, err := svc.GetAttempt(runID, 99)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+func TestGetAttempt_RunNotFound(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewArchiveService(dir)
+
+	_, err := svc.GetAttempt("run-nonexistent", 1)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+func TestGetAttempt_BatchMember(t *testing.T) {
+	dir := t.TempDir()
+	batchID := "batch-20260201-100000-aaaa0001"
+	runID := "run-20260201-100000-bbbb0001"
+
+	// Write batch and member archives.
+	b := makeBatchArchive(batchID, "passed",
+		archive.BatchRunEntry{PlanName: "plan1", RunID: runID, Outcome: "passed", DurationMs: 100},
+	)
+	writeBatchArchive(t, dir, b)
+	memberArchive := makeArchive(runID, "passed", makeStep("node", 200, 100))
+	memberArchive.Metadata.Attempt = 2
+	memberArchive.Metadata.TotalAttempts = 2
+	writeBatchMemberArchive(t, dir, batchID, memberArchive)
+
+	// Write attempt-01 inside the batch member directory.
+	attemptArchive := makeArchive(runID, "failed", makeStep("node", 500, 80))
+	attemptArchive.Metadata.Attempt = 1
+	attemptArchive.Metadata.TotalAttempts = 2
+	attemptPath := filepath.Join(dir, batchID, runID, "attempt-01.json")
+	require.NoError(t, archive.Write(attemptArchive, attemptPath))
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetAttempt(runID, 1)
+	require.NoError(t, err)
+
+	assert.Equal(t, runID, detail.RunID)
+	assert.Equal(t, "failed", detail.Outcome)
+	assert.Equal(t, 1, detail.Attempt)
+	assert.Equal(t, batchID, detail.BatchID)
+}
+
+// --- GetAttemptStep ---
+
+func TestGetAttemptStep_Success(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+
+	// Write the final archive so loadArchiveWithContext can find the run.
+	finalArchive := makeArchive(runID, "passed", makeStep("node", 200, 100))
+	finalArchive.Metadata.Attempt = 2
+	finalArchive.Metadata.TotalAttempts = 2
+	writeArchive(t, dir, finalArchive)
+
+	// Write attempt-01.json with different step data.
+	attemptStep := makeStep("node", 500, 80)
+	attemptStep.Error = "step failed"
+	attemptArchive := makeArchive(runID, "failed", attemptStep)
+	attemptArchive.Metadata.Attempt = 1
+	attemptArchive.Metadata.TotalAttempts = 2
+	attemptPath := filepath.Join(dir, runID, "attempt-01.json")
+	require.NoError(t, archive.Write(attemptArchive, attemptPath))
+
+	svc := NewArchiveService(dir)
+	detail, err := svc.GetAttemptStep(runID, 1, "node")
+	require.NoError(t, err)
+
+	assert.Equal(t, "node", detail.StepID)
+	assert.Equal(t, "node", detail.Node)
+	assert.Equal(t, 500, detail.Status)
+	assert.Equal(t, "step failed", detail.Error)
+}
+
+func TestGetAttemptStep_StepNotFound(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+
+	finalArchive := makeArchive(runID, "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, finalArchive)
+
+	attemptArchive := makeArchive(runID, "failed", makeStep("node", 500, 80))
+	attemptPath := filepath.Join(dir, runID, "attempt-01.json")
+	require.NoError(t, archive.Write(attemptArchive, attemptPath))
+
+	svc := NewArchiveService(dir)
+	_, err := svc.GetAttemptStep(runID, 1, "nonexistent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrStepNotFound))
+}
+
+func TestGetAttemptStep_AttemptNotFound(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+
+	finalArchive := makeArchive(runID, "passed", makeStep("node", 200, 100))
+	writeArchive(t, dir, finalArchive)
+
+	svc := NewArchiveService(dir)
+	_, err := svc.GetAttemptStep(runID, 99, "node")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
 // --- file helpers ---
 
 func createDir(path string) error {

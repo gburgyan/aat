@@ -5,13 +5,20 @@
   interface Props {
     resolutions: ResolutionDetail[];
     runId: string;
+    attempt?: number;
   }
 
-  let { resolutions, runId }: Props = $props();
+  let { resolutions, runId, attempt }: Props = $props();
+
+  function stepHref(stepId: string): string {
+    return attempt
+      ? `/runs/${runId}/attempts/${attempt}/steps/${stepId}`
+      : `/runs/${runId}/steps/${stepId}`;
+  }
 
   function goToStep(e: MouseEvent, stepId: string) {
     e.preventDefault();
-    navigate(`/runs/${runId}/steps/${stepId}`);
+    navigate(stepHref(stepId));
   }
 
   function sourceBadgeClass(source: string): string {
@@ -67,7 +74,7 @@
         <td class="dt-mono">{formatValue(r.finalValue ?? r.rawValue)}</td>
         <td class="dt-mono dt-muted">
           {#if r.fromStep && r.fromOutput}
-            <a href="/runs/{runId}/steps/{r.fromStep}" class="step-link" onclick={(e: MouseEvent) => goToStep(e, r.fromStep!)}>{r.fromStep}</a>.{r.fromOutput}
+            <a href={stepHref(r.fromStep!)} class="step-link" onclick={(e: MouseEvent) => goToStep(e, r.fromStep!)}>{r.fromStep}</a>.{r.fromOutput}
           {:else if r.expression}
             {r.expression}
           {/if}

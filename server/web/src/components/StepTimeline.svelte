@@ -6,11 +6,12 @@
   interface Props {
     steps: StepSummary[];
     runId: string;
+    attempt?: number;
     sectionLabel?: string;
     muted?: boolean;
   }
 
-  let { steps, runId, sectionLabel, muted = false }: Props = $props();
+  let { steps, runId, attempt, sectionLabel, muted = false }: Props = $props();
 
   // Total span = last step's (offset + duration), used for Gantt positioning
   let totalSpanMs = $derived.by(() => {
@@ -23,7 +24,10 @@
   });
 
   function goToStep(stepId: string) {
-    navigate(`/runs/${runId}/steps/${stepId}`);
+    const url = attempt
+      ? `/runs/${runId}/attempts/${attempt}/steps/${stepId}`
+      : `/runs/${runId}/steps/${stepId}`;
+    navigate(url);
   }
 
   function handleKeydown(e: KeyboardEvent, stepId: string) {

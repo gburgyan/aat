@@ -425,7 +425,7 @@ func loadAndRunPlanWithRetries(ctx context.Context, rctx *runContext, planPath, 
 		}
 
 		// Execute the plan (writes its own archive to runDir)
-		res := loadAndRunPlanToDir(ctx, rctx, planPath, runDir, observer, logf)
+		res := loadAndRunPlanToDir(ctx, rctx, planPath, runDir, attempt, totalPossible, observer, logf)
 		lastRes = res
 		lastRes.attempts = attempt
 
@@ -450,18 +450,6 @@ func loadAndRunPlanWithRetries(ctx context.Context, rctx *runContext, planPath, 
 				reason = res.err.Error()
 			}
 			logf("[attempt %d/%d] FAILED: %s\n", attempt, totalPossible, reason)
-		}
-	}
-
-	// Annotate the final archive with attempt metadata if retries occurred
-	if lastRes != nil && lastRes.attempts > 1 && lastRes.archivePath != "" {
-		// Re-read, annotate, and re-write the final archive
-		if arc, readErr := archive.Read(lastRes.archivePath); readErr == nil {
-			arc.Metadata.Attempt = lastRes.attempts
-			arc.Metadata.TotalAttempts = lastRes.attempts
-			if writeErr := archive.Write(arc, lastRes.archivePath); writeErr != nil {
-				logf("aat: warning: could not annotate final archive: %s\n", writeErr)
-			}
 		}
 	}
 
@@ -602,12 +590,12 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 func loadAndRunPlan(ctx context.Context, rctx *runContext, planPath, outputDir string, observer engine.ProgressObserver, logf func(string, ...any)) *runResult {
 	runID := archive.GenerateRunID()
 	runDir := filepath.Join(outputDir, runID)
-	return loadAndRunPlanToDir(ctx, rctx, planPath, runDir, observer, logf)
+	return loadAndRunPlanToDir(ctx, rctx, planPath, runDir, 0, 0, observer, logf)
 }
 
 // loadAndRunPlanToDir parses a plan file, executes it, and writes the archive
 // to the specified run directory (archive.json within runDir).
-func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir string, observer engine.ProgressObserver, logf func(string, ...any)) *runResult {
+func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir string, attempt, totalAttempts int, observer engine.ProgressObserver, logf func(string, ...any)) *runResult {
 	// 1. Parse plan (or recipe)
 	parsed, err := plan.ParseAnyFile(planPath)
 	if err != nil {
@@ -734,13 +722,15 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	}
 
 	meta := archive.ArchiveMetadata{
-		Version:      "1.0.0",
-		RunID:        filepath.Base(runDir),
-		Timestamp:    time.Now(),
-		Plan:         p,
-		Environment:  rctx.Env.Name,
-		GraphVersion: rctx.Graph.Version,
-		ToolVersion:  "0.1.0",
+		Version:       "1.0.0",
+		RunID:         filepath.Base(runDir),
+		Timestamp:     time.Now(),
+		Plan:          p,
+		Environment:   rctx.Env.Name,
+		GraphVersion:  rctx.Graph.Version,
+		ToolVersion:   "0.1.0",
+		Attempt:       attempt,
+		TotalAttempts: totalAttempts,
 	}
 	arc := engine.ToArchive(result, meta, rctx.Env.APIBaseURL, secrets)
 	archivePath := filepath.Join(runDir, "archive.json")

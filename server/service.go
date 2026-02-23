@@ -98,12 +98,73 @@ func (s *ArchiveService) GetRun(id string) (*RunDetail, error) {
 	return detail, nil
 }
 
+// GetAttempt loads a prior attempt archive for a run and returns it as a RunDetail.
+func (s *ArchiveService) GetAttempt(runID string, attemptNum int) (*RunDetail, error) {
+	// Find the run directory (standalone or batch member).
+	_, batchID, err := s.loadArchiveWithContext(runID)
+	if err != nil {
+		return nil, err
+	}
+
+	var runDir string
+	if batchID != "" {
+		runDir = filepath.Join(s.archiveDir, batchID, runID)
+	} else {
+		runDir = filepath.Join(s.archiveDir, runID)
+	}
+
+	attemptPath := filepath.Join(runDir, fmt.Sprintf("attempt-%02d.json", attemptNum))
+	a, err := archive.Read(attemptPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("attempt %d of run %q: %w", attemptNum, runID, ErrRunNotFound)
+		}
+		return nil, fmt.Errorf("reading attempt %d of run %q: %w", attemptNum, runID, err)
+	}
+
+	detail := toRunDetail(a)
+	detail.BatchID = batchID
+	return detail, nil
+}
+
 // GetStep loads the full detail of a single step within a run.
 func (s *ArchiveService) GetStep(runID, stepID string) (*StepDetail, error) {
 	a, err := s.loadArchive(runID)
 	if err != nil {
 		return nil, err
 	}
+	return getStepFromArchive(a, runID, stepID)
+}
+
+// GetAttemptStep loads the full detail of a single step within a prior attempt archive.
+func (s *ArchiveService) GetAttemptStep(runID string, attemptNum int, stepID string) (*StepDetail, error) {
+	// Find the run directory (standalone or batch member).
+	_, batchID, err := s.loadArchiveWithContext(runID)
+	if err != nil {
+		return nil, err
+	}
+
+	var runDir string
+	if batchID != "" {
+		runDir = filepath.Join(s.archiveDir, batchID, runID)
+	} else {
+		runDir = filepath.Join(s.archiveDir, runID)
+	}
+
+	attemptPath := filepath.Join(runDir, fmt.Sprintf("attempt-%02d.json", attemptNum))
+	a, err := archive.Read(attemptPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("attempt %d of run %q: %w", attemptNum, runID, ErrRunNotFound)
+		}
+		return nil, fmt.Errorf("reading attempt %d of run %q: %w", attemptNum, runID, err)
+	}
+
+	return getStepFromArchive(a, runID, stepID)
+}
+
+// getStepFromArchive extracts a step detail from a loaded archive.
+func getStepFromArchive(a *archive.Archive, runID, stepID string) (*StepDetail, error) {
 	rec, isCleanup, found := findStep(a, stepID)
 	if !found {
 		return nil, fmt.Errorf("step %q in run %q: %w", stepID, runID, ErrStepNotFound)
@@ -272,6 +333,7 @@ func (s *ArchiveService) loadAttemptSummaries(runID, batchID string) []AttemptSu
 		if err != nil {
 			continue
 		}
+
 		attempts = append(attempts, AttemptSummary{
 			Attempt:  a.Metadata.Attempt,
 			Outcome:  a.Result.Outcome,

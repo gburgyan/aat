@@ -5,13 +5,20 @@
   interface Props {
     selections: SelectionDetail[];
     runId: string;
+    attempt?: number;
   }
 
-  let { selections, runId }: Props = $props();
+  let { selections, runId, attempt }: Props = $props();
+
+  function stepHref(stepId: string): string {
+    return attempt
+      ? `/runs/${runId}/attempts/${attempt}/steps/${stepId}`
+      : `/runs/${runId}/steps/${stepId}`;
+  }
 
   function goToStep(e: MouseEvent, stepId: string) {
     e.preventDefault();
-    navigate(`/runs/${runId}/steps/${stepId}`);
+    navigate(stepHref(stepId));
   }
 
   function strategyBadgeClass(strategy: string): string {
@@ -45,7 +52,7 @@
         <td class="dt-mono" style="font-weight: 600;">{s.inputName}</td>
         <td class="dt-mono dt-muted">
           {#if s.sourceStep}
-            <a href="/runs/{runId}/steps/{s.sourceStep}" class="step-link" onclick={(e: MouseEvent) => goToStep(e, s.sourceStep!)}>{s.sourceNode}</a>.{s.sourceField}
+            <a href={stepHref(s.sourceStep!)} class="step-link" onclick={(e: MouseEvent) => goToStep(e, s.sourceStep!)}>{s.sourceNode}</a>.{s.sourceField}
           {:else}
             {s.sourceNode}.{s.sourceField}
           {/if}

@@ -361,6 +361,127 @@ func TestHandleGetRun_BatchMember(t *testing.T) {
 	assert.Equal(t, batchID, run.BatchID)
 }
 
+// --- handleGetAttempt ---
+
+func TestHandleGetAttempt_Success(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+
+	finalArchive := makeArchive(runID, "passed", makeStep("node", 200, 100))
+	finalArchive.Metadata.Attempt = 2
+	finalArchive.Metadata.TotalAttempts = 2
+	writeArchive(t, dir, finalArchive)
+
+	attemptArchive := makeArchive(runID, "failed", makeStep("node", 500, 80))
+	attemptArchive.Metadata.Attempt = 1
+	attemptArchive.Metadata.TotalAttempts = 2
+	attemptArchive.Result.Error = "step failed"
+	require.NoError(t, archive.Write(attemptArchive,
+		dir+"/"+runID+"/attempt-01.json"))
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs/"+runID+"/attempts/1")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+
+	var detail RunDetail
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&detail))
+	assert.Equal(t, runID, detail.RunID)
+	assert.Equal(t, "failed", detail.Outcome)
+	assert.Equal(t, 1, detail.Attempt)
+}
+
+func TestHandleGetAttempt_InvalidAttempt(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100)))
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs/run-20260201-100000-bbbb0001/attempts/abc")
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var errResp apiError
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
+	assert.Equal(t, "invalid_parameter", errResp.Code)
+}
+
+func TestHandleGetAttempt_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100)))
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs/run-20260201-100000-bbbb0001/attempts/99")
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	var errResp apiError
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
+	assert.Equal(t, "not_found", errResp.Code)
+}
+
+// --- handleGetAttemptStep ---
+
+func TestHandleGetAttemptStep_Success(t *testing.T) {
+	dir := t.TempDir()
+	runID := "run-20260201-100000-bbbb0001"
+
+	// Write final archive.
+	finalArchive := makeArchive(runID, "passed", makeStep("node", 200, 100))
+	finalArchive.Metadata.Attempt = 2
+	finalArchive.Metadata.TotalAttempts = 2
+	writeArchive(t, dir, finalArchive)
+
+	// Write attempt-01 with a step that has status 500.
+	attemptStep := makeStep("node", 500, 80)
+	attemptStep.Error = "step failed"
+	attemptArchive := makeArchive(runID, "failed", attemptStep)
+	attemptArchive.Metadata.Attempt = 1
+	attemptArchive.Metadata.TotalAttempts = 2
+	require.NoError(t, archive.Write(attemptArchive,
+		dir+"/"+runID+"/attempt-01.json"))
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs/"+runID+"/attempts/1/steps/node")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "application/json; charset=utf-8", rec.Header().Get("Content-Type"))
+
+	var detail StepDetail
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&detail))
+	assert.Equal(t, "node", detail.StepID)
+	assert.Equal(t, 500, detail.Status)
+	assert.Equal(t, "step failed", detail.Error)
+}
+
+func TestHandleGetAttemptStep_InvalidAttempt(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100)))
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs/run-20260201-100000-bbbb0001/attempts/abc/steps/node")
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+
+	var errResp apiError
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
+	assert.Equal(t, "invalid_parameter", errResp.Code)
+}
+
+func TestHandleGetAttemptStep_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir, makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100)))
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs/run-20260201-100000-bbbb0001/attempts/99/steps/node")
+
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+
+	var errResp apiError
+	require.NoError(t, json.NewDecoder(rec.Body).Decode(&errResp))
+	assert.Equal(t, "not_found", errResp.Code)
+}
+
 // Verify unknown archive dirs at the handler level don't crash.
 func TestHandleListRuns_MissingArchiveDir(t *testing.T) {
 	dir := t.TempDir()

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { StepDetail } from '../lib/types';
-  import { fetchStep } from '../lib/api';
+  import { fetchStep, fetchAttemptStep } from '../lib/api';
   import { navigate } from '../lib/router';
   import { formatDuration, httpStatusCategory } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
@@ -17,21 +17,32 @@
   interface Props {
     runId: string;
     stepId: string;
+    attempt?: number;
   }
 
-  let { runId, stepId }: Props = $props();
+  let { runId, stepId, attempt }: Props = $props();
+
+  function stepUrl(sid: string): string {
+    return attempt
+      ? `/runs/${runId}/attempts/${attempt}/steps/${sid}`
+      : `/runs/${runId}/steps/${sid}`;
+  }
+
+  function runUrl(): string {
+    return attempt ? `/runs/${runId}/attempts/${attempt}` : `/runs/${runId}`;
+  }
 
   let step = $state<StepDetail | null>(null);
   let loading = $state(true);
   let error = $state('');
   let activeTab = $state('');
 
-  async function load(rid: string, sid: string) {
+  async function load(rid: string, sid: string, att?: number) {
     loading = true;
     error = '';
     step = null;
     try {
-      step = await fetchStep(rid, sid);
+      step = att ? await fetchAttemptStep(rid, att, sid) : await fetchStep(rid, sid);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load step';
     } finally {
@@ -40,7 +51,7 @@
   }
 
   $effect(() => {
-    load(runId, stepId);
+    load(runId, stepId, attempt);
   });
 
   interface TabDef {
@@ -109,13 +120,13 @@
 
       if (e.key === 'ArrowLeft' && step.prevStepId) {
         e.preventDefault();
-        navigate(`/runs/${runId}/steps/${step.prevStepId}`);
+        navigate(stepUrl(step.prevStepId));
       } else if (e.key === 'ArrowRight' && step.nextStepId) {
         e.preventDefault();
-        navigate(`/runs/${runId}/steps/${step.nextStepId}`);
+        navigate(stepUrl(step.nextStepId));
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        navigate(`/runs/${runId}`);
+        navigate(runUrl());
       }
     }
 
@@ -129,7 +140,7 @@
 {:else if error}
   <div class="error-message">
     <p>{error}</p>
-    <button onclick={() => load(runId, stepId)}>Retry</button>
+    <button onclick={() => load(runId, stepId, attempt)}>Retry</button>
   </div>
 {:else if step}
   <div class="step-detail-header">
@@ -141,12 +152,12 @@
       {/if}
       <div class="step-nav">
         {#if step.prevStepId}
-          <a href="/runs/{runId}/steps/{step.prevStepId}" class="step-nav-btn" title="{step.prevStepId}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/runs/${runId}/steps/${step.prevStepId}`); }}>&larr; Prev</a>
+          <a href={stepUrl(step.prevStepId)} class="step-nav-btn" title="{step.prevStepId}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(stepUrl(step.prevStepId!)); }}>&larr; Prev</a>
         {:else}
           <span class="step-nav-btn step-nav-disabled">&larr; Prev</span>
         {/if}
         {#if step.nextStepId}
-          <a href="/runs/{runId}/steps/{step.nextStepId}" class="step-nav-btn" title="{step.nextStepId}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/runs/${runId}/steps/${step.nextStepId}`); }}>Next &rarr;</a>
+          <a href={stepUrl(step.nextStepId)} class="step-nav-btn" title="{step.nextStepId}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(stepUrl(step.nextStepId!)); }}>Next &rarr;</a>
         {:else}
           <span class="step-nav-btn step-nav-disabled">Next &rarr;</span>
         {/if}
@@ -242,7 +253,7 @@
       {/if}
 
       {#if activeTab === 'extractions' && step.extractions}
-        <ExtractionsTable extractions={step.extractions} {runId} />
+        <ExtractionsTable extractions={step.extractions} {runId} {attempt} />
       {/if}
 
       {#if activeTab === 'lua-output' && step.outputs}
@@ -254,11 +265,11 @@
       {/if}
 
       {#if activeTab === 'resolutions' && step.resolutions}
-        <ResolutionsTable resolutions={step.resolutions} {runId} />
+        <ResolutionsTable resolutions={step.resolutions} {runId} {attempt} />
       {/if}
 
       {#if activeTab === 'selections' && step.selections}
-        <SelectionsTable selections={step.selections} {runId} />
+        <SelectionsTable selections={step.selections} {runId} {attempt} />
       {/if}
 
       {#if activeTab === 'errors'}

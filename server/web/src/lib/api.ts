@@ -37,9 +37,19 @@ export function fetchRun(id: string): Promise<RunDetail> {
   return request<RunDetail>(`/api/runs/${encodeURIComponent(id)}`);
 }
 
+export function fetchAttempt(runId: string, attempt: number): Promise<RunDetail> {
+  return request<RunDetail>(`/api/runs/${encodeURIComponent(runId)}/attempts/${attempt}`);
+}
+
 export function fetchStep(runId: string, stepId: string): Promise<StepDetail> {
   return request<StepDetail>(
     `/api/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}`,
+  );
+}
+
+export function fetchAttemptStep(runId: string, attempt: number, stepId: string): Promise<StepDetail> {
+  return request<StepDetail>(
+    `/api/runs/${encodeURIComponent(runId)}/attempts/${attempt}/steps/${encodeURIComponent(stepId)}`,
   );
 }
 

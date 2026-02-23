@@ -6,13 +6,20 @@
   interface Props {
     extractions: ExtractionDetail[];
     runId: string;
+    attempt?: number;
   }
 
-  let { extractions, runId }: Props = $props();
+  let { extractions, runId, attempt }: Props = $props();
+
+  function stepHref(stepId: string): string {
+    return attempt
+      ? `/runs/${runId}/attempts/${attempt}/steps/${stepId}`
+      : `/runs/${runId}/steps/${stepId}`;
+  }
 
   function goToStep(e: MouseEvent, stepId: string) {
     e.preventDefault();
-    navigate(`/runs/${runId}/steps/${stepId}`);
+    navigate(stepHref(stepId));
   }
 
   function isSimpleValue(val: unknown): boolean {
@@ -52,7 +59,7 @@
           {#if ext.consumers && ext.consumers.length > 0}
             {#each ext.consumers as c, ci (ci)}
               {#if ci > 0}<br />{/if}
-              <a href="/runs/{runId}/steps/{c.stepId}" class="step-link" onclick={(e: MouseEvent) => goToStep(e, c.stepId)}>{c.stepId}</a>
+              <a href={stepHref(c.stepId)} class="step-link" onclick={(e: MouseEvent) => goToStep(e, c.stepId)}>{c.stepId}</a>
               <span class="dt-muted">.{c.inputName}</span>
               <span class="badge badge-sm {viaBadgeClass(c.via)}" style="margin-left: 0.25rem;">{c.via}</span>
             {/each}

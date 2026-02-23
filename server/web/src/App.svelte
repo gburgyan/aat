@@ -27,8 +27,12 @@
     <RunList />
   {:else if route.view === 'run-detail'}
     <RunDetail runId={route.runId} />
+  {:else if route.view === 'attempt-detail'}
+    <RunDetail runId={route.runId} attempt={route.attempt} />
   {:else if route.view === 'step-detail'}
     <StepDetail runId={route.runId} stepId={route.stepId} />
+  {:else if route.view === 'attempt-step-detail'}
+    <StepDetail runId={route.runId} stepId={route.stepId} attempt={route.attempt} />
   {:else if route.view === 'batch-detail'}
     <BatchDetail batchId={route.batchId} />
   {:else if route.view === 'trace-list'}

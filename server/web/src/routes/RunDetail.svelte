@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RunDetail } from '../lib/types';
-  import { fetchRun } from '../lib/api';
+  import { fetchRun, fetchAttempt } from '../lib/api';
   import { navigate } from '../lib/router';
   import { formatDuration, timeAgo, formatTimestamp } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
@@ -9,20 +9,21 @@
 
   interface Props {
     runId: string;
+    attempt?: number;
   }
 
-  let { runId }: Props = $props();
+  let { runId, attempt }: Props = $props();
 
   let run = $state<RunDetail | null>(null);
   let loading = $state(true);
   let error = $state('');
 
-  async function load(id: string) {
+  async function load(id: string, attemptNum?: number) {
     loading = true;
     error = '';
     run = null;
     try {
-      run = await fetchRun(id);
+      run = attemptNum ? await fetchAttempt(id, attemptNum) : await fetchRun(id);
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load run';
     } finally {
@@ -31,7 +32,7 @@
   }
 
   $effect(() => {
-    load(runId);
+    load(runId, attempt);
   });
 
   let displayName = $derived(run?.planName || runId);
@@ -51,7 +52,12 @@
       <h1 class="run-detail-title">{displayName}</h1>
     </div>
 
-    {#if run.totalAttempts && run.totalAttempts > 1}
+    {#if attempt}
+      <div class="run-attempt-nav">
+        <a href="/runs/{runId}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/runs/${runId}`); }}>Back to final run</a>
+        &mdash; viewing attempt #{attempt}
+      </div>
+    {:else if run.totalAttempts && run.totalAttempts > 1}
       <div class="run-attempt-info">
         Attempt {run.attempt} of {run.totalAttempts}
       </div>
@@ -102,10 +108,10 @@
     </div>
   </div>
 
-  <StepTimeline steps={run.steps} {runId} sectionLabel="Steps" />
+  <StepTimeline steps={run.steps} {runId} {attempt} sectionLabel="Steps" />
 
   {#if run.cleanup && run.cleanup.length > 0}
-    <StepTimeline steps={run.cleanup} {runId} sectionLabel="Cleanup" muted />
+    <StepTimeline steps={run.cleanup} {runId} {attempt} sectionLabel="Cleanup" muted />
   {/if}
 
   {#if run.attempts && run.attempts.length > 0}
@@ -122,11 +128,12 @@
           </tr>
         </thead>
         <tbody>
-          {#each run.attempts as attempt (attempt.attempt)}
-            <tr>
-              <td>#{attempt.attempt}</td>
-              <td><OutcomeBadge outcome={attempt.outcome} size="sm" /></td>
-              <td class="attempt-error">{attempt.error || '-'}</td>
+          {#each run.attempts as att (att.attempt)}
+            <tr class="attempt-row-clickable"
+                onclick={() => navigate(`/runs/${runId}/attempts/${att.attempt}`)}>
+              <td>#{att.attempt}</td>
+              <td><OutcomeBadge outcome={att.outcome} size="sm" /></td>
+              <td class="attempt-error">{att.error || '-'}</td>
             </tr>
           {/each}
         </tbody>
@@ -196,5 +203,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .attempt-row-clickable {
+    cursor: pointer;
+  }
+  .attempt-row-clickable:hover {
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
+  }
+  .run-attempt-nav {
+    font-size: 0.85rem;
+    color: var(--color-text-muted, #9ca3af);
+    margin-bottom: 0.5rem;
+  }
+  .run-attempt-nav a {
+    color: var(--color-primary, #6366f1);
+    text-decoration: none;
+  }
+  .run-attempt-nav a:hover {
+    color: var(--color-primary-hover, #818cf8);
+    text-decoration: underline;
   }
 </style>

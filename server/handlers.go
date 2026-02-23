@@ -130,6 +130,50 @@ func (s *Server) handleGetBatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, batch)
 }
 
+func (s *Server) handleGetAttempt(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "id")
+	attemptStr := chi.URLParam(r, "attempt")
+	attemptNum, err := strconv.Atoi(attemptStr)
+	if err != nil || attemptNum < 1 {
+		writeError(w, http.StatusBadRequest, "invalid_parameter", fmt.Sprintf("invalid attempt number: %q", attemptStr))
+		return
+	}
+
+	detail, err := s.service.GetAttempt(runID, attemptNum)
+	if err != nil {
+		if errors.Is(err, ErrRunNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) handleGetAttemptStep(w http.ResponseWriter, r *http.Request) {
+	runID := chi.URLParam(r, "id")
+	attemptStr := chi.URLParam(r, "attempt")
+	stepID := chi.URLParam(r, "stepId")
+
+	attemptNum, err := strconv.Atoi(attemptStr)
+	if err != nil || attemptNum < 1 {
+		writeError(w, http.StatusBadRequest, "invalid_parameter", fmt.Sprintf("invalid attempt number: %q", attemptStr))
+		return
+	}
+
+	step, err := s.service.GetAttemptStep(runID, attemptNum, stepID)
+	if err != nil {
+		if errors.Is(err, ErrRunNotFound) || errors.Is(err, ErrStepNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, step)
+}
+
 func (s *Server) handleGetStep(w http.ResponseWriter, r *http.Request) {
 	runID := chi.URLParam(r, "id")
 	stepID := chi.URLParam(r, "stepId")
