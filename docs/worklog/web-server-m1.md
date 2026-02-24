@@ -2,7 +2,7 @@
 
 ## Context
 
-AAT is a power-user CLI tool. The web interface makes archive browsing accessible to a wider audience without replacing the CLI. Vision: `vision/web-server.md`. This plan covers foundational decisions and Milestone 1 broken into manageable sessions.
+AAT is a power-user CLI tool. The web interface makes archive browsing accessible to a wider audience without replacing the CLI. This plan covers foundational decisions and Milestone 1 broken into manageable sessions.
 
 ---
 

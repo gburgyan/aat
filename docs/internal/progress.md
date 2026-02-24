@@ -1,6 +1,6 @@
 # AAT Progress Tracker
 
-Cross-references task numbers from `vision/implementation-plan.md`.
+Cross-references task numbers from the implementation plan.
 
 ## Stage 1: Foundation
 

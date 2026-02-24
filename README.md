@@ -87,6 +87,10 @@ make clean    # Removes binary and frontend artifacts
 
 AAT is in active development (Stage 3a: CI/CD, Web UI & Polish). The core engine, graph model, plan execution, validation, archiving, LLM-assisted planning, web UI, and MCP server are complete. See `docs/internal/progress.md` for detailed status.
 
+## Contributing
+
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. By submitting a pull request, you agree to the [Contributor License Agreement](CLA.md).
+
 ## License
 
-Not yet determined.
+Apache 2.0 — see [LICENSE](LICENSE).

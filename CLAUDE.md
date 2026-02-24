@@ -1,6 +1,6 @@
 # AAT — Adaptive API Testing
 
-AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API workflows end-to-end. Vision and implementation details live in `vision/adaptive-api-testing-6-pager.md` and `vision/implementation-plan.md`.
+AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API workflows end-to-end.
 
 ## Module
 
