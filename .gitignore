@@ -33,3 +33,4 @@ server/web/dist/assets/
 
 # Environment configs (may contain credentials)
 environments/
+/setup-local.sh
