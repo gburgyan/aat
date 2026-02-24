@@ -153,9 +153,9 @@
         <a href="/runs/{encPath(runId)}" onclick={(e: MouseEvent) => { e.preventDefault(); navigate(`/runs/${encPath(runId)}`); }}>Back to final run</a>
         &mdash; viewing attempt #{attempt}
       </div>
-    {:else if run.totalAttempts && run.totalAttempts > 1}
+    {:else if run.attempts && run.attempts.length > 0}
       <div class="run-attempt-info">
-        Attempt {run.attempt} of {run.totalAttempts}
+        Attempt {run.attempt} of {run.attempts.length + 1}
       </div>
     {/if}
 

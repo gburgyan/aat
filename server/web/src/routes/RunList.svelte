@@ -173,8 +173,8 @@
               {:else}
                 {displayName(item.entry)}
               {/if}
-              {#if item.entry.totalAttempts && item.entry.totalAttempts > 1}
-                <span class="retry-badge" title="Took {item.entry.totalAttempts} attempts">{item.entry.totalAttempts} attempts</span>
+              {#if item.entry.attempt && item.entry.attempt > 1}
+                <span class="retry-badge" title="Took {item.entry.attempt} attempts">{item.entry.attempt} attempts</span>
               {/if}
               {#if item.entry.layers && item.entry.layers.length > 0}
                 {#each item.entry.layers as layer}

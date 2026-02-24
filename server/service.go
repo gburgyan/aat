@@ -115,8 +115,11 @@ func (s *ArchiveService) GetRun(id string) (*RunDetail, error) {
 	detail.Name = displayName(id)
 
 	// Load attempt summaries if this was a retried run.
-	if a.Metadata.TotalAttempts > 1 {
+	// Use Attempt (actual attempt number) rather than TotalAttempts (max possible),
+	// since TotalAttempts reflects configured retries, not actual retries taken.
+	if a.Metadata.Attempt > 1 {
 		detail.Attempts = s.loadAttemptSummaries(id, batchID)
+		detail.TotalAttempts = len(detail.Attempts) + 1 // actual total from files found
 	}
 
 	return detail, nil
