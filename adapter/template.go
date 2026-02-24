@@ -102,8 +102,8 @@ var placeholderRe = regexp.MustCompile(`\{\{\s*([^}]+?)\s*\}\}`)
 // iterOpenRe matches {{#key}} iteration block opening tags.
 var iterOpenRe = regexp.MustCompile(`\{\{#(\w+)\}\}`)
 
-// condOpenRe matches {{?key}} conditional block opening tags.
-var condOpenRe = regexp.MustCompile(`\{\{\?(\w+)\}\}`)
+// condOpenRe matches {{?key}} and {{?key1|key2}} conditional block opening tags.
+var condOpenRe = regexp.MustCompile(`\{\{\?([\w|]+)\}\}`)
 
 // ParseTemplate parses YAML bytes into a Template and validates required fields.
 func ParseTemplate(data []byte) (*Template, error) {
@@ -336,13 +336,25 @@ func expandConditionalBlocks(tmpl string, inputs map[string]any) (string, error)
 		body := result[loc[1] : loc[1]+closeIdx]
 		blockEnd := loc[1] + closeIdx + len(closeTag)
 
-		if condPresent(inputs, key) {
+		if anyPresent(inputs, key) {
 			result = result[:loc[0]] + body + result[blockEnd:]
 		} else {
 			result = result[:loc[0]] + result[blockEnd:]
 		}
 	}
 	return result, nil
+}
+
+// anyPresent returns true if any of the pipe-separated keys are present in
+// inputs with a non-empty value. For a single key (no pipes), it behaves
+// identically to condPresent.
+func anyPresent(inputs map[string]any, keys string) bool {
+	for _, k := range strings.Split(keys, "|") {
+		if condPresent(inputs, k) {
+			return true
+		}
+	}
+	return false
 }
 
 // condPresent returns true if the key exists in inputs and has a non-empty value.
@@ -549,8 +561,11 @@ func classifySource(src string, iterKeys, condKeys, condInnerKeys, allKeys map[s
 			break
 		}
 		body := remaining[loc[1] : loc[1]+closeIdx]
-		condKeys[key] = true
-		allKeys[key] = true
+		// Compound keys like "a|b" — register each individual key as conditional.
+		for _, k := range strings.Split(key, "|") {
+			condKeys[k] = true
+			allKeys[k] = true
+		}
 
 		// Find inner placeholders that only appear in this conditional block.
 		// First, find iteration blocks inside the conditional to mark their keys.

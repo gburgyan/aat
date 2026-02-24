@@ -156,6 +156,34 @@ body: |
 
 Conditional blocks are expanded before placeholder substitution, so a block guarded by `{{?key}}` will have its `{{key}}` placeholder replaced only if the block is included.
 
+### Compound Conditionals
+
+When a JSON object contains multiple optional sub-sections, use the compound conditional syntax `{{?a|b|c}}...{{/a|b|c}}`. The block is included when **any** of the listed keys is present. Individual sub-sections inside the block use their own simple conditionals.
+
+```yaml
+body: |
+  {
+    {{?cabinPreference|carrierPreference}}"SearchModifiersAir": {
+      "@type": "SearchModifiersAir"{{?cabinPreference}},
+      "CabinPreference": [
+        {
+          "preferenceType": "Permitted",
+          "cabins": {{cabinPreference}}
+        }
+      ]{{/cabinPreference}}{{?carrierPreference}},
+      "CarrierPreference": [
+        {
+          "preferenceType": "Permitted",
+          "carriers": ["{{carrierPreference}}"]
+        }
+      ]{{/carrierPreference}}
+    },
+    {{/cabinPreference|carrierPreference}}"PassengerCriteria": []
+  }
+```
+
+This produces valid JSON for all four combinations: neither key, cabin only, carrier only, or both. Without compound conditionals, handling N optional sub-sections would require 2^N nested blocks. Compound conditionals scale linearly — add one more `|key` to the wrapper and one more inner `{{?...}}` block.
+
 ## Iteration Blocks
 
 Iteration blocks repeat a section of a template for each element in an array input.

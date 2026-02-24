@@ -593,6 +593,19 @@ inputs:
   addPayment.cardCode: VISA
 ```
 
+When the API expects an array parameter, use the explicit `value:` form to pass a literal array rather than a pool:
+
+```yaml
+# layers/premium.yaml
+name: premium
+description: Constrain flight searches to premium cabins
+inputs:
+  cabinPreference:
+    value: [Business, First]
+```
+
+Note the distinction: bare `[A, B]` is a pool (random pick at runtime), while `value: [A, B]` is a literal array value passed through as-is. The array is JSON-serialized at template rendering time (e.g., `["Business","First"]`).
+
 ### Applying Multiple Layers
 
 When multiple layers are applied, they stack in order — later layers override earlier ones:

@@ -359,6 +359,36 @@ func TestExpandConditionalBlocks(t *testing.T) {
 			want:   `A `,
 		},
 		{
+			name:   "compound key: first present",
+			tmpl:   `before{{?a|b}}INCLUDED{{/a|b}}after`,
+			inputs: map[string]any{"a": "yes"},
+			want:   `beforeINCLUDEDafter`,
+		},
+		{
+			name:   "compound key: second present",
+			tmpl:   `before{{?a|b}}INCLUDED{{/a|b}}after`,
+			inputs: map[string]any{"b": "yes"},
+			want:   `beforeINCLUDEDafter`,
+		},
+		{
+			name:   "compound key: both present",
+			tmpl:   `before{{?a|b}}INCLUDED{{/a|b}}after`,
+			inputs: map[string]any{"a": "yes", "b": "also"},
+			want:   `beforeINCLUDEDafter`,
+		},
+		{
+			name:   "compound key: neither present",
+			tmpl:   `before{{?a|b}}REMOVED{{/a|b}}after`,
+			inputs: map[string]any{},
+			want:   `beforeafter`,
+		},
+		{
+			name:   "compound key: three keys, middle present",
+			tmpl:   `{{?x|y|z}}HIT{{/x|y|z}}`,
+			inputs: map[string]any{"y": "present"},
+			want:   `HIT`,
+		},
+		{
 			name:    "unclosed conditional block",
 			tmpl:    `{{?key}}no close`,
 			inputs:  map[string]any{"key": "val"},
@@ -417,6 +447,87 @@ func TestExpandConditionalBlocks(t *testing.T) {
 			}
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCompoundConditional_SearchModifiersAir(t *testing.T) {
+	body := `{
+  "offersPerPage": 15,
+  {{?cabinPreference|carrierPreference}}"SearchModifiersAir": {
+    "@type": "SearchModifiersAir"{{?cabinPreference}},
+    "CabinPreference": [
+      {
+        "@type": "CabinPreference",
+        "preferenceType": "Permitted",
+        "cabins": {{cabinPreference}}
+      }
+    ]{{/cabinPreference}}{{?carrierPreference}},
+    "CarrierPreference": [
+      {
+        "@type": "CarrierPreference",
+        "preferenceType": "Permitted",
+        "carriers": ["{{carrierPreference}}"]
+      }
+    ]{{/carrierPreference}}
+  },
+  {{/cabinPreference|carrierPreference}}"PassengerCriteria": []
+}`
+
+	tests := []struct {
+		name   string
+		inputs map[string]any
+		check  func(t *testing.T, parsed map[string]any)
+	}{
+		{
+			name:   "neither cabin nor carrier",
+			inputs: map[string]any{},
+			check: func(t *testing.T, parsed map[string]any) {
+				_, hasMods := parsed["SearchModifiersAir"]
+				assert.False(t, hasMods, "SearchModifiersAir should be absent")
+			},
+		},
+		{
+			name:   "cabin only",
+			inputs: map[string]any{"cabinPreference": []any{"Business", "First"}},
+			check: func(t *testing.T, parsed map[string]any) {
+				mods := parsed["SearchModifiersAir"].(map[string]any)
+				assert.NotNil(t, mods["CabinPreference"])
+				_, hasCarrier := mods["CarrierPreference"]
+				assert.False(t, hasCarrier)
+			},
+		},
+		{
+			name:   "carrier only",
+			inputs: map[string]any{"carrierPreference": "QF"},
+			check: func(t *testing.T, parsed map[string]any) {
+				mods := parsed["SearchModifiersAir"].(map[string]any)
+				assert.NotNil(t, mods["CarrierPreference"])
+				_, hasCabin := mods["CabinPreference"]
+				assert.False(t, hasCabin)
+			},
+		},
+		{
+			name:   "both cabin and carrier",
+			inputs: map[string]any{"cabinPreference": []any{"Business"}, "carrierPreference": "QF"},
+			check: func(t *testing.T, parsed map[string]any) {
+				mods := parsed["SearchModifiersAir"].(map[string]any)
+				assert.NotNil(t, mods["CabinPreference"])
+				assert.NotNil(t, mods["CarrierPreference"])
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := substitutePlaceholders(body, tt.inputs, nil)
+			require.NoError(t, err)
+
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal([]byte(result), &parsed), "output should be valid JSON:\n%s", result)
+
+			assert.NotNil(t, parsed["PassengerCriteria"], "PassengerCriteria should always be present")
+			tt.check(t, parsed)
 		})
 	}
 }
@@ -1002,6 +1113,26 @@ func TestClassifyInputs(t *testing.T) {
 			wantRequired:    nil,
 			wantConditional: nil,
 			wantIterable:    []string{"items"},
+		},
+		{
+			name: "compound conditional key",
+			tmpl: &Template{
+				Request: TemplateRequest{
+					Method: "POST",
+					Path:   "/search",
+					Body: `{
+  "required": "{{origin}}",
+  {{?cabinPref|carrierPref}}"mods": {
+    {{?cabinPref}}"cabin": "{{cabinPref}}"{{/cabinPref}}
+    {{?carrierPref}}"carrier": "{{carrierPref}}"{{/carrierPref}}
+  },
+  {{/cabinPref|carrierPref}}"end": true
+}`,
+				},
+			},
+			wantRequired:    []string{"origin"},
+			wantConditional: []string{"cabinPref", "carrierPref"},
+			wantIterable:    nil,
 		},
 		{
 			name: "empty template",
