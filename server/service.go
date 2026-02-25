@@ -18,9 +18,30 @@ import (
 // autoGenPrefixRe matches auto-generated run/batch directory prefixes.
 var autoGenPrefixRe = regexp.MustCompile(`^(run|batch)-`)
 
+// staticRun holds a pre-loaded run archive with its attempts.
+type staticRun struct {
+	archive  *archive.Archive
+	attempts map[int]*archive.Archive // attempt number → archive
+}
+
+// staticBatch holds a pre-loaded batch with its member runs.
+type staticBatch struct {
+	batch *archive.BatchArchive
+	runs  map[string]*staticRun // runID → archive + attempts
+}
+
+// staticData holds in-memory archives for file-based viewing.
+type staticData struct {
+	runs    map[string]*staticRun
+	batches map[string]*staticBatch
+}
+
 // ArchiveService provides read access to run archives for the web API.
 type ArchiveService struct {
 	archiveDir string
+	// static holds in-memory archives for file-based viewing.
+	// When non-nil, disk is not used.
+	static *staticData
 }
 
 // NewArchiveService creates an ArchiveService that reads from the given directory.
@@ -28,11 +49,58 @@ func NewArchiveService(archiveDir string) *ArchiveService {
 	return &ArchiveService{archiveDir: archiveDir}
 }
 
+// NewArchiveServiceFromRun creates an ArchiveService pre-loaded with a single
+// run archive and its attempts. No disk access is performed.
+func NewArchiveServiceFromRun(id string, a *archive.Archive, attempts map[int]*archive.Archive) *ArchiveService {
+	return &ArchiveService{
+		static: &staticData{
+			runs: map[string]*staticRun{
+				id: {archive: a, attempts: attempts},
+			},
+			batches: make(map[string]*staticBatch),
+		},
+	}
+}
+
+// NewArchiveServiceFromBatch creates an ArchiveService pre-loaded with a batch
+// archive and its member runs. No disk access is performed.
+func NewArchiveServiceFromBatch(id string, b *archive.BatchArchive, runs map[string]*archive.Archive, attempts map[string]map[int]*archive.Archive) *ArchiveService {
+	staticRuns := make(map[string]*staticRun)
+	for runID, a := range runs {
+		sr := &staticRun{archive: a}
+		if attempts != nil {
+			sr.attempts = attempts[runID]
+		}
+		staticRuns[runID] = sr
+	}
+
+	return &ArchiveService{
+		static: &staticData{
+			runs: staticRuns,
+			batches: map[string]*staticBatch{
+				id: {
+					batch: b,
+					runs:  staticRuns,
+				},
+			},
+		},
+	}
+}
+
+// IsStatic returns true if the service is operating in static (in-memory) mode.
+func (s *ArchiveService) IsStatic() bool {
+	return s.static != nil
+}
+
 // ListRuns scans the archive directory for run directories, reads each archive,
 // and returns summaries sorted newest-first. limit=0 means no limit.
 // When savedOnly is true, only named/saved runs are returned.
 // Unreadable archives are skipped silently.
 func (s *ArchiveService) ListRuns(limit int, savedOnly bool) ([]RunListEntry, error) {
+	if s.static != nil {
+		return s.listRunsStatic(limit, savedOnly)
+	}
+
 	if s.archiveDir == "" {
 		return nil, fmt.Errorf("archive directory not configured")
 	}
@@ -91,6 +159,31 @@ func (s *ArchiveService) ListRuns(limit int, savedOnly bool) ([]RunListEntry, er
 	return results, nil
 }
 
+func (s *ArchiveService) listRunsStatic(limit int, _ bool) ([]RunListEntry, error) {
+	var results []RunListEntry
+	for id, sr := range s.static.runs {
+		a := sr.archive
+		summary := archive.BuildRunSummary(a)
+		entry := summaryToRunListEntry(summary)
+		entry.RunID = id
+		entry.Name = displayName(id)
+		results = append(results, entry)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Timestamp.After(results[j].Timestamp)
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return results, nil
+}
+
 // LatestRunID returns the RunID of the most recent archive, or "" if none exist.
 func (s *ArchiveService) LatestRunID() (string, error) {
 	runs, err := s.ListRuns(1, false)
@@ -127,6 +220,11 @@ func (s *ArchiveService) GetRun(id string) (*RunDetail, error) {
 
 // GetAttempt loads a prior attempt archive for a run and returns it as a RunDetail.
 func (s *ArchiveService) GetAttempt(runID string, attemptNum int) (*RunDetail, error) {
+	// Check static data first.
+	if s.static != nil {
+		return s.getAttemptStatic(runID, attemptNum)
+	}
+
 	// Find the run directory (standalone or batch member).
 	_, batchID, err := s.loadArchiveWithContext(runID)
 	if err != nil {
@@ -154,6 +252,35 @@ func (s *ArchiveService) GetAttempt(runID string, attemptNum int) (*RunDetail, e
 	return detail, nil
 }
 
+func (s *ArchiveService) getAttemptStatic(runID string, attemptNum int) (*RunDetail, error) {
+	// Check standalone runs.
+	if sr, ok := s.static.runs[runID]; ok {
+		if sr.attempts != nil {
+			if a, ok := sr.attempts[attemptNum]; ok {
+				detail := toRunDetail(a)
+				return detail, nil
+			}
+		}
+		return nil, fmt.Errorf("attempt %d of run %q: %w", attemptNum, runID, ErrRunNotFound)
+	}
+
+	// Check batch member runs.
+	for batchID, sb := range s.static.batches {
+		if sr, ok := sb.runs[runID]; ok {
+			if sr.attempts != nil {
+				if a, ok := sr.attempts[attemptNum]; ok {
+					detail := toRunDetail(a)
+					detail.BatchID = batchID
+					return detail, nil
+				}
+			}
+			return nil, fmt.Errorf("attempt %d of run %q: %w", attemptNum, runID, ErrRunNotFound)
+		}
+	}
+
+	return nil, fmt.Errorf("run %q: %w", runID, ErrRunNotFound)
+}
+
 // GetStep loads the full detail of a single step within a run.
 func (s *ArchiveService) GetStep(runID, stepID string) (*StepDetail, error) {
 	a, err := s.loadArchive(runID)
@@ -165,6 +292,11 @@ func (s *ArchiveService) GetStep(runID, stepID string) (*StepDetail, error) {
 
 // GetAttemptStep loads the full detail of a single step within a prior attempt archive.
 func (s *ArchiveService) GetAttemptStep(runID string, attemptNum int, stepID string) (*StepDetail, error) {
+	// In static mode, get the attempt detail and extract step from its archive.
+	if s.static != nil {
+		return s.getAttemptStepStatic(runID, attemptNum, stepID)
+	}
+
 	// Find the run directory (standalone or batch member).
 	_, batchID, err := s.loadArchiveWithContext(runID)
 	if err != nil {
@@ -188,6 +320,36 @@ func (s *ArchiveService) GetAttemptStep(runID string, attemptNum int, stepID str
 	}
 
 	return getStepFromArchive(a, runID, stepID)
+}
+
+func (s *ArchiveService) getAttemptStepStatic(runID string, attemptNum int, stepID string) (*StepDetail, error) {
+	// Find the attempt archive in static data.
+	findAttempt := func(sr *staticRun) *archive.Archive {
+		if sr.attempts == nil {
+			return nil
+		}
+		return sr.attempts[attemptNum]
+	}
+
+	if sr, ok := s.static.runs[runID]; ok {
+		a := findAttempt(sr)
+		if a == nil {
+			return nil, fmt.Errorf("attempt %d of run %q: %w", attemptNum, runID, ErrRunNotFound)
+		}
+		return getStepFromArchive(a, runID, stepID)
+	}
+
+	for _, sb := range s.static.batches {
+		if sr, ok := sb.runs[runID]; ok {
+			a := findAttempt(sr)
+			if a == nil {
+				return nil, fmt.Errorf("attempt %d of run %q: %w", attemptNum, runID, ErrRunNotFound)
+			}
+			return getStepFromArchive(a, runID, stepID)
+		}
+	}
+
+	return nil, fmt.Errorf("run %q: %w", runID, ErrRunNotFound)
 }
 
 // getStepFromArchive extracts a step detail from a loaded archive.
@@ -237,6 +399,21 @@ func (s *ArchiveService) loadArchive(id string) (*archive.Archive, error) {
 // if the run is found inside a batch directory. Returns ("", ErrRunNotFound)
 // if not found anywhere.
 func (s *ArchiveService) loadArchiveWithContext(id string) (*archive.Archive, string, error) {
+	// Check static data first.
+	if s.static != nil {
+		// Check batch member runs first to preserve batch context.
+		for batchID, sb := range s.static.batches {
+			if sr, ok := sb.runs[id]; ok {
+				return sr.archive, batchID, nil
+			}
+		}
+		// Then check standalone runs.
+		if sr, ok := s.static.runs[id]; ok {
+			return sr.archive, "", nil
+		}
+		return nil, "", fmt.Errorf("run %q: %w", id, ErrRunNotFound)
+	}
+
 	// First, try standalone run directory.
 	archivePath := filepath.Join(s.archiveDir, id, "archive.json")
 	a, err := archive.Read(archivePath)
@@ -275,6 +452,10 @@ func (s *ArchiveService) loadArchiveWithContext(id string) (*archive.Archive, st
 // When savedOnly is true, only named/saved batches are returned.
 // Unreadable batch archives are skipped silently.
 func (s *ArchiveService) ListBatches(limit int, savedOnly bool) ([]BatchListEntry, error) {
+	if s.static != nil {
+		return s.listBatchesStatic(limit)
+	}
+
 	if s.archiveDir == "" {
 		return nil, fmt.Errorf("archive directory not configured")
 	}
@@ -329,6 +510,26 @@ func (s *ArchiveService) ListBatches(limit int, savedOnly bool) ([]BatchListEntr
 	return results, nil
 }
 
+func (s *ArchiveService) listBatchesStatic(limit int) ([]BatchListEntry, error) {
+	var results []BatchListEntry
+	for id, sb := range s.static.batches {
+		entry := toBatchListEntry(sb.batch)
+		entry.BatchID = id
+		entry.Name = displayName(id)
+		results = append(results, entry)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Timestamp.After(results[j].Timestamp)
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
+	}
+
+	return results, nil
+}
+
 // GetBatch loads a full batch overview by batch ID.
 func (s *ArchiveService) GetBatch(id string) (*BatchDetail, error) {
 	b, err := s.loadBatchArchive(id)
@@ -344,6 +545,13 @@ func (s *ArchiveService) GetBatch(id string) (*BatchDetail, error) {
 // loadBatchArchive reads a batch archive by batch ID. Returns ErrBatchNotFound
 // if the batch directory or batch.json doesn't exist.
 func (s *ArchiveService) loadBatchArchive(id string) (*archive.BatchArchive, error) {
+	if s.static != nil {
+		if sb, ok := s.static.batches[id]; ok {
+			return sb.batch, nil
+		}
+		return nil, fmt.Errorf("batch %q: %w", id, ErrBatchNotFound)
+	}
+
 	batchPath := filepath.Join(s.archiveDir, id, "batch.json")
 	b, err := archive.ReadBatch(batchPath)
 	if err != nil {
@@ -358,6 +566,10 @@ func (s *ArchiveService) loadBatchArchive(id string) (*archive.BatchArchive, err
 // loadAttemptSummaries scans a run directory for attempt-NN.json files
 // and returns a summary of each prior failed attempt.
 func (s *ArchiveService) loadAttemptSummaries(runID, batchID string) []AttemptSummary {
+	if s.static != nil {
+		return s.loadAttemptSummariesStatic(runID)
+	}
+
 	// Determine the run directory path.
 	var runDir string
 	if batchID != "" {
@@ -392,6 +604,40 @@ func (s *ArchiveService) loadAttemptSummaries(runID, batchID string) []AttemptSu
 	}
 
 	// Sort by attempt number.
+	sort.Slice(attempts, func(i, j int) bool {
+		return attempts[i].Attempt < attempts[j].Attempt
+	})
+
+	return attempts
+}
+
+func (s *ArchiveService) loadAttemptSummariesStatic(runID string) []AttemptSummary {
+	// Find the static run (standalone or batch member).
+	var sr *staticRun
+	if r, ok := s.static.runs[runID]; ok {
+		sr = r
+	} else {
+		for _, sb := range s.static.batches {
+			if r, ok := sb.runs[runID]; ok {
+				sr = r
+				break
+			}
+		}
+	}
+	if sr == nil || len(sr.attempts) == 0 {
+		return nil
+	}
+
+	var attempts []AttemptSummary
+	for num, a := range sr.attempts {
+		attempts = append(attempts, AttemptSummary{
+			Attempt:  a.Metadata.Attempt,
+			Outcome:  a.Result.Outcome,
+			Error:    a.Result.Error,
+			FileName: fmt.Sprintf("attempt-%02d.json", num),
+		})
+	}
+
 	sort.Slice(attempts, func(i, j int) bool {
 		return attempts[i].Attempt < attempts[j].Attempt
 	})
@@ -445,8 +691,14 @@ func formatDuration(ms int64) string {
 
 // --- export/import ---
 
+// ErrStaticMode is returned when a mutating operation is attempted in static mode.
+var ErrStaticMode = errors.New("operation not available in static viewing mode")
+
 // ExportRun streams the run directory as a zip to w and returns the suggested filename.
 func (s *ArchiveService) ExportRun(id string, w io.Writer) (string, error) {
+	if s.static != nil {
+		return "", ErrStaticMode
+	}
 	dir, err := s.resolveRunDir(id)
 	if err != nil {
 		return "", err
@@ -463,6 +715,9 @@ func (s *ArchiveService) ExportRun(id string, w io.Writer) (string, error) {
 
 // ExportBatch streams the batch directory as a zip to w and returns the suggested filename.
 func (s *ArchiveService) ExportBatch(id string, w io.Writer) (string, error) {
+	if s.static != nil {
+		return "", ErrStaticMode
+	}
 	dir := filepath.Join(s.archiveDir, id)
 	if !isBatchDir(dir) {
 		return "", fmt.Errorf("batch %q: %w", id, ErrBatchNotFound)
@@ -479,6 +734,9 @@ func (s *ArchiveService) ExportBatch(id string, w io.Writer) (string, error) {
 
 // ImportArchive imports a zip archive into the archive directory.
 func (s *ArchiveService) ImportArchive(data io.ReaderAt, size int64, filename string) (ref string, archiveType string, err error) {
+	if s.static != nil {
+		return "", "", ErrStaticMode
+	}
 	name, err := archive.SanitizeArchiveName(filename)
 	if err != nil {
 		return "", "", err
@@ -559,24 +817,36 @@ func isBatchDir(path string) bool {
 // RenameRun renames a run directory to give it a user-friendly name.
 // Returns the new directory name (routing reference).
 func (s *ArchiveService) RenameRun(currentRef, newName string) (string, error) {
+	if s.static != nil {
+		return "", ErrStaticMode
+	}
 	return s.renameDir(currentRef, newName, "archive.json")
 }
 
 // UnnameRun restores a run directory to its original auto-generated name.
 // Returns the original directory name.
 func (s *ArchiveService) UnnameRun(currentRef string) (string, error) {
+	if s.static != nil {
+		return "", ErrStaticMode
+	}
 	return s.unnameDir(currentRef, "archive.json")
 }
 
 // RenameBatch renames a batch directory to give it a user-friendly name.
 // Returns the new directory name (routing reference).
 func (s *ArchiveService) RenameBatch(currentRef, newName string) (string, error) {
+	if s.static != nil {
+		return "", ErrStaticMode
+	}
 	return s.renameDir(currentRef, newName, "batch.json")
 }
 
 // UnnameBatch restores a batch directory to its original auto-generated name.
 // Returns the original directory name.
 func (s *ArchiveService) UnnameBatch(currentRef string) (string, error) {
+	if s.static != nil {
+		return "", ErrStaticMode
+	}
 	return s.unnameDir(currentRef, "batch.json")
 }
 

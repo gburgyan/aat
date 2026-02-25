@@ -9,9 +9,11 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/server"
 	"github.com/spf13/cobra"
@@ -66,9 +68,18 @@ var webCmd = &cobra.Command{
 
 var webViewCmd = &cobra.Command{
 	Use:   "view [ref]",
-	Short: "Open a run in the browser",
-	Long:  "Open a specific run (or the latest) in the browser. If no server is running, starts a temporary one.",
-	Args:  cobra.MaximumNArgs(1),
+	Short: "Open a run or archive file in the browser",
+	Long: `Open a specific run, batch, or archive file in the browser.
+
+Accepts run IDs, batch IDs, or file paths:
+  aat web view run-20260225-143022-abc12345
+  aat web view path/to/exported.aar
+  aat web view path/to/run-dir/archive.json
+  aat web view path/to/batch.aab
+
+When given a .aar, .aab, archive.json, or batch.json file, the archive is
+loaded directly into memory — no project setup or manifest is needed.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
@@ -77,6 +88,14 @@ var webViewCmd = &cobra.Command{
 			ref = args[0]
 		}
 		port, _ := cmd.Flags().GetInt("port")
+
+		// Check if the argument is a file path before resolving project context.
+		if ref != "" {
+			ft := classifyFileArg(ref)
+			if ft != fileTypeNotAFile {
+				return webViewFileCommand(port, ref, ft)
+			}
+		}
 
 		overrides := config.ProjectPaths{}
 		if cmd.Flags().Changed("manifest") {
@@ -322,5 +341,220 @@ func openURL(url string) error {
 		return exec.Command("cmd", "/c", "start", url).Start()
 	default:
 		return fmt.Errorf("unsupported platform %s", runtime.GOOS)
+	}
+}
+
+// --- File-based archive viewing ---
+
+type fileType int
+
+const (
+	fileTypeNotAFile  fileType = iota
+	fileTypeAar                // .aar zip (run)
+	fileTypeAab                // .aab zip (batch)
+	fileTypeRunJSON            // archive.json
+	fileTypeBatchJSON          // batch.json
+)
+
+// classifyFileArg checks if the argument refers to a viewable archive file.
+// Returns fileTypeNotAFile if the argument is not a file or not a recognized type.
+func classifyFileArg(arg string) fileType {
+	lower := strings.ToLower(arg)
+
+	// Check extensions first (fast path).
+	if strings.HasSuffix(lower, ".aar") {
+		if fi, err := os.Stat(arg); err == nil && !fi.IsDir() {
+			return fileTypeAar
+		}
+	}
+	if strings.HasSuffix(lower, ".aab") {
+		if fi, err := os.Stat(arg); err == nil && !fi.IsDir() {
+			return fileTypeAab
+		}
+	}
+
+	// Check for archive.json or batch.json by basename.
+	base := filepath.Base(arg)
+	if base == "archive.json" {
+		if fi, err := os.Stat(arg); err == nil && !fi.IsDir() {
+			return fileTypeRunJSON
+		}
+	}
+	if base == "batch.json" {
+		if fi, err := os.Stat(arg); err == nil && !fi.IsDir() {
+			return fileTypeBatchJSON
+		}
+	}
+
+	return fileTypeNotAFile
+}
+
+// loadArchiveFile loads an archive file into a pre-loaded ArchiveService.
+// Returns the service, the ref ID for URL building, and the archive type string.
+func loadArchiveFile(filePath string, ft fileType) (*server.ArchiveService, string, string, error) {
+	switch ft {
+	case fileTypeAar:
+		main, attempts, err := archive.LoadRunFromZip(filePath)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("loading .aar: %w", err)
+		}
+		id := main.Metadata.RunID
+		if id == "" {
+			id = "archive"
+		}
+		svc := server.NewArchiveServiceFromRun(id, main, attempts)
+		return svc, id, "run", nil
+
+	case fileTypeAab:
+		batch, runs, attempts, err := archive.LoadBatchFromZip(filePath)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("loading .aab: %w", err)
+		}
+		id := batch.Metadata.BatchID
+		if id == "" {
+			id = "batch"
+		}
+		svc := server.NewArchiveServiceFromBatch(id, batch, runs, attempts)
+		return svc, id, "batch", nil
+
+	case fileTypeRunJSON:
+		main, err := archive.Read(filePath)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("reading archive.json: %w", err)
+		}
+		// Load sibling attempt files from the same directory.
+		attempts := loadSiblingAttempts(filepath.Dir(filePath))
+		id := main.Metadata.RunID
+		if id == "" {
+			id = "archive"
+		}
+		svc := server.NewArchiveServiceFromRun(id, main, attempts)
+		return svc, id, "run", nil
+
+	case fileTypeBatchJSON:
+		batch, err := archive.ReadBatch(filePath)
+		if err != nil {
+			return nil, "", "", fmt.Errorf("reading batch.json: %w", err)
+		}
+		// Load sub-run archives from the same directory.
+		runs, attempts := loadBatchMemberRuns(filepath.Dir(filePath))
+		id := batch.Metadata.BatchID
+		if id == "" {
+			id = "batch"
+		}
+		svc := server.NewArchiveServiceFromBatch(id, batch, runs, attempts)
+		return svc, id, "batch", nil
+
+	default:
+		return nil, "", "", fmt.Errorf("unsupported file type")
+	}
+}
+
+// loadSiblingAttempts scans dir for attempt-NN.json files and loads them.
+func loadSiblingAttempts(dir string) map[int]*archive.Archive {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	attempts := make(map[int]*archive.Archive)
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasPrefix(name, "attempt-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		a, err := archive.Read(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		// Parse attempt number from filename.
+		numStr := strings.TrimPrefix(name, "attempt-")
+		numStr = strings.TrimSuffix(numStr, ".json")
+		var num int
+		if _, err := fmt.Sscanf(numStr, "%d", &num); err != nil {
+			continue
+		}
+		attempts[num] = a
+	}
+	if len(attempts) == 0 {
+		return nil
+	}
+	return attempts
+}
+
+// loadBatchMemberRuns scans dir for subdirectories containing archive.json
+// and loads each as a member run.
+func loadBatchMemberRuns(dir string) (map[string]*archive.Archive, map[string]map[int]*archive.Archive) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, nil
+	}
+	runs := make(map[string]*archive.Archive)
+	allAttempts := make(map[string]map[int]*archive.Archive)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		archivePath := filepath.Join(dir, e.Name(), "archive.json")
+		a, err := archive.Read(archivePath)
+		if err != nil {
+			continue
+		}
+		runID := e.Name()
+		runs[runID] = a
+		// Load attempt files for this run.
+		attempts := loadSiblingAttempts(filepath.Join(dir, e.Name()))
+		if attempts != nil {
+			allAttempts[runID] = attempts
+		}
+	}
+	return runs, allAttempts
+}
+
+// webViewFileCommand loads an archive file into memory and serves it via
+// an ephemeral web server. No temp files are created on disk.
+func webViewFileCommand(port int, filePath string, ft fileType) error {
+	svc, ref, archiveType, err := loadArchiveFile(filePath, ft)
+	if err != nil {
+		return err
+	}
+
+	var viewURL string
+	if archiveType == "batch" {
+		viewURL = fmt.Sprintf("http://localhost:%d/batches/%s", port, ref)
+	} else {
+		viewURL = fmt.Sprintf("http://localhost:%d/runs/%s", port, ref)
+	}
+
+	fmt.Fprintf(os.Stderr, "aat web: viewing %s (in-memory, no temp files)\n", filePath)
+
+	srv := server.NewServerWithService(server.ServerOptions{
+		Port: port,
+	}, svc)
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ListenAndServe()
+	}()
+
+	if waitForServer(srv, 2*time.Second) {
+		if err := openURLFunc(viewURL); err != nil {
+			fmt.Fprintf(os.Stderr, "aat web: could not open browser: %s\n", err)
+		}
+	}
+
+	select {
+	case <-ctx.Done():
+		fmt.Fprintln(os.Stderr, "aat web: shutting down...")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return srv.Shutdown(shutdownCtx)
+	case err := <-errCh:
+		if err != nil && err != http.ErrServerClosed {
+			return fmt.Errorf("server error: %w", err)
+		}
+		return nil
 	}
 }

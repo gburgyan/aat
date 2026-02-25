@@ -3,9 +3,11 @@ package archive
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -229,6 +231,189 @@ func TestDetectArchiveType(t *testing.T) {
 			zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
 			require.NoError(t, err)
 			assert.Equal(t, tt.expected, detectArchiveType(zr))
+		})
+	}
+}
+
+// --- LoadRunFromZip tests ---
+
+func TestLoadRunFromZip(t *testing.T) {
+	// Create a run directory, export to zip, then load from zip.
+	srcDir := t.TempDir()
+	runDir := filepath.Join(srcDir, "test-run")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+
+	a := &Archive{
+		Metadata: ArchiveMetadata{
+			RunID:     "run-test-123",
+			Timestamp: time.Date(2026, 2, 25, 10, 0, 0, 0, time.UTC),
+		},
+		Steps:  []StepRecord{{Node: "TestNode", DurationMs: 100}},
+		Result: ArchiveResult{Outcome: "passed"},
+	}
+	data, err := json.Marshal(a)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(runDir, "archive.json"), data, 0o644))
+
+	// Export to zip file.
+	zipPath := filepath.Join(srcDir, "test.aar")
+	f, err := os.Create(zipPath)
+	require.NoError(t, err)
+	require.NoError(t, ExportDir(runDir, f))
+	require.NoError(t, f.Close())
+
+	// Load from zip.
+	main, attempts, err := LoadRunFromZip(zipPath)
+	require.NoError(t, err)
+	assert.Equal(t, "run-test-123", main.Metadata.RunID)
+	assert.Equal(t, "passed", main.Result.Outcome)
+	assert.Len(t, main.Steps, 1)
+	assert.Empty(t, attempts)
+}
+
+func TestLoadRunFromZip_WithAttempts(t *testing.T) {
+	srcDir := t.TempDir()
+	runDir := filepath.Join(srcDir, "test-run")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+
+	main := &Archive{
+		Metadata: ArchiveMetadata{RunID: "r1", Attempt: 3},
+		Result:   ArchiveResult{Outcome: "passed"},
+	}
+	attempt1 := &Archive{
+		Metadata: ArchiveMetadata{RunID: "r1", Attempt: 1},
+		Result:   ArchiveResult{Outcome: "failed"},
+	}
+	attempt2 := &Archive{
+		Metadata: ArchiveMetadata{RunID: "r1", Attempt: 2},
+		Result:   ArchiveResult{Outcome: "failed"},
+	}
+
+	for name, a := range map[string]*Archive{
+		"archive.json":    main,
+		"attempt-01.json": attempt1,
+		"attempt-02.json": attempt2,
+	} {
+		data, _ := json.Marshal(a)
+		require.NoError(t, os.WriteFile(filepath.Join(runDir, name), data, 0o644))
+	}
+
+	zipPath := filepath.Join(srcDir, "test.aar")
+	f, err := os.Create(zipPath)
+	require.NoError(t, err)
+	require.NoError(t, ExportDir(runDir, f))
+	require.NoError(t, f.Close())
+
+	loaded, attempts, err := LoadRunFromZip(zipPath)
+	require.NoError(t, err)
+	assert.Equal(t, "r1", loaded.Metadata.RunID)
+	assert.Equal(t, 3, loaded.Metadata.Attempt)
+	assert.Len(t, attempts, 2)
+	assert.Equal(t, "failed", attempts[1].Result.Outcome)
+	assert.Equal(t, "failed", attempts[2].Result.Outcome)
+}
+
+func TestLoadRunFromZip_MissingArchiveJSON(t *testing.T) {
+	srcDir := t.TempDir()
+
+	// Create a zip with only an attempt file, no archive.json.
+	zipPath := filepath.Join(srcDir, "test.aar")
+	f, err := os.Create(zipPath)
+	require.NoError(t, err)
+	zw := zip.NewWriter(f)
+	w, _ := zw.Create("attempt-01.json")
+	_, _ = w.Write([]byte(`{"metadata":{"attempt":1}}`))
+	require.NoError(t, zw.Close())
+	require.NoError(t, f.Close())
+
+	_, _, err = LoadRunFromZip(zipPath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "archive.json not found")
+}
+
+func TestLoadBatchFromZip(t *testing.T) {
+	srcDir := t.TempDir()
+	batchDir := filepath.Join(srcDir, "test-batch")
+	require.NoError(t, os.MkdirAll(filepath.Join(batchDir, "run-001"), 0o755))
+
+	batch := &BatchArchive{
+		Metadata: BatchMetadata{BatchID: "b1", Timestamp: time.Date(2026, 2, 25, 10, 0, 0, 0, time.UTC)},
+		Runs:     []BatchRunEntry{{PlanName: "test-plan", RunID: "run-001", Outcome: "passed"}},
+		Result:   BatchResult{Outcome: "passed", TotalRuns: 1, PassedRuns: 1},
+	}
+	batchData, _ := json.Marshal(batch)
+	require.NoError(t, os.WriteFile(filepath.Join(batchDir, "batch.json"), batchData, 0o644))
+
+	run := &Archive{
+		Metadata: ArchiveMetadata{RunID: "run-001"},
+		Steps:    []StepRecord{{Node: "Node1", DurationMs: 50}},
+		Result:   ArchiveResult{Outcome: "passed"},
+	}
+	runData, _ := json.Marshal(run)
+	require.NoError(t, os.WriteFile(filepath.Join(batchDir, "run-001", "archive.json"), runData, 0o644))
+
+	// Add an attempt file to the run.
+	attempt := &Archive{
+		Metadata: ArchiveMetadata{RunID: "run-001", Attempt: 1},
+		Result:   ArchiveResult{Outcome: "failed"},
+	}
+	attemptData, _ := json.Marshal(attempt)
+	require.NoError(t, os.WriteFile(filepath.Join(batchDir, "run-001", "attempt-01.json"), attemptData, 0o644))
+
+	zipPath := filepath.Join(srcDir, "test.aab")
+	f, err := os.Create(zipPath)
+	require.NoError(t, err)
+	require.NoError(t, ExportDir(batchDir, f))
+	require.NoError(t, f.Close())
+
+	loadedBatch, runs, attempts, err := LoadBatchFromZip(zipPath)
+	require.NoError(t, err)
+	assert.Equal(t, "b1", loadedBatch.Metadata.BatchID)
+	assert.Equal(t, "passed", loadedBatch.Result.Outcome)
+	assert.Len(t, runs, 1)
+	assert.Equal(t, "run-001", runs["run-001"].Metadata.RunID)
+	assert.Len(t, attempts, 1)
+	assert.Len(t, attempts["run-001"], 1)
+	assert.Equal(t, "failed", attempts["run-001"][1].Result.Outcome)
+}
+
+func TestLoadBatchFromZip_MissingBatchJSON(t *testing.T) {
+	srcDir := t.TempDir()
+
+	zipPath := filepath.Join(srcDir, "test.aab")
+	f, err := os.Create(zipPath)
+	require.NoError(t, err)
+	zw := zip.NewWriter(f)
+	w, _ := zw.Create("run-001/archive.json")
+	_, _ = w.Write([]byte(`{"metadata":{"runId":"r1"}}`))
+	require.NoError(t, zw.Close())
+	require.NoError(t, f.Close())
+
+	_, _, _, err = LoadBatchFromZip(zipPath)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "batch.json not found")
+}
+
+func TestParseAttemptNumber(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    int
+		wantErr bool
+	}{
+		{"attempt-01.json", 1, false},
+		{"attempt-02.json", 2, false},
+		{"attempt-10.json", 10, false},
+		{"attempt-abc.json", 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := parseAttemptNumber(tt.input)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got)
+			}
 		})
 	}
 }

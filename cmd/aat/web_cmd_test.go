@@ -383,3 +383,61 @@ func TestWebViewCommand_OpensCorrectURL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, fmt.Sprintf("http://localhost:%d/runs/run-abc123", portInt), opened)
 }
+
+// --- classifyFileArg tests ---
+
+func TestClassifyFileArg(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create test files.
+	aarPath := filepath.Join(dir, "test.aar")
+	require.NoError(t, os.WriteFile(aarPath, []byte("zip data"), 0o644))
+
+	aabPath := filepath.Join(dir, "test.aab")
+	require.NoError(t, os.WriteFile(aabPath, []byte("zip data"), 0o644))
+
+	runDir := filepath.Join(dir, "run-dir")
+	require.NoError(t, os.MkdirAll(runDir, 0o755))
+	archiveJSONPath := filepath.Join(runDir, "archive.json")
+	require.NoError(t, os.WriteFile(archiveJSONPath, []byte(`{}`), 0o644))
+
+	batchDir := filepath.Join(dir, "batch-dir")
+	require.NoError(t, os.MkdirAll(batchDir, 0o755))
+	batchJSONPath := filepath.Join(batchDir, "batch.json")
+	require.NoError(t, os.WriteFile(batchJSONPath, []byte(`{}`), 0o644))
+
+	tests := []struct {
+		name string
+		arg  string
+		want fileType
+	}{
+		{"aar file", aarPath, fileTypeAar},
+		{"aab file", aabPath, fileTypeAab},
+		{"archive.json", archiveJSONPath, fileTypeRunJSON},
+		{"batch.json", batchJSONPath, fileTypeBatchJSON},
+		{"nonexistent aar", filepath.Join(dir, "nonexistent.aar"), fileTypeNotAFile},
+		{"run ID (not a file)", "run-20260225-143022-abc12345", fileTypeNotAFile},
+		{"batch ID (not a file)", "batch-20260225-143022-abc12345", fileTypeNotAFile},
+		{"latest", "latest", fileTypeNotAFile},
+		{"empty string", "", fileTypeNotAFile},
+		{"regular json file", filepath.Join(dir, "other.json"), fileTypeNotAFile},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyFileArg(tt.arg)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestClassifyFileArg_DirectoryNotFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a directory named "test.aar" — should not classify as a file.
+	aarDir := filepath.Join(dir, "test.aar")
+	require.NoError(t, os.MkdirAll(aarDir, 0o755))
+
+	got := classifyFileArg(aarDir)
+	assert.Equal(t, fileTypeNotAFile, got)
+}

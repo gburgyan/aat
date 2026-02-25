@@ -2,12 +2,14 @@ package archive
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -220,6 +222,182 @@ func detectArchiveType(zr *zip.Reader) string {
 		}
 	}
 	return ""
+}
+
+// LoadRunFromZip reads a .aar zip file and returns the main archive plus any
+// attempt archives. No files are written to disk.
+func LoadRunFromZip(filePath string) (main *Archive, attempts map[int]*Archive, err error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("opening archive file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, nil, fmt.Errorf("stat archive file: %w", err)
+	}
+
+	zr, err := zip.NewReader(f, fi.Size())
+	if err != nil {
+		return nil, nil, fmt.Errorf("reading zip: %w", err)
+	}
+
+	if err := validateZipContents(zr); err != nil {
+		return nil, nil, err
+	}
+
+	attempts = make(map[int]*Archive)
+	for _, zf := range zr.File {
+		if zf.FileInfo().IsDir() {
+			continue
+		}
+		switch {
+		case zf.Name == "archive.json":
+			main, err = readArchiveFromZipEntry(zf)
+			if err != nil {
+				return nil, nil, fmt.Errorf("reading archive.json: %w", err)
+			}
+		case strings.HasPrefix(zf.Name, "attempt-") && strings.HasSuffix(zf.Name, ".json"):
+			num, parseErr := parseAttemptNumber(zf.Name)
+			if parseErr != nil {
+				continue
+			}
+			a, readErr := readArchiveFromZipEntry(zf)
+			if readErr != nil {
+				return nil, nil, fmt.Errorf("reading %s: %w", zf.Name, readErr)
+			}
+			attempts[num] = a
+		}
+	}
+
+	if main == nil {
+		return nil, nil, fmt.Errorf("archive.json not found in zip")
+	}
+
+	return main, attempts, nil
+}
+
+// LoadBatchFromZip reads a .aab zip file and returns the batch archive plus
+// all run archives keyed by run ID. No files are written to disk.
+func LoadBatchFromZip(filePath string) (batch *BatchArchive, runs map[string]*Archive, attempts map[string]map[int]*Archive, err error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("opening batch file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("stat batch file: %w", err)
+	}
+
+	zr, err := zip.NewReader(f, fi.Size())
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("reading zip: %w", err)
+	}
+
+	if err := validateZipContents(zr); err != nil {
+		return nil, nil, nil, err
+	}
+
+	runs = make(map[string]*Archive)
+	attempts = make(map[string]map[int]*Archive)
+	for _, zf := range zr.File {
+		if zf.FileInfo().IsDir() {
+			continue
+		}
+		name := zf.Name
+		if name == "batch.json" {
+			batch, err = readBatchFromZipEntry(zf)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("reading batch.json: %w", err)
+			}
+			continue
+		}
+
+		// Expect paths like "runID/archive.json" or "runID/attempt-NN.json".
+		parts := strings.SplitN(name, "/", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		runID, fileName := parts[0], parts[1]
+		if fileName == "archive.json" {
+			a, readErr := readArchiveFromZipEntry(zf)
+			if readErr != nil {
+				return nil, nil, nil, fmt.Errorf("reading %s: %w", name, readErr)
+			}
+			runs[runID] = a
+		} else if strings.HasPrefix(fileName, "attempt-") && strings.HasSuffix(fileName, ".json") {
+			num, parseErr := parseAttemptNumber(fileName)
+			if parseErr != nil {
+				continue
+			}
+			a, readErr := readArchiveFromZipEntry(zf)
+			if readErr != nil {
+				return nil, nil, nil, fmt.Errorf("reading %s: %w", name, readErr)
+			}
+			if attempts[runID] == nil {
+				attempts[runID] = make(map[int]*Archive)
+			}
+			attempts[runID][num] = a
+		}
+	}
+
+	if batch == nil {
+		return nil, nil, nil, fmt.Errorf("batch.json not found in zip")
+	}
+
+	return batch, runs, attempts, nil
+}
+
+// readArchiveFromZipEntry reads and unmarshals an Archive from a zip entry.
+func readArchiveFromZipEntry(zf *zip.File) (*Archive, error) {
+	rc, err := zf.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rc.Close() }()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, err
+	}
+
+	var a Archive
+	if err := json.Unmarshal(data, &a); err != nil {
+		return nil, err
+	}
+	return &a, nil
+}
+
+// readBatchFromZipEntry reads and unmarshals a BatchArchive from a zip entry.
+func readBatchFromZipEntry(zf *zip.File) (*BatchArchive, error) {
+	rc, err := zf.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rc.Close() }()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, err
+	}
+
+	var b BatchArchive
+	if err := json.Unmarshal(data, &b); err != nil {
+		return nil, err
+	}
+	return &b, nil
+}
+
+// parseAttemptNumber extracts the attempt number from a filename like "attempt-01.json".
+func parseAttemptNumber(filename string) (int, error) {
+	// Strip directory prefix if present.
+	base := filepath.Base(filename)
+	base = strings.TrimPrefix(base, "attempt-")
+	base = strings.TrimSuffix(base, ".json")
+	return strconv.Atoi(base)
 }
 
 // extractZipEntry extracts a single zip entry to destDir.

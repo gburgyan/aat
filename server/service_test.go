@@ -2206,6 +2206,186 @@ func TestListRuns_MixedSummaryAndFallback(t *testing.T) {
 	assert.Equal(t, "passed", runs[1].Outcome)
 }
 
+// --- static mode tests ---
+
+func TestStaticRun_ListRuns(t *testing.T) {
+	a := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+	svc := NewArchiveServiceFromRun("r1", a, nil)
+
+	runs, err := svc.ListRuns(0, false)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "r1", runs[0].RunID)
+	assert.Equal(t, "passed", runs[0].Outcome)
+}
+
+func TestStaticRun_GetRun(t *testing.T) {
+	a := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+	svc := NewArchiveServiceFromRun("r1", a, nil)
+
+	detail, err := svc.GetRun("r1")
+	require.NoError(t, err)
+	assert.Equal(t, "r1", detail.RunID)
+	assert.Equal(t, "passed", detail.Outcome)
+	assert.Len(t, detail.Steps, 1)
+}
+
+func TestStaticRun_GetRun_NotFound(t *testing.T) {
+	a := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+	svc := NewArchiveServiceFromRun("r1", a, nil)
+
+	_, err := svc.GetRun("nonexistent")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+func TestStaticRun_GetStep(t *testing.T) {
+	a := makeArchive("r1", "passed", makeStepWithID("step1", "node1", 200, 100))
+	svc := NewArchiveServiceFromRun("r1", a, nil)
+
+	step, err := svc.GetStep("r1", "step1")
+	require.NoError(t, err)
+	assert.Equal(t, "step1", step.StepID)
+	assert.Equal(t, "node1", step.Node)
+}
+
+func TestStaticRun_GetAttempt(t *testing.T) {
+	main := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+	main.Metadata.Attempt = 2
+	attempt1 := makeArchive("r1", "failed", makeStep("node1", 500, 50))
+	attempt1.Metadata.Attempt = 1
+
+	svc := NewArchiveServiceFromRun("r1", main, map[int]*archive.Archive{1: attempt1})
+
+	detail, err := svc.GetAttempt("r1", 1)
+	require.NoError(t, err)
+	assert.Equal(t, "failed", detail.Outcome)
+}
+
+func TestStaticRun_GetAttempt_NotFound(t *testing.T) {
+	a := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+	svc := NewArchiveServiceFromRun("r1", a, nil)
+
+	_, err := svc.GetAttempt("r1", 1)
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrRunNotFound))
+}
+
+func TestStaticRun_MutatingOpsBlocked(t *testing.T) {
+	a := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+	svc := NewArchiveServiceFromRun("r1", a, nil)
+
+	_, err := svc.ExportRun("r1", nil)
+	assert.ErrorIs(t, err, ErrStaticMode)
+
+	_, err = svc.RenameRun("r1", "new-name")
+	assert.ErrorIs(t, err, ErrStaticMode)
+
+	_, err = svc.UnnameRun("r1")
+	assert.ErrorIs(t, err, ErrStaticMode)
+
+	_, _, err = svc.ImportArchive(nil, 0, "test.aar")
+	assert.ErrorIs(t, err, ErrStaticMode)
+}
+
+func TestStaticBatch_ListBatches(t *testing.T) {
+	batch := &archive.BatchArchive{
+		Metadata: archive.BatchMetadata{
+			BatchID:   "b1",
+			Timestamp: time.Date(2026, 2, 25, 10, 0, 0, 0, time.UTC),
+		},
+		Runs:   []archive.BatchRunEntry{{PlanName: "test", RunID: "r1", Outcome: "passed"}},
+		Result: archive.BatchResult{Outcome: "passed", TotalRuns: 1, PassedRuns: 1},
+	}
+	runArchive := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+
+	svc := NewArchiveServiceFromBatch("b1", batch, map[string]*archive.Archive{"r1": runArchive}, nil)
+
+	batches, err := svc.ListBatches(0, false)
+	require.NoError(t, err)
+	require.Len(t, batches, 1)
+	assert.Equal(t, "b1", batches[0].BatchID)
+	assert.Equal(t, "passed", batches[0].Outcome)
+}
+
+func TestStaticBatch_GetBatch(t *testing.T) {
+	batch := &archive.BatchArchive{
+		Metadata: archive.BatchMetadata{BatchID: "b1"},
+		Runs:     []archive.BatchRunEntry{{PlanName: "test", RunID: "r1", Outcome: "passed"}},
+		Result:   archive.BatchResult{Outcome: "passed", TotalRuns: 1, PassedRuns: 1},
+	}
+	runArchive := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+
+	svc := NewArchiveServiceFromBatch("b1", batch, map[string]*archive.Archive{"r1": runArchive}, nil)
+
+	detail, err := svc.GetBatch("b1")
+	require.NoError(t, err)
+	assert.Equal(t, "b1", detail.BatchID)
+	assert.Equal(t, "passed", detail.Outcome)
+	assert.Len(t, detail.Runs, 1)
+}
+
+func TestStaticBatch_GetBatchMemberRun(t *testing.T) {
+	batch := &archive.BatchArchive{
+		Metadata: archive.BatchMetadata{BatchID: "b1"},
+		Runs:     []archive.BatchRunEntry{{PlanName: "test", RunID: "r1", Outcome: "passed"}},
+		Result:   archive.BatchResult{Outcome: "passed", TotalRuns: 1, PassedRuns: 1},
+	}
+	runArchive := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+
+	svc := NewArchiveServiceFromBatch("b1", batch, map[string]*archive.Archive{"r1": runArchive}, nil)
+
+	// The member run should be accessible via GetRun.
+	detail, err := svc.GetRun("r1")
+	require.NoError(t, err)
+	assert.Equal(t, "r1", detail.RunID)
+	assert.Equal(t, "b1", detail.BatchID)
+}
+
+func TestStaticBatch_MemberRunListedInRuns(t *testing.T) {
+	batch := &archive.BatchArchive{
+		Metadata: archive.BatchMetadata{BatchID: "b1"},
+		Runs:     []archive.BatchRunEntry{{PlanName: "test", RunID: "r1", Outcome: "passed"}},
+		Result:   archive.BatchResult{Outcome: "passed", TotalRuns: 1, PassedRuns: 1},
+	}
+	runArchive := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+
+	svc := NewArchiveServiceFromBatch("b1", batch, map[string]*archive.Archive{"r1": runArchive}, nil)
+
+	// The batch member runs are in static.runs, so they appear in ListRuns.
+	runs, err := svc.ListRuns(0, false)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "r1", runs[0].RunID)
+}
+
+func TestStaticBatch_MutatingOpsBlocked(t *testing.T) {
+	batch := &archive.BatchArchive{
+		Metadata: archive.BatchMetadata{BatchID: "b1"},
+		Result:   archive.BatchResult{Outcome: "passed"},
+	}
+
+	svc := NewArchiveServiceFromBatch("b1", batch, nil, nil)
+
+	_, err := svc.ExportBatch("b1", nil)
+	assert.ErrorIs(t, err, ErrStaticMode)
+
+	_, err = svc.RenameBatch("b1", "new-name")
+	assert.ErrorIs(t, err, ErrStaticMode)
+
+	_, err = svc.UnnameBatch("b1")
+	assert.ErrorIs(t, err, ErrStaticMode)
+}
+
+func TestStaticRun_IsStatic(t *testing.T) {
+	a := makeArchive("r1", "passed", makeStep("node1", 200, 100))
+	svc := NewArchiveServiceFromRun("r1", a, nil)
+	assert.True(t, svc.IsStatic())
+
+	diskSvc := NewArchiveService(t.TempDir())
+	assert.False(t, diskSvc.IsStatic())
+}
+
 // --- file helpers ---
 
 func createDir(path string) error {

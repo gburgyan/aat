@@ -49,6 +49,22 @@ func NewServer(opts ServerOptions) *Server {
 	return s
 }
 
+// NewServerWithService creates a Server with a pre-built ArchiveService.
+// This is used for static/in-memory archive viewing where no disk access is needed.
+func NewServerWithService(opts ServerOptions, svc *ArchiveService) *Server {
+	if opts.Port == 0 {
+		opts.Port = 9119
+	}
+
+	s := &Server{
+		opts:         opts,
+		service:      svc,
+		traceService: NewTraceService(opts.TracesDir),
+	}
+	s.router = s.buildRouter()
+	return s
+}
+
 func (s *Server) buildRouter() chi.Router {
 	r := chi.NewRouter()
 
