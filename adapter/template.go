@@ -209,7 +209,7 @@ func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error)
 			return nil, fmt.Errorf("extract path %q (%s) not found in response", name, rule.Path)
 		}
 
-		val := result.Value()
+		val := gjsonValue(result)
 
 		// Transform array elements when Fields is set
 		if len(rule.Fields) > 0 {
@@ -252,7 +252,7 @@ func transformElements(arr []any, fields map[string]string) []any {
 			gpath := normalizeJSONPath(fieldPath)
 			r := gjson.GetBytes(data, gpath)
 			if r.Exists() {
-				flat[fieldName] = r.Value()
+				flat[fieldName] = gjsonValue(r)
 			}
 			// Missing fields are skipped (not an error)
 		}
@@ -444,6 +444,16 @@ func expandElement(body string, elem any) string {
 	return result
 }
 
+// gjsonValue extracts a Go value from a gjson.Result, using json.Number for
+// numeric values to preserve the original text representation. This avoids
+// float64 precision loss for large integers (e.g. 9223372036854775807).
+func gjsonValue(r gjson.Result) any {
+	if r.Type == gjson.Number {
+		return json.Number(r.Raw)
+	}
+	return r.Value()
+}
+
 // formatValue converts a value to its string representation for template output.
 // Arrays are marshaled as JSON. Strings are used directly. Other types use
 // fmt.Sprintf.
@@ -467,7 +477,7 @@ func formatValue(v any) string {
 func normalizeJSONPath(path string) string {
 	// Strip leading "$." or lone "$"
 	if path == "$" {
-		return ""
+		return "@this"
 	}
 	path = strings.TrimPrefix(path, "$.")
 

@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -85,6 +86,11 @@ func goToLua(ls *lua.LState, val any) lua.LValue {
 		return lua.LNumber(float64(v))
 	case int64:
 		return lua.LNumber(float64(v))
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return lua.LNumber(f)
+		}
+		return lua.LString(string(v))
 	case bool:
 		return lua.LBool(v)
 	case []any:

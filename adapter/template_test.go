@@ -722,7 +722,7 @@ func TestNormalizeJSONPath(t *testing.T) {
 		{"$.data.flights", "data.flights"},
 		{"data.flights", "data.flights"},
 		{"$.items[0].id", "items.0.id"},
-		{"$", ""},
+		{"$", "@this"},
 		{"$.array[0][1].field", "array.0.1.field"},
 		{"name", "name"},
 	}

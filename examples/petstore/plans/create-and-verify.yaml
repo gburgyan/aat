@@ -12,9 +12,9 @@ overrides:
       - type: status
         expect: 200
       - type: fieldExists
-        path: id
+        path: petId
     getPet:
       - type: status
         expect: 200
       - type: fieldExists
-        path: name
+        path: petName

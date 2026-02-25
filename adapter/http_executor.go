@@ -77,17 +77,31 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 }
 
 // joinURL combines a base URL with a relative path, preserving query parameters
-// from the path.
-func joinURL(base, path string) (string, error) {
+// from the path. Unlike url.ResolveReference, this always appends the path to
+// the base URL's existing path (e.g. base="/v2" + path="/pet" → "/v2/pet").
+func joinURL(base, relPath string) (string, error) {
 	baseURL, err := url.Parse(base)
 	if err != nil {
 		return "", fmt.Errorf("parsing base URL %q: %w", base, err)
 	}
 
-	pathURL, err := url.Parse(path)
+	pathURL, err := url.Parse(relPath)
 	if err != nil {
-		return "", fmt.Errorf("parsing path %q: %w", path, err)
+		return "", fmt.Errorf("parsing path %q: %w", relPath, err)
 	}
 
-	return baseURL.ResolveReference(pathURL).String(), nil
+	// Concatenate paths: strip trailing slash from base, ensure leading slash on path.
+	bp := strings.TrimRight(baseURL.Path, "/")
+	rp := pathURL.Path
+	if rp != "" && !strings.HasPrefix(rp, "/") {
+		rp = "/" + rp
+	}
+	baseURL.Path = bp + rp
+
+	// Merge query parameters: path's query wins if present, otherwise keep base's.
+	if pathURL.RawQuery != "" {
+		baseURL.RawQuery = pathURL.RawQuery
+	}
+
+	return baseURL.String(), nil
 }

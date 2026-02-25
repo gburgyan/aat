@@ -4,7 +4,7 @@ info:
   description: Subset of the Petstore API used by the AAT quickstart example.
   version: "1.0.0"
 servers:
-  - url: https://petstore3.swagger.io/api/v3
+  - url: https://petstore.swagger.io/v2
 
 paths:
   /pet:

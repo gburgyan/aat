@@ -252,7 +252,7 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 			wantOutputs: map[string]any{
 				"offerListId":  "e491538a-0c64-4804-ba44-bf9a8e1d8604_PC",
 				"offerId":      "o0",
-				"totalPrice":   542.50,
+				"totalPrice":   json.Number("542.50"),
 				"currencyCode": "USD",
 			},
 		},

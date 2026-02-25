@@ -16,7 +16,7 @@ func TestNormalizeJSONPath(t *testing.T) {
 		{name: "nested field", input: "price.amount", expect: "price.amount"},
 		{name: "dollar prefix", input: "$.name", expect: "name"},
 		{name: "dollar nested", input: "$.price.amount", expect: "price.amount"},
-		{name: "lone dollar", input: "$", expect: ""},
+		{name: "lone dollar", input: "$", expect: "@this"},
 		{name: "bracket index", input: "results[0]", expect: "results.0"},
 		{name: "bracket nested", input: "results[0].name", expect: "results.0.name"},
 		{name: "dollar bracket", input: "$.results[0].name", expect: "results.0.name"},

@@ -189,6 +189,24 @@ func TestHTTPExecutor_URLJoining(t *testing.T) {
 			path:     "v2/search",
 			wantPath: "/v2/search",
 		},
+		{
+			name:     "base with path prefix, path with leading slash",
+			baseURL:  "/v2",
+			path:     "/pet",
+			wantPath: "/v2/pet",
+		},
+		{
+			name:     "base with path prefix and trailing slash",
+			baseURL:  "/v2/",
+			path:     "/pet",
+			wantPath: "/v2/pet",
+		},
+		{
+			name:     "base with deep path prefix",
+			baseURL:  "/api/v3",
+			path:     "/pet/findByStatus",
+			wantPath: "/api/v3/pet/findByStatus",
+		},
 	}
 
 	for _, tt := range tests {

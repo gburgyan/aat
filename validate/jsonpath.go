@@ -11,7 +11,7 @@ var bracketRe = regexp.MustCompile(`\[(\d+)\]`)
 // Strips leading "$." and converts bracket notation [N] to dot notation .N.
 func NormalizeJSONPath(path string) string {
 	if path == "$" {
-		return ""
+		return "@this"
 	}
 	path = strings.TrimPrefix(path, "$.")
 

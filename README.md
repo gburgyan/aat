@@ -13,9 +13,12 @@ make build
 # Run the Petstore example (no API keys needed)
 cd examples/petstore
 ../../aat run plan plans/create-and-verify.yaml
+
+# Browse the results in the web UI
+../../aat web view
 ```
 
-See the [Petstore quickstart tutorial](examples/petstore/README.md) for a full walkthrough, or follow the [Quickstart guide](docs/user/quickstart.md) to set up AAT for your own API.
+See the [Petstore Walkthrough](docs/user/petstore-walkthrough.md) for a line-by-line explanation of how these files work together, or follow the [Quickstart guide](docs/user/quickstart.md) to set up AAT for your own API.
 
 ## How it works
 
@@ -71,6 +74,7 @@ make clean    # Removes binary and frontend artifacts
 ## Documentation
 
 - [Quickstart](docs/user/quickstart.md) — install AAT and set it up for your own API
+- [Petstore Walkthrough](docs/user/petstore-walkthrough.md) — line-by-line tour of graph, templates, workflows, and recipes
 - [Petstore Quickstart](examples/petstore/README.md) — runnable example with no setup
 - [Travelport Booking Example](docs/user/travelport-example.md) — real-world airline booking flow (requires [separate graph repo](https://github.com/gburgyan/aat-graph-travelport))
 - [Graphs](docs/user/graphs.md) — nodes, edges, conditions, OAS linking
