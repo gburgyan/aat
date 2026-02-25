@@ -15,7 +15,7 @@ build: frontend
 frontend:
 	cd server/web && npm install && npm run build
 
-test:
+test: frontend
 	go test ./...
 
 clean:
