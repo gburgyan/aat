@@ -33,7 +33,7 @@ func (s *Server) registerOASTools() {
 				mcp.Required(),
 			),
 			mcp.WithNumber("depth",
-				mcp.Description("Resolution depth (default 2, max 5). Higher values resolve nested schemas deeper."),
+				mcp.Description("Resolution depth (default 1, max 5). Higher values resolve nested schemas deeper."),
 			),
 		),
 		s.handleGetOASSchema,
@@ -106,7 +106,7 @@ func (s *Server) handleGetOASSchema(_ context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError("No OAS specs loaded. Configure an oas field in your graph."), nil
 	}
 
-	depth := req.GetInt("depth", 2)
+	depth := req.GetInt("depth", 1)
 	if depth < 1 {
 		depth = 1
 	}

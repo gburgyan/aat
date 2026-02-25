@@ -61,6 +61,16 @@ func (s *Server) registerArchiveTools() {
 		),
 		s.handleDiffArchives,
 	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("list_recent_failures",
+			mcp.WithDescription("List recent failed run archives, showing run ID, timestamp, outcome, and error summary. Skips passed runs."),
+			mcp.WithNumber("limit",
+				mcp.Description("Maximum number of failures to return (default 10)"),
+			),
+		),
+		s.handleListRecentFailures,
+	)
 }
 
 // handleListArchives scans the archive directory for recent runs.
@@ -193,6 +203,69 @@ func (s *Server) handleDiffArchives(_ context.Context, req mcp.CallToolRequest) 
 	}
 
 	return mcp.NewToolResultText(formatArchiveDiff(a1, a2)), nil
+}
+
+// handleListRecentFailures scans archives and returns only failures.
+func (s *Server) handleListRecentFailures(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if s.ctx.ArchiveDir == "" {
+		return mcp.NewToolResultText(
+			"Archive directory not configured. Set the `archives` field in aat-project.yaml to enable archive inspection.",
+		), nil
+	}
+
+	limit := 10
+	if v, err := req.RequireFloat("limit"); err == nil {
+		limit = int(v)
+		if limit < 1 {
+			limit = 1
+		}
+	}
+
+	entries, err := os.ReadDir(s.ctx.ArchiveDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return mcp.NewToolResultText("Archive directory is empty (no runs yet)."), nil
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("reading archive directory: %v", err)), nil
+	}
+
+	// Filter directories with "run-" prefix, sorted newest first.
+	var runDirs []os.DirEntry
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "run-") {
+			runDirs = append(runDirs, e)
+		}
+	}
+
+	sort.Slice(runDirs, func(i, j int) bool {
+		return runDirs[i].Name() > runDirs[j].Name()
+	})
+
+	var b strings.Builder
+	found := 0
+
+	for _, dir := range runDirs {
+		if found >= limit {
+			break
+		}
+		archivePath := filepath.Join(s.ctx.ArchiveDir, dir.Name(), "archive.json")
+		a, err := archive.Read(archivePath)
+		if err != nil {
+			continue
+		}
+		if a.Result.Outcome == "passed" {
+			continue
+		}
+		found++
+		fmt.Fprintf(&b, "- %s\n", formatArchiveListEntry(a))
+	}
+
+	if found == 0 {
+		return mcp.NewToolResultText("No recent failures found."), nil
+	}
+
+	header := fmt.Sprintf("Found %d recent failure(s):\n\n", found)
+	return mcp.NewToolResultText(header + b.String()), nil
 }
 
 // loadArchive loads an archive from the archive directory by run ID.

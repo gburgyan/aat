@@ -31,6 +31,41 @@ func (s *Server) registerTemplateTools() {
 	)
 }
 
+// registerIntegrationTemplateTools registers template tools for the API persona.
+func (s *Server) registerIntegrationTemplateTools() {
+	s.mcp.AddTool(
+		mcp.NewTool("inspect_request_template",
+			mcp.WithDescription("Show the HTTP request template for an API operation: method, path, headers, body template, and response extract rules. This shows the actual HTTP shape. For the OAS spec view use get_oas_operation."),
+			mcp.WithString("adapter",
+				mcp.Description("Adapter name (shown in describe_operation output)"),
+				mcp.Required(),
+			),
+		),
+		s.handleInspectTemplate,
+	)
+}
+
+// registerTestTemplateTools registers template tools for the test persona.
+func (s *Server) registerTestTemplateTools() {
+	s.mcp.AddTool(
+		mcp.NewTool("list_adapters",
+			mcp.WithDescription("List all registered adapter names. Use inspect_template to see HTTP details for a specific adapter."),
+		),
+		s.handleListAdapters,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("inspect_template",
+			mcp.WithDescription("Show the HTTP template for an adapter: method, path, headers, body template, and response extract rules. This shows what AAT actually sends at runtime. For the OAS spec view of the same endpoint, use get_oas_operation with the graph node name."),
+			mcp.WithString("adapter",
+				mcp.Description("Adapter name"),
+				mcp.Required(),
+			),
+		),
+		s.handleInspectTemplate,
+	)
+}
+
 // handleListAdapters returns a sorted list of all adapter names.
 func (s *Server) handleListAdapters(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	names := s.ctx.Registry.Names()

@@ -37,6 +37,70 @@ func (s *Server) registerPrompts() {
 	)
 }
 
+// registerIntegrationPrompts adds prompts for the API persona.
+func (s *Server) registerIntegrationPrompts() {
+	s.mcp.AddPrompt(
+		mcp.NewPrompt("explain_integration_flow",
+			mcp.WithPromptDescription("Explain how an API integration flow achieves a goal, with full dependency chain and domain context"),
+			mcp.WithArgument("goal",
+				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("Goal operation name to trace the integration flow to"),
+			),
+		),
+		s.handleExplainWorkflow,
+	)
+
+	s.mcp.AddPrompt(
+		mcp.NewPrompt("generate_client_code",
+			mcp.WithPromptDescription("Generate client code for calling a specific API endpoint"),
+			mcp.WithArgument("node",
+				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("Operation name to generate code for"),
+			),
+			mcp.WithArgument("language",
+				mcp.ArgumentDescription("Programming language (default: go)"),
+			),
+		),
+		s.handleGenerateClientCode,
+	)
+
+	s.mcp.AddPrompt(
+		mcp.NewPrompt("integration_guide",
+			mcp.WithPromptDescription("Comprehensive guide for integrating with an API workflow, including chain trace, templates, OAS details, and domain context"),
+			mcp.WithArgument("goal",
+				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("Goal operation name to build the integration guide for"),
+			),
+		),
+		s.handleIntegrationGuide,
+	)
+}
+
+// registerTestPrompts adds prompts for the test persona.
+func (s *Server) registerTestPrompts() {
+	s.mcp.AddPrompt(
+		mcp.NewPrompt("test_workflow",
+			mcp.WithPromptDescription("Guide the full test lifecycle: understand goal, generate plan, validate, execute, and inspect results"),
+			mcp.WithArgument("description",
+				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("Description of what to test"),
+			),
+		),
+		s.handleTestWorkflow,
+	)
+
+	s.mcp.AddPrompt(
+		mcp.NewPrompt("debug_failing_test",
+			mcp.WithPromptDescription("Load a failed run archive and diagnose root causes with comprehensive failure context"),
+			mcp.WithArgument("run_id",
+				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("Run ID of the failed archive to debug"),
+			),
+		),
+		s.handleDebugFailingTest,
+	)
+}
+
 // handleExplainWorkflow traces a workflow to a goal node and assembles context
 // for explaining it.
 func (s *Server) handleExplainWorkflow(_ context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {

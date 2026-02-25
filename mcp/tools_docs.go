@@ -65,6 +65,75 @@ func (s *Server) registerDocsTools() {
 	)
 }
 
+// registerIntegrationDocsTools registers docs tools for the API persona.
+func (s *Server) registerIntegrationDocsTools() {
+	s.mcp.AddTool(
+		mcp.NewTool("get_node_documentation",
+			mcp.WithDescription("Show merged documentation for an API operation: graph metadata, user-written Markdown docs, and OAS summary."),
+			mcp.WithString("node",
+				mcp.Description("Operation name"),
+				mcp.Required(),
+			),
+		),
+		s.handleGetNodeDocumentation,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("get_workflow_documentation",
+			mcp.WithDescription("Show merged documentation for every operation in a dependency chain, traced backward from the goal operation."),
+			mcp.WithString("goal",
+				mcp.Description("Goal operation name to trace backward from"),
+				mcp.Required(),
+			),
+		),
+		s.handleGetWorkflowDocumentation,
+	)
+}
+
+// registerTestDocsTools registers docs tools for the test persona.
+func (s *Server) registerTestDocsTools() {
+	s.mcp.AddTool(
+		mcp.NewTool("get_node_documentation",
+			mcp.WithDescription("Show merged documentation for a graph node: graph metadata, user-written Markdown docs, and OAS summary. Works even without docs — falls back to graph metadata only."),
+			mcp.WithString("node",
+				mcp.Description("Node name"),
+				mcp.Required(),
+			),
+		),
+		s.handleGetNodeDocumentation,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("generate_doc_stub",
+			mcp.WithDescription("Generate a Markdown documentation skeleton for a node, including graph metadata, input/output tables, and placeholder sections. Returns text — does not write to disk."),
+			mcp.WithString("node",
+				mcp.Description("Node name"),
+				mcp.Required(),
+			),
+		),
+		s.handleGenerateDocStub,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("list_undocumented_nodes",
+			mcp.WithDescription("List graph nodes that do not have a corresponding Markdown doc file. Shows which nodes need documentation."),
+		),
+		s.handleListUndocumentedNodes,
+	)
+
+	// Prompt: enrich_documentation
+	s.mcp.AddPrompt(
+		mcp.NewPrompt("enrich_documentation",
+			mcp.WithPromptDescription("Enrich or create documentation for a graph node using graph metadata, existing docs, OAS details, and domain knowledge"),
+			mcp.WithArgument("node",
+				mcp.RequiredArgument(),
+				mcp.ArgumentDescription("Graph node name to document"),
+			),
+		),
+		s.handleEnrichDocumentation,
+	)
+}
+
 // handleGetNodeDocumentation merges graph detail, user docs, and OAS summary.
 func (s *Server) handleGetNodeDocumentation(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	nodeName, err := req.RequireString("node")

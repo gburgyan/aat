@@ -49,6 +49,80 @@ func (s *Server) registerWorkflowTools() {
 			mcp.WithString("addons",
 				mcp.Description("Comma-separated addon workflow names to compose (optional)"),
 			),
+			mcp.WithBoolean("summary",
+				mcp.Description("If true (default), show compact data flow arrows without full value tables"),
+			),
+		),
+		s.handleGetWorkflowDetail,
+	)
+}
+
+// registerIntegrationWorkflowTools registers workflow tools for the API persona.
+func (s *Server) registerIntegrationWorkflowTools() {
+	s.mcp.AddTool(
+		mcp.NewTool("list_integration_flows",
+			mcp.WithDescription("List all integration flows with decision points (slots) and optional extensions (addons). Shows the available API workflows, their step sequences, and composable extensions."),
+		),
+		s.handleListWorkflows,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("get_integration_flow",
+			mcp.WithDescription("Show an enriched step-by-step recipe for an integration flow: HTTP methods, data flow between operations, value sources, selections, outputs, and required inputs. Optionally compose with addons to see the full extended flow."),
+			mcp.WithString("workflow",
+				mcp.Description("Integration flow name (exact or case-insensitive match)"),
+				mcp.Required(),
+			),
+			mcp.WithString("addons",
+				mcp.Description("Comma-separated addon names to compose into the flow (optional)"),
+			),
+			mcp.WithBoolean("summary",
+				mcp.Description("If true (default), show compact data flow arrows without full value tables"),
+			),
+		),
+		s.handleGetWorkflowDetail,
+	)
+}
+
+// registerTestWorkflowTools registers workflow tools for the test persona.
+func (s *Server) registerTestWorkflowTools() {
+	s.mcp.AddTool(
+		mcp.NewTool("list_workflows",
+			mcp.WithDescription("List all named workflows in the graph, including addons and composed workflows. Shows kind, template, includes, AUTOWIRE requirements, and step lists."),
+		),
+		s.handleListWorkflows,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("instantiate_workflow",
+			mcp.WithDescription("Load and compose a workflow template. Returns the skeleton plan YAML with unfed inputs marked. For composed workflows, slots are filled and addons are spliced with AUTOWIRE values auto-wired. No LLM call — deterministic only."),
+			mcp.WithString("workflow",
+				mcp.Description("Workflow name (exact or case-insensitive match)"),
+				mcp.Required(),
+			),
+			mcp.WithString("choices",
+				mcp.Description("Comma-separated slot choices as slot=option pairs (e.g., 'trip-search=Round-Trip,payment=Cash')"),
+			),
+			mcp.WithString("addons",
+				mcp.Description("Comma-separated addon workflow names to compose (optional)"),
+			),
+		),
+		s.handleInstantiateWorkflow,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("get_workflow_detail",
+			mcp.WithDescription("Show an enriched step-by-step recipe for a workflow: HTTP methods, data flow between steps, value sources, selections, outputs, unfed inputs, and cleanup. Optionally compose with addons."),
+			mcp.WithString("workflow",
+				mcp.Description("Workflow name (exact or case-insensitive match)"),
+				mcp.Required(),
+			),
+			mcp.WithString("addons",
+				mcp.Description("Comma-separated addon workflow names to compose (optional)"),
+			),
+			mcp.WithBoolean("summary",
+				mcp.Description("If true (default), show compact data flow arrows without full value tables"),
+			),
 		),
 		s.handleGetWorkflowDetail,
 	)
@@ -316,12 +390,14 @@ func (s *Server) handleGetWorkflowDetail(_ context.Context, req mcp.CallToolRequ
 		p = loaded
 	}
 
-	detail := formatWorkflowDetail(wf, p, g, s.ctx.Registry)
+	summaryMode := req.GetBool("summary", true)
+	detail := formatWorkflowDetail(wf, p, g, s.ctx.Registry, summaryMode)
 	return mcp.NewToolResultText(detail), nil
 }
 
 // formatWorkflowDetail renders an enriched step-by-step recipe for a workflow plan.
-func formatWorkflowDetail(wf graph.Workflow, p *plan.Plan, g *graph.Graph, reg *adapter.Registry) string {
+// When summary is true, value tables are replaced with compact data flow arrows.
+func formatWorkflowDetail(wf graph.Workflow, p *plan.Plan, g *graph.Graph, reg *adapter.Registry, summary bool) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Workflow: %s\n\n", wf.Name)
@@ -356,62 +432,64 @@ func formatWorkflowDetail(wf graph.Workflow, p *plan.Plan, g *graph.Graph, reg *
 			b.WriteString("**Depends on:** (none)\n")
 		}
 
-		// Values table
-		if len(step.Values) > 0 {
-			b.WriteString("\n**Values:**\n")
-			b.WriteString("| Input | Source | Value/Ref |\n")
-			b.WriteString("|-------|--------|-----------|\n")
+		if !summary {
+			// Values table (full detail mode)
+			if len(step.Values) > 0 {
+				b.WriteString("\n**Values:**\n")
+				b.WriteString("| Input | Source | Value/Ref |\n")
+				b.WriteString("|-------|--------|-----------|\n")
 
-			// Sort value keys for deterministic output.
-			valueKeys := make([]string, 0, len(step.Values))
-			for k := range step.Values {
-				valueKeys = append(valueKeys, k)
-			}
-			sort.Strings(valueKeys)
-
-			for _, inputName := range valueKeys {
-				sv := step.Values[inputName]
-				source, ref := classifyStepValue(sv)
-				fmt.Fprintf(&b, "| %s | %s | %s |\n", inputName, source, ref)
-			}
-		}
-
-		// Selections
-		if len(step.Selections) > 0 {
-			b.WriteString("\n**Selections:**\n")
-			selKeys := make([]string, 0, len(step.Selections))
-			for k := range step.Selections {
-				selKeys = append(selKeys, k)
-			}
-			sort.Strings(selKeys)
-			for _, selName := range selKeys {
-				sel := step.Selections[selName]
-				desc := fmt.Sprintf("- **%s** from %s", selName, sel.From)
-				if sel.Strategy != "" {
-					desc += fmt.Sprintf(" — strategy: %s", sel.Strategy)
+				// Sort value keys for deterministic output.
+				valueKeys := make([]string, 0, len(step.Values))
+				for k := range step.Values {
+					valueKeys = append(valueKeys, k)
 				}
-				if sel.Filter != "" {
-					desc += fmt.Sprintf(", filter: `%s`", sel.Filter)
-				}
-				b.WriteString(desc + "\n")
-			}
-		}
+				sort.Strings(valueKeys)
 
-		// Outputs from graph node
-		if node != nil && len(node.Outputs) > 0 {
-			b.WriteString("\n**Outputs:**\n")
-			b.WriteString("| Output | Type | Element Fields |\n")
-			b.WriteString("|--------|------|----------------|\n")
-			for _, out := range node.Outputs {
-				efNames := ""
-				if len(out.ElementFields) > 0 {
-					names := make([]string, len(out.ElementFields))
-					for j, ef := range out.ElementFields {
-						names[j] = ef.Name
+				for _, inputName := range valueKeys {
+					sv := step.Values[inputName]
+					source, ref := classifyStepValue(sv)
+					fmt.Fprintf(&b, "| %s | %s | %s |\n", inputName, source, ref)
+				}
+			}
+
+			// Selections
+			if len(step.Selections) > 0 {
+				b.WriteString("\n**Selections:**\n")
+				selKeys := make([]string, 0, len(step.Selections))
+				for k := range step.Selections {
+					selKeys = append(selKeys, k)
+				}
+				sort.Strings(selKeys)
+				for _, selName := range selKeys {
+					sel := step.Selections[selName]
+					desc := fmt.Sprintf("- **%s** from %s", selName, sel.From)
+					if sel.Strategy != "" {
+						desc += fmt.Sprintf(" — strategy: %s", sel.Strategy)
 					}
-					efNames = strings.Join(names, ", ")
+					if sel.Filter != "" {
+						desc += fmt.Sprintf(", filter: `%s`", sel.Filter)
+					}
+					b.WriteString(desc + "\n")
 				}
-				fmt.Fprintf(&b, "| %s | %s | %s |\n", out.Name, out.Type, efNames)
+			}
+
+			// Outputs from graph node
+			if node != nil && len(node.Outputs) > 0 {
+				b.WriteString("\n**Outputs:**\n")
+				b.WriteString("| Output | Type | Element Fields |\n")
+				b.WriteString("|--------|------|----------------|\n")
+				for _, out := range node.Outputs {
+					efNames := ""
+					if len(out.ElementFields) > 0 {
+						names := make([]string, len(out.ElementFields))
+						for j, ef := range out.ElementFields {
+							names[j] = ef.Name
+						}
+						efNames = strings.Join(names, ", ")
+					}
+					fmt.Fprintf(&b, "| %s | %s | %s |\n", out.Name, out.Type, efNames)
+				}
 			}
 		}
 

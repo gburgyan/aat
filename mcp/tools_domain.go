@@ -44,6 +44,69 @@ func (s *Server) registerDomainTools() {
 	)
 }
 
+// registerIntegrationDomainTools registers domain tools for the API persona.
+func (s *Server) registerIntegrationDomainTools() {
+	s.mcp.AddTool(
+		mcp.NewTool("list_concepts",
+			mcp.WithDescription("List all domain concepts with descriptions and applicable fields"),
+		),
+		s.handleListConcepts,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("list_types",
+			mcp.WithDescription("List all domain type definitions with format and field info"),
+		),
+		s.handleListTypes,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("list_value_pools",
+			mcp.WithDescription("List all value pools with type, sample values, and total count"),
+		),
+		s.handleListValuePools,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("explain_concept",
+			mcp.WithDescription("Show full detail for a domain concept: description, constraints, examples, and related types/pools"),
+			mcp.WithString("name",
+				mcp.Description("Concept name"),
+				mcp.Required(),
+			),
+		),
+		s.handleExplainConcept,
+	)
+}
+
+// registerTestDomainTools registers domain tools for the test persona.
+func (s *Server) registerTestDomainTools() {
+	s.mcp.AddTool(
+		mcp.NewTool("list_concepts",
+			mcp.WithDescription("List all domain concepts with descriptions and applicable fields"),
+		),
+		s.handleListConcepts,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("list_types",
+			mcp.WithDescription("List all domain type definitions with format and field info"),
+		),
+		s.handleListTypes,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("explain_concept",
+			mcp.WithDescription("Show full detail for a domain concept: description, constraints, examples, and related types/pools"),
+			mcp.WithString("name",
+				mcp.Description("Concept name"),
+				mcp.Required(),
+			),
+		),
+		s.handleExplainConcept,
+	)
+}
+
 // handleListConcepts returns a sorted list of all domain concepts.
 func (s *Server) handleListConcepts(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if s.ctx.KB == nil {

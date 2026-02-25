@@ -177,7 +177,7 @@ func TestHandleGetWorkflowDetail_Valid(t *testing.T) {
 		GraphDir: ".",
 	}
 	srv := NewServer(ctx)
-	result := callTool(t, srv.handleGetWorkflowDetail, map[string]any{"workflow": "Test Booking"})
+	result := callTool(t, srv.handleGetWorkflowDetail, map[string]any{"workflow": "Test Booking", "summary": false})
 	require.False(t, result.IsError)
 	text := resultText(t, result)
 

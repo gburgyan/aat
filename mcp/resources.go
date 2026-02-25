@@ -9,7 +9,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// registerResources adds static and dynamic resources to the MCP server.
+// registerResources adds static and dynamic resources to the MCP server (backward compat).
 func (s *Server) registerResources() {
 	// Static resources
 	s.mcp.AddResource(
@@ -78,6 +78,196 @@ func (s *Server) registerResources() {
 		),
 		s.handleWorkflowResource,
 	)
+}
+
+// registerIntegrationResources adds resources for the API persona.
+func (s *Server) registerIntegrationResources() {
+	s.mcp.AddResource(
+		mcp.NewResource("aat://api/overview", "API Overview",
+			mcp.WithResourceDescription("Compact overview of all API operations: name, HTTP method, path, and description"),
+			mcp.WithMIMEType("text/markdown"),
+		),
+		s.handleAPIOverviewResource,
+	)
+
+	s.mcp.AddResource(
+		mcp.NewResource("aat://domain", "Domain Knowledge",
+			mcp.WithResourceDescription("Domain concepts, types, and value pools"),
+			mcp.WithMIMEType("text/markdown"),
+		),
+		s.handleDomainResource,
+	)
+
+	s.mcp.AddResource(
+		mcp.NewResource("aat://metadata", "Project Metadata",
+			mcp.WithResourceDescription("Project manifest and graph statistics"),
+			mcp.WithMIMEType("text/markdown"),
+		),
+		s.handleMetadataResource,
+	)
+
+	if s.ctx.ReadmeContent != "" {
+		s.mcp.AddResource(
+			mcp.NewResource("aat://readme", "Project README",
+				mcp.WithResourceDescription("Project README.md documentation from the graph directory"),
+				mcp.WithMIMEType("text/markdown"),
+			),
+			s.handleReadmeResource,
+		)
+	}
+
+	s.mcp.AddResourceTemplate(
+		mcp.NewResourceTemplate("aat://operation/{name}", "Operation Detail",
+			mcp.WithTemplateDescription("Detailed view of a specific API operation including inputs, outputs, and dependencies"),
+			mcp.WithTemplateMIMEType("text/markdown"),
+		),
+		s.handleNodeResource,
+	)
+
+	s.mcp.AddResourceTemplate(
+		mcp.NewResourceTemplate("aat://template/{adapter}", "Request Template",
+			mcp.WithTemplateDescription("HTTP request template for a specific adapter"),
+			mcp.WithTemplateMIMEType("text/markdown"),
+		),
+		s.handleTemplateResource,
+	)
+
+	s.mcp.AddResourceTemplate(
+		mcp.NewResourceTemplate("aat://flow/{name}", "Integration Flow",
+			mcp.WithTemplateDescription("Step-by-step integration flow showing HTTP methods, data flow, and required inputs"),
+			mcp.WithTemplateMIMEType("text/markdown"),
+		),
+		s.handleWorkflowResource,
+	)
+}
+
+// registerTestResources adds resources for the test persona.
+func (s *Server) registerTestResources() {
+	s.mcp.AddResource(
+		mcp.NewResource("aat://graph/overview", "Graph Overview",
+			mcp.WithResourceDescription("Compact overview of all graph nodes: name, adapter, and description"),
+			mcp.WithMIMEType("text/markdown"),
+		),
+		s.handleGraphOverviewResource,
+	)
+
+	s.mcp.AddResource(
+		mcp.NewResource("aat://domain", "Domain Knowledge",
+			mcp.WithResourceDescription("Domain concepts, types, and value pools"),
+			mcp.WithMIMEType("text/markdown"),
+		),
+		s.handleDomainResource,
+	)
+
+	s.mcp.AddResource(
+		mcp.NewResource("aat://metadata", "Project Metadata",
+			mcp.WithResourceDescription("Project manifest and graph statistics"),
+			mcp.WithMIMEType("text/markdown"),
+		),
+		s.handleMetadataResource,
+	)
+
+	if s.ctx.ReadmeContent != "" {
+		s.mcp.AddResource(
+			mcp.NewResource("aat://readme", "Project README",
+				mcp.WithResourceDescription("Project README.md documentation from the graph directory"),
+				mcp.WithMIMEType("text/markdown"),
+			),
+			s.handleReadmeResource,
+		)
+	}
+
+	s.mcp.AddResourceTemplate(
+		mcp.NewResourceTemplate("aat://node/{name}", "Node Detail",
+			mcp.WithTemplateDescription("Detailed view of a specific graph node including inputs, outputs, and edges"),
+			mcp.WithTemplateMIMEType("text/markdown"),
+		),
+		s.handleNodeResource,
+	)
+
+	s.mcp.AddResourceTemplate(
+		mcp.NewResourceTemplate("aat://template/{adapter}", "Template Detail",
+			mcp.WithTemplateDescription("HTTP template detail for a specific adapter"),
+			mcp.WithTemplateMIMEType("text/markdown"),
+		),
+		s.handleTemplateResource,
+	)
+
+	s.mcp.AddResourceTemplate(
+		mcp.NewResourceTemplate("aat://workflow/{name}", "Workflow Detail",
+			mcp.WithTemplateDescription("Enriched step-by-step recipe for a workflow showing HTTP methods, data flow, and inputs"),
+			mcp.WithTemplateMIMEType("text/markdown"),
+		),
+		s.handleWorkflowResource,
+	)
+}
+
+// handleAPIOverviewResource returns a compact one-liner-per-operation summary.
+func (s *Server) handleAPIOverviewResource(_ context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	g := s.ctx.Graph
+	names := sortedNodeNames(g)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "# API Operations (%d)\n\n", len(names))
+
+	for _, name := range names {
+		node := g.Nodes[name]
+		method := ""
+		path := ""
+
+		// Try to get HTTP method/path from template
+		if node.Adapter != "" {
+			if tmpl, ok := s.ctx.Registry.GetTemplate(node.Adapter); ok {
+				method = tmpl.Request.Method
+				path = tmpl.Request.Path
+			}
+		}
+
+		if method != "" {
+			fmt.Fprintf(&b, "- **%s** %s `%s`", name, method, path)
+		} else {
+			fmt.Fprintf(&b, "- **%s**", name)
+		}
+		if node.Description != "" {
+			fmt.Fprintf(&b, " — %s", node.Description)
+		}
+		b.WriteString("\n")
+	}
+
+	return []mcp.ResourceContents{
+		mcp.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "text/markdown",
+			Text:     b.String(),
+		},
+	}, nil
+}
+
+// handleGraphOverviewResource returns a compact one-liner-per-node summary.
+func (s *Server) handleGraphOverviewResource(_ context.Context, req mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+	g := s.ctx.Graph
+	names := sortedNodeNames(g)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Graph Nodes (%d)\n\n", len(names))
+
+	for _, name := range names {
+		node := g.Nodes[name]
+		fmt.Fprintf(&b, "- **%s** [%s]", name, node.Adapter)
+		if node.Description != "" {
+			fmt.Fprintf(&b, " — %s", node.Description)
+		}
+		fmt.Fprintf(&b, " (%d in, %d out)", len(node.Inputs), len(node.Outputs))
+		b.WriteString("\n")
+	}
+
+	return []mcp.ResourceContents{
+		mcp.TextResourceContents{
+			URI:      req.Params.URI,
+			MIMEType: "text/markdown",
+			Text:     b.String(),
+		},
+	}, nil
 }
 
 // handleGraphResource returns the full API graph formatted as Markdown.
@@ -276,7 +466,7 @@ func (s *Server) handleWorkflowResource(_ context.Context, req mcp.ReadResourceR
 		return nil, fmt.Errorf("loading workflow template: %w", err)
 	}
 
-	content := formatWorkflowDetail(wf, p, s.ctx.Graph, s.ctx.Registry)
+	content := formatWorkflowDetail(wf, p, s.ctx.Graph, s.ctx.Registry, false)
 	return []mcp.ResourceContents{
 		mcp.TextResourceContents{
 			URI:      req.Params.URI,
