@@ -1,5 +1,10 @@
 # AAT — Adaptive API Testing
 
+[![CI](https://github.com/gburgyan/aat/actions/workflows/ci.yml/badge.svg)](https://github.com/gburgyan/aat/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/gburgyan/aat)](https://goreportcard.com/report/github.com/gburgyan/aat)
+[![Go Reference](https://pkg.go.dev/badge/github.com/gburgyan/aat.svg)](https://pkg.go.dev/github.com/gburgyan/aat)
+[![License](https://img.shields.io/github/license/gburgyan/aat)](https://github.com/gburgyan/aat/blob/main/LICENSE)
+
 AAT is a CLI tool that tests API workflows end-to-end. You define your API as a graph of operations, write test plans that traverse it, and AAT handles the execution — resolving data dependencies between steps, running assertions, and producing detailed archives of every request and response.
 
 With an LLM configured, AAT can also generate test plans from natural language prompts and intelligently select values when explicit data isn't available.
