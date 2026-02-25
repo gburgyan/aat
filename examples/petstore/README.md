@@ -1,6 +1,8 @@
 # AAT Quickstart: Petstore Example
 
-This example uses the public [Swagger Petstore v3 API](https://petstore3.swagger.io/) to demonstrate AAT's core workflow: define an API graph, write test plans, and run them. No API keys or setup required.
+This example uses the public [Swagger Petstore API](https://petstore.swagger.io/) to demonstrate AAT's core workflow: define an API graph, write test plans, and run them. No API keys or setup required.
+
+> **Want the full story?** See the [Petstore Walkthrough](../../docs/user/petstore-walkthrough.md) for a detailed, line-by-line explanation of how these files fit together.
 
 ## Prerequisites
 
@@ -49,6 +51,18 @@ Archive: _output/runs/run-XXXXXXXX-XXXXXX-XXXXXXXX/archive.json
 
 This discovers and runs every plan in the `plans/` directory.
 
+## View results in the browser
+
+After running a plan, you can inspect the full request/response details in the web UI:
+
+```bash
+../../aat web view
+```
+
+This opens the most recent run in your browser (starting a temporary server if needed). You'll see a Gantt timeline of each step, request/response bodies, headers, and assertion results.
+
+> **Note:** The web UI requires `make build` (not plain `go build`) since it embeds the compiled Svelte frontend into the binary.
+
 ## Validate the project
 
 Check that the graph, templates, plans, and workflows are all valid:
@@ -96,7 +110,7 @@ overrides:
       - type: status
         expect: 200
       - type: fieldExists
-        path: id
+        path: petId
 ```
 
 At runtime, AAT reconstitutes the recipe into a full plan by composing the workflow template with the overrides. Input values like `name` come from the graph's default pool (a random pet name each run), `status` defaults to "available", and data flow between steps (e.g. `petId` from `createPet` to `getPet`) is wired at the graph level via `default: {from: ...}`. The recipe only needs to add assertions.

@@ -29,6 +29,10 @@ AAT (Adaptive API Testing) is a CLI tool that tests API workflows end-to-end. It
 
 Start here if you have an OpenAPI spec and want to see AAT in action immediately. You'll scaffold a graph, write a simple plan, and execute it — all from the command line. [Go to Quickstart](quickstart.md)
 
+### Petstore Walkthrough (15 minutes)
+
+Start here if you want to understand what AAT does by reading through a working example. You'll see every file in the Petstore project and learn how they compose into automated, self-cleaning API tests. [Go to Petstore Walkthrough](petstore-walkthrough.md)
+
 ### Tutorial (30 minutes)
 
 Start here if you want to understand AAT from the ground up. You'll build a graph by hand, write templates, compose a plan, and learn how value resolution works along the way. [Go to Tutorial](tutorial.md)
@@ -67,6 +71,7 @@ Progressive reading order — each builds on the previous.
 
 | Document | What you'll learn |
 |----------|-------------------|
+| [Petstore Walkthrough](petstore-walkthrough.md) | A line-by-line tour of a working example: graph, templates, workflows, recipes, and how they compose |
 | [Case Study: Travelport](travelport-example.md) | A real-world airline booking API with selections, addons, Lua transforms, and domain knowledge |
 
 ## Concepts Glossary
