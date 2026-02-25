@@ -14,10 +14,13 @@ The project uses a Makefile for builds:
 make build      # Build frontend, then Go binary with version/commit/date ldflags
 make frontend   # cd server/web && npm install && npm run build
 make test       # go test ./...
+make check      # fmt + test-race + lint — mirrors CI pipeline
 make clean      # Remove binary and frontend artifacts (node_modules, dist)
 ```
 
 `make build` injects `VERSION`, `COMMIT`, and `BUILD_DATE` into `internal/version` via `-ldflags`.
+
+**Before committing or pushing**, run `make check` to catch issues that CI would flag. This runs `gofmt -s` formatting, tests with the race detector, and linting — the same checks the CI/CD pipeline performs.
 
 ## Package Structure
 
