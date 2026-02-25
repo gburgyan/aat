@@ -532,9 +532,9 @@ type runContext struct {
 	EnvOverlay string   // path to overlay YAML
 
 	// Layer configuration
-	Layers          []string                    // layer names from CLI flags
-	LayersDir       string                      // directory containing layer files
-	AvailableLayers map[string]*graph.Layer      // pre-loaded layers (nil until needed)
+	Layers          []string                // layer names from CLI flags
+	LayersDir       string                  // directory containing layer files
+	AvailableLayers map[string]*graph.Layer // pre-loaded layers (nil until needed)
 }
 
 // loadRunContext loads all shared infrastructure from the given args.

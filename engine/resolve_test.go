@@ -977,7 +977,7 @@ func TestResolveInputsWithContext_PoolRandom(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"code": {
-				Pool:     []any{"A", "B", "C", "D", "E"},
+				Pool:         []any{"A", "B", "C", "D", "E"},
 				PoolStrategy: &strategy,
 			},
 		},
@@ -1014,9 +1014,9 @@ func TestResolveInputsWithContext_AllPoolFail(t *testing.T) {
 		Node: "target",
 		Values: map[string]plan.StepValue{
 			"code": {
-				Default:      "A",
-				Constraint:   "value == 'Z'", // nothing will match
-				Pool: []any{"B", "C"},
+				Default:    "A",
+				Constraint: "value == 'Z'", // nothing will match
+				Pool:       []any{"B", "C"},
 			},
 		},
 	}
@@ -1133,8 +1133,8 @@ func TestResolveInputsWithContext_MixedInputs(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "sess-123", inputs["sessionId"])       // from plan From ref
 	assert.Equal(t, "2026-02-13", inputs["departureDate"]) // from expression
-	assert.Equal(t, "DEN", inputs["origin"])                // plain default
-	assert.Equal(t, 1, inputs["passengers"])                // from pool (default failed constraint)
+	assert.Equal(t, "DEN", inputs["origin"])               // plain default
+	assert.Equal(t, 1, inputs["passengers"])               // from pool (default failed constraint)
 }
 
 func TestResolveInputsWithContext_ReferenceEarlierInput(t *testing.T) {
@@ -1220,7 +1220,7 @@ func TestResolveInputsWithContext_EnvExpression(t *testing.T) {
 	}
 
 	rctx := &ResolveContext{
-		Now:       fixedNow(),
+		Now: fixedNow(),
 		EnvLookup: func(key string) string {
 			if key == "TEST_KEY" {
 				return "secret-123"

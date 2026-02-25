@@ -512,7 +512,7 @@ func TestValidate_RequiresSatisfiesCycle_CycleBreakerSuppresses(t *testing.T) {
 			"a": {Name: "a", Adapter: "a",
 				Requires: []string{"tokenB"}, Satisfies: []string{"tokenA"},
 				CycleBreaker: true,
-				Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
+				Inputs:       []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},
 			"b": {Name: "b", Adapter: "b",
 				Requires: []string{"tokenA"}, Satisfies: []string{"tokenB"},
 				Inputs: []Input{{Name: "x", Type: "string"}}, Outputs: []Output{{Name: "y", Type: "string"}}},

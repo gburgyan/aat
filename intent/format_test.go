@@ -366,4 +366,3 @@ func TestFormatWorkflowMenu_EmptyWorkflows(t *testing.T) {
 	assert.NotContains(t, result, "## Workflows")
 	assert.NotContains(t, result, "## Addons")
 }
-

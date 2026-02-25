@@ -23,8 +23,8 @@ type ResolveContext struct {
 	EnvLookup func(string) string
 	KB        *domain.KnowledgeBase // may be nil
 	Node      *graph.Node
-	Plan      *plan.Plan            // for constraint classification (may be nil)
-	Registry  *adapter.Registry     // may be nil; enables template-side elementField resolution
+	Plan      *plan.Plan        // for constraint classification (may be nil)
+	Registry  *adapter.Registry // may be nil; enables template-side elementField resolution
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -121,13 +121,13 @@ func dedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
 
 // namedSelectionEntry holds the result of resolving a named selection.
 type namedSelectionEntry struct {
-	element    any    // the full selected element
-	sourceNode string // e.g. "searchFlights"
+	element     any    // the full selected element
+	sourceNode  string // e.g. "searchFlights"
 	sourceField string // e.g. "catalogOfferings"
-	strategy   string
-	index      int
-	sourceSize int
-	filterExpr string
+	strategy    string
+	index       int
+	sourceSize  int
+	filterExpr  string
 }
 
 // resolveNamedSelection performs the array selection for a named StepSelection.

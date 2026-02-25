@@ -1402,9 +1402,9 @@ func TestValidate_GoalConsistency(t *testing.T) {
 						"gender":      {Default: "Male"},
 					}},
 					{Node: "commitBooking", DependsOn: []string{"addOffer", "addTraveler", "createWorkbench"}, IsGoal: true, Values: map[string]StepValue{
-						"workbenchId":  {From: "createWorkbench.workbenchId"},
-						"offerStatus":  {From: "addOffer.offerStatus"},
-						"travelerId":   {From: "addTraveler.travelerId"},
+						"workbenchId": {From: "createWorkbench.workbenchId"},
+						"offerStatus": {From: "addOffer.offerStatus"},
+						"travelerId":  {From: "addTraveler.travelerId"},
 					}},
 				},
 			},
@@ -2546,8 +2546,8 @@ func TestValidate_StepAliasing(t *testing.T) {
 						ID:   "search_leg1",
 						Node: "searchFlights",
 						Values: map[string]StepValue{
-							"origin":        {Default: "MEL"},
-							"destination":   {Default: "SYD"},
+							"origin":      {Default: "MEL"},
+							"destination": {Default: "SYD"},
 							// Missing departureDate — required, no default, no edge for duplicates
 						},
 					},

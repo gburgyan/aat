@@ -228,8 +228,8 @@ func TestHandleTraceWorkflow_CycleBreaker(t *testing.T) {
 func TestHandleFindWorkflows_ByName(t *testing.T) {
 	g := &graph.Graph{
 		Nodes: map[string]*graph.Node{
-			"searchFlights":   {Name: "searchFlights", Description: "Search flights"},
-			"bookFlight":      {Name: "bookFlight", Description: "Book a flight"},
+			"searchFlights":     {Name: "searchFlights", Description: "Search flights"},
+			"bookFlight":        {Name: "bookFlight", Description: "Book a flight"},
 			"cancelReservation": {Name: "cancelReservation", Description: "Cancel reservation"},
 		},
 	}

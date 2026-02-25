@@ -135,7 +135,7 @@ func ValidateWorkflowCompat(g *graph.Graph, graphDir string) *WorkflowCompatResu
 		if err != nil {
 			result.Errors = append(result.Errors, WorkflowCompatError{
 				Workflow: wf.Name,
-				Err:     err,
+				Err:      err,
 			})
 			continue
 		}

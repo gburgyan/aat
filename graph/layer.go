@@ -197,7 +197,7 @@ func ApplyLayers(g *Graph, layerNames []string, available map[string]*Layer) (ma
 
 		// Separate bare and qualified entries.
 		bare := make(map[string]*InputDefault)      // input name → default
-		qualified := make(map[string]*InputDefault)  // node.input → default
+		qualified := make(map[string]*InputDefault) // node.input → default
 
 		for key, def := range layer.Inputs {
 			if strings.Contains(key, ".") {

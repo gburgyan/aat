@@ -129,10 +129,10 @@ func TestTravelportTemplates_BuildRequest(t *testing.T) {
 			adapterName: "travelport.addTraveler",
 			inputs: map[string]any{
 				"workbenchId":       "wb-789",
-				"surname":          "Smith",
-				"givenName":        "John",
-				"birthDate":        "1990-01-15",
-				"gender":           "Male",
+				"surname":           "Smith",
+				"givenName":         "John",
+				"birthDate":         "1990-01-15",
+				"gender":            "Male",
 				"passengerTypeCode": "ADT",
 			},
 			wantMethod: "POST",
@@ -205,10 +205,10 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 	registry := loadTravelportRegistry(t)
 
 	tests := []struct {
-		name        string
-		adapterName string
+		name         string
+		adapterName  string
 		responseJSON string
-		wantOutputs map[string]any
+		wantOutputs  map[string]any
 	}{
 		{
 			name:        "searchFlights extracts offerings and ID",
@@ -325,10 +325,10 @@ func TestTravelportTemplates_ExtractOutputs(t *testing.T) {
 			},
 		},
 		{
-			name:        "ignoreWorkbench extracts nothing",
-			adapterName: "travelport.ignoreWorkbench",
+			name:         "ignoreWorkbench extracts nothing",
+			adapterName:  "travelport.ignoreWorkbench",
 			responseJSON: `{}`,
-			wantOutputs: map[string]any{},
+			wantOutputs:  map[string]any{},
 		},
 	}
 

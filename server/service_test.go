@@ -802,7 +802,6 @@ func TestGetStep_Resolutions(t *testing.T) {
 	assert.Equal(t, 5, res.PoolSize)
 }
 
-
 func TestGetStep_ErrorClassification(t *testing.T) {
 	dir := t.TempDir()
 

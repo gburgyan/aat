@@ -292,4 +292,3 @@ func TestFormatChainTrace(t *testing.T) {
 		assert.Contains(t, result, "Alternatives: alt1, alt2")
 	})
 }
-

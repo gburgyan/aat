@@ -424,8 +424,8 @@ func TestGenerateDocs_ConfigurableInput(t *testing.T) {
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
 			"search": {
-				Name:    "search",
-				Adapter: "search",
+				Name:        "search",
+				Adapter:     "search",
 				Description: "Search for things",
 				Inputs: []Input{
 					{Name: "query", Type: "string"},

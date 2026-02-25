@@ -65,57 +65,57 @@ type AttemptSummary struct {
 
 // StepSummary is a compact view of a step for timeline display.
 type StepSummary struct {
-	StepID              string          `json:"stepId"`
-	Node                string          `json:"node"`
-	Status              int             `json:"status,omitempty"`
-	DurationMs          int64           `json:"durationMs"`
-	DurationDisplay     string          `json:"durationDisplay"`
-	Passed              bool            `json:"passed"`
-	AssertionCount      int             `json:"assertionCount"`
-	AssertionPassedCount int            `json:"assertionPassedCount"`
-	DisplayOutputs      []DisplayOutput `json:"displayOutputs,omitempty"`
-	Error               string          `json:"error,omitempty"`
-	IsCleanup           bool            `json:"isCleanup,omitempty"`
-	HasSelections       bool            `json:"hasSelections,omitempty"`
-	HasResolutions      bool            `json:"hasResolutions,omitempty"`
-	HasTransform        bool            `json:"hasTransform,omitempty"`
-	RetryCount          int             `json:"retryCount,omitempty"`
-	OffsetMs            int64           `json:"offsetMs,omitempty"`
+	StepID               string          `json:"stepId"`
+	Node                 string          `json:"node"`
+	Status               int             `json:"status,omitempty"`
+	DurationMs           int64           `json:"durationMs"`
+	DurationDisplay      string          `json:"durationDisplay"`
+	Passed               bool            `json:"passed"`
+	AssertionCount       int             `json:"assertionCount"`
+	AssertionPassedCount int             `json:"assertionPassedCount"`
+	DisplayOutputs       []DisplayOutput `json:"displayOutputs,omitempty"`
+	Error                string          `json:"error,omitempty"`
+	IsCleanup            bool            `json:"isCleanup,omitempty"`
+	HasSelections        bool            `json:"hasSelections,omitempty"`
+	HasResolutions       bool            `json:"hasResolutions,omitempty"`
+	HasTransform         bool            `json:"hasTransform,omitempty"`
+	RetryCount           int             `json:"retryCount,omitempty"`
+	OffsetMs             int64           `json:"offsetMs,omitempty"`
 }
 
 // StepDetail is the full audit view of a single step.
 type StepDetail struct {
-	StepID               string                  `json:"stepId"`
-	Node                 string                  `json:"node"`
-	Status               int                     `json:"status,omitempty"`
-	DurationMs           int64                   `json:"durationMs"`
-	DurationDisplay      string                  `json:"durationDisplay"`
-	Passed               bool                    `json:"passed"`
-	AssertionCount       int                     `json:"assertionCount"`
-	AssertionPassedCount int                     `json:"assertionPassedCount"`
-	DisplayOutputs       []DisplayOutput         `json:"displayOutputs,omitempty"`
-	Error                string                  `json:"error,omitempty"`
-	IsCleanup            bool                    `json:"isCleanup,omitempty"`
-	HasSelections        bool                    `json:"hasSelections,omitempty"`
-	HasResolutions       bool                    `json:"hasResolutions,omitempty"`
-	RetryCount           int                     `json:"retryCount,omitempty"`
-	StartTime            time.Time               `json:"startTime,omitempty"`
-	Inputs               map[string]any          `json:"inputs,omitempty"`
-	Outputs              map[string]any          `json:"outputs,omitempty"`
-	Request              *RequestDetail          `json:"request,omitempty"`
-	Response             *ResponseDetail         `json:"response,omitempty"`
-	Validation           *ValidationDetail       `json:"validation,omitempty"`
-	Selections           []SelectionDetail       `json:"selections,omitempty"`
-	Resolutions          []ResolutionDetail      `json:"resolutions,omitempty"`
-	ErrorClassification  *ErrorClassDetail       `json:"errorClassification,omitempty"`
-	ExpectFailure        *ExpectFailureDetail    `json:"expectFailure,omitempty"`
+	StepID               string                   `json:"stepId"`
+	Node                 string                   `json:"node"`
+	Status               int                      `json:"status,omitempty"`
+	DurationMs           int64                    `json:"durationMs"`
+	DurationDisplay      string                   `json:"durationDisplay"`
+	Passed               bool                     `json:"passed"`
+	AssertionCount       int                      `json:"assertionCount"`
+	AssertionPassedCount int                      `json:"assertionPassedCount"`
+	DisplayOutputs       []DisplayOutput          `json:"displayOutputs,omitempty"`
+	Error                string                   `json:"error,omitempty"`
+	IsCleanup            bool                     `json:"isCleanup,omitempty"`
+	HasSelections        bool                     `json:"hasSelections,omitempty"`
+	HasResolutions       bool                     `json:"hasResolutions,omitempty"`
+	RetryCount           int                      `json:"retryCount,omitempty"`
+	StartTime            time.Time                `json:"startTime,omitempty"`
+	Inputs               map[string]any           `json:"inputs,omitempty"`
+	Outputs              map[string]any           `json:"outputs,omitempty"`
+	Request              *RequestDetail           `json:"request,omitempty"`
+	Response             *ResponseDetail          `json:"response,omitempty"`
+	Validation           *ValidationDetail        `json:"validation,omitempty"`
+	Selections           []SelectionDetail        `json:"selections,omitempty"`
+	Resolutions          []ResolutionDetail       `json:"resolutions,omitempty"`
+	ErrorClassification  *ErrorClassDetail        `json:"errorClassification,omitempty"`
+	ExpectFailure        *ExpectFailureDetail     `json:"expectFailure,omitempty"`
 	ResponseBodyError    *ResponseBodyErrorDetail `json:"responseBodyError,omitempty"`
-	TransformScript      string                  `json:"transformScript,omitempty"`
-	Extractions          []ExtractionDetail      `json:"extractions,omitempty"`
-	PlanStepYAML         string                  `json:"planStepYaml,omitempty"`
-	InstantiatedStepYAML string                  `json:"instantiatedStepYaml,omitempty"`
-	PrevStepID           string                  `json:"prevStepId,omitempty"`
-	NextStepID           string                  `json:"nextStepId,omitempty"`
+	TransformScript      string                   `json:"transformScript,omitempty"`
+	Extractions          []ExtractionDetail       `json:"extractions,omitempty"`
+	PlanStepYAML         string                   `json:"planStepYaml,omitempty"`
+	InstantiatedStepYAML string                   `json:"instantiatedStepYaml,omitempty"`
+	PrevStepID           string                   `json:"prevStepId,omitempty"`
+	NextStepID           string                   `json:"nextStepId,omitempty"`
 }
 
 // ExtractionDetail captures a single output value and which downstream steps consumed it.
@@ -178,32 +178,32 @@ type AssertionDetail struct {
 
 // SelectionDetail captures how an array selection was resolved.
 type SelectionDetail struct {
-	InputName     string         `json:"inputName"`
-	SourceStep    string         `json:"sourceStep,omitempty"`
-	SourceNode    string         `json:"sourceNode"`
-	SourceField   string         `json:"sourceField"`
-	SourceSize    int            `json:"sourceSize"`
-	FilterExpr    string         `json:"filterExpr,omitempty"`
-	FilteredSize  int            `json:"filteredSize"`
-	Strategy      string         `json:"strategy"`
+	InputName     string `json:"inputName"`
+	SourceStep    string `json:"sourceStep,omitempty"`
+	SourceNode    string `json:"sourceNode"`
+	SourceField   string `json:"sourceField"`
+	SourceSize    int    `json:"sourceSize"`
+	FilterExpr    string `json:"filterExpr,omitempty"`
+	FilteredSize  int    `json:"filteredSize"`
+	Strategy      string `json:"strategy"`
 	SelectedIndex int    `json:"selectedIndex"`
 	SelectionName string `json:"selectionName,omitempty"`
 }
 
 // ResolutionDetail captures how a single input was resolved.
 type ResolutionDetail struct {
-	InputName         string         `json:"inputName"`
-	Source            string         `json:"source"`
-	RawValue          any            `json:"rawValue,omitempty"`
-	FinalValue        any            `json:"finalValue,omitempty"`
-	FromStep          string         `json:"fromStep,omitempty"`
-	FromOutput        string         `json:"fromOutput,omitempty"`
-	Expression        string         `json:"expression,omitempty"`
-	Constraint        string         `json:"constraint,omitempty"`
-	ConstraintOK      *bool          `json:"constraintOk,omitempty"`
-	PoolIndex int   `json:"poolIndex,omitempty"`
-	PoolSize  int   `json:"poolSize,omitempty"`
-	Tried     []any `json:"tried,omitempty"`
+	InputName    string `json:"inputName"`
+	Source       string `json:"source"`
+	RawValue     any    `json:"rawValue,omitempty"`
+	FinalValue   any    `json:"finalValue,omitempty"`
+	FromStep     string `json:"fromStep,omitempty"`
+	FromOutput   string `json:"fromOutput,omitempty"`
+	Expression   string `json:"expression,omitempty"`
+	Constraint   string `json:"constraint,omitempty"`
+	ConstraintOK *bool  `json:"constraintOk,omitempty"`
+	PoolIndex    int    `json:"poolIndex,omitempty"`
+	PoolSize     int    `json:"poolSize,omitempty"`
+	Tried        []any  `json:"tried,omitempty"`
 }
 
 // LLMCallDetail captures details of a single LLM API call.

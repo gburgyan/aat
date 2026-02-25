@@ -367,10 +367,10 @@ nodes:
 
 func TestSplitRef(t *testing.T) {
 	tests := []struct {
-		ref      string
-		wantNode string
+		ref       string
+		wantNode  string
 		wantField string
-		wantErr  bool
+		wantErr   bool
 	}{
 		{ref: "node.field", wantNode: "node", wantField: "field"},
 		{ref: "searchFlights.flights", wantNode: "searchFlights", wantField: "flights"},

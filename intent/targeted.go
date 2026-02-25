@@ -56,12 +56,12 @@ type InputContext struct {
 	Format           string   // from TypeDef.Format
 	PoolValues       []string // sample values from value pool
 	GraphConstr      string   // graph-level constraint annotation
-	IsDate         bool
-	IsConfigurable  bool   // true if graph.Input.Configurable
-	IsPoolInput     bool   // true if template has a pool and no Default is set
-	CurrentDefault  string // template default value, if any (e.g., "DEN")
-	HasTemplatePool bool   // true if template has a pool of curated values
-	FromResolved    string // non-empty if auto-wired from sibling input (e.g., "leg1Destination")
+	IsDate           bool
+	IsConfigurable   bool   // true if graph.Input.Configurable
+	IsPoolInput      bool   // true if template has a pool and no Default is set
+	CurrentDefault   string // template default value, if any (e.g., "DEN")
+	HasTemplatePool  bool   // true if template has a pool of curated values
+	FromResolved     string // non-empty if auto-wired from sibling input (e.g., "leg1Destination")
 
 	// Validation metadata from graph.Input.Constraints — used by validateTargetedResponse.
 	ConstraintPattern   string // regex pattern (e.g., "^[A-Z]{3}$")
@@ -73,7 +73,7 @@ type InputContext struct {
 type SelectionContext struct {
 	StepID          string
 	SelectionName   string
-	Source          string   // "searchFlights.catalogOfferings"
+	Source          string // "searchFlights.catalogOfferings"
 	CurrentStrategy string
 	ElementFields   []string // "offeringId (string), carrier (string), ..."
 	FeedsInto       []string // inputs that reference this selection
@@ -218,7 +218,7 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 				}
 			}
 
-				contexts = append(contexts, ic)
+			contexts = append(contexts, ic)
 		}
 	}
 

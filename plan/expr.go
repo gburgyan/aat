@@ -145,8 +145,8 @@ type parsedExpr struct {
 
 // Regex for expression parsing.
 var (
-	exprEnvRe      = regexp.MustCompile(`^env\.([A-Za-z_][A-Za-z0-9_]*)$`)
-	exprArithRe    = regexp.MustCompile(`^(\S+)\s*([+-])\s*(\d+)\s+days?$`)
+	exprEnvRe       = regexp.MustCompile(`^env\.([A-Za-z_][A-Za-z0-9_]*)$`)
+	exprArithRe     = regexp.MustCompile(`^(\S+)\s*([+-])\s*(\d+)\s+days?$`)
 	exprIdentOnlyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 )
 

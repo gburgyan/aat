@@ -351,9 +351,9 @@ func TestBuildInputContexts_PooledInput(t *testing.T) {
 func TestValidateTargetedResponse_PooledInputOmitted(t *testing.T) {
 	// Missing value for a pooled input should NOT produce a missing_value issue.
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.destination": "LHR"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.destination": "LHR"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{
@@ -501,13 +501,13 @@ func TestBuildTargetedPlanPrompt_ConfigurableSection(t *testing.T) {
 func TestValidateTargetedResponse_ConfigurableMissing_NoError(t *testing.T) {
 	// Missing value for a configurable input should NOT produce a missing_value issue.
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "JFK"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "JFK"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{
-		"search.origin":    true,
+		"search.origin":     true,
 		"search.passengers": true,
 	}
 
@@ -723,9 +723,9 @@ func TestApplyTargetedResponse_ValuesApplied(t *testing.T) {
 	}
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "JFK", "search.destination": "LHR"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "JFK", "search.destination": "LHR"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{
@@ -751,9 +751,9 @@ func TestApplyTargetedResponse_WiredInputsRejected(t *testing.T) {
 	}
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"process.itemId": "hallucinated-value"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"process.itemId": "hallucinated-value"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	// itemId is NOT in unfedSet — it's wired
@@ -785,7 +785,7 @@ func TestApplyTargetedResponse_NamedSelectionOverride(t *testing.T) {
 		Selections: map[string]TargetedSelection{
 			"process.item": {Strategy: "match", Filter: "active == true"},
 		},
-		Assertions:   map[string][]TargetedAssertion{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	applyTargetedResponse(skeleton, resp, map[string]bool{})
@@ -817,7 +817,7 @@ func TestApplyTargetedResponse_InlineSelectionOverride(t *testing.T) {
 		Selections: map[string]TargetedSelection{
 			"process.itemId": {Strategy: "min", SortField: "price"},
 		},
-		Assertions:   map[string][]TargetedAssertion{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	applyTargetedResponse(skeleton, resp, map[string]bool{})
@@ -883,8 +883,8 @@ func TestApplyTargetedResponse_UnknownStepIDSkipped(t *testing.T) {
 
 func TestSplitStepInput(t *testing.T) {
 	tests := []struct {
-		key      string
-		stepID   string
+		key       string
+		stepID    string
 		inputName string
 	}{
 		{"search.origin", "search", "origin"},
@@ -928,7 +928,7 @@ func TestSanitizeAssertions_UnknownTypeFiltered(t *testing.T) {
 	assertions := []TargetedAssertion{
 		{Type: "status", Expect: float64(200)},
 		{Type: "responseTime", Expect: float64(500)}, // invalid type
-		{Type: "magic", Path: "$.foo"},                // invalid type
+		{Type: "magic", Path: "$.foo"},               // invalid type
 	}
 
 	result := sanitizeAssertions(assertions)
@@ -977,8 +977,8 @@ func TestSanitizeAssertions_FieldExistsEmptyPathFiltered(t *testing.T) {
 
 func TestSanitizeAssertions_FieldEqualsEmptyPathFiltered(t *testing.T) {
 	assertions := []TargetedAssertion{
-		{Type: "fieldEquals", Value: "test"},            // no path
-		{Type: "fieldEquals", Path: "$.x", Value: "y"},  // valid, $. stripped
+		{Type: "fieldEquals", Value: "test"},           // no path
+		{Type: "fieldEquals", Path: "$.x", Value: "y"}, // valid, $. stripped
 	}
 
 	result := sanitizeAssertions(assertions)
@@ -989,7 +989,7 @@ func TestSanitizeAssertions_FieldEqualsEmptyPathFiltered(t *testing.T) {
 
 func TestSanitizeAssertions_StatusNilExpectFiltered(t *testing.T) {
 	assertions := []TargetedAssertion{
-		{Type: "status"},                    // no expect
+		{Type: "status"},                       // no expect
 		{Type: "status", Expect: float64(200)}, // valid
 	}
 
@@ -1001,8 +1001,8 @@ func TestSanitizeAssertions_StatusNilExpectFiltered(t *testing.T) {
 
 func TestSanitizeAssertions_SchemaNilExpectFiltered(t *testing.T) {
 	assertions := []TargetedAssertion{
-		{Type: "schema"},                           // no expect
-		{Type: "schema", Expect: "MySchemaName"},   // valid
+		{Type: "schema"},                         // no expect
+		{Type: "schema", Expect: "MySchemaName"}, // valid
 	}
 
 	result := sanitizeAssertions(assertions)
@@ -1069,8 +1069,8 @@ func TestApplyTargetedResponse_AssertionsSanitized(t *testing.T) {
 			"commit": {
 				{Type: "status", Expect: float64(200)},
 				{Type: "predicate", Expect: "locator != \"\"", Expr: ""}, // expr in expect
-				{Type: "predicate"}, // completely empty — should be filtered
-				{Type: "bogusType", Path: "$.foo"}, // invalid type — filtered
+				{Type: "predicate"},                                      // completely empty — should be filtered
+				{Type: "bogusType", Path: "$.foo"},                       // invalid type — filtered
 			},
 		},
 	}
@@ -1149,9 +1149,9 @@ func TestResolveElementFields(t *testing.T) {
 
 func TestValidateTargetedResponse_CleanResponse(t *testing.T) {
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "JFK", "search.destination": "LHR"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "JFK", "search.destination": "LHR"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{
@@ -1170,9 +1170,9 @@ func TestValidateTargetedResponse_CleanResponse(t *testing.T) {
 
 func TestValidateTargetedResponse_MissingValue(t *testing.T) {
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "JFK"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "JFK"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{
@@ -1195,9 +1195,9 @@ func TestValidateTargetedResponse_MissingValue(t *testing.T) {
 func TestValidateTargetedResponse_MissingValueWithDefault(t *testing.T) {
 	// If the input has a CurrentDefault, it's not required from the LLM.
 	resp := &TargetedResponse{
-		Values:       map[string]any{},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{
@@ -1217,8 +1217,8 @@ func TestValidateTargetedResponse_NonLiteralObject(t *testing.T) {
 		Values: map[string]any{
 			"search.origin": map[string]any{"from": "setup.origin", "select": "first"},
 		},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.origin": true}
@@ -1239,8 +1239,8 @@ func TestValidateTargetedResponse_NonLiteralArray(t *testing.T) {
 		Values: map[string]any{
 			"search.tags": []any{"a", "b"},
 		},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.tags": true}
@@ -1261,7 +1261,7 @@ func TestValidateTargetedResponse_InvalidStrategy(t *testing.T) {
 		Selections: map[string]TargetedSelection{
 			"process.item": {Strategy: "cheapest"},
 		},
-		Assertions:   map[string][]TargetedAssertion{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	issues := validateTargetedResponse(resp, map[string]bool{}, nil, nil)
@@ -1278,7 +1278,7 @@ func TestValidateTargetedResponse_InvalidFilterSyntax(t *testing.T) {
 		Selections: map[string]TargetedSelection{
 			"process.item": {Strategy: "match", Filter: "price >>== 100"},
 		},
-		Assertions:   map[string][]TargetedAssertion{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	issues := validateTargetedResponse(resp, map[string]bool{}, nil, nil)
@@ -1293,7 +1293,7 @@ func TestValidateTargetedResponse_InvalidFilterField(t *testing.T) {
 		Selections: map[string]TargetedSelection{
 			"process.item": {Strategy: "match", Filter: "departureDate == '2026-03-10'"},
 		},
-		Assertions:   map[string][]TargetedAssertion{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	selContexts := []SelectionContext{
@@ -1317,7 +1317,7 @@ func TestValidateTargetedResponse_ValidFilterField(t *testing.T) {
 		Selections: map[string]TargetedSelection{
 			"process.item": {Strategy: "match", Filter: "carrier == 'UA'"},
 		},
-		Assertions:   map[string][]TargetedAssertion{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	selContexts := []SelectionContext{
@@ -1340,7 +1340,7 @@ func TestValidateTargetedResponse_MultipleIssues(t *testing.T) {
 		Selections: map[string]TargetedSelection{
 			"process.item": {Strategy: "bogus"},
 		},
-		Assertions:   map[string][]TargetedAssertion{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{
@@ -1373,8 +1373,8 @@ func TestValidateTargetedResponse_WiredInputsIgnored(t *testing.T) {
 		Values: map[string]any{
 			"process.itemId": map[string]any{"from": "search.id"},
 		},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	// itemId is NOT in unfedSet — it's wired.
@@ -1417,9 +1417,9 @@ func TestFormatValidationIssues(t *testing.T) {
 
 func TestValidateTargetedResponse_PatternMismatch(t *testing.T) {
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "den"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "den"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.origin": true}
@@ -1436,9 +1436,9 @@ func TestValidateTargetedResponse_PatternMismatch(t *testing.T) {
 
 func TestValidateTargetedResponse_PatternMatch(t *testing.T) {
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "DEN"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "DEN"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.origin": true}
@@ -1453,9 +1453,9 @@ func TestValidateTargetedResponse_PatternMatch(t *testing.T) {
 func TestValidateTargetedResponse_PatternSkipsExpr(t *testing.T) {
 	// Expression values should NOT be checked against regex patterns.
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.departureDate": "{{today + 7 days}}"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.departureDate": "{{today + 7 days}}"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.departureDate": true}
@@ -1469,9 +1469,9 @@ func TestValidateTargetedResponse_PatternSkipsExpr(t *testing.T) {
 
 func TestValidateTargetedResponse_InvalidExpression(t *testing.T) {
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.departureDate": "{{today +}}"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.departureDate": "{{today +}}"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.departureDate": true}
@@ -1489,9 +1489,9 @@ func TestValidateTargetedResponse_LengthViolation(t *testing.T) {
 	minLen := 3
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "AB"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "AB"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.origin": true}
@@ -1509,9 +1509,9 @@ func TestValidateTargetedResponse_MaxLengthViolation(t *testing.T) {
 	maxLen := 3
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "ABCD"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "ABCD"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.origin": true}
@@ -1529,9 +1529,9 @@ func TestValidateTargetedResponse_LengthSkipsExpr(t *testing.T) {
 	minLen := 10
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.date": "{{today + 7 days}}"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.date": "{{today + 7 days}}"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.date": true}
@@ -1547,9 +1547,9 @@ func TestValidateTargetedResponse_LengthSkipsExpr(t *testing.T) {
 func TestValidateTargetedResponse_NonStringValuesSkipConstraints(t *testing.T) {
 	// Numeric values should not be checked against string constraints.
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.count": float64(5)},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.count": float64(5)},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	minLen := 3
@@ -1609,9 +1609,9 @@ func TestApplyTargetedResponse_ClearsPoolWhenLLMProvides(t *testing.T) {
 	}
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "BNA"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "BNA"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.origin": true}
@@ -1640,9 +1640,9 @@ func TestApplyTargetedResponse_ClearsPoolPreservesConstraint(t *testing.T) {
 	}
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "BNA"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "BNA"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.origin": true}
@@ -1666,9 +1666,9 @@ func TestApplyTargetedResponse_NewInputNoExisting(t *testing.T) {
 	}
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search.origin": "JFK"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search.origin": "JFK"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search.origin": true}
@@ -1702,9 +1702,9 @@ func TestBuildInputContexts_IsPoolInput(t *testing.T) {
 				{
 					Node: "search",
 					Values: map[string]plan.StepValue{
-						"origin":      {Pool: []any{"DEN", "ORD", "SFO"}},              // pool, no default → IsPoolInput
-						"destination": {Default: "LHR"},                                  // default, no pool → not IsPoolInput
-						"carrier":     {Pool: []any{"UA", "AA"}, Default: "UA"},          // pool + default → not IsPoolInput
+						"origin":      {Pool: []any{"DEN", "ORD", "SFO"}},       // pool, no default → IsPoolInput
+						"destination": {Default: "LHR"},                         // default, no pool → not IsPoolInput
+						"carrier":     {Pool: []any{"UA", "AA"}, Default: "UA"}, // pool + default → not IsPoolInput
 					},
 				},
 			},
@@ -1805,9 +1805,9 @@ func TestApplyTargetedResponse_ClearsFromResolved(t *testing.T) {
 	}
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search2.leg2Origin": "BNA"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search2.leg2Origin": "BNA"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search2.leg2Origin": true}
@@ -1833,9 +1833,9 @@ func TestApplyTargetedResponse_FromResolvedPreservedWhenNotOverridden(t *testing
 	}
 
 	resp := &TargetedResponse{
-		Values:       map[string]any{}, // LLM doesn't override
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{}, // LLM doesn't override
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{"search2.leg2Origin": true}
@@ -1881,14 +1881,14 @@ func TestBuildTargetedPlanPrompt_AutoWiredSection(t *testing.T) {
 func TestValidateTargetedResponse_FromResolvedMissing_NoError(t *testing.T) {
 	// Missing value for a fromResolved input should NOT produce a missing_value issue.
 	resp := &TargetedResponse{
-		Values:       map[string]any{"search1.origin": "BNA"},
-		Selections:   map[string]TargetedSelection{},
-		Assertions:   map[string][]TargetedAssertion{},
+		Values:     map[string]any{"search1.origin": "BNA"},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
 	}
 
 	unfedSet := map[string]bool{
-		"search1.origin":      true,
-		"search2.leg2Origin":  true,
+		"search1.origin":     true,
+		"search2.leg2Origin": true,
 	}
 
 	inputContexts := []InputContext{
@@ -1998,7 +1998,7 @@ func TestBuildTargetedPlanPrompt_PoolValuesHidden(t *testing.T) {
 		{
 			StepID: "search", InputName: "origin", InputType: "string",
 			InputDescription: "Departure airport code",
-			IsPoolInput: true, HasTemplatePool: true,
+			IsPoolInput:      true, HasTemplatePool: true,
 			PoolValues:  []string{"DEN", "ORD", "ATL", "DFW", "IAH"},
 			GraphConstr: "IATA airport/city code (pattern: ^[A-Z]{3}$)",
 		},

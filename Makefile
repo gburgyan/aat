@@ -7,7 +7,7 @@ LDFLAGS   := -X github.com/gburgyan/aat/internal/version.Version=$(VERSION) \
              -X github.com/gburgyan/aat/internal/version.GitCommit=$(COMMIT) \
              -X github.com/gburgyan/aat/internal/version.BuildDate=$(DATE)
 
-.PHONY: build test test-race lint check clean frontend
+.PHONY: build test test-race lint fmt check clean frontend
 
 build: frontend
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
@@ -24,7 +24,10 @@ test-race: frontend
 lint:
 	golangci-lint run --timeout 5m
 
-check: test-race lint
+fmt:
+	gofmt -s -w .
+
+check: fmt test-race lint
 
 clean:
 	rm -f $(BINARY)

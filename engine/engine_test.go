@@ -946,7 +946,7 @@ func TestExpectFailure_SkipsRetry(t *testing.T) {
 	assert.Equal(t, OutcomePassed, result.Outcome)
 	require.Len(t, result.Steps, 1)
 	assert.Equal(t, 0, result.Steps[0].RetryCount) // no retries
-	assert.Equal(t, 1, callCount)                   // only one call
+	assert.Equal(t, 1, callCount)                  // only one call
 	require.NotNil(t, result.Steps[0].ExpectFailure)
 	assert.True(t, result.Steps[0].ExpectFailure.Passed)
 }
@@ -1500,4 +1500,3 @@ func TestEngine_Run_NoDisplayOutputs(t *testing.T) {
 	require.Len(t, result.Steps, 1)
 	assert.Nil(t, result.Steps[0].DisplayOutputs)
 }
-

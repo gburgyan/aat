@@ -817,7 +817,7 @@ func TestValidateWorkflowSelection_NonAddonAsAddon(t *testing.T) {
 
 	ws := &WorkflowSelection{
 		Workflow: "Main",
-		Addons:  []string{"Extra"},
+		Addons:   []string{"Extra"},
 	}
 
 	errs := validateWorkflowSelection(ws, g)
@@ -837,7 +837,7 @@ func TestValidateWorkflowSelection_DuplicateAddon(t *testing.T) {
 
 	ws := &WorkflowSelection{
 		Workflow: "Main",
-		Addons:  []string{"Seat", "Seat"},
+		Addons:   []string{"Seat", "Seat"},
 	}
 
 	errs := validateWorkflowSelection(ws, g)

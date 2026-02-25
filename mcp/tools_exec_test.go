@@ -43,9 +43,9 @@ func TestHandleExecutePlan_NoPlansDirConfigured(t *testing.T) {
 func TestHandleExecutePlan_NoEnvironmentConfigured(t *testing.T) {
 	g := twoNodeGraph()
 	ctx := &ServerContext{
-		Graph:    g,
-		Registry: adapter.NewRegistry(),
-		Manifest: &ProjectManifest{Name: "test"},
+		Graph:        g,
+		Registry:     adapter.NewRegistry(),
+		Manifest:     &ProjectManifest{Name: "test"},
 		WorkflowsDir: t.TempDir(),
 	}
 	srv := NewServer(ctx)
@@ -58,11 +58,11 @@ func TestHandleExecutePlan_NoEnvironmentConfigured(t *testing.T) {
 func TestHandleExecutePlan_NoArchiveDirConfigured(t *testing.T) {
 	g := twoNodeGraph()
 	ctx := &ServerContext{
-		Graph:       g,
-		Registry:    adapter.NewRegistry(),
-		Manifest:    &ProjectManifest{Name: "test"},
-		WorkflowsDir:    t.TempDir(),
-		Environment: &config.Environment{Name: "test"},
+		Graph:        g,
+		Registry:     adapter.NewRegistry(),
+		Manifest:     &ProjectManifest{Name: "test"},
+		WorkflowsDir: t.TempDir(),
+		Environment:  &config.Environment{Name: "test"},
 	}
 	srv := NewServer(ctx)
 
@@ -75,12 +75,12 @@ func TestHandleExecutePlan_PlanNotFound(t *testing.T) {
 	plansDir := t.TempDir()
 	g := twoNodeGraph()
 	ctx := &ServerContext{
-		Graph:       g,
-		Registry:    adapter.NewRegistry(),
-		Manifest:    &ProjectManifest{Name: "test"},
-		WorkflowsDir:    plansDir,
-		ArchiveDir:  t.TempDir(),
-		Environment: &config.Environment{Name: "test", Auth: config.AuthConfig{Type: "none"}},
+		Graph:        g,
+		Registry:     adapter.NewRegistry(),
+		Manifest:     &ProjectManifest{Name: "test"},
+		WorkflowsDir: plansDir,
+		ArchiveDir:   t.TempDir(),
+		Environment:  &config.Environment{Name: "test", Auth: config.AuthConfig{Type: "none"}},
 	}
 	srv := NewServer(ctx)
 
@@ -99,12 +99,12 @@ func TestHandleExecutePlan_InvalidPlan(t *testing.T) {
 `), 0o644))
 
 	ctx := &ServerContext{
-		Graph:       g,
-		Registry:    adapter.NewRegistry(),
-		Manifest:    &ProjectManifest{Name: "test"},
-		WorkflowsDir:    plansDir,
-		ArchiveDir:  t.TempDir(),
-		Environment: &config.Environment{Name: "test", Auth: config.AuthConfig{Type: "none"}},
+		Graph:        g,
+		Registry:     adapter.NewRegistry(),
+		Manifest:     &ProjectManifest{Name: "test"},
+		WorkflowsDir: plansDir,
+		ArchiveDir:   t.TempDir(),
+		Environment:  &config.Environment{Name: "test", Auth: config.AuthConfig{Type: "none"}},
 	}
 	srv := NewServer(ctx)
 

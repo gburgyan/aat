@@ -41,15 +41,15 @@ func convertStepResults(steps []StepResult, baseURL string, secrets map[string]b
 
 func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) archive.StepRecord {
 	rec := archive.StepRecord{
-		StepID:     s.StepID,
-		Node:       s.Node,
-		StartTime:  s.StartTime,
-		DurationMs: s.Duration.Milliseconds(),
-		Inputs:     archive.RedactMap(s.Inputs, secrets),
+		StepID:          s.StepID,
+		Node:            s.Node,
+		StartTime:       s.StartTime,
+		DurationMs:      s.Duration.Milliseconds(),
+		Inputs:          archive.RedactMap(s.Inputs, secrets),
 		Outputs:         s.Outputs,
 		TransformScript: s.TransformScript,
-		Error:      errString(s.Error),
-		RetryCount: s.RetryCount,
+		Error:           errString(s.Error),
+		RetryCount:      s.RetryCount,
 	}
 
 	if s.Request != nil {

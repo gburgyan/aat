@@ -135,7 +135,7 @@ func TestValidate_Rule5_InputNotInOAS(t *testing.T) {
 				OAS:     &graph.OASRef{OperationID: "listPets"},
 				Inputs: []graph.Input{
 					{Name: "limit", Type: "integer"},     // exists in OAS
-					{Name: "extraParam", Type: "string"},  // does NOT exist in OAS
+					{Name: "extraParam", Type: "string"}, // does NOT exist in OAS
 				},
 			},
 		},

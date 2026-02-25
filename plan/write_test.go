@@ -326,8 +326,8 @@ func TestMarshalRoundTrip_WithAuth(t *testing.T) {
 			},
 		},
 		Headers: map[string]string{
-			"X-Custom":         "custom-value",
-			"Content-Version":  "2.0",
+			"X-Custom":        "custom-value",
+			"Content-Version": "2.0",
 		},
 		Execution: Execution{
 			Steps: []Step{

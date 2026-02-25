@@ -32,24 +32,24 @@ type ArchiveMetadata struct {
 
 // StepRecord captures the execution trace for a single step.
 type StepRecord struct {
-	StepID      string                    `json:"stepId,omitempty"`
-	Node        string                    `json:"node"`
-	StartTime   time.Time                 `json:"startTime,omitempty"`
-	DurationMs  int64                     `json:"duration_ms"`
-	Inputs      map[string]any            `json:"inputs"`
-	Request     *RequestRecord            `json:"request,omitempty"`
-	Response    *ResponseRecord           `json:"response,omitempty"`
-	Outputs        map[string]any            `json:"outputs,omitempty"`
-	TransformScript string                   `json:"transformScript,omitempty"`
-	Validation  *ValidationRecord         `json:"validation,omitempty"`
-	Selections  []SelectionRecord         `json:"selections,omitempty"`
-	Resolutions []ValueResolutionRecord   `json:"resolutions,omitempty"`
+	StepID            string                   `json:"stepId,omitempty"`
+	Node              string                   `json:"node"`
+	StartTime         time.Time                `json:"startTime,omitempty"`
+	DurationMs        int64                    `json:"duration_ms"`
+	Inputs            map[string]any           `json:"inputs"`
+	Request           *RequestRecord           `json:"request,omitempty"`
+	Response          *ResponseRecord          `json:"response,omitempty"`
+	Outputs           map[string]any           `json:"outputs,omitempty"`
+	TransformScript   string                   `json:"transformScript,omitempty"`
+	Validation        *ValidationRecord        `json:"validation,omitempty"`
+	Selections        []SelectionRecord        `json:"selections,omitempty"`
+	Resolutions       []ValueResolutionRecord  `json:"resolutions,omitempty"`
 	DisplayOutputs    []DisplayOutputRecord    `json:"displayOutputs,omitempty"`
-	ErrorClass        *ErrorClassRecord         `json:"errorClassification,omitempty"`
-	ExpectFailure     *ExpectFailureRecord      `json:"expectFailure,omitempty"`
-	ResponseBodyError *ResponseBodyErrorRecord  `json:"responseBodyError,omitempty"`
-	Error             string                    `json:"error,omitempty"`
-	RetryCount        int                       `json:"retryCount,omitempty"`
+	ErrorClass        *ErrorClassRecord        `json:"errorClassification,omitempty"`
+	ExpectFailure     *ExpectFailureRecord     `json:"expectFailure,omitempty"`
+	ResponseBodyError *ResponseBodyErrorRecord `json:"responseBodyError,omitempty"`
+	Error             string                   `json:"error,omitempty"`
+	RetryCount        int                      `json:"retryCount,omitempty"`
 }
 
 // DisplayOutputRecord captures an output value tagged for display.
@@ -108,12 +108,12 @@ type AssertionRecord struct {
 
 // SelectionRecord captures how an array selection was resolved.
 type SelectionRecord struct {
-	InputName     string         `json:"inputName"`
-	SourceNode    string         `json:"sourceNode"`
-	SourceField   string         `json:"sourceField"`
-	SourceSize    int            `json:"sourceSize"`
-	FilterExpr    string         `json:"filterExpr,omitempty"`
-	FilteredSize  int            `json:"filteredSize"`
+	InputName     string `json:"inputName"`
+	SourceNode    string `json:"sourceNode"`
+	SourceField   string `json:"sourceField"`
+	SourceSize    int    `json:"sourceSize"`
+	FilterExpr    string `json:"filterExpr,omitempty"`
+	FilteredSize  int    `json:"filteredSize"`
 	Strategy      string `json:"strategy"`
 	SelectedIndex int    `json:"selectedIndex"`
 	SelectionName string `json:"selectionName,omitempty"`
@@ -129,13 +129,13 @@ type ErrorClassRecord struct {
 
 // ValueResolutionRecord captures how a single input was resolved.
 type ValueResolutionRecord struct {
-	InputName         string         `json:"inputName"`
-	Source            string         `json:"source"`
-	RawValue          any            `json:"rawValue,omitempty"`
-	FinalValue        any            `json:"finalValue,omitempty"`
-	FromStep          string         `json:"fromStep,omitempty"`
-	FromOutput        string         `json:"fromOutput,omitempty"`
-	Expression        string         `json:"expression,omitempty"`
+	InputName    string `json:"inputName"`
+	Source       string `json:"source"`
+	RawValue     any    `json:"rawValue,omitempty"`
+	FinalValue   any    `json:"finalValue,omitempty"`
+	FromStep     string `json:"fromStep,omitempty"`
+	FromOutput   string `json:"fromOutput,omitempty"`
+	Expression   string `json:"expression,omitempty"`
 	Constraint   string `json:"constraint,omitempty"`
 	ConstraintOK *bool  `json:"constraintOk,omitempty"`
 	PoolIndex    int    `json:"poolIndex,omitempty"`
@@ -179,7 +179,7 @@ type BatchMetadata struct {
 	Timestamp   time.Time  `json:"timestamp"`
 	Source      string     `json:"source,omitempty"` // directory filter or "all"
 	ToolVersion string     `json:"toolVersion,omitempty"`
-	Layers      []string   `json:"layers,omitempty"`   // CLI layers applied at the batch level
+	Layers      []string   `json:"layers,omitempty"`      // CLI layers applied at the batch level
 	LayerGroups [][]string `json:"layerGroups,omitempty"` // layer groups for permutation
 }
 

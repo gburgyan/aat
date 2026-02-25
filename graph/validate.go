@@ -414,4 +414,3 @@ func detectRequiresCycles(g *Graph, satisfierIndex map[string][]string) []string
 
 	return cycles
 }
-

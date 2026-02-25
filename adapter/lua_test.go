@@ -596,7 +596,7 @@ func TestRunTransform_GDS_PreservesExistingValues(t *testing.T) {
 				"offeringId":   "offer1",
 				"productId":    "p0",
 				"carrier":      "QF",         // Already set from inline data
-				"flightNumber": float64(401),  // Already set
+				"flightNumber": float64(401), // Already set
 			},
 		},
 	}

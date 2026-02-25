@@ -236,8 +236,8 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 		} else {
 			// Default: compact recipe format.
 			r := &plan.Recipe{
-				Kind:     "recipe",
-				Metadata: result.Plan.Metadata,
+				Kind:      "recipe",
+				Metadata:  result.Plan.Metadata,
 				Selection: intent.WorkflowSelectionToRecipeSelection(result.WorkflowSelection),
 			}
 			if result.TargetedResponse != nil {
@@ -461,4 +461,3 @@ func resolveSavePlan(name string, planDirs []string) string {
 	// CWD fallback: just append .yaml
 	return name + ".yaml"
 }
-

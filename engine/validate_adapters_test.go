@@ -365,8 +365,8 @@ func TestValidateAdapterOutputs(t *testing.T) {
 							"items": {
 								Path: "items",
 								Fields: map[string]string{
-									"id":      "id",
-									"orphan":  "orphan_path", // not in graph
+									"id":     "id",
+									"orphan": "orphan_path", // not in graph
 								},
 							},
 						},

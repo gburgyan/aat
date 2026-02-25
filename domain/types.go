@@ -23,12 +23,12 @@ type Concept struct {
 // and optional composite fields. Types map to custom type names used in
 // graph node inputs/outputs.
 type TypeDef struct {
-	Name        string              `yaml:"-"           json:"name"`
-	Description string              `yaml:"description" json:"description"`
-	Format      string              `yaml:"format"      json:"format"`
-	Validation  string              `yaml:"validation"  json:"validation,omitempty"`
+	Name        string               `yaml:"-"           json:"name"`
+	Description string               `yaml:"description" json:"description"`
+	Format      string               `yaml:"format"      json:"format"`
+	Validation  string               `yaml:"validation"  json:"validation,omitempty"`
 	Fields      map[string]*FieldDef `yaml:"fields"     json:"fields,omitempty"`
-	Pool        string              `yaml:"pool"        json:"pool,omitempty"`
+	Pool        string               `yaml:"pool"        json:"pool,omitempty"`
 }
 
 // FieldDef describes a field within a composite TypeDef.

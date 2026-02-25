@@ -300,8 +300,8 @@ func TestAutoWirePlaceholders_NonPlaceholderUntouched(t *testing.T) {
 					ID:   "inc0_step1",
 					Node: "step1",
 					Values: map[string]plan.StepValue{
-						"fixedValue":  {Default: "12A"},
-						"wiredValue":  {From: "other.output"},
+						"fixedValue":     {Default: "12A"},
+						"wiredValue":     {From: "other.output"},
 						"seatAssignment": {Default: "14C"},
 					},
 				},
@@ -327,9 +327,9 @@ func TestAddInsertionDeps(t *testing.T) {
 	sub := &plan.Plan{
 		Execution: plan.Execution{
 			Steps: []plan.Step{
-				{ID: "inc0_a", Node: "a"},                                           // root
-				{ID: "inc0_b", Node: "b", DependsOn: []string{"inc0_a"}},            // not root
-				{ID: "inc0_c", Node: "c", DependsOn: []string{"externalStep"}},      // root (dep is outside sub)
+				{ID: "inc0_a", Node: "a"},                                      // root
+				{ID: "inc0_b", Node: "b", DependsOn: []string{"inc0_a"}},       // not root
+				{ID: "inc0_c", Node: "c", DependsOn: []string{"externalStep"}}, // root (dep is outside sub)
 			},
 		},
 	}

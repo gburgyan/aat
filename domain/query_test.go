@@ -322,10 +322,10 @@ func TestFormatForPrompt_MixedAnnotationsAndSections(t *testing.T) {
 	kb := &KnowledgeBase{
 		ValuePools: map[string]*ValuePool{
 			"mixed": {
-				Name:        "mixed",
-				Description: "Mixed pool",
-				Type:        "string",
-				Values:      []string{"JFK", "LAX", "ORD", "LHR", "CDG"},
+				Name:          "mixed",
+				Description:   "Mixed pool",
+				Type:          "string",
+				Values:        []string{"JFK", "LAX", "ORD", "LHR", "CDG"},
 				Annotations:   map[string]string{"LAX": "Los Angeles", "LHR": "London Heathrow"},
 				SectionLabels: map[string]string{"JFK": "US hubs", "LHR": "International"},
 			},

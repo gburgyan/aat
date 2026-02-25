@@ -81,4 +81,3 @@ func TestPlanValidate_AllTemplates_WithUnfed(t *testing.T) {
 	})
 	assert.Equal(t, 0, code)
 }
-

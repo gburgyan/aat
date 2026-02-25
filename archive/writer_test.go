@@ -357,8 +357,8 @@ func TestBatchRoundTrip_WithLayers(t *testing.T) {
 			},
 		},
 		Result: BatchResult{
-			Outcome:   "passed",
-			TotalRuns: 2,
+			Outcome:    "passed",
+			TotalRuns:  2,
 			PassedRuns: 2,
 		},
 	}

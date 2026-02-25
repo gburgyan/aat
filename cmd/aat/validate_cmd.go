@@ -54,10 +54,10 @@ type validateArgs struct {
 
 // sectionResult tracks the outcome of one validation section.
 type sectionResult struct {
-	Name    string
-	Status  string // "OK", "FAILED", "SKIPPED"
-	Detail  string // e.g. "(59 nodes)"
-	Errors  []string
+	Name   string
+	Status string // "OK", "FAILED", "SKIPPED"
+	Detail string // e.g. "(59 nodes)"
+	Errors []string
 }
 
 // validateCommand runs full project validation. Returns 0 on success, 1 on failure.

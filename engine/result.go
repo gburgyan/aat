@@ -35,32 +35,32 @@ func (o Outcome) String() string {
 
 // RunResult captures the complete outcome of a plan execution.
 type RunResult struct {
-	Outcome           Outcome
-	Steps             []StepResult
-	CleanupResults    []StepResult
-	Error             error
-	InstantiatedPlan  *plan.Plan // fully merged plan with graph defaults, nil on early errors
+	Outcome          Outcome
+	Steps            []StepResult
+	CleanupResults   []StepResult
+	Error            error
+	InstantiatedPlan *plan.Plan // fully merged plan with graph defaults, nil on early errors
 }
 
 // StepResult captures the outcome of a single step execution.
 type StepResult struct {
-	StepID        string // effective step identifier (ID if set, else Node)
-	Node          string
-	Inputs        map[string]any
-	Request       *adapter.Request
-	Response      *adapter.Response
-	Outputs        map[string]any
-	TransformScript string
-	Selections    []SelectionDecision
-	Resolutions   []ValueResolution
-	StatusCode    int
-	Error         error
-	StartTime     time.Time
-	Duration      time.Duration
-	ErrorClass    *ErrorClassification       // nil on success
-	RetryCount    int                        // number of retries performed (0 = no retries)
-	Validation    *validate.MechanicalResult // nil if no assertions configured
-	DisplayOutputs    []DisplayOutput             // outputs tagged with display labels
+	StepID            string // effective step identifier (ID if set, else Node)
+	Node              string
+	Inputs            map[string]any
+	Request           *adapter.Request
+	Response          *adapter.Response
+	Outputs           map[string]any
+	TransformScript   string
+	Selections        []SelectionDecision
+	Resolutions       []ValueResolution
+	StatusCode        int
+	Error             error
+	StartTime         time.Time
+	Duration          time.Duration
+	ErrorClass        *ErrorClassification       // nil on success
+	RetryCount        int                        // number of retries performed (0 = no retries)
+	Validation        *validate.MechanicalResult // nil if no assertions configured
+	DisplayOutputs    []DisplayOutput            // outputs tagged with display labels
 	ExpectFailure     *ExpectFailureResult       // non-nil for negative assertion steps
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
 }
@@ -95,18 +95,17 @@ type SelectionDecision struct {
 
 // ValueResolution records how a single input was resolved.
 type ValueResolution struct {
-	InputName         string         // input being resolved
-	Source            string         // "edge", "select_edge", "plan_default", "expression",
-	                                 // "fallback_pool", "graph_default", "llm", "optional_skip"
-	RawValue          any            // before expression evaluation (nil if N/A)
-	FinalValue        any            // after evaluation + coercion
-	FromStep          string         // source step (for edge/select_edge)
-	FromOutput        string         // source output (for edge/select_edge)
-	Expression        string         // template string if evaluated (e.g. "{{today + 5 days}}")
-	Constraint        string         // constraint expression if checked
-	ConstraintOK      bool           // whether constraint passed
-	PoolIndex         int            // index in fallback pool (-1 if not from pool)
-	PoolSize          int            // fallback pool size (0 if no pool)
-	Tried []any // values tried and rejected before this one
+	InputName string // input being resolved
+	Source    string // "edge", "select_edge", "plan_default", "expression",
+	// "fallback_pool", "graph_default", "llm", "optional_skip"
+	RawValue     any    // before expression evaluation (nil if N/A)
+	FinalValue   any    // after evaluation + coercion
+	FromStep     string // source step (for edge/select_edge)
+	FromOutput   string // source output (for edge/select_edge)
+	Expression   string // template string if evaluated (e.g. "{{today + 5 days}}")
+	Constraint   string // constraint expression if checked
+	ConstraintOK bool   // whether constraint passed
+	PoolIndex    int    // index in fallback pool (-1 if not from pool)
+	PoolSize     int    // fallback pool size (0 if no pool)
+	Tried        []any  // values tried and rejected before this one
 }
-

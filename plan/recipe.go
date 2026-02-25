@@ -21,7 +21,7 @@ type Recipe struct {
 // RecipeSelection captures which workflow template to use and how to compose it.
 type RecipeSelection struct {
 	Workflow    string            `yaml:"workflow"`
-	Description string           `yaml:"description,omitempty"`
+	Description string            `yaml:"description,omitempty"`
 	Layers      []string          `yaml:"layers,omitempty"`
 	Choices     map[string]string `yaml:"choices,omitempty"`
 	Addons      []string          `yaml:"addons,omitempty"`
@@ -31,10 +31,10 @@ type RecipeSelection struct {
 // RecipeOverrides captures the LLM's creative decisions: literal values,
 // selection strategy overrides, assertions, and step descriptions.
 type RecipeOverrides struct {
-	Values       map[string]any                         `yaml:"values,omitempty"`
-	Selections   map[string]RecipeSelectionOverride      `yaml:"selections,omitempty"`
-	Assertions   map[string][]RecipeAssertion            `yaml:"assertions,omitempty"`
-	Descriptions map[string]string                       `yaml:"descriptions,omitempty"`
+	Values       map[string]any                     `yaml:"values,omitempty"`
+	Selections   map[string]RecipeSelectionOverride `yaml:"selections,omitempty"`
+	Assertions   map[string][]RecipeAssertion       `yaml:"assertions,omitempty"`
+	Descriptions map[string]string                  `yaml:"descriptions,omitempty"`
 }
 
 // RecipeSelectionOverride mirrors intent.TargetedSelection for YAML serialization

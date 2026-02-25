@@ -284,4 +284,3 @@ func TestToFloat64_Types(t *testing.T) {
 		})
 	}
 }
-

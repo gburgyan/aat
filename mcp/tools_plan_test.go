@@ -415,4 +415,3 @@ func TestResolveWorkflowPath_KeepsYAMLExtension(t *testing.T) {
 func TestResolveWorkflowPath_KeepsYMLExtension(t *testing.T) {
 	assert.Equal(t, "/plans/test.yml", resolveWorkflowPath("/plans", "test.yml"))
 }
-

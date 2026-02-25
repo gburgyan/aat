@@ -23,10 +23,10 @@ func TestBuildRunSummary_AllPassed(t *testing.T) {
 		},
 		Steps: []StepRecord{
 			{Node: "search", DurationMs: 100, Inputs: map[string]any{},
-				Response: &ResponseRecord{Status: 200},
+				Response:   &ResponseRecord{Status: 200},
 				Validation: &ValidationRecord{Passed: true}},
 			{Node: "book", DurationMs: 200, Inputs: map[string]any{},
-				Response: &ResponseRecord{Status: 200},
+				Response:   &ResponseRecord{Status: 200},
 				Validation: &ValidationRecord{Passed: true}},
 		},
 		Cleanup: []StepRecord{

@@ -18,8 +18,8 @@ type ServerContext struct {
 	// Core (always available after BuildServerContext)
 	Graph    *graph.Graph
 	Registry *adapter.Registry
-	KB       *domain.KnowledgeBase        // may be nil
-	OASSpecs map[string]*v3high.Document  // spec path -> loaded doc; may be empty
+	KB       *domain.KnowledgeBase       // may be nil
+	OASSpecs map[string]*v3high.Document // spec path -> loaded doc; may be empty
 
 	// Docs (60b, may be nil)
 	DocsDir  string

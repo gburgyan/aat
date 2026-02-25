@@ -30,10 +30,10 @@ type InterpretRequest struct {
 // non-nil with only Trace populated — callers can inspect the partial trace for
 // debugging even when the returned error is non-nil.
 type InterpretResult struct {
-	Plan               *plan.Plan
-	WorkflowSelection  *WorkflowSelection
-	TargetedResponse   *TargetedResponse  // Call 2 output; used for recipe save
-	Trace              *PlanTrace         // non-nil only when EnableTrace was true
+	Plan              *plan.Plan
+	WorkflowSelection *WorkflowSelection
+	TargetedResponse  *TargetedResponse // Call 2 output; used for recipe save
+	Trace             *PlanTrace        // non-nil only when EnableTrace was true
 }
 
 // WorkflowSelection captures the output of the first LLM call: which workflow
@@ -42,7 +42,7 @@ type WorkflowSelection struct {
 	Workflow    string            `json:"workflow"`
 	Description string            `json:"description"`
 	Layers      []string          `json:"layers,omitempty"`
-	Choices     map[string]string `json:"choices,omitempty"`     // slot name → option name
+	Choices     map[string]string `json:"choices,omitempty"` // slot name → option name
 	Addons      []string          `json:"addons,omitempty"`
 	Repetitions map[string]int    `json:"repetitions,omitempty"`
 }
@@ -79,8 +79,8 @@ type selectionResult struct {
 	Selection     *WorkflowSelection
 	SelectionJSON string
 	Response      *llm.Response
-	System        string // system prompt sent
-	User          string // user prompt sent
+	System        string           // system prompt sent
+	User          string           // user prompt sent
 	RetriedFrom   *selectionResult // non-nil if this is a retry result
 }
 

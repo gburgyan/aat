@@ -323,8 +323,8 @@ func TestApplyLayers_QualifiedOverridesBare(t *testing.T) {
 		"mixed": {
 			Name: "mixed",
 			Inputs: map[string]*InputDefault{
-				"origin":        {Pool: []any{"CDG", "FRA"}},           // bare: all nodes
-				"nodeB.origin":  {Value: "AMS"},                        // qualified: nodeB only
+				"origin":       {Pool: []any{"CDG", "FRA"}}, // bare: all nodes
+				"nodeB.origin": {Value: "AMS"},              // qualified: nodeB only
 			},
 		},
 	}

@@ -358,11 +358,11 @@ func TestExtractConstraints_FromSchema(t *testing.T) {
 	desc := "Airport code"
 
 	schema := &base.Schema{
-		MinLength: &minLen,
-		MaxLength: &maxLen,
-		Pattern:   pattern,
-		Minimum:   &min,
-		Maximum:   &max,
+		MinLength:   &minLen,
+		MaxLength:   &maxLen,
+		Pattern:     pattern,
+		Minimum:     &min,
+		Maximum:     &max,
 		Description: desc,
 	}
 

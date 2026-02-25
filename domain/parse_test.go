@@ -280,7 +280,7 @@ func TestMerge_CombineAnnotations(t *testing.T) {
 	p := merged.ValuePools["pool1"]
 	require.NotNil(t, p)
 	assert.Equal(t, "Alpha", p.Annotations["A"])
-	assert.Equal(t, "Beta", p.Annotations["B"])   // later wins
+	assert.Equal(t, "Beta", p.Annotations["B"]) // later wins
 	assert.Equal(t, "Charlie", p.Annotations["C"])
 }
 
@@ -363,7 +363,7 @@ func TestMerge_CombineSectionLabels(t *testing.T) {
 	merged := Merge(kb1, kb2)
 	p := merged.ValuePools["pool1"]
 	require.NotNil(t, p)
-	assert.Equal(t, "Overridden", p.SectionLabels["A"])   // later wins
+	assert.Equal(t, "Overridden", p.SectionLabels["A"]) // later wins
 	assert.Equal(t, "Second section", p.SectionLabels["C"])
 }
 

@@ -91,15 +91,15 @@ func TestParseFieldType(t *testing.T) {
 
 func TestInputDefault_UnmarshalYAML(t *testing.T) {
 	tests := []struct {
-		name          string
-		yaml          string
-		wantValue     any
-		wantPool      []any
-		wantFrom      string
-		wantResolved  string
-		wantConstr    string
-		wantSelect    *InputDefaultSelect
-		wantLiteral   bool
+		name         string
+		yaml         string
+		wantValue    any
+		wantPool     []any
+		wantFrom     string
+		wantResolved string
+		wantConstr   string
+		wantSelect   *InputDefaultSelect
+		wantLiteral  bool
 	}{
 		{
 			name:        "scalar string",
@@ -379,9 +379,9 @@ func TestAfterSpec_Helpers(t *testing.T) {
 
 func TestInputDefault_RoundTrip(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   Input
-		check   func(t *testing.T, got Input)
+		name  string
+		input Input
+		check func(t *testing.T, got Input)
 	}{
 		{
 			name: "literal string round-trip",

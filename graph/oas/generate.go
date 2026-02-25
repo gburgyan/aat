@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/pb33f/libopenapi/datamodel/high/base"
+	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 
 	"github.com/gburgyan/aat/graph"
 )

@@ -192,12 +192,12 @@ func TestTestWorkflow_WithDomain(t *testing.T) {
 func TestTestWorkflow_CapabilitiesFull(t *testing.T) {
 	g := twoNodeGraph()
 	ctx := &ServerContext{
-		Graph:       g,
-		Registry:    adapter.NewRegistry(),
-		Manifest:    &ProjectManifest{Name: "test"},
-		WorkflowsDir:    "/tmp/plans",
-		ArchiveDir:  "/tmp/archives",
-		Environment: &config.Environment{Name: "test"},
+		Graph:        g,
+		Registry:     adapter.NewRegistry(),
+		Manifest:     &ProjectManifest{Name: "test"},
+		WorkflowsDir: "/tmp/plans",
+		ArchiveDir:   "/tmp/archives",
+		Environment:  &config.Environment{Name: "test"},
 	}
 	srv := NewServer(ctx)
 

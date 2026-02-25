@@ -14,15 +14,15 @@ func (s *stubAdapter) BuildRequest(_ map[string]any, _ *EnvironmentConfig) (*Req
 	return nil, nil
 }
 func (s *stubAdapter) ExtractOutputs(_ *Response) (map[string]any, error) { return nil, nil }
-func (s *stubAdapter) ValidateInputs(_ map[string]any) *ValidationResult   { return nil }
-func (s *stubAdapter) ValidateResponse(_ *Response) *ValidationResult      { return nil }
+func (s *stubAdapter) ValidateInputs(_ map[string]any) *ValidationResult  { return nil }
+func (s *stubAdapter) ValidateResponse(_ *Response) *ValidationResult     { return nil }
 
 func TestRegistry(t *testing.T) {
 	tests := []struct {
-		name    string
-		setup   func(*Registry)
-		action  func(*Registry) error
-		check   func(*testing.T, *Registry, error)
+		name   string
+		setup  func(*Registry)
+		action func(*Registry) error
+		check  func(*testing.T, *Registry, error)
 	}{
 		{
 			name: "register and get",

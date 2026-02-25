@@ -64,18 +64,18 @@ type Execution struct {
 // Node is empty for slot markers. At composition time, the marker is replaced
 // by the chosen option's steps.
 type Step struct {
-	ID            string                    `yaml:"id,omitempty" json:"id,omitempty"`
-	Node          string                    `yaml:"node,omitempty" json:"node,omitempty"`
-	Slot          string                    `yaml:"slot,omitempty" json:"slot,omitempty"` // slot marker name
-	DependsOn     []string                  `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
-	Description   string                    `yaml:"description,omitempty" json:"description,omitempty"`
-	IsGoal        bool                      `yaml:"isGoal,omitempty" json:"isGoal,omitempty"`
-	Selections    map[string]StepSelection  `yaml:"selections,omitempty" json:"selections,omitempty"`
-	Values        map[string]StepValue      `yaml:"values,omitempty" json:"values,omitempty"`
-	Retry         *RetryConfig              `yaml:"retry,omitempty" json:"retry,omitempty"`
-	Fallback      *FallbackConfig           `yaml:"fallback,omitempty" json:"fallback,omitempty"`
-	Assertions    *Assertions               `yaml:"assertions,omitempty" json:"assertions,omitempty"`
-	ExpectFailure *ExpectFailure            `yaml:"expectFailure,omitempty" json:"expectFailure,omitempty"`
+	ID            string                   `yaml:"id,omitempty" json:"id,omitempty"`
+	Node          string                   `yaml:"node,omitempty" json:"node,omitempty"`
+	Slot          string                   `yaml:"slot,omitempty" json:"slot,omitempty"` // slot marker name
+	DependsOn     []string                 `yaml:"dependsOn,omitempty" json:"dependsOn,omitempty"`
+	Description   string                   `yaml:"description,omitempty" json:"description,omitempty"`
+	IsGoal        bool                     `yaml:"isGoal,omitempty" json:"isGoal,omitempty"`
+	Selections    map[string]StepSelection `yaml:"selections,omitempty" json:"selections,omitempty"`
+	Values        map[string]StepValue     `yaml:"values,omitempty" json:"values,omitempty"`
+	Retry         *RetryConfig             `yaml:"retry,omitempty" json:"retry,omitempty"`
+	Fallback      *FallbackConfig          `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	Assertions    *Assertions              `yaml:"assertions,omitempty" json:"assertions,omitempty"`
+	ExpectFailure *ExpectFailure           `yaml:"expectFailure,omitempty" json:"expectFailure,omitempty"`
 }
 
 // StepID returns the effective step identifier.
