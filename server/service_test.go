@@ -1402,7 +1402,7 @@ func TestLoadArchive_FindsStandaloneRun(t *testing.T) {
 	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
 	writeArchive(t, dir, a)
 
-	svc := NewArchiveService(dir)
+	svc := NewArchiveService(dir).(*diskArchiveService)
 	loaded, err := svc.loadArchive("run-20260101-100000-aaaa0001")
 	require.NoError(t, err)
 	assert.Equal(t, "run-20260101-100000-aaaa0001", loaded.Metadata.RunID)
@@ -1420,7 +1420,7 @@ func TestLoadArchive_FindsBatchMemberRun(t *testing.T) {
 	memberArchive := makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100))
 	writeBatchMemberArchive(t, dir, batchID, memberArchive)
 
-	svc := NewArchiveService(dir)
+	svc := NewArchiveService(dir).(*diskArchiveService)
 	loaded, err := svc.loadArchive("run-20260201-100000-bbbb0001")
 	require.NoError(t, err)
 	assert.Equal(t, "run-20260201-100000-bbbb0001", loaded.Metadata.RunID)
@@ -1438,7 +1438,7 @@ func TestLoadArchiveWithContext_ReturnsBatchID(t *testing.T) {
 	memberArchive := makeArchive("run-20260201-100000-bbbb0001", "passed", makeStep("node", 200, 100))
 	writeBatchMemberArchive(t, dir, batchID, memberArchive)
 
-	svc := NewArchiveService(dir)
+	svc := NewArchiveService(dir).(*diskArchiveService)
 	loaded, gotBatchID, err := svc.loadArchiveWithContext("run-20260201-100000-bbbb0001")
 	require.NoError(t, err)
 	assert.Equal(t, "run-20260201-100000-bbbb0001", loaded.Metadata.RunID)
@@ -1451,7 +1451,7 @@ func TestLoadArchiveWithContext_StandaloneHasNoBatchID(t *testing.T) {
 	a := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("node", 200, 100))
 	writeArchive(t, dir, a)
 
-	svc := NewArchiveService(dir)
+	svc := NewArchiveService(dir).(*diskArchiveService)
 	_, gotBatchID, err := svc.loadArchiveWithContext("run-20260101-100000-aaaa0001")
 	require.NoError(t, err)
 	assert.Equal(t, "", gotBatchID)
@@ -1459,7 +1459,7 @@ func TestLoadArchiveWithContext_StandaloneHasNoBatchID(t *testing.T) {
 
 func TestLoadArchive_RunNotFoundAnywhere(t *testing.T) {
 	dir := t.TempDir()
-	svc := NewArchiveService(dir)
+	svc := NewArchiveService(dir).(*diskArchiveService)
 
 	_, err := svc.loadArchive("run-nonexistent")
 	require.Error(t, err)
@@ -1516,7 +1516,7 @@ func TestLoadAttemptSummaries_ReadsAttemptFromMetadata(t *testing.T) {
 		require.NoError(t, archive.Write(a, path))
 	}
 
-	svc := NewArchiveService(dir)
+	svc := NewArchiveService(dir).(*diskArchiveService)
 	attempts := svc.loadAttemptSummaries(runID, batchID)
 
 	require.Len(t, attempts, 4)
@@ -1542,7 +1542,7 @@ func TestLoadAttemptSummaries_SortOrder(t *testing.T) {
 		require.NoError(t, archive.Write(a, path))
 	}
 
-	svc := NewArchiveService(dir)
+	svc := NewArchiveService(dir).(*diskArchiveService)
 	attempts := svc.loadAttemptSummaries(runID, "")
 
 	require.Len(t, attempts, 3)
@@ -1557,7 +1557,7 @@ func TestLoadAttemptSummaries_Empty(t *testing.T) {
 	runDir := filepath.Join(dir, runID)
 	require.NoError(t, createDir(runDir))
 
-	svc := NewArchiveService(dir)
+	svc := NewArchiveService(dir).(*diskArchiveService)
 	attempts := svc.loadAttemptSummaries(runID, "")
 	assert.Nil(t, attempts)
 }
@@ -2375,15 +2375,6 @@ func TestStaticBatch_MutatingOpsBlocked(t *testing.T) {
 
 	_, err = svc.UnnameBatch("b1")
 	assert.ErrorIs(t, err, ErrStaticMode)
-}
-
-func TestStaticRun_IsStatic(t *testing.T) {
-	a := makeArchive("r1", "passed", makeStep("node1", 200, 100))
-	svc := NewArchiveServiceFromRun("r1", a, nil)
-	assert.True(t, svc.IsStatic())
-
-	diskSvc := NewArchiveService(t.TempDir())
-	assert.False(t, diskSvc.IsStatic())
 }
 
 // --- file helpers ---

@@ -25,7 +25,7 @@ type ServerOptions struct {
 // Server is the AAT web API server.
 type Server struct {
 	opts         ServerOptions
-	service      *ArchiveService
+	service      ArchiveService
 	traceService *TraceService
 	router       chi.Router
 	httpServer   *http.Server
@@ -51,7 +51,7 @@ func NewServer(opts ServerOptions) *Server {
 
 // NewServerWithService creates a Server with a pre-built ArchiveService.
 // This is used for static/in-memory archive viewing where no disk access is needed.
-func NewServerWithService(opts ServerOptions, svc *ArchiveService) *Server {
+func NewServerWithService(opts ServerOptions, svc ArchiveService) *Server {
 	if opts.Port == 0 {
 		opts.Port = 9119
 	}

@@ -391,7 +391,7 @@ func classifyFileArg(arg string) fileType {
 
 // loadArchiveFile loads an archive file into a pre-loaded ArchiveService.
 // Returns the service, the ref ID for URL building, and the archive type string.
-func loadArchiveFile(filePath string, ft fileType) (*server.ArchiveService, string, string, error) {
+func loadArchiveFile(filePath string, ft fileType) (server.ArchiveService, string, string, error) {
 	switch ft {
 	case fileTypeAar:
 		main, attempts, err := archive.LoadRunFromZip(filePath)
