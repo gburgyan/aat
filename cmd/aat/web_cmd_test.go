@@ -227,11 +227,11 @@ func TestWebViewCommand_ServerAlreadyRunning(t *testing.T) {
 func TestWebViewCommand_StartsEphemeralServer(t *testing.T) {
 	archiveDir := t.TempDir()
 
-	// Stub browser open to capture URL.
-	var opened string
+	// Stub browser open to capture URL via channel.
+	openedCh := make(chan string, 1)
 	orig := openURLFunc
 	openURLFunc = func(url string) error {
-		opened = url
+		openedCh <- url
 		return nil
 	}
 	defer func() { openURLFunc = orig }()
@@ -244,12 +244,10 @@ func TestWebViewCommand_StartsEphemeralServer(t *testing.T) {
 	}()
 
 	// Wait for the ephemeral server to come up and open the browser.
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if opened != "" {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
+	var opened string
+	select {
+	case opened = <-openedCh:
+	case <-time.After(3 * time.Second):
 	}
 	assert.Equal(t, "http://localhost:19224/runs/latest", opened, "should have opened the ref URL")
 

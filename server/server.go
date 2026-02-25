@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -28,6 +29,7 @@ type Server struct {
 	traceService *TraceService
 	router       chi.Router
 	httpServer   *http.Server
+	mu           sync.Mutex
 	addr         string
 }
 
@@ -103,6 +105,8 @@ func (s *Server) Handler() http.Handler {
 
 // Addr returns the actual listening address. Only valid after ListenAndServe has started.
 func (s *Server) Addr() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.addr
 }
 
@@ -114,21 +118,28 @@ func (s *Server) ListenAndServe() error {
 		return fmt.Errorf("listen: %w", err)
 	}
 
-	s.addr = ln.Addr().String()
-	fmt.Fprintf(os.Stderr, "aat web: listening on http://localhost:%d\n", ln.Addr().(*net.TCPAddr).Port)
-
-	s.httpServer = &http.Server{
+	srv := &http.Server{
 		Handler:           s.router,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	return s.httpServer.Serve(ln)
+	s.mu.Lock()
+	s.addr = ln.Addr().String()
+	s.httpServer = srv
+	s.mu.Unlock()
+
+	fmt.Fprintf(os.Stderr, "aat web: listening on http://localhost:%d\n", ln.Addr().(*net.TCPAddr).Port)
+
+	return srv.Serve(ln)
 }
 
 // Shutdown gracefully shuts down the server.
 func (s *Server) Shutdown(ctx context.Context) error {
-	if s.httpServer == nil {
+	s.mu.Lock()
+	srv := s.httpServer
+	s.mu.Unlock()
+	if srv == nil {
 		return nil
 	}
-	return s.httpServer.Shutdown(ctx)
+	return srv.Shutdown(ctx)
 }
