@@ -101,7 +101,7 @@ func TestEngine_Run_ThreeNodeFlow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -218,7 +218,7 @@ func TestEngine_Run_FailOnNon2xx(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "bad request"}`))
+		_, _ = w.Write([]byte(`{"error": "bad request"}`))
 	}))
 	defer server.Close()
 
@@ -301,7 +301,7 @@ func TestEngine_Run_OutputPropagation(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -378,7 +378,7 @@ func TestEngine_Run_StatusAssertionPasses(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id": "abc-123"}`))
+		_, _ = w.Write([]byte(`{"id": "abc-123"}`))
 	}))
 	defer server.Close()
 
@@ -448,7 +448,7 @@ func TestEngine_Run_FailingAssertionTriggersCleanup(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id": "abc"}`))
+		_, _ = w.Write([]byte(`{"id": "abc"}`))
 	}))
 	defer server.Close()
 
@@ -518,7 +518,7 @@ func TestEngine_Run_FieldExistsAssertionOnBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"name": "Alice", "age": 30}`))
+		_, _ = w.Write([]byte(`{"name": "Alice", "age": 30}`))
 	}))
 	defer server.Close()
 
@@ -570,7 +570,7 @@ func TestEngine_Run_NoAssertions(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -615,7 +615,7 @@ func TestEngine_Run_PredicateAssertion(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"count": 5, "active": true}`))
+		_, _ = w.Write([]byte(`{"count": 5, "active": true}`))
 	}))
 	defer server.Close()
 
@@ -674,7 +674,7 @@ func TestEngine_Run_ContinueOnAssertionFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"id": "abc", "result": "done"}`))
+		_, _ = w.Write([]byte(`{"id": "abc", "result": "done"}`))
 	}))
 	defer server.Close()
 
@@ -731,7 +731,7 @@ func TestEngine_Run_StepDurations(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -779,7 +779,7 @@ func TestExpectFailure_MatchingStatus_Passes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "unauthorized"}`))
+		_, _ = w.Write([]byte(`{"error": "unauthorized"}`))
 	}))
 	defer server.Close()
 
@@ -845,7 +845,7 @@ func TestExpectFailure_NonMatchingStatus_Fails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"output": "success"}`))
+		_, _ = w.Write([]byte(`{"output": "success"}`))
 	}))
 	defer server.Close()
 
@@ -910,7 +910,7 @@ func TestExpectFailure_SkipsRetry(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount++
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "bad"}`))
+		_, _ = w.Write([]byte(`{"error": "bad"}`))
 	}))
 	defer server.Close()
 
@@ -987,11 +987,11 @@ func TestExpectFailure_NoOutputsStored(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/step1" {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error": "unauthorized"}`))
+			_, _ = w.Write([]byte(`{"error": "unauthorized"}`))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -1070,7 +1070,7 @@ func TestExpectFailure_MechanicalAssertions(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": {"message": "unauthorized", "code": "AUTH_REQUIRED"}}`))
+		_, _ = w.Write([]byte(`{"error": {"message": "unauthorized", "code": "AUTH_REQUIRED"}}`))
 	}))
 	defer server.Close()
 
@@ -1125,7 +1125,7 @@ func TestEngine_Run_CancelledContext(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -1207,7 +1207,7 @@ func TestEngine_Run_CleanupRunsDespiteCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -1279,7 +1279,7 @@ func TestEngine_Run_StepAliasing(t *testing.T) {
 		callCount++
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -1410,7 +1410,7 @@ func TestEngine_Run_DisplayOutputs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -1462,7 +1462,7 @@ func TestEngine_Run_NoDisplayOutputs(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 

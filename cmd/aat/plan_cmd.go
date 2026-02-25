@@ -56,22 +56,22 @@ func planListCommand(planDirs []string, out io.Writer) error {
 	}
 
 	if len(entries) == 0 {
-		fmt.Fprintln(out, "No plans found.")
+		_, _ = fmt.Fprintln(out, "No plans found.")
 		return nil
 	}
 
-	fmt.Fprintf(out, "Found %d plan(s):\n\n", len(entries))
+	_, _ = fmt.Fprintf(out, "Found %d plan(s):\n\n", len(entries))
 	for _, entry := range entries {
 		p, err := plan.ParseFile(entry.FullPath)
 		if err != nil {
-			fmt.Fprintf(out, "  %-40s (parse error)\n", entry.Name)
+			_, _ = fmt.Fprintf(out, "  %-40s (parse error)\n", entry.Name)
 			continue
 		}
 		goal := p.Intent.Goal
 		if len(goal) > 60 {
 			goal = goal[:57] + "..."
 		}
-		fmt.Fprintf(out, "  %-40s %d steps  %s\n", entry.Name, len(p.Execution.Steps), goal)
+		_, _ = fmt.Fprintf(out, "  %-40s %d steps  %s\n", entry.Name, len(p.Execution.Steps), goal)
 	}
 
 	return nil

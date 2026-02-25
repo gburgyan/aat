@@ -28,7 +28,7 @@ func TestOpenAI_SuccessfulCompletion(t *testing.T) {
 		assert.Equal(t, "system", req.Messages[0].Role)
 		assert.Equal(t, "user", req.Messages[1].Role)
 
-		json.NewEncoder(w).Encode(openAIResponse{
+		_ = json.NewEncoder(w).Encode(openAIResponse{
 			Choices: []openAIChoice{{
 				Message:      openAIMessage{Role: "assistant", Content: "Hello!"},
 				FinishReason: "stop",
@@ -63,7 +63,7 @@ func TestOpenAI_SuccessfulCompletion(t *testing.T) {
 func TestOpenAI_ErrorResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(openAIError{
+		_ = json.NewEncoder(w).Encode(openAIError{
 			Error: struct {
 				Message string `json:"message"`
 			}{Message: "rate limit exceeded"},
@@ -83,7 +83,7 @@ func TestOpenAI_ErrorResponse(t *testing.T) {
 
 func TestOpenAI_NoChoices(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(openAIResponse{
+		_ = json.NewEncoder(w).Encode(openAIResponse{
 			Choices: []openAIChoice{},
 			Model:   "gpt-4",
 		})
@@ -112,10 +112,10 @@ func TestOpenAI_MissingModel(t *testing.T) {
 func TestOpenAI_RequestModelOverridesDefault(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req openAIRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		assert.Equal(t, "gpt-3.5-turbo", req.Model)
 
-		json.NewEncoder(w).Encode(openAIResponse{
+		_ = json.NewEncoder(w).Encode(openAIResponse{
 			Choices: []openAIChoice{{
 				Message:      openAIMessage{Role: "assistant", Content: "ok"},
 				FinishReason: "stop",
@@ -150,7 +150,7 @@ func TestOpenAI_ContextCancellation(t *testing.T) {
 func TestOpenAI_NoAPIKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Empty(t, r.Header.Get("Authorization"))
-		json.NewEncoder(w).Encode(openAIResponse{
+		_ = json.NewEncoder(w).Encode(openAIResponse{
 			Choices: []openAIChoice{{
 				Message:      openAIMessage{Role: "assistant", Content: "ok"},
 				FinishReason: "stop",
@@ -187,7 +187,7 @@ func TestAnthropic_SuccessfulCompletion(t *testing.T) {
 		assert.Equal(t, "user", req.Messages[0].Role)
 		assert.Equal(t, 4096, req.MaxTokens)
 
-		json.NewEncoder(w).Encode(anthropicResponse{
+		_ = json.NewEncoder(w).Encode(anthropicResponse{
 			Content:    []anthropicContent{{Type: "text", Text: "Hello!"}},
 			Model:      "claude-3-opus-20240229",
 			StopReason: "end_turn",
@@ -227,7 +227,7 @@ func TestAnthropic_SystemMessageHandling(t *testing.T) {
 		assert.Len(t, req.Messages, 1)
 		assert.Equal(t, "user", req.Messages[0].Role)
 
-		json.NewEncoder(w).Encode(anthropicResponse{
+		_ = json.NewEncoder(w).Encode(anthropicResponse{
 			Content:    []anthropicContent{{Type: "text", Text: "ok"}},
 			Model:      "claude-3-haiku-20240307",
 			StopReason: "end_turn",
@@ -249,7 +249,7 @@ func TestAnthropic_SystemMessageHandling(t *testing.T) {
 func TestAnthropic_ErrorResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(anthropicError{
+		_ = json.NewEncoder(w).Encode(anthropicError{
 			Error: struct {
 				Message string `json:"message"`
 			}{Message: "invalid api key"},
@@ -283,7 +283,7 @@ func TestAnthropic_CustomMaxTokens(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		assert.Equal(t, 1024, req.MaxTokens)
 
-		json.NewEncoder(w).Encode(anthropicResponse{
+		_ = json.NewEncoder(w).Encode(anthropicResponse{
 			Content:    []anthropicContent{{Type: "text", Text: "ok"}},
 			Model:      "claude-3-haiku-20240307",
 			StopReason: "end_turn",

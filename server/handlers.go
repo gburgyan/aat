@@ -287,7 +287,7 @@ func (s *Server) handleExportRun(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, sanitizeHeaderValue(filename)))
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 	w.WriteHeader(http.StatusOK)
-	io.Copy(w, &buf)
+	_, _ = io.Copy(w, &buf)
 }
 
 func (s *Server) handleExportBatch(w http.ResponseWriter, r *http.Request) {
@@ -308,7 +308,7 @@ func (s *Server) handleExportBatch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, sanitizeHeaderValue(filename)))
 	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
 	w.WriteHeader(http.StatusOK)
-	io.Copy(w, &buf)
+	_, _ = io.Copy(w, &buf)
 }
 
 const maxUploadSize = 100 * 1024 * 1024 // 100MB
@@ -326,7 +326,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing_file", "missing 'file' field in multipart form")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Read into buffer for ReaderAt access.
 	var buf bytes.Buffer

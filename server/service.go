@@ -676,7 +676,7 @@ func validateDirName(name string) error {
 		return fmt.Errorf("name must not contain null bytes")
 	}
 	if name == "." || name == ".." {
-		return fmt.Errorf("name must not be . or ..")
+		return fmt.Errorf("name must not be %q", name)
 	}
 	return nil
 }
@@ -724,32 +724,6 @@ func summaryToRunListEntry(s *archive.RunSummary) RunListEntry {
 }
 
 // --- conversion: archive → view model ---
-
-func toRunListEntry(a *archive.Archive) RunListEntry {
-	passed := 0
-	failed := 0
-	for _, s := range a.Steps {
-		if stepPassed(s) {
-			passed++
-		} else {
-			failed++
-		}
-	}
-
-	return RunListEntry{
-		RunID:         a.Metadata.RunID,
-		Timestamp:     a.Metadata.Timestamp,
-		Outcome:       a.Result.Outcome,
-		StepCount:     len(a.Steps),
-		PassedCount:   passed,
-		FailedCount:   failed,
-		DurationMs:    totalDuration(a),
-		PlanName:      extractPlanName(a),
-		Attempt:       a.Metadata.Attempt,
-		TotalAttempts: a.Metadata.TotalAttempts,
-		Layers:        a.Metadata.Layers,
-	}
-}
 
 func toBatchListEntry(b *archive.BatchArchive) BatchListEntry {
 	return BatchListEntry{

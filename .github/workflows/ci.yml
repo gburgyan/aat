@@ -1,0 +1,115 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/web/package-lock.json
+
+      - name: Build frontend
+        working-directory: server/web
+        run: npm ci && npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: server/web/dist/
+          retention-days: 1
+
+  test:
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: server/web/dist/
+
+      - name: Run tests
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Coverage summary
+        run: |
+          total=$(go tool cover -func=coverage.out | grep ^total: | awk '{print $3}')
+          echo "### Test Coverage: ${total}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          go tool cover -func=coverage.out | tail -20 >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate HTML coverage report
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.html
+          retention-days: 30
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  build:
+    needs: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: server/web/dist/
+
+      - name: Build binary
+        run: |
+          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          go build -ldflags "\
+            -X github.com/gburgyan/aat/internal/version.Version=${VERSION} \
+            -X github.com/gburgyan/aat/internal/version.GitCommit=${COMMIT} \
+            -X github.com/gburgyan/aat/internal/version.BuildDate=${DATE}" \
+            -o aat ./cmd/aat/
+
+      - name: Smoke test
+        run: ./aat --version

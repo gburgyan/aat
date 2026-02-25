@@ -500,9 +500,5 @@ func writeLayer(t *testing.T, dir, filename, name, inputsYAML string) {
 }
 
 func splitLines(s string) []string {
-	var lines []string
-	for _, line := range []string{s} {
-		lines = append(lines, line)
-	}
-	return lines
+	return []string{s}
 }

@@ -361,7 +361,7 @@ func TestProgressRenderer_FinishEmpty(t *testing.T) {
 func TestProgressRenderer_FormatPlanLine_Bar(t *testing.T) {
 	r := &ProgressRenderer{termWidth: 80, nameWidth: 15}
 
-	line := r.formatPlanLine(PlanProgressState{
+	line := r.formatPlanLine(&PlanProgressState{
 		PlanName:       "my-plan",
 		TotalSteps:     10,
 		CompletedSteps: 5,
@@ -378,7 +378,7 @@ func TestProgressRenderer_FormatPlanLine_Bar(t *testing.T) {
 func TestProgressRenderer_FormatPlanLine_WaitingState(t *testing.T) {
 	r := &ProgressRenderer{termWidth: 80, nameWidth: 15}
 
-	line := r.formatPlanLine(PlanProgressState{
+	line := r.formatPlanLine(&PlanProgressState{
 		PlanName:   "pending-plan",
 		TotalSteps: 0,
 	}, 0)
@@ -390,7 +390,7 @@ func TestProgressRenderer_FormatPlanLine_WaitingState(t *testing.T) {
 func TestProgressRenderer_FormatPlanLine_LongName(t *testing.T) {
 	r := &ProgressRenderer{termWidth: 80, nameWidth: 15}
 
-	line := r.formatPlanLine(PlanProgressState{
+	line := r.formatPlanLine(&PlanProgressState{
 		PlanName:       "very-long-plan-name-that-exceeds-column",
 		TotalSteps:     5,
 		CompletedSteps: 3,
@@ -405,7 +405,7 @@ func TestProgressRenderer_FormatPlanLine_LongName(t *testing.T) {
 func TestProgressRenderer_FormatPlanLine_Complete(t *testing.T) {
 	r := &ProgressRenderer{termWidth: 80, nameWidth: 10}
 
-	line := r.formatPlanLine(PlanProgressState{
+	line := r.formatPlanLine(&PlanProgressState{
 		PlanName:       "doneplan",
 		TotalSteps:     4,
 		CompletedSteps: 4,
@@ -430,14 +430,14 @@ func TestProgressRenderer_FormatPlanLine_CountAlignment(t *testing.T) {
 	// denomWidth=2 (width of "15"), so counts render as " 7/9 " and " 6/15".
 	denomWidth := 2
 
-	line9 := r.formatPlanLine(PlanProgressState{
+	line9 := r.formatPlanLine(&PlanProgressState{
 		PlanName:       "plan-short",
 		TotalSteps:     9,
 		CompletedSteps: 7,
 		CurrentNode:    "addPayment",
 	}, denomWidth)
 
-	line15 := r.formatPlanLine(PlanProgressState{
+	line15 := r.formatPlanLine(&PlanProgressState{
 		PlanName:       "plan-long",
 		TotalSteps:     15,
 		CompletedSteps: 6,

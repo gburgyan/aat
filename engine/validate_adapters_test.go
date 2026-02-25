@@ -45,7 +45,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						},
 					},
 				}
-				r.Register("getPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("getPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr: false,
 		},
@@ -74,7 +74,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						},
 					},
 				}
-				r.Register("getPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("getPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr:     true,
 			wantErrType: true,
@@ -107,7 +107,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						},
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr:     true,
 			wantErrType: true,
@@ -141,7 +141,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						},
 					},
 				}
-				r.Register("updatePet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("updatePet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr:     true,
 			wantErrType: true,
@@ -180,7 +180,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						Extract: map[string]adapter.ExtractRule{"x": {Path: "x"}},
 					},
 				}
-				r.Register("alpha", adapter.NewTemplateAdapter(tmplA))
+				_ = r.Register("alpha", adapter.NewTemplateAdapter(tmplA))
 
 				tmplB := adapter.Template{
 					Adapter:  "beta",
@@ -193,7 +193,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						},
 					},
 				}
-				r.Register("beta", adapter.NewTemplateAdapter(tmplB))
+				_ = r.Register("beta", adapter.NewTemplateAdapter(tmplB))
 			},
 			wantErr:     true,
 			wantErrType: true,
@@ -217,7 +217,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 			},
 			setup: func(r *adapter.Registry) {
 				// Register a non-template adapter (stubAdapter).
-				r.Register("custom.impl", &stubAdapter{
+				_ = r.Register("custom.impl", &stubAdapter{
 					method:   "GET",
 					path:     "/custom",
 					response: map[string]any{"result": "ok"},
@@ -243,7 +243,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 					Request:  adapter.TemplateRequest{Method: "DELETE", Path: "/pets/{{petId}}"},
 					Response: adapter.TemplateResponse{},
 				}
-				r.Register("deletePet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("deletePet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr: false,
 		},
@@ -285,7 +285,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						},
 					},
 				}
-				r.Register("search", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("search", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr:     true,
 			wantErrType: true,
@@ -332,7 +332,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						Transform: `return outputs`, // has a transform
 					},
 				}
-				r.Register("search", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("search", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr: false, // no error — transform may populate "extra"
 		},
@@ -373,7 +373,7 @@ func TestValidateAdapterOutputs(t *testing.T) {
 						Transform: `return outputs`,
 					},
 				}
-				r.Register("search", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("search", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr:     true,
 			wantErrType: true,
@@ -450,7 +450,7 @@ func TestValidateAdapterOutputsForPlan(t *testing.T) {
 	}
 
 	registry := adapter.NewRegistry()
-	registry.Register("good", adapter.NewTemplateAdapter(adapter.Template{
+	_ = registry.Register("good", adapter.NewTemplateAdapter(adapter.Template{
 		Adapter:  "good",
 		Protocol: "http",
 		Request:  adapter.TemplateRequest{Method: "GET", Path: "/good"},
@@ -458,7 +458,7 @@ func TestValidateAdapterOutputsForPlan(t *testing.T) {
 			Extract: map[string]adapter.ExtractRule{"result": {Path: "result"}},
 		},
 	}))
-	registry.Register("broken", adapter.NewTemplateAdapter(adapter.Template{
+	_ = registry.Register("broken", adapter.NewTemplateAdapter(adapter.Template{
 		Adapter:  "broken",
 		Protocol: "http",
 		Request:  adapter.TemplateRequest{Method: "GET", Path: "/broken"},

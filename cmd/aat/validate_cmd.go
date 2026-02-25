@@ -334,12 +334,12 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		}
 	}
 
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 	if failedCount > 0 {
-		fmt.Fprintf(out, "Project validation: FAILED (%d section(s) with errors)\n", failedCount)
+		_, _ = fmt.Fprintf(out, "Project validation: FAILED (%d section(s) with errors)\n", failedCount)
 		return 1
 	}
-	fmt.Fprintln(out, "Project validation: PASSED")
+	_, _ = fmt.Fprintln(out, "Project validation: PASSED")
 	return 0
 }
 
@@ -469,14 +469,14 @@ func printSections(out io.Writer, sections []sectionResult) {
 		if s.Detail != "" {
 			line += " " + s.Detail
 		}
-		fmt.Fprintln(out, line)
+		_, _ = fmt.Fprintln(out, line)
 
 		if s.Status == "FAILED" {
 			for _, e := range s.Errors {
 				// Indent each line of the error
 				for _, eline := range strings.Split(e, "\n") {
 					if eline != "" {
-						fmt.Fprintf(out, "  %s\n", eline)
+						_, _ = fmt.Fprintf(out, "  %s\n", eline)
 					}
 				}
 			}

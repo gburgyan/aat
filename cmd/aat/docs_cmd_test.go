@@ -47,7 +47,7 @@ func TestDocsGenerateCommand_Stdout(t *testing.T) {
 	err := docsGenerateCommand(args)
 	require.NoError(t, err)
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = old
 
 	buf := make([]byte, 64*1024)

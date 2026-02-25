@@ -142,7 +142,7 @@ func TestFindManifest_Found(t *testing.T) {
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	require.NoError(t, os.Chdir(subDir))
 
@@ -162,7 +162,7 @@ func TestFindManifest_InCurrentDir(t *testing.T) {
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	require.NoError(t, os.Chdir(dir))
 

@@ -37,7 +37,7 @@ func TestCleanupStack_FILOOrder(t *testing.T) {
 	var callOrder []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -93,7 +93,7 @@ func TestCleanupStack_ErrorDoesNotStop(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -153,7 +153,7 @@ func TestEngine_Run_WithCleanup(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -248,11 +248,11 @@ func TestEngine_Run_CleanupOnFailure(t *testing.T) {
 		if requestCount == 2 {
 			// Second request (fail step) returns 500
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error": "server error"}`))
+			_, _ = w.Write([]byte(`{"error": "server error"}`))
 			return
 		}
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -337,7 +337,7 @@ func TestEngine_Run_DeleteNoBody(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]any{"id": "resource-789"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "resource-789"})
 	}))
 	defer server.Close()
 

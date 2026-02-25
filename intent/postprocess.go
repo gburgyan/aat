@@ -627,40 +627,6 @@ func blankBrokenFromSelections(p *plan.Plan, g *graph.Graph) (blanked []string, 
 	return blanked, hints
 }
 
-// restoreBlankedFromSelections copies fromSelection values from the LLM plan
-// into the skeleton for inputs that were blanked during retry preparation.
-// This is needed because MergeLLMValues treats fromSelection as structural
-// and won't accept it from the LLM.
-func restoreBlankedFromSelections(skeleton, llmPlan *plan.Plan, blanked []string) {
-	blankedSet := make(map[string]bool, len(blanked))
-	for _, b := range blanked {
-		blankedSet[b] = true
-	}
-
-	// Build LLM step index
-	llmSteps := map[string]*plan.Step{}
-	for i := range llmPlan.Execution.Steps {
-		llmSteps[llmPlan.Execution.Steps[i].Node] = &llmPlan.Execution.Steps[i]
-	}
-
-	for i, step := range skeleton.Execution.Steps {
-		llmStep, ok := llmSteps[step.Node]
-		if !ok {
-			continue
-		}
-		for inputName, skelVal := range step.Values {
-			key := step.Node + "." + inputName
-			if !blankedSet[key] {
-				continue
-			}
-			if llmVal, exists := llmStep.Values[inputName]; exists && llmVal.FromSelection != "" {
-				skelVal.FromSelection = llmVal.FromSelection
-				skeleton.Execution.Steps[i].Values[inputName] = skelVal
-			}
-		}
-	}
-}
-
 // sortStrings sorts a string slice in place.
 func sortStrings(s []string) {
 	for i := 1; i < len(s); i++ {

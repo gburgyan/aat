@@ -18,7 +18,7 @@ func TestHTTPExecutor_Execute(t *testing.T) {
 			assert.Equal(t, "/v2/status", r.URL.Path)
 			w.Header().Set("X-Custom", "value")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{"status":"ok"}`))
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		}))
 		defer srv.Close()
 
@@ -41,7 +41,7 @@ func TestHTTPExecutor_Execute(t *testing.T) {
 			body, _ := io.ReadAll(r.Body)
 			assert.JSONEq(t, `{"origin":"JFK","destination":"LAX"}`, string(body))
 			w.WriteHeader(http.StatusCreated)
-			w.Write([]byte(`{"id":"123"}`))
+			_, _ = w.Write([]byte(`{"id":"123"}`))
 		}))
 		defer srv.Close()
 

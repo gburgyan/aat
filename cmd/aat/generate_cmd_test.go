@@ -74,7 +74,7 @@ func TestGenerateCommand_Stdout(t *testing.T) {
 		OutputTemplates: templatesOut,
 	})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	require.NoError(t, genErr)

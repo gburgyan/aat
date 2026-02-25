@@ -291,7 +291,7 @@ func checkServerHealth(baseURL string) error {
 	if err != nil {
 		return fmt.Errorf("server not reachable at %s: %w\n\nhint: start the server first with: aat web", baseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server at %s returned status %d\n\nhint: the server may not be ready yet", baseURL, resp.StatusCode)

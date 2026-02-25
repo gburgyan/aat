@@ -8,19 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stubPredicateEval is a test predicate evaluator that delegates to plan.EvalPredicate-compatible logic.
-func stubPredicateEval(expr string, context map[string]any) (bool, error) {
-	// Simple evaluator for tests: supports "true", "false", and field comparisons
-	switch expr {
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	}
-	// For more complex expressions, return an error to indicate unsupported
-	return false, fmt.Errorf("stubPredicateEval: unsupported expression %q", expr)
-}
-
 func TestCheckStatus(t *testing.T) {
 	tests := []struct {
 		name       string

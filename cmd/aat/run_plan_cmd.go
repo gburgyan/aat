@@ -92,7 +92,7 @@ func executeRun(ra *runArgs) int {
 		if res.summary != nil {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			enc.Encode(res.summary)
+			_ = enc.Encode(res.summary)
 		} else {
 			// Setup error before we got a RunResult — emit minimal JSON
 			s := &RunSummary{
@@ -101,7 +101,7 @@ func executeRun(ra *runArgs) int {
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			enc.Encode(s)
+			_ = enc.Encode(s)
 		}
 		return exitCode(res)
 	}
@@ -114,14 +114,14 @@ func executeRun(ra *runArgs) int {
 		}
 		switch res.summary.Outcome {
 		case "passed":
-			fmt.Fprintf(os.Stdout, "PASSED (%d/%d steps)%s\n", res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps, attemptSuffix)
+			_, _ = fmt.Fprintf(os.Stdout, "PASSED (%d/%d steps)%s\n", res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps, attemptSuffix)
 		case "failed":
-			fmt.Fprintf(os.Stdout, "FAILED: %s%s\n", res.summary.Error, attemptSuffix)
+			_, _ = fmt.Fprintf(os.Stdout, "FAILED: %s%s\n", res.summary.Error, attemptSuffix)
 		case "error":
-			fmt.Fprintf(os.Stdout, "ERROR: %s%s\n", res.summary.Error, attemptSuffix)
+			_, _ = fmt.Fprintf(os.Stdout, "ERROR: %s%s\n", res.summary.Error, attemptSuffix)
 		}
 		if res.archivePath != "" {
-			fmt.Fprintf(os.Stdout, "Archive: %s\n", res.archivePath)
+			_, _ = fmt.Fprintf(os.Stdout, "Archive: %s\n", res.archivePath)
 		}
 		return exitCode(res)
 	}
@@ -137,7 +137,7 @@ func executeRun(ra *runArgs) int {
 // The out writer receives progress messages; callers pass io.Discard for quiet mode.
 func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	logf := func(format string, a ...any) {
-		fmt.Fprintf(out, format, a...)
+		_, _ = fmt.Fprintf(out, format, a...)
 	}
 
 	// Validate required fields

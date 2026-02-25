@@ -180,9 +180,7 @@ func Validate(g *Graph) error {
 
 	// 7b. Cycle detection in requires/satisfies graph
 	if reqCycles := detectRequiresCycles(g, satisfierIndex); len(reqCycles) > 0 {
-		for _, c := range reqCycles {
-			errs = append(errs, c)
-		}
+		errs = append(errs, reqCycles...)
 	}
 
 	if len(errs) > 0 {

@@ -62,7 +62,7 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 	if err != nil {
 		return nil, fmt.Errorf("executing HTTP request: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {

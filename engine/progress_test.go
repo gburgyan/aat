@@ -58,7 +58,7 @@ func TestProgressObserver_SuccessfulRun(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"results":   []any{map[string]any{"id": "item-1"}},
 			"sessionId": "sess-1",
 			"confirmed": true,
@@ -165,7 +165,7 @@ func TestProgressObserver_StepFailure(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "bad"}`))
+		_, _ = w.Write([]byte(`{"error": "bad"}`))
 	}))
 	defer server.Close()
 
@@ -231,7 +231,7 @@ func TestProgressObserver_NilObserver(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"output": "val"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"output": "val"})
 	}))
 	defer server.Close()
 
@@ -274,7 +274,7 @@ func TestProgressObserver_WithCleanup(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"id": "res-1"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": "res-1"})
 	}))
 	defer server.Close()
 
@@ -334,7 +334,7 @@ func TestProgressObserver_IndexValues(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"out": "val"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"out": "val"})
 	}))
 	defer server.Close()
 

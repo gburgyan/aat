@@ -138,7 +138,7 @@ func TestWebViewTraceCommand_ServerAlreadyRunning(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx)
 	}()
 	require.True(t, waitForServer(srv, 3*time.Second))
 
@@ -165,7 +165,7 @@ func TestCheckServerHealth_OK(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintln(w, `{"status":"ok"}`)
+			_, _ = fmt.Fprintln(w, `{"status":"ok"}`)
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -205,7 +205,7 @@ func TestWebViewCommand_ServerAlreadyRunning(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx)
 	}()
 	require.True(t, waitForServer(srv, 3*time.Second))
 
@@ -256,11 +256,11 @@ func TestWebViewCommand_StartsEphemeralServer(t *testing.T) {
 	// Verify the server is actually serving.
 	resp, err := http.Get("http://localhost:19224/health")
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Send SIGINT to shut down the ephemeral server.
-	syscall.Kill(syscall.Getpid(), syscall.SIGINT)
+	_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 
 	select {
 	case <-errCh:
@@ -284,7 +284,7 @@ func TestWaitForServer_Ready(t *testing.T) {
 	defer func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		srv.Shutdown(ctx)
+		_ = srv.Shutdown(ctx)
 	}()
 
 	ready := waitForServer(srv, 3*time.Second)
@@ -322,13 +322,13 @@ func TestWebServeCommand_Lifecycle(t *testing.T) {
 	// Verify health endpoint responds.
 	resp, err := http.Get(fmt.Sprintf("http://%s/health", srv.Addr()))
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Verify runs endpoint responds.
 	resp, err = http.Get(fmt.Sprintf("http://%s/api/runs", srv.Addr()))
 	require.NoError(t, err)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Graceful shutdown.
@@ -351,7 +351,7 @@ func TestWebViewCommand_OpensCorrectURL(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/health" {
 			w.WriteHeader(http.StatusOK)
-			fmt.Fprintln(w, `{"status":"ok"}`)
+			_, _ = fmt.Fprintln(w, `{"status":"ok"}`)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -361,7 +361,7 @@ func TestWebViewCommand_OpensCorrectURL(t *testing.T) {
 	// Extract port from test server URL.
 	port := strings.TrimPrefix(ts.URL, "http://127.0.0.1:")
 	portInt := 0
-	fmt.Sscanf(port, "%d", &portInt)
+	_, _ = fmt.Sscanf(port, "%d", &portInt)
 	require.NotZero(t, portInt)
 
 	// Stub browser open.

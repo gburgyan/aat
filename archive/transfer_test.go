@@ -130,8 +130,8 @@ func TestImportArchive_MissingMarkerFile(t *testing.T) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	w, _ := zw.Create("something.json")
-	w.Write([]byte(`{}`))
-	zw.Close()
+	_, _ = w.Write([]byte(`{}`))
+	_ = zw.Close()
 
 	data := buf.Bytes()
 	r := bytes.NewReader(data)
@@ -145,8 +145,8 @@ func TestImportArchive_NameCollision(t *testing.T) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	w, _ := zw.Create("archive.json")
-	w.Write([]byte(`{}`))
-	zw.Close()
+	_, _ = w.Write([]byte(`{}`))
+	_ = zw.Close()
 
 	destDir := t.TempDir()
 	// Pre-create the target directory.
@@ -163,8 +163,8 @@ func TestValidateZipContents_ZipSlip(t *testing.T) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	w, _ := zw.Create("../evil.json")
-	w.Write([]byte(`{}`))
-	zw.Close()
+	_, _ = w.Write([]byte(`{}`))
+	_ = zw.Close()
 
 	data := buf.Bytes()
 	r := bytes.NewReader(data)
@@ -177,8 +177,8 @@ func TestValidateZipContents_AbsolutePath(t *testing.T) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	w, _ := zw.Create("/etc/passwd")
-	w.Write([]byte(`{}`))
-	zw.Close()
+	_, _ = w.Write([]byte(`{}`))
+	_ = zw.Close()
 
 	data := buf.Bytes()
 	r := bytes.NewReader(data)
@@ -193,9 +193,9 @@ func TestValidateZipContents_TooManyEntries(t *testing.T) {
 	// Create maxEntryCount + 1 entries.
 	for i := 0; i <= maxEntryCount; i++ {
 		w, _ := zw.Create(filepath.Join("dir", "file"+string(rune('a'+i%26))+".json"))
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}
-	zw.Close()
+	_ = zw.Close()
 
 	data := buf.Bytes()
 	r := bytes.NewReader(data)
@@ -222,9 +222,9 @@ func TestDetectArchiveType(t *testing.T) {
 			zw := zip.NewWriter(&buf)
 			for _, f := range tt.files {
 				w, _ := zw.Create(f)
-				w.Write([]byte(`{}`))
+				_, _ = w.Write([]byte(`{}`))
 			}
-			zw.Close()
+			_ = zw.Close()
 
 			zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
 			require.NoError(t, err)

@@ -164,7 +164,7 @@ func executeBatch(ba *batchArgs) int {
 		if res.summary != nil {
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			enc.Encode(res.summary)
+			_ = enc.Encode(res.summary)
 		} else {
 			s := &BatchSummary{
 				Outcome: "error",
@@ -174,7 +174,7 @@ func executeBatch(ba *batchArgs) int {
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
-			enc.Encode(s)
+			_ = enc.Encode(s)
 		}
 		return batchExitCode(res)
 	}
@@ -188,24 +188,24 @@ func executeBatch(ba *batchArgs) int {
 			}
 			switch r.Outcome {
 			case "passed":
-				fmt.Fprintf(os.Stdout, "%s: PASSED%s\n", name, attemptSuffix)
+				_, _ = fmt.Fprintf(os.Stdout, "%s: PASSED%s\n", name, attemptSuffix)
 			case "failed":
-				fmt.Fprintf(os.Stdout, "%s: FAILED: %s%s\n", name, r.Error, attemptSuffix)
+				_, _ = fmt.Fprintf(os.Stdout, "%s: FAILED: %s%s\n", name, r.Error, attemptSuffix)
 			case "error":
-				fmt.Fprintf(os.Stdout, "%s: ERROR: %s%s\n", name, r.Error, attemptSuffix)
+				_, _ = fmt.Fprintf(os.Stdout, "%s: ERROR: %s%s\n", name, r.Error, attemptSuffix)
 			}
 		}
-		fmt.Fprintf(os.Stdout, "Batch: %d/%d PASSED",
+		_, _ = fmt.Fprintf(os.Stdout, "Batch: %d/%d PASSED",
 			res.summary.Summary.PassedPlans, res.summary.Summary.TotalPlans)
 		if res.summary.Summary.FailedPlans > 0 {
-			fmt.Fprintf(os.Stdout, ", %d FAILED", res.summary.Summary.FailedPlans)
+			_, _ = fmt.Fprintf(os.Stdout, ", %d FAILED", res.summary.Summary.FailedPlans)
 		}
 		if res.summary.Summary.ErrorPlans > 0 {
-			fmt.Fprintf(os.Stdout, ", %d ERROR", res.summary.Summary.ErrorPlans)
+			_, _ = fmt.Fprintf(os.Stdout, ", %d ERROR", res.summary.Summary.ErrorPlans)
 		}
-		fmt.Fprintln(os.Stdout)
+		_, _ = fmt.Fprintln(os.Stdout)
 		if res.batchDir != "" {
-			fmt.Fprintf(os.Stdout, "Archive: %s\n", res.batchDir)
+			_, _ = fmt.Fprintf(os.Stdout, "Archive: %s\n", res.batchDir)
 		}
 		return batchExitCode(res)
 	}
@@ -313,7 +313,7 @@ func specDisplayName(planName string, permutation string) string {
 // batchCommand executes the batch pipeline.
 func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchResult {
 	logf := func(format string, a ...any) {
-		fmt.Fprintf(out, format, a...)
+		_, _ = fmt.Fprintf(out, format, a...)
 	}
 
 	// 1. Discover plans
@@ -333,9 +333,9 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	}
 
 	// 2. Build the run matrix (plans × permutations)
-	specs := buildRunMatrix(plans, args.runArgs.Layers, args.runArgs.LayerGroups)
+	specs := buildRunMatrix(plans, args.Layers, args.LayerGroups)
 
-	if len(args.runArgs.LayerGroups) > 0 {
+	if len(args.LayerGroups) > 0 {
 		permCount := len(specs) / len(plans)
 		logf("aat: batch run — %d plans x %d permutations = %d total runs", len(plans), permCount, len(specs))
 	} else {
@@ -402,8 +402,8 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			Timestamp:   batchStart,
 			Source:      source,
 			ToolVersion: "0.1.0",
-			Layers:      args.runArgs.Layers,
-			LayerGroups: args.runArgs.LayerGroups,
+			Layers:      args.Layers,
+			LayerGroups: args.LayerGroups,
 		},
 		Runs: batchEntries,
 		Result: archive.BatchResult{
@@ -481,15 +481,15 @@ func batchSequential(ctx context.Context, rctx *runContext, specs []batchRunSpec
 			dur := formatDuration(time.Duration(br.DurationMs) * time.Millisecond)
 			switch br.Outcome {
 			case "passed":
-				fmt.Fprintf(out, "  %s  PASSED (%d steps, %s)\n", displayName, br.StepCount, dur)
+				_, _ = fmt.Fprintf(out, "  %s  PASSED (%d steps, %s)\n", displayName, br.StepCount, dur)
 			case "failed":
-				fmt.Fprintf(out, "  %s  FAILED (%d steps, %s)\n", displayName, br.StepCount, dur)
+				_, _ = fmt.Fprintf(out, "  %s  FAILED (%d steps, %s)\n", displayName, br.StepCount, dur)
 			case "error":
-				fmt.Fprintf(out, "  %s  ERROR: %s\n", displayName, br.Error)
+				_, _ = fmt.Fprintf(out, "  %s  ERROR: %s\n", displayName, br.Error)
 			}
 		}
 
-		fmt.Fprintln(out)
+		_, _ = fmt.Fprintln(out)
 	}
 
 	return runs, batchEntries
@@ -563,7 +563,7 @@ func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, 
 			} else if out != io.Discard {
 				// Non-TTY fallback: print simple result line under mutex
 				outputMu.Lock()
-				fmt.Fprintln(out, resultLine)
+				_, _ = fmt.Fprintln(out, resultLine)
 				outputMu.Unlock()
 			}
 
@@ -571,7 +571,7 @@ func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, 
 		})
 	}
 
-	g.Wait()
+	_ = g.Wait()
 
 	if renderer != nil {
 		renderer.Finish()

@@ -1,0 +1,38 @@
+version: 2
+
+builds:
+  - main: ./cmd/aat/
+    binary: aat
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X github.com/gburgyan/aat/internal/version.Version={{.Version}}
+      - -X github.com/gburgyan/aat/internal/version.GitCommit={{.ShortCommit}}
+      - -X github.com/gburgyan/aat/internal/version.BuildDate={{.Date}}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"

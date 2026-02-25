@@ -33,7 +33,7 @@ func (o *BatchStreamObserver) OnRunStart(total int, mode string) {
 	o.total = total
 	o.mode = mode
 	o.start = time.Now()
-	fmt.Fprintf(o.out, "  ── %s (%d steps, mode=%s) ──\n", o.planName, total, mode)
+	_, _ = fmt.Fprintf(o.out, "  ── %s (%d steps, mode=%s) ──\n", o.planName, total, mode)
 }
 
 func (o *BatchStreamObserver) OnStepStart(index, total int, step plan.Step) {}
@@ -45,9 +45,9 @@ func (o *BatchStreamObserver) OnStepComplete(index, total int, result engine.Ste
 	prefix := fmt.Sprintf("    [%*d/%s] %-20s", width, index+1, totalStr, result.Node)
 	if result.Error != nil {
 		if result.RetryCount > 0 {
-			fmt.Fprintf(o.out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(result), result.RetryCount)
+			_, _ = fmt.Fprintf(o.out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(result), result.RetryCount)
 		} else {
-			fmt.Fprintf(o.out, "%s ERROR: %s\n", prefix, result.Error)
+			_, _ = fmt.Fprintf(o.out, "%s ERROR: %s\n", prefix, result.Error)
 		}
 	} else if result.Response != nil {
 		status := fmt.Sprintf("%d", result.StatusCode)
@@ -55,27 +55,27 @@ func (o *BatchStreamObserver) OnStepComplete(index, total int, result engine.Ste
 		if result.Validation != nil && !result.Validation.Passed {
 			validMark = "  ASSERTIONS FAILED"
 		}
-		fmt.Fprintf(o.out, "%s %s  %dms%s\n", prefix, status, result.Duration.Milliseconds(), validMark)
+		_, _ = fmt.Fprintf(o.out, "%s %s  %dms%s\n", prefix, status, result.Duration.Milliseconds(), validMark)
 		for _, do := range result.DisplayOutputs {
-			fmt.Fprintf(o.out, "%*s  %s: %v\n", indent, "", do.Label, do.Value)
+			_, _ = fmt.Fprintf(o.out, "%*s  %s: %v\n", indent, "", do.Label, do.Value)
 		}
 	} else {
-		fmt.Fprintf(o.out, "%s (no response)\n", prefix)
+		_, _ = fmt.Fprintf(o.out, "%s (no response)\n", prefix)
 	}
 }
 
 func (o *BatchStreamObserver) OnCleanupStart(total int) {
-	fmt.Fprintln(o.out, "    cleanup:")
+	_, _ = fmt.Fprintln(o.out, "    cleanup:")
 }
 
 func (o *BatchStreamObserver) OnCleanupStepComplete(index, total int, result engine.StepResult) {
 	prefix := fmt.Sprintf("      %-22s", result.Node)
 	if result.Error != nil {
-		fmt.Fprintf(o.out, "%s ERROR: %s\n", prefix, result.Error)
+		_, _ = fmt.Fprintf(o.out, "%s ERROR: %s\n", prefix, result.Error)
 	} else if result.Response != nil {
-		fmt.Fprintf(o.out, "%s %d  %dms\n", prefix, result.StatusCode, result.Duration.Milliseconds())
+		_, _ = fmt.Fprintf(o.out, "%s %d  %dms\n", prefix, result.StatusCode, result.Duration.Milliseconds())
 	} else {
-		fmt.Fprintf(o.out, "%s (no response)\n", prefix)
+		_, _ = fmt.Fprintf(o.out, "%s (no response)\n", prefix)
 	}
 }
 
@@ -84,11 +84,11 @@ func (o *BatchStreamObserver) OnRunComplete(result *engine.RunResult) {
 	total := len(result.Steps)
 	switch result.Outcome {
 	case engine.OutcomePassed:
-		fmt.Fprintf(o.out, "  ── %s: PASSED (%d steps, %s) ──\n", o.planName, total, formatDuration(dur))
+		_, _ = fmt.Fprintf(o.out, "  ── %s: PASSED (%d steps, %s) ──\n", o.planName, total, formatDuration(dur))
 	case engine.OutcomeFailed:
-		fmt.Fprintf(o.out, "  ── %s: FAILED (%s) ──\n", o.planName, formatDuration(dur))
+		_, _ = fmt.Fprintf(o.out, "  ── %s: FAILED (%s) ──\n", o.planName, formatDuration(dur))
 	case engine.OutcomeError:
-		fmt.Fprintf(o.out, "  ── %s: ERROR (%s) ──\n", o.planName, formatDuration(dur))
+		_, _ = fmt.Fprintf(o.out, "  ── %s: ERROR (%s) ──\n", o.planName, formatDuration(dur))
 	}
 }
 
@@ -222,7 +222,7 @@ func (r *ProgressRenderer) CompletePlan(state *PlanProgressState, resultLine str
 	r.eraseLocked()
 
 	// Print the permanent result line (scrolls up naturally)
-	fmt.Fprintln(r.out, resultLine)
+	_, _ = fmt.Fprintln(r.out, resultLine)
 
 	// Remove the completed plan from active list
 	active := r.plans[:0]
@@ -271,9 +271,9 @@ func (r *ProgressRenderer) eraseLocked() {
 	}
 	// Move cursor up r.lines and clear each line
 	for i := 0; i < r.lines; i++ {
-		fmt.Fprintf(r.out, "\033[A\033[2K")
+		_, _ = fmt.Fprintf(r.out, "\033[A\033[2K")
 	}
-	fmt.Fprintf(r.out, "\r")
+	_, _ = fmt.Fprintf(r.out, "\r")
 	r.lines = 0
 }
 
@@ -286,8 +286,8 @@ func (r *ProgressRenderer) renderLocked() {
 
 	for _, p := range r.plans {
 		snap := p.Snapshot()
-		line := r.formatPlanLine(snap, r.denomWidth)
-		fmt.Fprintln(r.out, line)
+		line := r.formatPlanLine(&snap, r.denomWidth)
+		_, _ = fmt.Fprintln(r.out, line)
 		r.lines++
 	}
 }
@@ -296,7 +296,7 @@ func (r *ProgressRenderer) renderLocked() {
 // Format: "  planName  [####------]  3/7  currentNode"
 // denomWidth is the digit width of the largest TotalSteps; both numerator and
 // denominator are padded to this width so the slash aligns across plans.
-func (r *ProgressRenderer) formatPlanLine(snap PlanProgressState, denomWidth int) string {
+func (r *ProgressRenderer) formatPlanLine(snap *PlanProgressState, denomWidth int) string {
 	nameCol := r.nameWidth
 	if nameCol < 10 {
 		nameCol = 10

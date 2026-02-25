@@ -2193,7 +2193,7 @@ func TestListRuns_MixedSummaryAndFallback(t *testing.T) {
 	a2 := makeArchive("run-20260222-110000-aaaa0002", "failed", makeStep("node2", 500, 200))
 	a2.Metadata.Timestamp = time.Date(2026, 2, 22, 11, 0, 0, 0, time.UTC)
 	writeArchive(t, dir, a2)
-	os.Remove(filepath.Join(dir, "run-20260222-110000-aaaa0002", "summary.json"))
+	_ = os.Remove(filepath.Join(dir, "run-20260222-110000-aaaa0002", "summary.json"))
 
 	svc := NewArchiveService(dir)
 	runs, err := svc.ListRuns(0, false)

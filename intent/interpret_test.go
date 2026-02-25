@@ -41,13 +41,6 @@ func (s *stubClient) Complete(_ context.Context, req *llm.Request) (*llm.Respons
 	}, nil
 }
 
-func loadFixture(t *testing.T, path string) string {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	require.NoError(t, err)
-	return string(data)
-}
-
 func TestInterpret_EmptyPrompt(t *testing.T) {
 	g, _ := buildTemplateTestGraph(t)
 	client := &stubClient{}
@@ -479,20 +472,6 @@ func TestStripJSONFencing(t *testing.T) {
 			assert.Equal(t, tt.expected, stripJSONFencing(tt.input))
 		})
 	}
-}
-
-// contains is a helper for checking if a string contains a substring.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
-}
-
-func containsHelper(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // loadKBFromYAML is a test helper to parse a KB from inline YAML.

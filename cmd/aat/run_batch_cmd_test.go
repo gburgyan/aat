@@ -178,7 +178,7 @@ func TestBatchCommand_NoPlans(t *testing.T) {
 func TestBatchCommand_SinglePlan_Passed(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -211,7 +211,7 @@ func TestBatchCommand_SinglePlan_Passed(t *testing.T) {
 func TestBatchCommand_MultiplePlans(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -243,7 +243,7 @@ func TestBatchCommand_OneFailedPlan(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "bad request"}`))
+		_, _ = w.Write([]byte(`{"error": "bad request"}`))
 	}))
 	defer apiServer.Close()
 
@@ -275,10 +275,10 @@ func TestBatchCommand_MixedResults(t *testing.T) {
 		reqCount++
 		w.Header().Set("Content-Type", "application/json")
 		if reqCount == 1 {
-			json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 		} else {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"error": "bad"}`))
+			_, _ = w.Write([]byte(`{"error": "bad"}`))
 		}
 	}))
 	defer apiServer.Close()
@@ -310,7 +310,7 @@ func TestBatchCommand_MixedResults(t *testing.T) {
 func TestBatchCommand_WritesBatchJSON(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -346,7 +346,7 @@ func TestBatchCommand_WritesBatchJSON(t *testing.T) {
 func TestBatchCommand_ArchiveStructure(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -419,7 +419,7 @@ func TestBatchCommand_SetupError(t *testing.T) {
 func TestBatchCommand_InvalidPlan(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -453,7 +453,7 @@ func TestBatchCommand_InvalidPlan(t *testing.T) {
 func TestExecuteBatch_JSONOutput(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -479,11 +479,11 @@ func TestExecuteBatch_JSONOutput(t *testing.T) {
 		PlanDirs: []string{planDir},
 	})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	assert.Equal(t, 0, code)
 
@@ -497,7 +497,7 @@ func TestExecuteBatch_JSONOutput(t *testing.T) {
 func TestExecuteBatch_QuietOutput(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -523,11 +523,11 @@ func TestExecuteBatch_QuietOutput(t *testing.T) {
 		PlanDirs: []string{planDir},
 	})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	assert.Equal(t, 0, code)
 	output := buf.String()
@@ -585,7 +585,7 @@ func TestBatchSummary_JSONRoundTrip(t *testing.T) {
 func TestBatchCommand_FilterBySubdir(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 

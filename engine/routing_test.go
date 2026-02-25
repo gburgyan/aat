@@ -179,7 +179,7 @@ func TestEngine_Run_RoutingToMultipleServers(t *testing.T) {
 		searchHost = r.Host
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]any{"resultId": "found-123"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"resultId": "found-123"})
 	}))
 	defer searchServer.Close()
 
@@ -189,7 +189,7 @@ func TestEngine_Run_RoutingToMultipleServers(t *testing.T) {
 		bookHost = r.Host
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]any{"bookingId": "book-456"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"bookingId": "book-456"})
 	}))
 	defer bookServer.Close()
 
@@ -261,7 +261,7 @@ func TestEngine_Run_PathRewriteIntegration(t *testing.T) {
 		receivedPath = r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 

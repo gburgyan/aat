@@ -136,7 +136,6 @@ func extractSequenceAnnotations(seqNode *yaml.Node, pool *ValuePool) {
 					pool.SectionLabels = make(map[string]string)
 				}
 				pool.SectionLabels[item.Value] = currentSection
-				currentSection = "" // consumed by first value
 			}
 		}
 

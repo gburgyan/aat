@@ -1,8 +1,6 @@
 package mcp
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,8 +8,6 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/graph"
-	"github.com/gburgyan/aat/llm"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -373,21 +369,6 @@ func TestHandleSavePlan_WithYMLExtension(t *testing.T) {
 
 // --- generate_plan ---
 
-// stubLLMClient is a test LLM client that returns canned responses in order.
-type stubLLMClient struct {
-	responses []*llm.Response
-	calls     int
-}
-
-func (c *stubLLMClient) Complete(_ context.Context, _ *llm.Request) (*llm.Response, error) {
-	if c.calls >= len(c.responses) {
-		return nil, fmt.Errorf("stub: no more canned responses (call %d)", c.calls)
-	}
-	resp := c.responses[c.calls]
-	c.calls++
-	return resp, nil
-}
-
 func TestHandleGeneratePlan_NoEnvironment(t *testing.T) {
 	g := twoNodeGraph()
 	srv := newTestServer(g) // no environment
@@ -435,10 +416,3 @@ func TestResolveWorkflowPath_KeepsYMLExtension(t *testing.T) {
 	assert.Equal(t, "/plans/test.yml", resolveWorkflowPath("/plans", "test.yml"))
 }
 
-// callToolWithHandler is a variant of callTool that accepts separate handler and error check.
-func callToolWithHandler(t *testing.T, handler func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error), args map[string]any) (*mcp.CallToolResult, error) {
-	t.Helper()
-	req := mcp.CallToolRequest{}
-	req.Params.Arguments = args
-	return handler(context.Background(), req)
-}

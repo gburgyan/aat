@@ -132,7 +132,7 @@ func workflowValidateCommand(args *workflowValidateArgs, out io.Writer) int {
 	}
 
 	if len(sections) == 0 {
-		fmt.Fprintln(out, "No workflows found.")
+		_, _ = fmt.Fprintln(out, "No workflows found.")
 		return 0
 	}
 

@@ -14,7 +14,7 @@ func TestValidate_NoManifestFound(t *testing.T) {
 	// chdir to an empty directory and clear env so no manifest is discovered
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	t.Setenv("AAT_PROJECT", "")
 
@@ -32,7 +32,7 @@ func TestValidate_ExplicitManifestNotFound(t *testing.T) {
 	// chdir to an empty directory so CWD walk-up doesn't find a manifest.
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 
 	t.Setenv("AAT_PROJECT", "")
 

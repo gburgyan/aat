@@ -259,7 +259,7 @@ func TestAuthenticate_OAuth2Success(t *testing.T) {
 		assert.Equal(t, "test-client-secret", r.FormValue("client_secret"))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(OAuthToken{
+		_ = json.NewEncoder(w).Encode(OAuthToken{
 			AccessToken: "test-token-123",
 			TokenType:   "Bearer",
 			ExpiresIn:   3600,
@@ -288,7 +288,7 @@ func TestAuthenticate_OAuth2Success(t *testing.T) {
 func TestAuthenticate_OAuth2HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte(`{"error": "invalid_client"}`))
+		_, _ = w.Write([]byte(`{"error": "invalid_client"}`))
 	}))
 	defer server.Close()
 
@@ -311,7 +311,7 @@ func TestAuthenticate_OAuth2HTTPError(t *testing.T) {
 func TestAuthenticate_OAuth2MalformedResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("not json"))
+		_, _ = w.Write([]byte("not json"))
 	}))
 	defer server.Close()
 
@@ -334,7 +334,7 @@ func TestAuthenticate_OAuth2MalformedResponse(t *testing.T) {
 func TestAuthenticate_OAuth2MissingAccessToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"token_type": "Bearer",
 			"expires_in": 3600,
 		})
@@ -398,7 +398,7 @@ func TestAuthenticate_NoneReturnsNil(t *testing.T) {
 func TestBuildAPIConfig_OAuth2(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(OAuthToken{
+		_ = json.NewEncoder(w).Encode(OAuthToken{
 			AccessToken: "built-token",
 			TokenType:   "Bearer",
 			ExpiresIn:   3600,
@@ -451,7 +451,7 @@ func TestBuildAPIConfig_APIKey(t *testing.T) {
 func TestBuildAPIConfig_CustomHeaders(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(OAuthToken{
+		_ = json.NewEncoder(w).Encode(OAuthToken{
 			AccessToken: "test-token",
 			TokenType:   "Bearer",
 			ExpiresIn:   3600,

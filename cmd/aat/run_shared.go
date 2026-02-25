@@ -206,9 +206,9 @@ func printRunSummary(result *engine.RunResult, out io.Writer) {
 		prefix := fmt.Sprintf("  [%d/%d] %-20s", i+1, total, step.Node)
 		if step.Error != nil {
 			if step.RetryCount > 0 {
-				fmt.Fprintf(out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(step), step.RetryCount)
+				_, _ = fmt.Fprintf(out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(step), step.RetryCount)
 			} else {
-				fmt.Fprintf(out, "%s ERROR: %s\n", prefix, step.Error)
+				_, _ = fmt.Fprintf(out, "%s ERROR: %s\n", prefix, step.Error)
 			}
 		} else if step.Response != nil {
 			status := fmt.Sprintf("%d", step.StatusCode)
@@ -216,37 +216,37 @@ func printRunSummary(result *engine.RunResult, out io.Writer) {
 			if step.Validation != nil && !step.Validation.Passed {
 				validMark = "  ASSERTIONS FAILED"
 			}
-			fmt.Fprintf(out, "%s %s  %dms%s\n", prefix, status, step.Duration.Milliseconds(), validMark)
+			_, _ = fmt.Fprintf(out, "%s %s  %dms%s\n", prefix, status, step.Duration.Milliseconds(), validMark)
 			for _, do := range step.DisplayOutputs {
-				fmt.Fprintf(out, "        %s: %v\n", do.Label, do.Value)
+				_, _ = fmt.Fprintf(out, "        %s: %v\n", do.Label, do.Value)
 			}
 		} else {
-			fmt.Fprintf(out, "%s (no response)\n", prefix)
+			_, _ = fmt.Fprintf(out, "%s (no response)\n", prefix)
 		}
 	}
 
 	if len(result.CleanupResults) > 0 {
-		fmt.Fprintln(out, "\n  cleanup:")
+		_, _ = fmt.Fprintln(out, "\n  cleanup:")
 		for _, step := range result.CleanupResults {
 			prefix := fmt.Sprintf("    %-22s", step.Node)
 			if step.Error != nil {
-				fmt.Fprintf(out, "%s ERROR: %s\n", prefix, step.Error)
+				_, _ = fmt.Fprintf(out, "%s ERROR: %s\n", prefix, step.Error)
 			} else if step.Response != nil {
-				fmt.Fprintf(out, "%s %d  %dms\n", prefix, step.StatusCode, step.Duration.Milliseconds())
+				_, _ = fmt.Fprintf(out, "%s %d  %dms\n", prefix, step.StatusCode, step.Duration.Milliseconds())
 			} else {
-				fmt.Fprintf(out, "%s (no response)\n", prefix)
+				_, _ = fmt.Fprintf(out, "%s (no response)\n", prefix)
 			}
 		}
 	}
 
-	fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out)
 	switch result.Outcome {
 	case engine.OutcomePassed:
-		fmt.Fprintf(out, "PASSED (%d/%d steps, %s)\n", total, total, totalDuration(result))
+		_, _ = fmt.Fprintf(out, "PASSED (%d/%d steps, %s)\n", total, total, totalDuration(result))
 	case engine.OutcomeFailed:
-		fmt.Fprintf(out, "FAILED: %s\n", outcomeMessage(result))
+		_, _ = fmt.Fprintf(out, "FAILED: %s\n", outcomeMessage(result))
 	case engine.OutcomeError:
-		fmt.Fprintf(out, "ERROR: %s\n", outcomeMessage(result))
+		_, _ = fmt.Fprintf(out, "ERROR: %s\n", outcomeMessage(result))
 	}
 }
 

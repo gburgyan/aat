@@ -110,7 +110,7 @@ func TestRunCommand_SuccessfulRun(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"result": "test-output"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "test-output"})
 	}))
 	defer apiServer.Close()
 
@@ -137,7 +137,7 @@ func TestRunCommand_SuccessfulRun(t *testing.T) {
 func TestRunCommand_FailedStep(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": "internal"}`))
+		_, _ = w.Write([]byte(`{"error": "internal"}`))
 	}))
 	defer apiServer.Close()
 
@@ -158,7 +158,7 @@ func TestRunCommand_WithCustomHeaders(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedHeader = r.Header.Get("X-Custom")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -183,7 +183,7 @@ func TestRunCommand_WithCustomHeaders(t *testing.T) {
 func TestExitCode_Passed(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -204,7 +204,7 @@ func TestExitCode_FailedStep(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "bad request"}`))
+		_, _ = w.Write([]byte(`{"error": "bad request"}`))
 	}))
 	defer apiServer.Close()
 
@@ -268,7 +268,7 @@ func TestExitCode_PlanValidationError(t *testing.T) {
 func TestJSON_SuccessfulRun(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -307,7 +307,7 @@ func TestJSON_FailedRun(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "invalid"}`))
+		_, _ = w.Write([]byte(`{"error": "invalid"}`))
 	}))
 	defer apiServer.Close()
 
@@ -351,7 +351,7 @@ func TestJSON_InfraError(t *testing.T) {
 func TestQuiet_SuppressesProgressMessages(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -392,7 +392,7 @@ func TestQuiet_SuppressesProgressMessages(t *testing.T) {
 func TestProgressOutput_NotQuiet(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -417,7 +417,7 @@ func TestProgressOutput_NotQuiet(t *testing.T) {
 func TestRunSummary_ArchivePath(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -444,7 +444,7 @@ func TestRunSummary_ArchivePath(t *testing.T) {
 func TestExecuteRun_JSONOutput(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -465,11 +465,11 @@ func TestExecuteRun_JSONOutput(t *testing.T) {
 		JSON:          true,
 	})
 
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	var buf bytes.Buffer
-	io.Copy(&buf, r)
+	_, _ = io.Copy(&buf, r)
 
 	assert.Equal(t, 0, code)
 
@@ -603,7 +603,7 @@ func TestRunCommand_PlanAuth_OverridesEnvAuth(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -645,7 +645,7 @@ func TestRunCommand_PlanHeaders_MergeWithEnv(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedHeaders = r.Header
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 
@@ -688,7 +688,7 @@ func TestRunCommand_NoPlanAuth_UsesEnvAuth(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 	}))
 	defer apiServer.Close()
 

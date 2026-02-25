@@ -208,9 +208,7 @@ func prefixStepRefs(sub *plan.Plan, prefix string) {
 					step.Values[name] = sv
 				}
 			}
-			if sv.Select != nil && sv.From != "" {
-				// already handled above
-			}
+			// sv.Select != nil && sv.From != "" — already handled above
 		}
 
 		// Rewrite named selection from refs.

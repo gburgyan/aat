@@ -57,7 +57,7 @@ func (r ScaffoldExtractRule) MarshalYAML() (interface{}, error) {
 		Path   string            `yaml:"path"`
 		Fields map[string]string `yaml:"fields,omitempty"`
 	}
-	return raw{Path: r.Path, Fields: r.Fields}, nil
+	return raw(r), nil
 }
 
 // Generate produces a graph and template stubs from an OAS spec.

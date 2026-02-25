@@ -50,7 +50,7 @@ func TestResolveProjectPaths_CWDManifest(t *testing.T) {
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	require.NoError(t, os.Chdir(dir))
 
 	result, err := ResolveProjectPaths(ProjectPaths{})
@@ -75,7 +75,7 @@ func TestResolveProjectPaths_EnvVar(t *testing.T) {
 	// chdir away from the manifest so CWD discovery doesn't find it
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	tmpEmpty := t.TempDir()
 	require.NoError(t, os.Chdir(tmpEmpty))
 
@@ -97,7 +97,7 @@ func TestResolveProjectPaths_EnvVarAsFile(t *testing.T) {
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	tmpEmpty := t.TempDir()
 	require.NoError(t, os.Chdir(tmpEmpty))
 
@@ -118,7 +118,7 @@ func TestResolveProjectPaths_ExplicitOverridesManifest(t *testing.T) {
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	require.NoError(t, os.Chdir(dir))
 
 	overrides := ProjectPaths{
@@ -144,7 +144,7 @@ func TestResolveProjectPaths_ExplicitManifest(t *testing.T) {
 	// chdir away so CWD discovery doesn't find it
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	tmpEmpty := t.TempDir()
 	require.NoError(t, os.Chdir(tmpEmpty))
 	t.Setenv("AAT_PROJECT", "")
@@ -173,7 +173,7 @@ func TestResolveProjectPaths_ExplicitManifestOverriddenByFields(t *testing.T) {
 	// chdir away so CWD discovery doesn't find it
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	tmpEmpty := t.TempDir()
 	require.NoError(t, os.Chdir(tmpEmpty))
 	t.Setenv("AAT_PROJECT", "")
@@ -210,7 +210,7 @@ environment: explicit-env.yaml
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	require.NoError(t, os.Chdir(cwdDir))
 	t.Setenv("AAT_PROJECT", "")
 
@@ -238,7 +238,7 @@ plans: plans/
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	require.NoError(t, os.Chdir(dir))
 
 	result, err := ResolveProjectPaths(ProjectPaths{})
@@ -261,7 +261,7 @@ plans: plans/
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	require.NoError(t, os.Chdir(dir))
 
 	result, err := ResolveProjectPaths(ProjectPaths{
@@ -287,7 +287,7 @@ templates: templates/
 	// Isolate from user config and env
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	tmpEmpty := t.TempDir()
 	require.NoError(t, os.Chdir(tmpEmpty))
 	t.Setenv("AAT_PROJECT", "")
@@ -303,7 +303,7 @@ templates: templates/
 func TestResolveProjectPaths_NothingFound(t *testing.T) {
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
-	defer os.Chdir(origDir)
+	defer func() { _ = os.Chdir(origDir) }()
 	tmpEmpty := t.TempDir()
 	require.NoError(t, os.Chdir(tmpEmpty))
 

@@ -37,7 +37,7 @@ func ExportDir(dir string, w io.Writer) error {
 	}
 
 	zw := zip.NewWriter(w)
-	defer zw.Close()
+	defer func() { _ = zw.Close() }()
 
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -62,7 +62,7 @@ func ExportDir(dir string, w io.Writer) error {
 		if err != nil {
 			return fmt.Errorf("opening %s: %w", rel, err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		fi, err := f.Stat()
 		if err != nil {
@@ -126,7 +126,7 @@ func ImportArchive(r io.ReaderAt, size int64, name string, destDir string) (dirN
 	for _, f := range zr.File {
 		if err := extractZipEntry(f, destPath); err != nil {
 			// Clean up on failure.
-			os.RemoveAll(destPath)
+			_ = os.RemoveAll(destPath)
 			return "", "", fmt.Errorf("import: extracting %s: %w", f.Name, err)
 		}
 	}
@@ -245,13 +245,13 @@ func extractZipEntry(f *zip.File, destDir string) error {
 	if err != nil {
 		return fmt.Errorf("opening zip entry: %w", err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	out, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return fmt.Errorf("creating file: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if _, err := io.Copy(out, rc); err != nil {
 		return fmt.Errorf("writing file: %w", err)

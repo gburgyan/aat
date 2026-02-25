@@ -3,19 +3,11 @@ package oas
 import (
 	"testing"
 
-	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/gburgyan/aat/graph"
 )
-
-func loadPetstore(t *testing.T) *v3high.Document {
-	t.Helper()
-	model, err := LoadSpec("testdata/petstore.yaml")
-	require.NoError(t, err)
-	return model
-}
 
 func newValidatorWithPetstore(t *testing.T) *Validator {
 	t.Helper()

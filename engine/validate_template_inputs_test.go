@@ -42,7 +42,7 @@ func TestValidateTemplateInputs(t *testing.T) {
 						Body:   `{"name": "{{name}}", "species": "{{species}}"}`,
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr: false,
 		},
@@ -72,7 +72,7 @@ func TestValidateTemplateInputs(t *testing.T) {
 						Body:   `{"name": "{{name}}", "color": "{{color}}"}`,
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr: false,
 		},
@@ -102,7 +102,7 @@ func TestValidateTemplateInputs(t *testing.T) {
 						Body:   `{"name": "{{name}}", "color": "{{color}}"}`,
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr: false,
 		},
@@ -130,7 +130,7 @@ func TestValidateTemplateInputs(t *testing.T) {
 						Body:   `{"name": "{{name}}", "color": "{{color}}"}`,
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr:    true,
 			wantErrMsg: `node "createPet": template requires placeholder "color" but graph input is optional with no default`,
@@ -175,7 +175,7 @@ func TestValidateTemplateInputs(t *testing.T) {
 						Path:   "/api/{{workbenchId}}/items/{{id}}",
 					},
 				}
-				r.Register("callAPI", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("callAPI", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr: false,
 		},
@@ -203,7 +203,7 @@ func TestValidateTemplateInputs(t *testing.T) {
 						Body:   `{"item": "{{item}}"{{?note}}, "note": "{{note}}"{{/note}}}`,
 					},
 				}
-				r.Register("createOrder", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createOrder", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr: false,
 		},
@@ -232,7 +232,7 @@ func TestValidateTemplateInputs(t *testing.T) {
 						Body:   `{"name": "{{name}}", "color": "{{color}}", "breed": "{{breed}}"}`,
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			wantErr:    true,
 			wantErrMsg: "template input validation failed",
@@ -292,7 +292,7 @@ func TestValidateTemplateInputsForPlan(t *testing.T) {
 						Body:   `{"name": "{{name}}", "color": "{{color}}"}`,
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			plan: &plan.Plan{
 				Execution: plan.Execution{
@@ -332,7 +332,7 @@ func TestValidateTemplateInputsForPlan(t *testing.T) {
 						Body:   `{"name": "{{name}}", "color": "{{color}}"}`,
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl))
 			},
 			plan: &plan.Plan{
 				Execution: plan.Execution{
@@ -376,7 +376,7 @@ func TestValidateTemplateInputsForPlan(t *testing.T) {
 						Body:   `{"name": "{{name}}"}`,
 					},
 				}
-				r.Register("createPet", adapter.NewTemplateAdapter(tmpl1))
+				_ = r.Register("createPet", adapter.NewTemplateAdapter(tmpl1))
 				// brokenNode has unconditional placeholder for optional input
 				tmpl2 := adapter.Template{
 					Adapter:  "brokenNode",
@@ -387,7 +387,7 @@ func TestValidateTemplateInputsForPlan(t *testing.T) {
 						Body:   `{"data": "{{data}}"}`,
 					},
 				}
-				r.Register("brokenNode", adapter.NewTemplateAdapter(tmpl2))
+				_ = r.Register("brokenNode", adapter.NewTemplateAdapter(tmpl2))
 			},
 			plan: &plan.Plan{
 				Execution: plan.Execution{
@@ -421,7 +421,7 @@ func TestValidateTemplateInputsForPlan(t *testing.T) {
 						Path:   "/items/{{id}}?reason={{reason}}",
 					},
 				}
-				r.Register("cleanup", adapter.NewTemplateAdapter(tmpl))
+				_ = r.Register("cleanup", adapter.NewTemplateAdapter(tmpl))
 			},
 			plan: &plan.Plan{
 				Execution: plan.Execution{

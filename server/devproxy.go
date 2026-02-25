@@ -29,7 +29,7 @@ func (s *Server) devProxy() http.HandlerFunc {
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusBadGateway)
-			fmt.Fprintf(w, "Vite dev server is not running at %s.\n\nStart it with:\n  cd server/web && npm run dev\n", viteURL)
+			_, _ = fmt.Fprintf(w, "Vite dev server is not running at %s.\n\nStart it with:\n  cd server/web && npm run dev\n", viteURL)
 		},
 	}
 

@@ -40,7 +40,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// List runs
 	resp, err := client.Get(ts.URL + "/api/runs")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "application/json; charset=utf-8", resp.Header.Get("Content-Type"))
 
@@ -52,7 +52,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Get run
 	resp, err = client.Get(ts.URL + "/api/runs/run-20260101-100000-aaaa0001")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var run RunDetail
@@ -64,7 +64,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Get step
 	resp, err = client.Get(ts.URL + "/api/runs/run-20260101-100000-aaaa0001/steps/SearchOffers")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var step StepDetail
@@ -78,20 +78,20 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Latest redirect
 	resp, err = client.Get(ts.URL + "/api/runs/latest")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusFound, resp.StatusCode)
 	assert.Equal(t, "/api/runs/run-20260102-100000-aaaa0002", resp.Header.Get("Location"))
 
 	// Not found
 	resp, err = client.Get(ts.URL + "/api/runs/run-nonexistent")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	// Health
 	resp, err = client.Get(ts.URL + "/health")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var health map[string]string
@@ -152,7 +152,7 @@ func TestDevProxy_NoVite(t *testing.T) {
 func TestDevProxy_WithMockVite(t *testing.T) {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte("<html><body>vite page</body></html>"))
+		_, _ = w.Write([]byte("<html><body>vite page</body></html>"))
 	}))
 	defer mock.Close()
 
@@ -169,7 +169,7 @@ func TestDevProxy_WithMockVite(t *testing.T) {
 
 func TestDevProxy_APINotProxied(t *testing.T) {
 	mock := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("from vite"))
+		_, _ = w.Write([]byte("from vite"))
 	}))
 	defer mock.Close()
 
@@ -207,7 +207,7 @@ func TestIntegration_ListenAndShutdown(t *testing.T) {
 	// Verify we can reach it
 	resp, err := http.Get("http://" + s.Addr() + "/health")
 	require.NoError(t, err)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	// Graceful shutdown

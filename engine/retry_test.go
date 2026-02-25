@@ -71,12 +71,12 @@ func TestRetryOnTransientStatus(t *testing.T) {
 		count := callCount.Add(1)
 		if count <= 2 {
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte(`{"error": "service unavailable"}`))
+			_, _ = w.Write([]byte(`{"error": "service unavailable"}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -100,7 +100,7 @@ func TestRetryExhausted(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": "service unavailable"}`))
+		_, _ = w.Write([]byte(`{"error": "service unavailable"}`))
 	}))
 	defer server.Close()
 
@@ -126,7 +126,7 @@ func TestNoRetryWithoutConfig(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": "service unavailable"}`))
+		_, _ = w.Write([]byte(`{"error": "service unavailable"}`))
 	}))
 	defer server.Close()
 
@@ -150,7 +150,7 @@ func TestNoRetryOnClientError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
-		w.Write([]byte(`{"error": "bad request"}`))
+		_, _ = w.Write([]byte(`{"error": "bad request"}`))
 	}))
 	defer server.Close()
 
@@ -175,7 +175,7 @@ func TestFailOnOverridesOn(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(`{"error": "server error"}`))
+		_, _ = w.Write([]byte(`{"error": "server error"}`))
 	}))
 	defer server.Close()
 
@@ -202,7 +202,7 @@ func TestRetryRespectsContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		callCount.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error": "service unavailable"}`))
+		_, _ = w.Write([]byte(`{"error": "service unavailable"}`))
 	}))
 	defer server.Close()
 
@@ -228,7 +228,7 @@ func TestExistingBehaviorPreserved(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write([]byte(`{}`))
+			_, _ = w.Write([]byte(`{}`))
 		}))
 		defer server.Close()
 
@@ -246,7 +246,7 @@ func TestExistingBehaviorPreserved(t *testing.T) {
 	t.Run("failure flow", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(`{"error": "bad"}`))
+			_, _ = w.Write([]byte(`{"error": "bad"}`))
 		}))
 		defer server.Close()
 
@@ -269,12 +269,12 @@ func TestRetryOnServerError(t *testing.T) {
 		count := callCount.Add(1)
 		if count <= 1 {
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(`{"error": "internal server error"}`))
+			_, _ = w.Write([]byte(`{"error": "internal server error"}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -297,12 +297,12 @@ func TestRetryOnExplicitOnList(t *testing.T) {
 		count := callCount.Add(1)
 		if count <= 1 {
 			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte(`{"error": "unauthorized"}`))
+			_, _ = w.Write([]byte(`{"error": "unauthorized"}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{}`))
+		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer server.Close()
 
@@ -346,7 +346,7 @@ func TestRetry_CancelledContextReturnsImmediately(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		atomic.AddInt32(&callCount, 1)
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(`{"error":"unavailable"}`))
+		_, _ = w.Write([]byte(`{"error":"unavailable"}`))
 	}))
 	defer server.Close()
 

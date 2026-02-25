@@ -286,12 +286,6 @@ func formatArchiveDiff(a1, a2 *archive.Archive) string {
 	b.WriteString("\n")
 
 	// Match steps by node name (position-based for duplicates)
-	type stepPair struct {
-		node string
-		s1   *archive.StepRecord
-		s2   *archive.StepRecord
-	}
-
 	pairs := matchSteps(a1.Steps, a2.Steps)
 
 	if len(pairs) > 0 {
