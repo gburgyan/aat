@@ -1,0 +1,11 @@
+execution:
+  steps:
+    - node: search
+      description: "Search for items"
+    - node: book
+      dependsOn: [search]
+      values:
+        itemId: {from: search.results}
+  cleanup:
+    - node: commit
+      runOn: always

@@ -68,25 +68,22 @@ func TestFindWorkflowTemplate_NoMatch(t *testing.T) {
 // --- LoadWorkflowTemplate ---
 
 func TestLoadWorkflowTemplate_Success(t *testing.T) {
-	// Use the existing travelport exchange.yaml as a real template.
-	g, err := graph.ParseFile("../travelport/graph.yaml")
+	g, err := graph.ParseFile("testdata/compat/graph.yaml")
 	require.NoError(t, err)
 
-	p, err := LoadWorkflowTemplate("workflows/exchange.yaml", "../travelport", g)
+	p, err := LoadWorkflowTemplate("workflows/simple.yaml", "testdata", g)
 	require.NoError(t, err)
 	require.NotNil(t, p)
 
-	// Should have steps
 	assert.NotEmpty(t, p.Execution.Steps)
-	// Should have cleanup
 	assert.NotEmpty(t, p.Execution.Cleanup)
 }
 
 func TestLoadWorkflowTemplate_AbsolutePath(t *testing.T) {
-	g, err := graph.ParseFile("../travelport/graph.yaml")
+	g, err := graph.ParseFile("testdata/compat/graph.yaml")
 	require.NoError(t, err)
 
-	absPath, err := filepath.Abs("../travelport/workflows/exchange.yaml")
+	absPath, err := filepath.Abs("testdata/workflows/simple.yaml")
 	require.NoError(t, err)
 
 	p, err := LoadWorkflowTemplate(absPath, "/nonexistent", g)

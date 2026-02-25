@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -83,14 +82,3 @@ func TestPlanValidate_AllTemplates_WithUnfed(t *testing.T) {
 	assert.Equal(t, 0, code)
 }
 
-func TestPlanValidate_TravelportWorkflows(t *testing.T) {
-	graphPath := "../../travelport/graph.yaml"
-	if _, err := os.Stat(graphPath); os.IsNotExist(err) {
-		t.Skip("travelport graph not available")
-	}
-	code := planValidateCommand(&planValidateArgs{
-		GraphPath: graphPath,
-		Unfed:     true,
-	})
-	assert.Equal(t, 0, code)
-}
