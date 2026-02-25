@@ -612,13 +612,39 @@ Nine things happened, and you configured exactly three of them: the workflow nam
 
 ---
 
+## Browsing Results (`aat web view`)
+
+After any run, the full details are preserved in a JSON archive under `_output/runs/`. You can read the JSON directly, but the web UI is the faster way to make sense of it:
+
+```bash
+../../aat web view
+```
+
+This opens the most recent run in your browser. Here is what you get:
+
+**A Gantt timeline of the entire run.** Every step is a bar on the timeline — you can see at a glance which steps ran in parallel, how long each took, and where the time went. Cleanup steps appear separately so you can distinguish test logic from teardown.
+
+**Full request and response details for every step.** Click a step and you see the HTTP method, URL, headers, request body, response status, response body, and extracted outputs. No detail is lost. If a test fails next week because the API changed a field name, you do not have to reproduce the failure — the archive already has the exact response that caused it.
+
+**Assertion results.** Each step shows which assertions passed and which failed, with the expected and actual values side by side.
+
+**Batch runs.** When you run `aat run batch`, the web UI shows every plan in the batch with the same level of detail. You can drill from the batch summary into any individual run and from there into any step.
+
+### Why this matters
+
+The archive is a self-contained record of what happened. You can send the archive directory to a teammate, attach it to a Jira ticket, or store it as a CI artifact. Anyone who opens it with `aat web view <path>` sees exactly what the API returned — not a screenshot, not a summary, not someone's recollection of what went wrong. The raw facts, every header and every byte.
+
+No more screenshots and handwaving. The archive gets right to the evidence.
+
+> **Further reading:** [Web UI and Archives](web-ui.md)
+
+---
+
 ## What You Can Do Next
 
 - **Validate the project:** `aat validate` checks graphs, templates, plans, and workflows for consistency. See [Validation](validation.md).
 
-- **Browse results in the web UI:** `aat web view` opens the most recent run with a Gantt timeline and request/response details. See [Web UI and Archives](web-ui.md).
-
-- **Run in CI/CD:** Add `--json --quiet` to get machine-readable output and clean exit codes. See [CI/CD Integration](ci-cd.md).
+- **Run in CI/CD:** Add `--json --quiet` to get machine-readable output and clean exit codes. Archives make great pipeline artifacts. See [CI/CD Integration](ci-cd.md).
 
 - **Build your own project:** The [Quickstart](quickstart.md) scaffolds a graph from an OpenAPI spec in 5 minutes. The [Tutorial](tutorial.md) builds everything from scratch.
 
