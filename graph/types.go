@@ -291,6 +291,7 @@ type Output struct {
 	Name          string  `yaml:"name"`
 	Type          string  `yaml:"type"`
 	Description   string  `yaml:"description,omitempty"`
+	Optional      bool    `yaml:"optional,omitempty"`
 	Display       string  `yaml:"display,omitempty"`
 	ElementFields []Field `yaml:"elementFields,omitempty"`
 }

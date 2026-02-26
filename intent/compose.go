@@ -208,6 +208,13 @@ func prefixStepRefs(sub *plan.Plan, prefix string) {
 					step.Values[name] = sv
 				}
 			}
+			if sv.FromInput != "" {
+				fromStep := splitNodeName(sv.FromInput)
+				if newID, ok := idMap[fromStep]; ok {
+					sv.FromInput = newID + sv.FromInput[len(fromStep):]
+					step.Values[name] = sv
+				}
+			}
 			// sv.Select != nil && sv.From != "" — already handled above
 		}
 
@@ -375,6 +382,9 @@ func fixFromDependencies(sub *plan.Plan) {
 			if sv.From != "" {
 				refs = append(refs, splitNodeName(sv.From))
 			}
+			if sv.FromInput != "" {
+				refs = append(refs, splitNodeName(sv.FromInput))
+			}
 		}
 		for _, sel := range step.Selections {
 			if sel.From != "" {
@@ -417,6 +427,9 @@ func ensureFromDeps(p *plan.Plan) {
 		for _, sv := range step.Values {
 			if sv.From != "" {
 				refs = append(refs, splitNodeName(sv.From))
+			}
+			if sv.FromInput != "" {
+				refs = append(refs, splitNodeName(sv.FromInput))
 			}
 		}
 		for _, sel := range step.Selections {

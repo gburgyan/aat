@@ -955,6 +955,49 @@ func TestTemplateAdapter_ExtractOutputs(t *testing.T) {
 		assert.Empty(t, outputs)
 	})
 
+	t.Run("optional extract path missing is skipped", func(t *testing.T) {
+		a := NewTemplateAdapter(Template{
+			Response: TemplateResponse{
+				Extract: map[string]ExtractRule{
+					"required": {Path: "$.data.id"},
+					"optional": {Path: "$.data.missing", Optional: true},
+				},
+			},
+		})
+
+		resp := &Response{
+			StatusCode: 200,
+			Body:       []byte(`{"data": {"id": "abc-123"}}`),
+		}
+
+		outputs, err := a.ExtractOutputs(resp)
+		require.NoError(t, err)
+		assert.Equal(t, "abc-123", outputs["required"])
+		_, hasOptional := outputs["optional"]
+		assert.False(t, hasOptional, "optional missing path should not appear in outputs")
+	})
+
+	t.Run("optional extract path present is extracted", func(t *testing.T) {
+		a := NewTemplateAdapter(Template{
+			Response: TemplateResponse{
+				Extract: map[string]ExtractRule{
+					"required": {Path: "$.data.id"},
+					"optional": {Path: "$.data.name", Optional: true},
+				},
+			},
+		})
+
+		resp := &Response{
+			StatusCode: 200,
+			Body:       []byte(`{"data": {"id": "abc-123", "name": "test"}}`),
+		}
+
+		outputs, err := a.ExtractOutputs(resp)
+		require.NoError(t, err)
+		assert.Equal(t, "abc-123", outputs["required"])
+		assert.Equal(t, "test", outputs["optional"])
+	})
+
 	t.Run("bare path without dollar prefix", func(t *testing.T) {
 		a := NewTemplateAdapter(Template{
 			Response: TemplateResponse{

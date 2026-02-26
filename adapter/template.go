@@ -39,10 +39,12 @@ type TemplateResponse struct {
 
 // ExtractRule defines how to extract a single output from the response.
 // For scalar values, only Path is set. For array values with element
-// transformation, both Path and Fields are set.
+// transformation, both Path and Fields are set. When Optional is true,
+// a missing path does not produce an error — the output is simply omitted.
 type ExtractRule struct {
-	Path   string            `yaml:"path"`
-	Fields map[string]string `yaml:"fields,omitempty"`
+	Path     string            `yaml:"path"`
+	Fields   map[string]string `yaml:"fields,omitempty"`
+	Optional bool              `yaml:"optional,omitempty"`
 }
 
 // UnmarshalYAML handles both string and object forms of extract rules.
@@ -206,6 +208,9 @@ func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error)
 		gpath := normalizeJSONPath(rule.Path)
 		result := gjson.Get(bodyStr, gpath)
 		if !result.Exists() {
+			if rule.Optional {
+				continue
+			}
 			return nil, fmt.Errorf("extract path %q (%s) not found in response", name, rule.Path)
 		}
 

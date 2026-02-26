@@ -382,6 +382,69 @@ func TestValidateAdapterOutputs(t *testing.T) {
 			},
 		},
 		{
+			name: "optional output without extract rule passes",
+			graph: &graph.Graph{
+				Nodes: map[string]*graph.Node{
+					"workbench": {
+						Name:    "workbench",
+						Adapter: "workbench",
+						Outputs: []graph.Output{
+							{Name: "id", Type: "string"},
+							{Name: "maybeFop", Type: "string", Optional: true},
+						},
+					},
+				},
+			},
+			setup: func(r *adapter.Registry) {
+				tmpl := adapter.Template{
+					Adapter:  "workbench",
+					Protocol: "http",
+					Request:  adapter.TemplateRequest{Method: "POST", Path: "/workbench"},
+					Response: adapter.TemplateResponse{
+						Extract: map[string]adapter.ExtractRule{
+							"id": {Path: "id"},
+							// No extract rule for maybeFop — optional, so OK
+						},
+					},
+				}
+				_ = r.Register("workbench", adapter.NewTemplateAdapter(tmpl))
+			},
+			wantErr: false,
+		},
+		{
+			name: "non-optional output without extract rule still fails",
+			graph: &graph.Graph{
+				Nodes: map[string]*graph.Node{
+					"workbench": {
+						Name:    "workbench",
+						Adapter: "workbench",
+						Outputs: []graph.Output{
+							{Name: "id", Type: "string"},
+							{Name: "requiredFop", Type: "string"},
+						},
+					},
+				},
+			},
+			setup: func(r *adapter.Registry) {
+				tmpl := adapter.Template{
+					Adapter:  "workbench",
+					Protocol: "http",
+					Request:  adapter.TemplateRequest{Method: "POST", Path: "/workbench"},
+					Response: adapter.TemplateResponse{
+						Extract: map[string]adapter.ExtractRule{
+							"id": {Path: "id"},
+						},
+					},
+				}
+				_ = r.Register("workbench", adapter.NewTemplateAdapter(tmpl))
+			},
+			wantErr:     true,
+			wantErrType: true,
+			wantErrors: []string{
+				`node "workbench": graph declares output "requiredFop" but template does not extract it`,
+			},
+		},
+		{
 			name: "adapter not in registry skipped",
 			graph: &graph.Graph{
 				Nodes: map[string]*graph.Node{

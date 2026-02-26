@@ -88,6 +88,9 @@ func validateAdapterOutputsForNodes(g *graph.Graph, registry *adapter.Registry, 
 		// Graph output not extracted by template.
 		for _, out := range node.Outputs {
 			if !extractKeys[out.Name] {
+				if out.Optional {
+					continue
+				}
 				errs = append(errs, fmt.Sprintf("node %q: graph declares output %q but template does not extract it", name, out.Name))
 			}
 		}
