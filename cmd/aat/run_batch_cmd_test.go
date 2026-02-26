@@ -11,7 +11,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/archive"
+	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -656,6 +659,167 @@ func TestBatchArchive_WriteAndRead(t *testing.T) {
 	assert.Equal(t, "passed", loaded.Result.Outcome)
 	assert.Len(t, loaded.Runs, 1)
 	assert.Equal(t, "test", loaded.Runs[0].PlanName)
+}
+
+// --- dedupScore tests ---
+
+func TestDedupScore_ExactMatch(t *testing.T) {
+	// spec.layers = [premium], effective = [premium] → symDiff=0, score=1
+	score := dedupScore([]string{"premium"}, []string{"premium"})
+	assert.Equal(t, 1, score)
+}
+
+func TestDedupScore_BaseMismatch(t *testing.T) {
+	// spec.layers = [], effective = [premium] → symDiff=1, score=101
+	score := dedupScore(nil, []string{"premium"})
+	assert.Equal(t, 101, score)
+}
+
+func TestDedupScore_BaseNoLayers(t *testing.T) {
+	// spec.layers = [], effective = [] → symDiff=0, score=0
+	score := dedupScore(nil, nil)
+	assert.Equal(t, 0, score)
+}
+
+func TestDedupScore_ExtraLayer(t *testing.T) {
+	// spec.layers = [european], effective = [european] → symDiff=0, score=1
+	score := dedupScore([]string{"european"}, []string{"european"})
+	assert.Equal(t, 1, score)
+}
+
+func TestDedupScore_RecipeEmbedded_PremiumWins(t *testing.T) {
+	// Recipe embeds premium:
+	// premium spec: spec.layers=[premium], effective=[premium] → score=1
+	// base spec: spec.layers=[], effective=[premium] → score=101
+	premiumScore := dedupScore([]string{"premium"}, []string{"premium"})
+	baseScore := dedupScore(nil, []string{"premium"})
+	assert.Less(t, premiumScore, baseScore, "premium should win over base")
+}
+
+func TestDedupScore_HardCoded_BaseWins(t *testing.T) {
+	// Hard-coded plan (layers don't affect anything):
+	// base spec: spec.layers=[], effective=[] → score=0
+	// european spec: spec.layers=[european], effective=[european] → score=1
+	baseScore := dedupScore(nil, nil)
+	europeanScore := dedupScore([]string{"european"}, []string{"european"})
+	assert.Less(t, baseScore, europeanScore, "base should win over european")
+}
+
+// --- deduplicateSpecs tests ---
+
+func testRunContext(t *testing.T) *runContext {
+	t.Helper()
+	g, err := graph.ParseFile("testdata/test_graph.yaml")
+	require.NoError(t, err)
+	registry := adapter.NewRegistry()
+	_, err = adapter.LoadTemplates("testdata/templates", registry)
+	require.NoError(t, err)
+	return &runContext{
+		Graph:    g,
+		Registry: registry,
+		GraphDir: "testdata",
+	}
+}
+
+func TestDeduplicateSpecs_NoDuplicates(t *testing.T) {
+	planDir := t.TempDir()
+	writeFile(t, filepath.Join(planDir, "alpha.yaml"),
+		"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: hello\n")
+	writeFile(t, filepath.Join(planDir, "beta.yaml"),
+		"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: world\n")
+
+	rctx := testRunContext(t)
+	specs := []batchRunSpec{
+		{entry: config.PlanEntry{Name: "alpha.yaml", FullPath: filepath.Join(planDir, "alpha.yaml")}, layers: nil},
+		{entry: config.PlanEntry{Name: "beta.yaml", FullPath: filepath.Join(planDir, "beta.yaml")}, layers: nil},
+	}
+
+	result, err := deduplicateSpecs(rctx, specs)
+	require.NoError(t, err)
+	assert.Len(t, result.specs, 2, "no duplicates should be removed")
+	assert.Empty(t, result.skipped)
+}
+
+func TestDeduplicateSpecs_IdenticalPermutations(t *testing.T) {
+	planDir := t.TempDir()
+	// Same plan, same values — two permutations that produce identical instantiated plans
+	writeFile(t, filepath.Join(planDir, "plan.yaml"),
+		"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: fixed\n")
+
+	rctx := testRunContext(t)
+	specs := []batchRunSpec{
+		{entry: config.PlanEntry{Name: "plan.yaml", FullPath: filepath.Join(planDir, "plan.yaml")}, layers: nil, permutation: "(base)"},
+		{entry: config.PlanEntry{Name: "plan.yaml", FullPath: filepath.Join(planDir, "plan.yaml")}, layers: []string{"european"}, permutation: "european"},
+	}
+
+	result, err := deduplicateSpecs(rctx, specs)
+	require.NoError(t, err)
+	assert.Len(t, result.specs, 1, "should keep one canonical spec")
+	assert.Len(t, result.skipped, 1, "should skip one duplicate")
+
+	// Base should win because hard-coded plan: base score=0 < european score=1
+	assert.Equal(t, "(base)", result.specs[0].permutation)
+	assert.Contains(t, result.skipped[0].duplicateOf, "(base)")
+}
+
+func TestDeduplicateSpecs_DifferentFiles_NeverDeduped(t *testing.T) {
+	planDir := t.TempDir()
+	// Two different files with identical content
+	content := "execution:\n  steps:\n    - node: testNode\n      values:\n        input1: same\n"
+	writeFile(t, filepath.Join(planDir, "alpha.yaml"), content)
+	writeFile(t, filepath.Join(planDir, "beta.yaml"), content)
+
+	rctx := testRunContext(t)
+	specs := []batchRunSpec{
+		{entry: config.PlanEntry{Name: "alpha.yaml", FullPath: filepath.Join(planDir, "alpha.yaml")}, layers: nil, permutation: "(base)"},
+		{entry: config.PlanEntry{Name: "beta.yaml", FullPath: filepath.Join(planDir, "beta.yaml")}, layers: nil, permutation: "(base)"},
+	}
+
+	result, err := deduplicateSpecs(rctx, specs)
+	require.NoError(t, err)
+	assert.Len(t, result.specs, 2, "different plan files should never be deduped against each other")
+	assert.Empty(t, result.skipped)
+}
+
+func TestDeduplicateSpecs_ParseError_IncludedAsUnique(t *testing.T) {
+	planDir := t.TempDir()
+	writeFile(t, filepath.Join(planDir, "good.yaml"),
+		"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: hello\n")
+	writeFile(t, filepath.Join(planDir, "bad.yaml"), "this is not valid yaml: [[[")
+
+	rctx := testRunContext(t)
+	specs := []batchRunSpec{
+		{entry: config.PlanEntry{Name: "good.yaml", FullPath: filepath.Join(planDir, "good.yaml")}, layers: nil},
+		{entry: config.PlanEntry{Name: "bad.yaml", FullPath: filepath.Join(planDir, "bad.yaml")}, layers: nil},
+	}
+
+	result, err := deduplicateSpecs(rctx, specs)
+	require.NoError(t, err)
+	assert.Len(t, result.specs, 2, "error specs should be included as unique")
+	assert.Empty(t, result.skipped)
+}
+
+func TestDeduplicateSpecs_MultipleGroups(t *testing.T) {
+	planDir := t.TempDir()
+	// Plan A: has fixed values, layers don't affect it → duplicates across permutations
+	writeFile(t, filepath.Join(planDir, "planA.yaml"),
+		"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: fixed\n")
+	// Plan B: also has fixed values
+	writeFile(t, filepath.Join(planDir, "planB.yaml"),
+		"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: also-fixed\n")
+
+	rctx := testRunContext(t)
+	specs := []batchRunSpec{
+		{entry: config.PlanEntry{Name: "planA.yaml", FullPath: filepath.Join(planDir, "planA.yaml")}, layers: nil, permutation: "(base)"},
+		{entry: config.PlanEntry{Name: "planA.yaml", FullPath: filepath.Join(planDir, "planA.yaml")}, layers: []string{"european"}, permutation: "european"},
+		{entry: config.PlanEntry{Name: "planB.yaml", FullPath: filepath.Join(planDir, "planB.yaml")}, layers: nil, permutation: "(base)"},
+		{entry: config.PlanEntry{Name: "planB.yaml", FullPath: filepath.Join(planDir, "planB.yaml")}, layers: []string{"european"}, permutation: "european"},
+	}
+
+	result, err := deduplicateSpecs(rctx, specs)
+	require.NoError(t, err)
+	assert.Len(t, result.specs, 2, "should keep one canonical per plan")
+	assert.Len(t, result.skipped, 2, "should skip one duplicate per plan")
 }
 
 // --- Helpers ---

@@ -1,4 +1,4 @@
-export type Outcome = 'passed' | 'failed' | 'error';
+export type Outcome = 'passed' | 'failed' | 'error' | 'skipped';
 
 export interface ApiError {
   error: string;
@@ -291,6 +291,7 @@ export interface BatchDetail {
   passedRuns: number;
   failedRuns: number;
   errorRuns: number;
+  skippedRuns?: number;
   totalDurationMs: number;
   durationDisplay: string;
   source?: string;
@@ -313,6 +314,8 @@ export interface BatchRunSummary {
   attempts?: number;
   layers?: string[];
   permutation?: string;
+  skipped?: boolean;
+  duplicateOf?: string;
 }
 
 export interface RenameResponse {

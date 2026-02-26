@@ -79,7 +79,9 @@
       const runs = groupMap.get(label)!;
       const hasError = runs.some(r => r.outcome === 'error');
       const hasFailed = runs.some(r => r.outcome === 'failed');
-      const outcome: Outcome = hasError ? 'error' : hasFailed ? 'failed' : 'passed';
+      const hasPassed = runs.some(r => r.outcome === 'passed');
+      const allSkipped = runs.every(r => r.outcome === 'skipped');
+      const outcome: Outcome = hasError ? 'error' : hasFailed ? 'failed' : allSkipped ? 'skipped' : hasPassed ? 'passed' : 'skipped';
       return { label, runs, outcome };
     });
   });
@@ -214,6 +216,7 @@
           <span class="steps-passed">{batch.passedRuns}</span>
           {#if batch.failedRuns > 0}<span class="steps-separator"> / </span><span class="steps-failed">{batch.failedRuns}</span>{/if}
           {#if batch.errorRuns > 0}<span class="steps-separator"> / </span><span class="steps-error">{batch.errorRuns}</span>{/if}
+          {#if batch.skippedRuns && batch.skippedRuns > 0}<span class="steps-separator"> / </span><span class="steps-skipped">{batch.skippedRuns} skipped</span>{/if}
           <span class="steps-separator">of&nbsp;</span>{batch.totalRuns}
         </span>
       </div>
@@ -263,27 +266,41 @@
               </tr>
             </thead>
             <tbody>
-              {#each group.runs as run (run.runId)}
-                <tr
-                  class="run-row"
-                  role="link"
-                  tabindex="0"
-                  onclick={() => goToRun(run.runId)}
-                  onkeydown={(e: KeyboardEvent) => handleRowKeydown(e, run.runId)}
-                >
-                  <td><OutcomeBadge outcome={run.outcome} size="sm" /></td>
-                  <td class="cell-plan" title={run.planName || run.runId}>
-                    {run.planName || run.runId}
-                    {#if run.attempts && run.attempts > 1}
-                      <span class="retry-badge" title="Took {run.attempts} attempts">{run.attempts} attempts</span>
-                    {/if}
-                  </td>
-                  <td class="cell-steps">
-                    <span class="steps-passed">{run.passedCount}</span>{#if run.failedCount > 0}<span class="steps-separator"> / </span><span class="steps-failed">{run.failedCount}</span>{/if}
-                    <span class="steps-separator"> of {run.stepCount}</span>
-                  </td>
-                  <td class="cell-duration">{formatDuration(run.durationMs)}</td>
-                </tr>
+              {#each group.runs as run (run.skipped ? `${run.planName}-${run.permutation}-skipped` : run.runId)}
+                {#if run.skipped}
+                  <tr class="run-row run-row-skipped">
+                    <td><OutcomeBadge outcome="skipped" size="sm" /></td>
+                    <td class="cell-plan cell-dimmed" title={run.planName}>
+                      {run.planName}
+                      {#if run.duplicateOf}
+                        <span class="dedup-info" title="Duplicate of {run.duplicateOf}">duplicate of {run.duplicateOf}</span>
+                      {/if}
+                    </td>
+                    <td class="cell-steps cell-dimmed">&mdash;</td>
+                    <td class="cell-duration cell-dimmed">&mdash;</td>
+                  </tr>
+                {:else}
+                  <tr
+                    class="run-row"
+                    role="link"
+                    tabindex="0"
+                    onclick={() => goToRun(run.runId)}
+                    onkeydown={(e: KeyboardEvent) => handleRowKeydown(e, run.runId)}
+                  >
+                    <td><OutcomeBadge outcome={run.outcome} size="sm" /></td>
+                    <td class="cell-plan" title={run.planName || run.runId}>
+                      {run.planName || run.runId}
+                      {#if run.attempts && run.attempts > 1}
+                        <span class="retry-badge" title="Took {run.attempts} attempts">{run.attempts} attempts</span>
+                      {/if}
+                    </td>
+                    <td class="cell-steps">
+                      <span class="steps-passed">{run.passedCount}</span>{#if run.failedCount > 0}<span class="steps-separator"> / </span><span class="steps-failed">{run.failedCount}</span>{/if}
+                      <span class="steps-separator"> of {run.stepCount}</span>
+                    </td>
+                    <td class="cell-duration">{formatDuration(run.durationMs)}</td>
+                  </tr>
+                {/if}
               {/each}
             </tbody>
           </table>
@@ -301,32 +318,46 @@
         </tr>
       </thead>
       <tbody>
-        {#each batch.runs as run (run.runId)}
-          <tr
-            class="run-row"
-            role="link"
-            tabindex="0"
-            onclick={() => goToRun(run.runId)}
-            onkeydown={(e: KeyboardEvent) => handleRowKeydown(e, run.runId)}
-          >
-            <td><OutcomeBadge outcome={run.outcome} size="sm" /></td>
-            <td class="cell-plan" title={run.planName || run.runId}>
-              {run.planName || run.runId}
-              {#if run.attempts && run.attempts > 1}
-                <span class="retry-badge" title="Took {run.attempts} attempts">{run.attempts} attempts</span>
-              {/if}
-              {#if run.layers && run.layers.length > 0}
-                {#each run.layers as layer}
-                  <span class="layer-badge" title="Layer: {layer}">{layer}</span>
-                {/each}
-              {/if}
-            </td>
-            <td class="cell-steps">
-              <span class="steps-passed">{run.passedCount}</span>{#if run.failedCount > 0}<span class="steps-separator"> / </span><span class="steps-failed">{run.failedCount}</span>{/if}
-              <span class="steps-separator"> of {run.stepCount}</span>
-            </td>
-            <td class="cell-duration">{formatDuration(run.durationMs)}</td>
-          </tr>
+        {#each batch.runs as run (run.skipped ? `${run.planName}-skipped` : run.runId)}
+          {#if run.skipped}
+            <tr class="run-row run-row-skipped">
+              <td><OutcomeBadge outcome="skipped" size="sm" /></td>
+              <td class="cell-plan cell-dimmed" title={run.planName}>
+                {run.planName}
+                {#if run.duplicateOf}
+                  <span class="dedup-info" title="Duplicate of {run.duplicateOf}">duplicate of {run.duplicateOf}</span>
+                {/if}
+              </td>
+              <td class="cell-steps cell-dimmed">&mdash;</td>
+              <td class="cell-duration cell-dimmed">&mdash;</td>
+            </tr>
+          {:else}
+            <tr
+              class="run-row"
+              role="link"
+              tabindex="0"
+              onclick={() => goToRun(run.runId)}
+              onkeydown={(e: KeyboardEvent) => handleRowKeydown(e, run.runId)}
+            >
+              <td><OutcomeBadge outcome={run.outcome} size="sm" /></td>
+              <td class="cell-plan" title={run.planName || run.runId}>
+                {run.planName || run.runId}
+                {#if run.attempts && run.attempts > 1}
+                  <span class="retry-badge" title="Took {run.attempts} attempts">{run.attempts} attempts</span>
+                {/if}
+                {#if run.layers && run.layers.length > 0}
+                  {#each run.layers as layer}
+                    <span class="layer-badge" title="Layer: {layer}">{layer}</span>
+                  {/each}
+                {/if}
+              </td>
+              <td class="cell-steps">
+                <span class="steps-passed">{run.passedCount}</span>{#if run.failedCount > 0}<span class="steps-separator"> / </span><span class="steps-failed">{run.failedCount}</span>{/if}
+                <span class="steps-separator"> of {run.stepCount}</span>
+              </td>
+              <td class="cell-duration">{formatDuration(run.durationMs)}</td>
+            </tr>
+          {/if}
         {/each}
       </tbody>
     </table>
@@ -508,5 +539,25 @@
     border-top: none;
     border-top-left-radius: 0;
     border-top-right-radius: 0;
+  }
+  .run-row-skipped {
+    cursor: default;
+  }
+  .run-row-skipped:hover {
+    background: inherit;
+  }
+  .cell-dimmed {
+    color: var(--color-text-muted, #9ca3af);
+    opacity: 0.6;
+  }
+  .dedup-info {
+    display: inline-block;
+    font-size: 0.7rem;
+    color: var(--color-text-muted, #9ca3af);
+    margin-left: 0.4rem;
+    font-style: italic;
+  }
+  .steps-skipped {
+    color: var(--color-text-muted, #9ca3af);
   }
 </style>

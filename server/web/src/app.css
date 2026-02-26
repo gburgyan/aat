@@ -162,6 +162,11 @@ p {
   background: rgba(245, 158, 11, 0.12);
 }
 
+.badge-skipped {
+  color: var(--color-text-muted, #9ca3af);
+  background: rgba(156, 163, 175, 0.12);
+}
+
 /* --- Run Table --- */
 .run-table {
   width: 100%;

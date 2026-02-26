@@ -276,6 +276,7 @@ type BatchDetail struct {
 	PassedRuns      int               `json:"passedRuns"`
 	FailedRuns      int               `json:"failedRuns"`
 	ErrorRuns       int               `json:"errorRuns"`
+	SkippedRuns     int               `json:"skippedRuns,omitempty"`
 	TotalDurationMs int64             `json:"totalDurationMs"`
 	DurationDisplay string            `json:"durationDisplay"`
 	Source          string            `json:"source,omitempty"`
@@ -299,6 +300,8 @@ type BatchRunSummary struct {
 	Attempts    int      `json:"attempts,omitempty"`
 	Layers      []string `json:"layers,omitempty"`
 	Permutation string   `json:"permutation,omitempty"`
+	Skipped     bool     `json:"skipped,omitempty"`
+	DuplicateOf string   `json:"duplicateOf,omitempty"`
 }
 
 // RenameRequest is the JSON body for rename endpoints.

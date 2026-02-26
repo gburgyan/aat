@@ -15,6 +15,8 @@ import (
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/intent"
+	"github.com/gburgyan/aat/plan"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 )
@@ -56,6 +58,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
 		layerGroupFlags, _ := cmd.Flags().GetStringArray("layer-group")
 		layerGroups := parseLayerGroups(layerGroupFlags)
+		noDedup, _ := cmd.Flags().GetBool("no-dedup")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -78,6 +81,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,
 			Parallel:   parallel,
+			NoDedup:    noDedup,
 		}
 
 		code := executeBatch(ba)
@@ -94,6 +98,7 @@ func init() {
 	runBatchCmd.Flags().Int("parallel", 1, "number of plans to execute concurrently (default 1 = sequential)")
 	runBatchCmd.Flags().StringArray("layer-group", nil,
 		"layer group for permutation (comma-separated names, repeatable)")
+	runBatchCmd.Flags().Bool("no-dedup", false, "disable duplicate plan detection across permutations")
 
 	runCmd.AddCommand(runBatchCmd)
 }
@@ -104,6 +109,7 @@ type batchArgs struct {
 	PlanDirs   []string
 	FilterPath string // optional subdirectory filter
 	Parallel   int    // concurrency limit; <=1 means sequential
+	NoDedup    bool   // disable duplicate plan detection
 }
 
 // BatchSummary is the machine-readable JSON output for batch CI/CD pipelines.
@@ -125,18 +131,21 @@ type BatchRunResult struct {
 	DurationMs  int64    `json:"duration_ms"`
 	Error       string   `json:"error,omitempty"`
 	ArchivePath string   `json:"archive_path,omitempty"`
-	Attempts    int      `json:"attempts,omitempty"`    // total attempts (omitted if 1)
-	Layers      []string `json:"layers,omitempty"`      // effective layers for this run
-	Permutation string   `json:"permutation,omitempty"` // permutation label for grouping
+	Attempts    int      `json:"attempts,omitempty"`     // total attempts (omitted if 1)
+	Layers      []string `json:"layers,omitempty"`       // effective layers for this run
+	Permutation string   `json:"permutation,omitempty"`  // permutation label for grouping
+	Skipped     bool     `json:"skipped,omitempty"`      // true if skipped as a duplicate
+	DuplicateOf string   `json:"duplicate_of,omitempty"` // display name of canonical run
 }
 
 // BatchStats is the aggregate counts in the batch JSON summary.
 type BatchStats struct {
-	TotalPlans  int   `json:"total_plans"`
-	PassedPlans int   `json:"passed_plans"`
-	FailedPlans int   `json:"failed_plans"`
-	ErrorPlans  int   `json:"error_plans"`
-	DurationMs  int64 `json:"duration_ms"`
+	TotalPlans   int   `json:"total_plans"`
+	PassedPlans  int   `json:"passed_plans"`
+	FailedPlans  int   `json:"failed_plans"`
+	ErrorPlans   int   `json:"error_plans"`
+	SkippedPlans int   `json:"skipped_plans,omitempty"`
+	DurationMs   int64 `json:"duration_ms"`
 }
 
 // batchResult is the internal result from batchCommand.
@@ -193,6 +202,8 @@ func executeBatch(ba *batchArgs) int {
 				_, _ = fmt.Fprintf(os.Stdout, "%s: FAILED: %s%s\n", name, r.Error, attemptSuffix)
 			case "error":
 				_, _ = fmt.Fprintf(os.Stdout, "%s: ERROR: %s%s\n", name, r.Error, attemptSuffix)
+			case "skipped":
+				_, _ = fmt.Fprintf(os.Stdout, "%s: SKIPPED (duplicate of %s)\n", name, r.DuplicateOf)
 			}
 		}
 		_, _ = fmt.Fprintf(os.Stdout, "Batch: %d/%d PASSED",
@@ -202,6 +213,9 @@ func executeBatch(ba *batchArgs) int {
 		}
 		if res.summary.Summary.ErrorPlans > 0 {
 			_, _ = fmt.Fprintf(os.Stdout, ", %d ERROR", res.summary.Summary.ErrorPlans)
+		}
+		if res.summary.Summary.SkippedPlans > 0 {
+			_, _ = fmt.Fprintf(os.Stdout, ", %d SKIPPED", res.summary.Summary.SkippedPlans)
 		}
 		_, _ = fmt.Fprintln(os.Stdout)
 		if res.batchDir != "" {
@@ -352,6 +366,25 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		return &batchResult{setupErr: true, err: err}
 	}
 
+	// 3a. Deduplicate specs when layer groups are present
+	var skippedSpecs []skippedSpec
+	if len(args.LayerGroups) > 0 && !args.NoDedup {
+		dedup, dedupErr := deduplicateSpecs(rctx, specs)
+		if dedupErr != nil {
+			return &batchResult{setupErr: true, err: fmt.Errorf("deduplication: %w", dedupErr)}
+		}
+		if len(dedup.skipped) > 0 {
+			logf("aat: dedup — %d duplicate permutations detected:\n", len(dedup.skipped))
+			for _, s := range dedup.skipped {
+				skippedName := specDisplayName(planBaseName(s.spec.entry.Name), s.spec.permutation)
+				logf("  %s → duplicate of %s\n", skippedName, s.duplicateOf)
+			}
+			logf("\n")
+			skippedSpecs = dedup.skipped
+			specs = dedup.specs
+		}
+	}
+
 	// 4. Generate batch ID and create batch directory
 	batchID := archive.GenerateBatchID()
 	batchDir := filepath.Join(args.OutputDir, batchID)
@@ -371,7 +404,30 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 
 	totalDur := time.Since(batchStart)
 
-	// 6. Compute aggregate stats
+	// 6. Inject skipped entries
+	for _, s := range skippedSpecs {
+		skippedPlanName := planBaseName(s.spec.entry.Name)
+		br := BatchRunResult{
+			PlanName:    skippedPlanName,
+			Outcome:     "skipped",
+			Permutation: s.spec.permutation,
+			Layers:      s.spec.layers,
+			Skipped:     true,
+			DuplicateOf: s.duplicateOf,
+		}
+		be := archive.BatchRunEntry{
+			PlanName:    skippedPlanName,
+			Outcome:     "skipped",
+			Permutation: s.spec.permutation,
+			Layers:      s.spec.layers,
+			Skipped:     true,
+			DuplicateOf: s.duplicateOf,
+		}
+		runs = append(runs, br)
+		batchEntries = append(batchEntries, be)
+	}
+
+	// 7. Compute aggregate stats
 	stats := BatchStats{
 		TotalPlans: len(runs),
 		DurationMs: totalDur.Milliseconds(),
@@ -382,6 +438,8 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			stats.PassedPlans++
 		case "failed":
 			stats.FailedPlans++
+		case "skipped":
+			stats.SkippedPlans++
 		default:
 			stats.ErrorPlans++
 		}
@@ -394,7 +452,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		aggregateOutcome = "failed"
 	}
 
-	// 7. Write batch.json
+	// 8. Write batch.json
 	batchArchive := &archive.BatchArchive{
 		Metadata: archive.BatchMetadata{
 			Version:     "1.0.0",
@@ -412,6 +470,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			PassedRuns:      stats.PassedPlans,
 			FailedRuns:      stats.FailedPlans,
 			ErrorRuns:       stats.ErrorPlans,
+			SkippedRuns:     stats.SkippedPlans,
 			TotalDurationMs: stats.DurationMs,
 		},
 	}
@@ -421,13 +480,16 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		logf("aat: warning: failed to write batch.json: %s\n", err)
 	}
 
-	// 8. Print aggregate summary
+	// 9. Print aggregate summary
 	logf("\nBatch: %d/%d PASSED", stats.PassedPlans, stats.TotalPlans)
 	if stats.FailedPlans > 0 {
 		logf(", %d FAILED", stats.FailedPlans)
 	}
 	if stats.ErrorPlans > 0 {
 		logf(", %d ERROR", stats.ErrorPlans)
+	}
+	if stats.SkippedPlans > 0 {
+		logf(", %d SKIPPED", stats.SkippedPlans)
 	}
 	logf(" (%s)\n", formatDuration(totalDur))
 	logf("Archive: %s\n", batchDir)
@@ -663,6 +725,8 @@ func formatBatchResultLine(displayName string, br BatchRunResult) string {
 		return fmt.Sprintf("  %s  FAILED (%d steps, %s)", displayName, br.StepCount, dur)
 	case "error":
 		return fmt.Sprintf("  %s  ERROR: %s", displayName, br.Error)
+	case "skipped":
+		return fmt.Sprintf("  %s  SKIPPED (duplicate of %s)", displayName, br.DuplicateOf)
 	default:
 		return fmt.Sprintf("  %s  %s", displayName, br.Outcome)
 	}
@@ -688,6 +752,200 @@ func parseLayerGroups(flags []string) [][]string {
 		}
 	}
 	return groups
+}
+
+// dedupResult holds the outcome of duplicate detection across specs.
+type dedupResult struct {
+	specs   []batchRunSpec
+	skipped []skippedSpec
+}
+
+// skippedSpec describes a spec that was identified as a duplicate of a canonical spec.
+type skippedSpec struct {
+	spec        batchRunSpec
+	duplicateOf string // display name of the canonical spec
+}
+
+// instantiateForFingerprint mirrors the parse+reconstitute+instantiate logic from
+// loadAndRunPlanToDir but stops before auth/execution. Returns the instantiated
+// plan and the effective layers (needed for canonical scoring).
+func instantiateForFingerprint(rctx *runContext, spec batchRunSpec) (*plan.Plan, []string, error) {
+	parsed, err := plan.ParseAnyFile(spec.entry.FullPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var p *plan.Plan
+	var effectiveLayers []string
+	switch v := parsed.(type) {
+	case *plan.Plan:
+		p = v
+		effectiveLayers = spec.layers
+	case *plan.Recipe:
+		// Merge CLI layers after recipe layers (same logic as loadAndRunPlanToDir)
+		recipeLayers := make([]string, len(v.Selection.Layers))
+		copy(recipeLayers, v.Selection.Layers)
+		if len(spec.layers) > 0 {
+			seen := make(map[string]bool, len(recipeLayers))
+			for _, l := range recipeLayers {
+				seen[l] = true
+			}
+			for _, l := range spec.layers {
+				if !seen[l] {
+					recipeLayers = append(recipeLayers, l)
+				}
+			}
+			v.Selection.Layers = recipeLayers
+		}
+		effectiveLayers = v.Selection.Layers
+		var reconOpts []intent.ReconstituteOption
+		if rctx.LayersDir != "" {
+			reconOpts = append(reconOpts, intent.WithLayersDir(rctx.LayersDir))
+		}
+		if rctx.AvailableLayers != nil {
+			reconOpts = append(reconOpts, intent.WithAvailableLayers(rctx.AvailableLayers))
+		}
+		reconstituted, reconErr := intent.Reconstitute(v, rctx.Graph, rctx.GraphDir, reconOpts...)
+		if reconErr != nil {
+			return nil, nil, reconErr
+		}
+		p = reconstituted
+	default:
+		return nil, nil, fmt.Errorf("unexpected parse result type %T", parsed)
+	}
+
+	// Apply layers to get layered defaults, then instantiate
+	var layeredDefaults map[string]*graph.InputDefault
+	if len(effectiveLayers) > 0 && rctx.LayersDir != "" {
+		available, loadErr := graph.ResolveLayerNames(effectiveLayers, rctx.LayersDir)
+		if loadErr != nil {
+			return nil, nil, loadErr
+		}
+		layeredDefaults, err = graph.ApplyLayers(rctx.Graph, effectiveLayers, available)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	inst := plan.InstantiateWithLayers(p, rctx.Graph, layeredDefaults)
+	return inst, effectiveLayers, nil
+}
+
+// dedupScore computes a canonical selection score for a spec. Lower is better.
+// Primary: symmetric difference between spec.layers and effectiveLayers.
+// Tiebreaker: fewer effective layers = simpler = better.
+func dedupScore(specLayers, effectiveLayers []string) int {
+	specSet := make(map[string]bool, len(specLayers))
+	for _, l := range specLayers {
+		specSet[l] = true
+	}
+	effectiveSet := make(map[string]bool, len(effectiveLayers))
+	for _, l := range effectiveLayers {
+		effectiveSet[l] = true
+	}
+
+	// Symmetric difference: items in specSet but not effectiveSet, plus vice versa
+	symDiff := 0
+	for l := range specSet {
+		if !effectiveSet[l] {
+			symDiff++
+		}
+	}
+	for l := range effectiveSet {
+		if !specSet[l] {
+			symDiff++
+		}
+	}
+
+	return symDiff*100 + len(effectiveLayers)
+}
+
+// deduplicateSpecs identifies duplicate instantiated plans across specs and
+// selects the most accurately-labeled permutation as canonical for each group.
+// Specs from different plan files are never deduplicated against each other.
+func deduplicateSpecs(rctx *runContext, specs []batchRunSpec) (*dedupResult, error) {
+	type fingerprintInfo struct {
+		fingerprint     string
+		effectiveLayers []string
+		index           int
+		err             error
+	}
+
+	infos := make([]fingerprintInfo, len(specs))
+	for i, spec := range specs {
+		inst, effectiveLayers, err := instantiateForFingerprint(rctx, spec)
+		if err != nil {
+			infos[i] = fingerprintInfo{index: i, err: err}
+			continue
+		}
+		fp := plan.Fingerprint(inst)
+		infos[i] = fingerprintInfo{
+			fingerprint:     fp,
+			effectiveLayers: effectiveLayers,
+			index:           i,
+		}
+	}
+
+	// Group by (planFilePath, fingerprint). Specs with errors are always unique.
+	type groupKey struct {
+		planFile    string
+		fingerprint string
+	}
+	groups := make(map[groupKey][]int) // key → indices into specs
+	for i, info := range infos {
+		if info.err != nil {
+			continue // errors are included as unique
+		}
+		key := groupKey{
+			planFile:    specs[i].entry.FullPath,
+			fingerprint: info.fingerprint,
+		}
+		groups[key] = append(groups[key], i)
+	}
+
+	// For each group with >1 member, pick the canonical spec (lowest score).
+	isSkipped := make(map[int]string) // index → canonical display name
+	for _, indices := range groups {
+		if len(indices) <= 1 {
+			continue
+		}
+
+		// Find canonical: lowest score
+		bestIdx := indices[0]
+		bestScore := dedupScore(specs[bestIdx].layers, infos[bestIdx].effectiveLayers)
+		for _, idx := range indices[1:] {
+			score := dedupScore(specs[idx].layers, infos[idx].effectiveLayers)
+			if score < bestScore {
+				bestScore = score
+				bestIdx = idx
+			}
+		}
+
+		canonicalName := specDisplayName(
+			planBaseName(specs[bestIdx].entry.Name),
+			specs[bestIdx].permutation,
+		)
+
+		for _, idx := range indices {
+			if idx != bestIdx {
+				isSkipped[idx] = canonicalName
+			}
+		}
+	}
+
+	result := &dedupResult{}
+	for i, spec := range specs {
+		if canonName, skipped := isSkipped[i]; skipped {
+			result.skipped = append(result.skipped, skippedSpec{
+				spec:        spec,
+				duplicateOf: canonName,
+			})
+		} else {
+			result.specs = append(result.specs, spec)
+		}
+	}
+
+	return result, nil
 }
 
 // discoverBatchPlans finds plans based on the filter path.

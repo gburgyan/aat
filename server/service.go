@@ -816,6 +816,8 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 			Attempts:    r.Attempts,
 			Layers:      r.Layers,
 			Permutation: r.Permutation,
+			Skipped:     r.Skipped,
+			DuplicateOf: r.DuplicateOf,
 		}
 	}
 
@@ -827,6 +829,7 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 		PassedRuns:      b.Result.PassedRuns,
 		FailedRuns:      b.Result.FailedRuns,
 		ErrorRuns:       b.Result.ErrorRuns,
+		SkippedRuns:     b.Result.SkippedRuns,
 		TotalDurationMs: b.Result.TotalDurationMs,
 		DurationDisplay: formatDuration(b.Result.TotalDurationMs),
 		Source:          b.Metadata.Source,

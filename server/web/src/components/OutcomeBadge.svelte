@@ -12,6 +12,7 @@
     passed: 'badge-success',
     failed: 'badge-error',
     error: 'badge-warning',
+    skipped: 'badge-skipped',
   };
 
   let badgeClass = $derived(`badge badge-${size} ${classMap[outcome]}`);

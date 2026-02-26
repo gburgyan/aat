@@ -197,6 +197,8 @@ type BatchRunEntry struct {
 	Attempts    int      `json:"attempts,omitempty"`    // total attempts (omitted if 1)
 	Layers      []string `json:"layers,omitempty"`      // effective layers for this run
 	Permutation string   `json:"permutation,omitempty"` // permutation label for grouping
+	Skipped     bool     `json:"skipped,omitempty"`     // true if this run was skipped as a duplicate
+	DuplicateOf string   `json:"duplicateOf,omitempty"` // display name of canonical run (when skipped)
 }
 
 // BatchResult captures the aggregate outcome of a batch.
@@ -206,5 +208,6 @@ type BatchResult struct {
 	PassedRuns      int    `json:"passedRuns"`
 	FailedRuns      int    `json:"failedRuns"`
 	ErrorRuns       int    `json:"errorRuns"`
+	SkippedRuns     int    `json:"skippedRuns,omitempty"`
 	TotalDurationMs int64  `json:"totalDurationMs"`
 }
