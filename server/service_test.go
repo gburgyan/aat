@@ -946,6 +946,147 @@ func TestEffectiveStepID(t *testing.T) {
 	}
 }
 
+func TestDeduplicateIDs(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    []string
+		expected []string
+	}{
+		{
+			name:     "no duplicates",
+			input:    []string{"a", "b", "c"},
+			expected: []string{"a", "b", "c"},
+		},
+		{
+			name:     "two duplicates",
+			input:    []string{"x", "x"},
+			expected: []string{"x", "x_2"},
+		},
+		{
+			name:     "three duplicates",
+			input:    []string{"x", "x", "x"},
+			expected: []string{"x", "x_2", "x_3"},
+		},
+		{
+			name:     "mixed",
+			input:    []string{"a", "b", "a", "c", "b"},
+			expected: []string{"a", "b", "a_2", "c", "b_2"},
+		},
+		{
+			name:     "empty",
+			input:    []string{},
+			expected: []string{},
+		},
+		{
+			name:     "single",
+			input:    []string{"x"},
+			expected: []string{"x"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, deduplicateIDs(tt.input))
+		})
+	}
+}
+
+func TestDeduplicateStepIDs(t *testing.T) {
+	steps := []StepSummary{
+		{StepID: "ignoreWorkbench", Node: "ignoreWorkbench"},
+		{StepID: "ignoreWorkbench", Node: "ignoreWorkbench"},
+		{StepID: "ignoreWorkbench", Node: "ignoreWorkbench"},
+	}
+	deduplicateStepIDs(steps)
+	assert.Equal(t, "ignoreWorkbench", steps[0].StepID)
+	assert.Equal(t, "ignoreWorkbench_2", steps[1].StepID)
+	assert.Equal(t, "ignoreWorkbench_3", steps[2].StepID)
+}
+
+func TestGetRun_DuplicateCleanupStepIDs(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed",
+		makeStepWithID("step-1", "SearchOffers", 200, 100),
+	)
+	a.Cleanup = []archive.StepRecord{
+		makeStep("ignoreWorkbench", 200, 50),
+		makeStep("ignoreWorkbench", 200, 50),
+		makeStep("ignoreWorkbench", 200, 50),
+	}
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+	run, err := svc.GetRun("run-20260101-100000-aaaa0001")
+	require.NoError(t, err)
+
+	require.Len(t, run.Cleanup, 3)
+	assert.Equal(t, "ignoreWorkbench", run.Cleanup[0].StepID)
+	assert.Equal(t, "ignoreWorkbench_2", run.Cleanup[1].StepID)
+	assert.Equal(t, "ignoreWorkbench_3", run.Cleanup[2].StepID)
+}
+
+func TestGetStep_DuplicateCleanupLookup(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed",
+		makeStepWithID("step-1", "SearchOffers", 200, 100),
+	)
+	a.Cleanup = []archive.StepRecord{
+		makeStep("ignoreWorkbench", 200, 50),
+		makeStep("ignoreWorkbench", 201, 60),
+		makeStep("ignoreWorkbench", 202, 70),
+	}
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+
+	// First cleanup step: original ID
+	d1, err := svc.GetStep("run-20260101-100000-aaaa0001", "ignoreWorkbench")
+	require.NoError(t, err)
+	assert.Equal(t, "ignoreWorkbench", d1.StepID)
+	assert.Equal(t, 200, d1.Status)
+	assert.True(t, d1.IsCleanup)
+
+	// Second cleanup step: suffixed ID
+	d2, err := svc.GetStep("run-20260101-100000-aaaa0001", "ignoreWorkbench_2")
+	require.NoError(t, err)
+	assert.Equal(t, "ignoreWorkbench_2", d2.StepID)
+	assert.Equal(t, 201, d2.Status)
+
+	// Third cleanup step: suffixed ID
+	d3, err := svc.GetStep("run-20260101-100000-aaaa0001", "ignoreWorkbench_3")
+	require.NoError(t, err)
+	assert.Equal(t, "ignoreWorkbench_3", d3.StepID)
+	assert.Equal(t, 202, d3.Status)
+}
+
+func TestGetStep_DuplicateCleanupPrevNext(t *testing.T) {
+	dir := t.TempDir()
+
+	a := makeArchive("run-20260101-100000-aaaa0001", "passed",
+		makeStepWithID("step-1", "SearchOffers", 200, 100),
+	)
+	a.Cleanup = []archive.StepRecord{
+		makeStep("ignoreWorkbench", 200, 50),
+		makeStep("ignoreWorkbench", 200, 50),
+	}
+	writeArchive(t, dir, a)
+
+	svc := NewArchiveService(dir)
+
+	// First cleanup: prev=step-1, next=ignoreWorkbench_2
+	d1, err := svc.GetStep("run-20260101-100000-aaaa0001", "ignoreWorkbench")
+	require.NoError(t, err)
+	assert.Equal(t, "step-1", d1.PrevStepID)
+	assert.Equal(t, "ignoreWorkbench_2", d1.NextStepID)
+
+	// Second cleanup: prev=ignoreWorkbench, next=""
+	d2, err := svc.GetStep("run-20260101-100000-aaaa0001", "ignoreWorkbench_2")
+	require.NoError(t, err)
+	assert.Equal(t, "ignoreWorkbench", d2.PrevStepID)
+	assert.Equal(t, "", d2.NextStepID)
+}
+
 func TestToHeaderEntries(t *testing.T) {
 	tests := []struct {
 		name     string

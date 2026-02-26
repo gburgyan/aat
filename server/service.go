@@ -217,18 +217,18 @@ func getStepFromArchive(a *archive.Archive, runID, stepID string) (*StepDetail, 
 	}
 	nodeSteps := nodeToStepMap(a)
 	detail := toStepDetail(rec, isCleanup, nodeSteps)
+	detail.StepID = stepID // Use the deduplicated ID
 	detail.Extractions = buildExtractions(stepID, rec.Outputs, a, nodeSteps)
 	detail.PlanStepYAML = findPlanStepYAML(a, stepID, rec.Node, isCleanup)
 	detail.InstantiatedStepYAML = findInstantiatedStepYAML(a, stepID, rec.Node, isCleanup)
 
 	// Compute prev/next across all steps (steps then cleanup in order).
+	// Cleanup steps use deduplicated IDs to match the API's step list.
 	allSteps := make([]string, 0, len(a.Steps)+len(a.Cleanup))
 	for _, s := range a.Steps {
 		allSteps = append(allSteps, effectiveStepID(s))
 	}
-	for _, s := range a.Cleanup {
-		allSteps = append(allSteps, effectiveStepID(s))
-	}
+	allSteps = append(allSteps, buildCleanupIDs(a.Cleanup)...)
 	for i, id := range allSteps {
 		if id == stepID {
 			if i > 0 {
@@ -426,16 +426,57 @@ func effectiveStepID(s archive.StepRecord) string {
 	return s.Node
 }
 
+// deduplicateIDs takes a slice of IDs and returns a new slice with duplicates
+// suffixed (_2, _3, ...). The first occurrence keeps its original ID.
+func deduplicateIDs(ids []string) []string {
+	seen := make(map[string]int)
+	result := make([]string, len(ids))
+	for i, id := range ids {
+		seen[id]++
+		if seen[id] == 1 {
+			result[i] = id
+		} else {
+			result[i] = fmt.Sprintf("%s_%d", id, seen[id])
+		}
+	}
+	return result
+}
+
+// deduplicateStepIDs mutates the StepID fields in a slice of StepSummary
+// to ensure uniqueness by suffixing duplicates with _2, _3, etc.
+func deduplicateStepIDs(steps []StepSummary) {
+	seen := make(map[string]int)
+	for i := range steps {
+		id := steps[i].StepID
+		seen[id]++
+		if seen[id] > 1 {
+			steps[i].StepID = fmt.Sprintf("%s_%d", id, seen[id])
+		}
+	}
+}
+
+// buildCleanupIDs returns deduplicated step IDs for cleanup steps.
+func buildCleanupIDs(cleanup []archive.StepRecord) []string {
+	ids := make([]string, len(cleanup))
+	for i, s := range cleanup {
+		ids[i] = effectiveStepID(s)
+	}
+	return deduplicateIDs(ids)
+}
+
 // findStep scans Steps then Cleanup for a step matching the given ID.
+// Cleanup steps use deduplicated IDs (e.g., ignoreWorkbench_2) when multiple
+// cleanup steps share the same node.
 func findStep(a *archive.Archive, stepID string) (archive.StepRecord, bool, bool) {
 	for _, s := range a.Steps {
 		if effectiveStepID(s) == stepID {
 			return s, false, true
 		}
 	}
-	for _, s := range a.Cleanup {
-		if effectiveStepID(s) == stepID {
-			return s, true, true
+	cleanupIDs := buildCleanupIDs(a.Cleanup)
+	for i, id := range cleanupIDs {
+		if id == stepID {
+			return a.Cleanup[i], true, true
 		}
 	}
 	return archive.StepRecord{}, false, false
@@ -829,6 +870,7 @@ func toRunDetail(a *archive.Archive) *RunDetail {
 		for i, s := range a.Cleanup {
 			cleanup[i] = toStepSummary(s, true, runStart)
 		}
+		deduplicateStepIDs(cleanup)
 	}
 
 	dur := totalDuration(a)

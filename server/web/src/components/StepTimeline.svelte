@@ -43,7 +43,7 @@
 {/if}
 
 <div class="step-timeline" class:muted>
-  {#each steps as step, i (step.stepId)}
+  {#each steps as step, i (i)}
     <div
       class="step-entry"
       role="link"
