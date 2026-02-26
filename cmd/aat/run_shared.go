@@ -632,16 +632,6 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		return &runResult{setupErr: true, err: fmt.Errorf("loading plan: %w", err)}
 	}
 
-	// Compute layered defaults if layers are active
-	var layeredDefaults map[string]*graph.InputDefault
-	if len(rctx.Layers) > 0 && rctx.AvailableLayers != nil {
-		var layerErr error
-		layeredDefaults, layerErr = graph.ApplyLayers(rctx.Graph, rctx.Layers, rctx.AvailableLayers)
-		if layerErr != nil {
-			return &runResult{setupErr: true, err: fmt.Errorf("applying layers: %w", layerErr)}
-		}
-	}
-
 	var p *plan.Plan
 	var effectiveLayers []string
 	switch v := parsed.(type) {
@@ -679,6 +669,21 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		p = reconstituted
 	default:
 		return &runResult{setupErr: true, err: fmt.Errorf("unexpected parse result type %T", parsed)}
+	}
+
+	// Compute layered defaults from the effective set of layers (CLI + recipe).
+	// This must happen after the switch so recipe-embedded layers are included.
+	var layeredDefaults map[string]*graph.InputDefault
+	if len(effectiveLayers) > 0 && rctx.LayersDir != "" {
+		available, loadErr := graph.ResolveLayerNames(effectiveLayers, rctx.LayersDir)
+		if loadErr != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("loading layers: %w", loadErr)}
+		}
+		var applyErr error
+		layeredDefaults, applyErr = graph.ApplyLayers(rctx.Graph, effectiveLayers, available)
+		if applyErr != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("applying layers: %w", applyErr)}
+		}
 	}
 
 	// 2. Validate plan against graph (with layers)
