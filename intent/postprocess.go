@@ -52,21 +52,43 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 		nodeToStepIDs[step.Node] = append(nodeToStepIDs[step.Node], step.StepID())
 	}
 
-	// Build requires/satisfies deps: targetNode → set of sourceNodes.
-	tokenDeps := map[string]map[string]bool{}
+	// Build requires/satisfies deps scoped to composition groups.
+	// Steps with the same prefix (e.g., "inc0_") belong to the same addon;
+	// steps with no prefix belong to the base workflow. A step's requires
+	// tokens should only resolve to satisfiers within the same group to
+	// prevent cross-boundary cycles when addons share node types with the
+	// base workflow (e.g., both using addFormOfPaymentCash).
+	type satisfierEntry struct {
+		stepID string
+		prefix string
+	}
+	tokenSatisfiers := map[string][]satisfierEntry{} // token → satisfier stepIDs+prefix
+	stepTokenDeps := map[string][]string{}           // stepID → satisfier stepIDs
 	if g.SatisfiersByToken != nil {
+		// Index: token → satisfier steps within each composition group.
 		for _, step := range p.Execution.Steps {
 			node := g.Nodes[step.Node]
 			if node == nil {
 				continue
 			}
+			sid := step.StepID()
+			pfx := stepPrefix(sid)
+			for _, token := range node.Satisfies {
+				tokenSatisfiers[token] = append(tokenSatisfiers[token], satisfierEntry{sid, pfx})
+			}
+		}
+		// For each step that requires a token, find same-prefix satisfiers.
+		for _, step := range p.Execution.Steps {
+			node := g.Nodes[step.Node]
+			if node == nil {
+				continue
+			}
+			sid := step.StepID()
+			pfx := stepPrefix(sid)
 			for _, token := range node.Requires {
-				for _, satisfier := range g.SatisfiersByToken[token] {
-					if stepIndex[satisfier] && satisfier != step.Node {
-						if tokenDeps[step.Node] == nil {
-							tokenDeps[step.Node] = map[string]bool{}
-						}
-						tokenDeps[step.Node][satisfier] = true
+				for _, sat := range tokenSatisfiers[token] {
+					if sat.prefix == pfx && sat.stepID != sid {
+						stepTokenDeps[sid] = append(stepTokenDeps[sid], sat.stepID)
 					}
 				}
 			}
@@ -77,8 +99,28 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 	// them to required. If dep is a node name, it maps to the step IDs using
 	// that node (e.g., "addSeatOffer" → ["inc0_addSeatOffer"]). If dep is
 	// already a step ID not found in nodeToStepIDs, it's added directly.
+	//
+	// When a node name maps to multiple step IDs across composition groups,
+	// prefer steps in the same group as the caller to avoid cross-boundary
+	// dependencies. Fall back to all matches only when no same-group match
+	// exists (which handles intentional cross-boundary refs like addon steps
+	// referencing the base workflow's commitReservation).
 	addStepDeps := func(required map[string]bool, dep, selfStepID string) {
 		if sids, ok := nodeToStepIDs[dep]; ok {
+			selfPfx := stepPrefix(selfStepID)
+			var sameGroup []string
+			for _, sid := range sids {
+				if sid != selfStepID && stepPrefix(sid) == selfPfx {
+					sameGroup = append(sameGroup, sid)
+				}
+			}
+			if len(sameGroup) > 0 {
+				for _, sid := range sameGroup {
+					required[sid] = true
+				}
+				return
+			}
+			// No same-group match: use all (cross-boundary ref).
 			for _, sid := range sids {
 				if sid != selfStepID {
 					required[sid] = true
@@ -125,9 +167,9 @@ func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 			}
 		}
 
-		// 3. Requires/satisfies token deps (ordering constraints).
-		for depNode := range tokenDeps[step.Node] {
-			addStepDeps(required, depNode, stepID)
+		// 3. Requires/satisfies token deps (ordering constraints, scoped to composition group).
+		for _, depStepID := range stepTokenDeps[stepID] {
+			required[depStepID] = true
 		}
 
 		// 4. Existing valid dependsOn entries (resolved via addStepDeps
@@ -548,6 +590,18 @@ func deriveSelectionName(source string) string {
 		name = name[:len(name)-1]
 	}
 	return name
+}
+
+// stepPrefix extracts the composition-group prefix from a step ID.
+// Addon steps have prefixes like "inc0_", "inc1_", etc.
+// Base workflow steps have no prefix (returns "").
+func stepPrefix(stepID string) string {
+	if strings.HasPrefix(stepID, "inc") {
+		if idx := strings.Index(stepID, "_"); idx >= 0 {
+			return stepID[:idx+1]
+		}
+	}
+	return ""
 }
 
 // splitNodeName extracts the node name from a "node.field" reference.
