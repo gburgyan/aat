@@ -223,6 +223,58 @@ templates: templates/
 	assert.Empty(t, m.PlanDirs)
 }
 
+func TestLoadManifest_OASPathsScalar(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+graph: graph.yaml
+templates: templates/
+oas: spec.yaml
+`
+	path := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+
+	require.Len(t, m.OASPaths, 1)
+	assert.Equal(t, filepath.Join(dir, "spec.yaml"), m.OASPaths[0])
+}
+
+func TestLoadManifest_OASPathsList(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+graph: graph.yaml
+templates: templates/
+oas:
+  - spec.yaml
+  - /absolute/other-spec.json
+`
+	path := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+
+	require.Len(t, m.OASPaths, 2)
+	assert.Equal(t, filepath.Join(dir, "spec.yaml"), m.OASPaths[0])
+	assert.Equal(t, "/absolute/other-spec.json", m.OASPaths[1]) // absolute unchanged
+}
+
+func TestLoadManifest_OASPathsOmitted(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+graph: graph.yaml
+templates: templates/
+`
+	path := filepath.Join(dir, "aat-project.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+
+	m, err := LoadManifest(path)
+	require.NoError(t, err)
+
+	assert.Empty(t, m.OASPaths)
+}
+
 func TestResolvePath(t *testing.T) {
 	tests := []struct {
 		name     string

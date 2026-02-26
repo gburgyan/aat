@@ -217,6 +217,69 @@ func TestHandleGetWorkflowDetail_Valid(t *testing.T) {
 	assert.Contains(t, text, "cancel (runOn: always)")
 }
 
+func TestHandleGetWorkflowDetail_StepIDDiffersFromNode(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{
+				Name:     "Round Trip",
+				Template: "testdata/workflows/roundtrip.yaml",
+			},
+		},
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "searchTmpl",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+				Outputs: []graph.Output{{Name: "results", Type: "flight[]"}},
+			},
+			"book": {
+				Name:    "book",
+				Adapter: "bookTmpl",
+				Inputs:  []graph.Input{{Name: "flightId", Type: "string"}},
+				Outputs: []graph.Output{{Name: "workbenchId", Type: "string"}},
+			},
+			"cancel": {Name: "cancel", Adapter: "cancelTmpl"},
+		},
+	}
+
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("searchTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "searchTmpl", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "POST", Path: "/api/search"},
+	})))
+	require.NoError(t, reg.Register("bookTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "bookTmpl", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "POST", Path: "/api/book"},
+	})))
+	require.NoError(t, reg.Register("cancelTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "cancelTmpl", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "DELETE", Path: "/api/cancel"},
+	})))
+
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+		GraphDir: ".",
+	}
+	srv := NewServer(ctx)
+	result := callTool(t, srv.handleGetWorkflowDetail, map[string]any{"workflow": "Round Trip", "summary": false})
+	require.False(t, result.IsError)
+	text := resultText(t, result)
+
+	// Step 1 (search): StepID == Node, no Operation line
+	assert.Contains(t, text, "### 1. search")
+	// Step 2 (searchNextLeg2): StepID != Node, should show Operation line
+	assert.Contains(t, text, "### 2. searchNextLeg2")
+	assert.Contains(t, text, "**Operation:** search")
+	// Step 3 (book): StepID == Node, no Operation line
+	assert.Contains(t, text, "### 3. book")
+}
+
 func TestHandleGetWorkflowDetail_UnknownWorkflow(t *testing.T) {
 	g := workflowTestGraph()
 	srv := newWorkflowTestServer(g)

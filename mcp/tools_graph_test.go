@@ -364,6 +364,170 @@ func TestHandleDescribeNode_WithConstraints(t *testing.T) {
 	assert.Contains(t, text, "len=3")
 }
 
+// --- describe_node next steps ---
+
+// --- describe_node transform indicator ---
+
+func TestHandleDescribeNode_WithTransformAndComments(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "searchTmpl",
+				Outputs: []graph.Output{{Name: "results", Type: "result[]"}},
+			},
+		},
+	}
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("searchTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "searchTmpl",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/search"},
+		Response: adapter.TemplateResponse{
+			Transform: "-- Resolve GDS ReferenceList into flat results\nlocal json = require('json')\n",
+		},
+	})))
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+	srv := NewServer(ctx)
+	result := callTool(t, srv.handleDescribeNode, map[string]any{"node": "search"})
+	text := resultText(t, result)
+	assert.Contains(t, text, "**Transform:** Lua (Resolve GDS ReferenceList into flat results)")
+}
+
+func TestHandleDescribeNode_WithTransformNoComments(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "searchTmpl",
+				Outputs: []graph.Output{{Name: "results", Type: "result[]"}},
+			},
+		},
+	}
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("searchTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "searchTmpl",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/search"},
+		Response: adapter.TemplateResponse{
+			Transform: "local json = require('json')\nreturn json.encode(result)\n",
+		},
+	})))
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+	srv := NewServer(ctx)
+	result := callTool(t, srv.handleDescribeNode, map[string]any{"node": "search"})
+	text := resultText(t, result)
+	assert.Contains(t, text, "**Transform:** Lua")
+	assert.NotContains(t, text, "**Transform:** Lua (")
+}
+
+func TestHandleDescribeNode_WithoutTransform(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "searchTmpl",
+				Outputs: []graph.Output{{Name: "results", Type: "result[]"}},
+			},
+		},
+	}
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("searchTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "searchTmpl",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/search"},
+	})))
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+	srv := NewServer(ctx)
+	result := callTool(t, srv.handleDescribeNode, map[string]any{"node": "search"})
+	text := resultText(t, result)
+	assert.NotContains(t, text, "Transform")
+}
+
+func TestHandleDescribeNode_NextSteps_WithAdapter(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "searchTmpl",
+			},
+		},
+	}
+	srv := newTestServer(g)
+	result := callTool(t, srv.handleDescribeNode, map[string]any{"node": "search"})
+
+	text := resultText(t, result)
+	assert.Contains(t, text, "## Next Steps")
+	assert.Contains(t, text, "inspect_template")
+	assert.Contains(t, text, "searchTmpl")
+}
+
+func TestHandleDescribeNode_NextSteps_WithOAS(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"createPet": {
+				Name:    "createPet",
+				Adapter: "createPet",
+				OAS:     &graph.OASRef{OperationID: "createPet"},
+			},
+		},
+	}
+	srv := newTestServer(g)
+	result := callTool(t, srv.handleDescribeNode, map[string]any{"node": "createPet"})
+
+	text := resultText(t, result)
+	assert.Contains(t, text, "## Next Steps")
+	assert.Contains(t, text, "inspect_template")
+	assert.Contains(t, text, "get_oas_operation")
+	assert.Contains(t, text, "createPet")
+}
+
+func TestHandleDescribeNode_NextSteps_IntegrationPersona(t *testing.T) {
+	ctx := &ServerContext{
+		Graph: &graph.Graph{
+			Nodes: map[string]*graph.Node{
+				"search": {
+					Name:    "search",
+					Adapter: "searchTmpl",
+				},
+			},
+		},
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+	srv := NewIntegrationServer(ctx)
+
+	result := callTool(t, srv.handleDescribeNode, map[string]any{"node": "search"})
+	text := resultText(t, result)
+	assert.Contains(t, text, "inspect_request_template")
+	assert.NotContains(t, text, "`inspect_template`")
+}
+
+func TestHandleDescribeNode_NextSteps_NoAdapterNoOAS(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"bare": {Name: "bare"},
+		},
+	}
+	srv := newTestServer(g)
+	result := callTool(t, srv.handleDescribeNode, map[string]any{"node": "bare"})
+
+	text := resultText(t, result)
+	assert.NotContains(t, text, "## Next Steps")
+}
+
 // indexOf returns the byte offset of the first occurrence of substr in s.
 func indexOf(s, substr string) int {
 	for i := 0; i <= len(s)-len(substr); i++ {

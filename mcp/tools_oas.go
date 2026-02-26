@@ -15,6 +15,33 @@ import (
 // registerOASTools adds the OAS browsing and validation tools to the MCP server.
 func (s *Server) registerOASTools() {
 	s.mcp.AddTool(
+		mcp.NewTool("list_oas_operations",
+			mcp.WithDescription("List all operations from loaded OAS specs. Filter by tag, keyword (searches operationId/summary/description), or HTTP method. Shows which operations are mapped to graph nodes."),
+			mcp.WithString("tag",
+				mcp.Description("Filter by tag name (case-insensitive)"),
+			),
+			mcp.WithString("keyword",
+				mcp.Description("Search in operationId, summary, and description (case-insensitive)"),
+			),
+			mcp.WithString("method",
+				mcp.Description("Filter by HTTP method (GET, POST, PUT, DELETE, PATCH)"),
+			),
+		),
+		s.handleListOASOperations,
+	)
+
+	s.mcp.AddTool(
+		mcp.NewTool("list_oas_subtypes",
+			mcp.WithDescription("Show polymorphic subtypes for a schema: discriminator mappings, oneOf/anyOf variants, and schemas that extend it via allOf. Useful for understanding which @type values to use in request payloads."),
+			mcp.WithString("schema",
+				mcp.Description("Schema name to analyze for subtypes (e.g. 'Animal', 'BaseEntity')"),
+				mcp.Required(),
+			),
+		),
+		s.handleListOASSubtypes,
+	)
+
+	s.mcp.AddTool(
 		mcp.NewTool("get_oas_operation",
 			mcp.WithDescription("Show OAS operation details for a graph node: HTTP method, path, parameters, request body schema, and response schemas. Use describe_node first to see if a node has an OAS reference. Use get_oas_schema to drill into schema names shown in the output. Use validate_oas_request or build_oas_example for the same node to work with payloads."),
 			mcp.WithString("node",
@@ -41,10 +68,18 @@ func (s *Server) registerOASTools() {
 
 	s.mcp.AddTool(
 		mcp.NewTool("search_oas_schemas",
-			mcp.WithDescription("Search for component schema names matching a regex pattern across all loaded OAS specs. Use get_oas_schema on results to see full schema details."),
+			mcp.WithDescription("Search for component schemas across all loaded OAS specs. Filter by name pattern, property existence, inheritance, or discriminator. At least one filter is required. Use get_oas_schema on results to see full schema details."),
 			mcp.WithString("pattern",
-				mcp.Description("Regex pattern to match schema names (case-insensitive)"),
-				mcp.Required(),
+				mcp.Description("Regex pattern to match schema names (case-insensitive). Optional if other filters are set."),
+			),
+			mcp.WithString("has_property",
+				mcp.Description("Find schemas that have this property name (checks allOf members too)"),
+			),
+			mcp.WithString("extends",
+				mcp.Description("Find schemas that extend this base schema via allOf $ref (e.g. 'BaseEntity')"),
+			),
+			mcp.WithBoolean("has_discriminator",
+				mcp.Description("Filter to schemas with (true) or without (false) a discriminator"),
 			),
 		),
 		s.handleSearchOASSchemas,
@@ -75,9 +110,72 @@ func (s *Server) registerOASTools() {
 			mcp.WithString("scenario",
 				mcp.Description("Detail level: minimal (required fields only), typical (common fields), or full (all fields). Default: typical"),
 			),
+			mcp.WithString("custom_values",
+				mcp.Description("JSON object with custom values to overlay on the generated example (e.g. '{\"name\":\"Buddy\",\"species\":\"dog\"}')"),
+			),
 		),
 		s.handleBuildOASExample,
 	)
+}
+
+// handleListOASOperations lists all operations from loaded OAS specs with optional filters.
+func (s *Server) handleListOASOperations(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	if len(s.ctx.OASSpecs) == 0 {
+		return mcp.NewToolResultError("No OAS specs loaded. Configure an oas field in your graph or manifest."), nil
+	}
+
+	tag := req.GetString("tag", "")
+	keyword := req.GetString("keyword", "")
+	method := req.GetString("method", "")
+
+	ops := s.listAllOperations(tag, keyword, method)
+
+	if len(ops) == 0 {
+		return mcp.NewToolResultText("No operations found matching the given filters."), nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Found %d operation(s):\n\n", len(ops))
+	b.WriteString("| Method | Path | OperationID | Summary | Graph Node |\n")
+	b.WriteString("|--------|------|-------------|---------|------------|\n")
+	for _, op := range ops {
+		node := ""
+		if op.GraphNode != "" {
+			node = op.GraphNode
+		}
+		summary := op.Summary
+		if op.Deprecated {
+			summary = "(deprecated) " + summary
+		}
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
+			op.Method, op.Path, op.OperationID, summary, node)
+	}
+
+	return mcp.NewToolResultText(b.String()), nil
+}
+
+// handleListOASSubtypes shows polymorphic subtypes for a schema.
+func (s *Server) handleListOASSubtypes(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	name, err := req.RequireString("schema")
+	if err != nil {
+		return mcp.NewToolResultError("missing required parameter: schema"), nil
+	}
+
+	if len(s.ctx.OASSpecs) == 0 {
+		return mcp.NewToolResultError("No OAS specs loaded. Configure an oas field in your graph or manifest."), nil
+	}
+
+	result := s.findSubtypes(name)
+	if result == nil {
+		suggestions := s.suggestSchemaNames(name)
+		msg := fmt.Sprintf("Schema %q not found.", name)
+		if len(suggestions) > 0 {
+			msg += fmt.Sprintf(" Did you mean: %s?", strings.Join(suggestions, ", "))
+		}
+		return mcp.NewToolResultError(msg), nil
+	}
+
+	return mcp.NewToolResultText(formatSubtypeResult(result)), nil
 }
 
 // handleGetOASOperation resolves a node to its OAS operation and formats the details.
@@ -128,18 +226,35 @@ func (s *Server) handleGetOASSchema(_ context.Context, req mcp.CallToolRequest) 
 	return mcp.NewToolResultText(formatResolvedSchema(rs)), nil
 }
 
-// handleSearchOASSchemas searches all specs for schema names matching a pattern.
+// handleSearchOASSchemas searches all specs for schemas matching filter criteria.
 func (s *Server) handleSearchOASSchemas(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	pattern, err := req.RequireString("pattern")
-	if err != nil {
-		return mcp.NewToolResultError("missing required parameter: pattern"), nil
-	}
-
 	if len(s.ctx.OASSpecs) == 0 {
 		return mcp.NewToolResultError("No OAS specs loaded. Configure an oas field in your graph."), nil
 	}
 
-	results, err := s.searchSchemaNames(pattern)
+	pattern := req.GetString("pattern", "")
+	hasProperty := req.GetString("has_property", "")
+	extends := req.GetString("extends", "")
+
+	// Build filters
+	filters := schemaSearchFilters{
+		Pattern:     pattern,
+		HasProperty: hasProperty,
+		Extends:     extends,
+	}
+
+	// Handle has_discriminator boolean — only set if explicitly provided
+	if _, ok := req.Params.Arguments.(map[string]any)["has_discriminator"]; ok {
+		v := req.GetBool("has_discriminator", false)
+		filters.HasDiscriminator = &v
+	}
+
+	// At least one filter must be specified
+	if filters.Pattern == "" && filters.HasProperty == "" && filters.Extends == "" && filters.HasDiscriminator == nil {
+		return mcp.NewToolResultError("At least one filter required: pattern, has_property, extends, or has_discriminator."), nil
+	}
+
+	results, err := s.searchSchemasFiltered(filters)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("Invalid pattern: %v", err)), nil
 	}
@@ -151,11 +266,25 @@ func (s *Server) handleSearchOASSchemas(_ context.Context, req mcp.CallToolReque
 	}
 
 	if total == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("No schemas matching %q.", pattern)), nil
+		// Build a description of what was searched
+		var desc []string
+		if filters.Pattern != "" {
+			desc = append(desc, fmt.Sprintf("pattern=%q", filters.Pattern))
+		}
+		if filters.HasProperty != "" {
+			desc = append(desc, fmt.Sprintf("has_property=%q", filters.HasProperty))
+		}
+		if filters.Extends != "" {
+			desc = append(desc, fmt.Sprintf("extends=%q", filters.Extends))
+		}
+		if filters.HasDiscriminator != nil {
+			desc = append(desc, fmt.Sprintf("has_discriminator=%v", *filters.HasDiscriminator))
+		}
+		return mcp.NewToolResultText(fmt.Sprintf("No schemas matching %s.", strings.Join(desc, ", "))), nil
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Found %d schema(s) matching %q:\n\n", total, pattern)
+	fmt.Fprintf(&b, "Found %d schema(s):\n\n", total)
 
 	specPaths := sortedMapKeys(results)
 	for _, specPath := range specPaths {
@@ -229,6 +358,16 @@ func (s *Server) handleBuildOASExample(_ context.Context, req mcp.CallToolReques
 	}
 
 	example := buildExample(schema, scenario, 5, make(map[*base.Schema]bool))
+
+	// Apply custom values overlay if provided
+	customStr := req.GetString("custom_values", "")
+	if customStr != "" {
+		var customValues map[string]any
+		if err := json.Unmarshal([]byte(customStr), &customValues); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Invalid custom_values JSON: %v", err)), nil
+		}
+		example = applyCustomValues(example, customValues)
+	}
 
 	data, err := json.MarshalIndent(example, "", "  ")
 	if err != nil {

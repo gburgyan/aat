@@ -112,9 +112,9 @@ func BuildServerContext(manifest *ProjectManifest) (*ServerContext, error) {
 	return ctx, nil
 }
 
-// loadOASSpecs discovers and loads OAS spec files referenced in the graph.
+// loadOASSpecs discovers and loads OAS spec files referenced in the manifest and graph.
 func (ctx *ServerContext) loadOASSpecs() error {
-	paths := collectSpecPaths(ctx.Graph, ctx.GraphDir)
+	paths := collectSpecPaths(ctx.Graph, ctx.GraphDir, ctx.Manifest)
 	for _, specPath := range paths {
 		if _, loaded := ctx.OASSpecs[specPath]; loaded {
 			continue
@@ -129,18 +129,18 @@ func (ctx *ServerContext) loadOASSpecs() error {
 }
 
 // collectSpecPaths returns the unique set of OAS spec file paths referenced
-// by the graph, resolved relative to graphDir.
-func collectSpecPaths(g *graph.Graph, graphDir string) []string {
+// by the manifest and graph, resolved relative to graphDir.
+func collectSpecPaths(g *graph.Graph, graphDir string, manifest *config.ProjectManifest) []string {
 	seen := make(map[string]bool)
 	var paths []string
 
-	addPath := func(raw string) {
+	addPath := func(raw, baseDir string) {
 		if raw == "" {
 			return
 		}
 		resolved := raw
 		if !filepath.IsAbs(raw) {
-			resolved = filepath.Join(graphDir, raw)
+			resolved = filepath.Join(baseDir, raw)
 		}
 		if !seen[resolved] {
 			seen[resolved] = true
@@ -148,13 +148,20 @@ func collectSpecPaths(g *graph.Graph, graphDir string) []string {
 		}
 	}
 
+	// Manifest-declared OAS paths (already resolved by LoadManifest)
+	if manifest != nil {
+		for _, p := range manifest.OASPaths {
+			addPath(p, graphDir)
+		}
+	}
+
 	// Graph-level default
-	addPath(g.OAS)
+	addPath(g.OAS, graphDir)
 
 	// Node-level overrides
 	for _, node := range g.Nodes {
 		if node != nil && node.OAS != nil {
-			addPath(node.OAS.Spec)
+			addPath(node.OAS.Spec, graphDir)
 		}
 	}
 

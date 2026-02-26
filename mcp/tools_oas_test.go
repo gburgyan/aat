@@ -70,6 +70,193 @@ func newOASTestServer(t *testing.T) *Server {
 	return NewServer(ctx)
 }
 
+// --- list_oas_operations ---
+
+func TestHandleListOASOperations_NoFilter(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASOperations, nil)
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "6 operation(s)")
+	assert.Contains(t, text, "listPets")
+	assert.Contains(t, text, "createPet")
+	assert.Contains(t, text, "listCategories")
+}
+
+func TestHandleListOASOperations_TagFilter(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASOperations, map[string]any{"tag": "Pets"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "listPets")
+	assert.Contains(t, text, "createPet")
+	assert.NotContains(t, text, "listCategories")
+}
+
+func TestHandleListOASOperations_KeywordFilter(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASOperations, map[string]any{"keyword": "categories"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "listCategories")
+	assert.NotContains(t, text, "createPet")
+}
+
+func TestHandleListOASOperations_MethodFilter(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASOperations, map[string]any{"method": "POST"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "createPet")
+	assert.NotContains(t, text, "listPets")
+	assert.NotContains(t, text, "getPet")
+}
+
+func TestHandleListOASOperations_CombinedFilters(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASOperations, map[string]any{
+		"tag":    "Pets",
+		"method": "GET",
+	})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "listPets")
+	assert.Contains(t, text, "getPet")
+	assert.NotContains(t, text, "createPet")
+	assert.NotContains(t, text, "listCategories")
+}
+
+func TestHandleListOASOperations_GraphNodeMarker(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASOperations, map[string]any{"keyword": "create"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	// createPet is mapped to a graph node
+	assert.Contains(t, text, "createPet")
+}
+
+func TestHandleListOASOperations_NoMatches(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASOperations, map[string]any{"keyword": "nonexistent"})
+
+	assert.False(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "No operations found")
+}
+
+func TestHandleListOASOperations_NoSpecs(t *testing.T) {
+	ctx := &ServerContext{
+		Graph:    &graph.Graph{Nodes: map[string]*graph.Node{}},
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+		OASSpecs: map[string]*v3high.Document{},
+	}
+	srv := NewServer(ctx)
+
+	result := callTool(t, srv.handleListOASOperations, nil)
+	assert.True(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "No OAS specs loaded")
+}
+
+func TestHandleListOASOperations_Deprecated(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASOperations, map[string]any{"keyword": "delete"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "deprecated")
+}
+
+// --- list_oas_subtypes ---
+
+func TestHandleListOASSubtypes_Discriminator(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASSubtypes, map[string]any{"schema": "Animal"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "Discriminator")
+	assert.Contains(t, text, "animalType")
+	assert.Contains(t, text, "Dog")
+	assert.Contains(t, text, "Cat")
+}
+
+func TestHandleListOASSubtypes_OneOfVariants(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASSubtypes, map[string]any{"schema": "Animal"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "oneOf Variants")
+	assert.Contains(t, text, "Dog")
+	assert.Contains(t, text, "Cat")
+}
+
+func TestHandleListOASSubtypes_AllOfChildren(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASSubtypes, map[string]any{"schema": "Animal"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "Extending Schemas")
+	assert.Contains(t, text, "Dog")
+	assert.Contains(t, text, "Cat")
+}
+
+func TestHandleListOASSubtypes_BaseEntity(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASSubtypes, map[string]any{"schema": "BaseEntity"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	// Pet extends BaseEntity via allOf
+	assert.Contains(t, text, "Extending Schemas")
+	assert.Contains(t, text, "Pet")
+}
+
+func TestHandleListOASSubtypes_NonPolymorphic(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASSubtypes, map[string]any{"schema": "Address"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "No polymorphic subtypes found")
+}
+
+func TestHandleListOASSubtypes_NotFound(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASSubtypes, map[string]any{"schema": "Nonexistent"})
+
+	assert.True(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "not found")
+}
+
+func TestHandleListOASSubtypes_MissingParam(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleListOASSubtypes, nil)
+	assert.True(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "missing required parameter")
+}
+
+func TestHandleListOASSubtypes_NoSpecs(t *testing.T) {
+	ctx := &ServerContext{
+		Graph:    &graph.Graph{Nodes: map[string]*graph.Node{}},
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+		OASSpecs: map[string]*v3high.Document{},
+	}
+	srv := NewServer(ctx)
+
+	result := callTool(t, srv.handleListOASSubtypes, map[string]any{"schema": "Animal"})
+	assert.True(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "No OAS specs loaded")
+}
+
 // --- get_oas_operation ---
 
 func TestHandleGetOASOperation_Valid(t *testing.T) {
@@ -130,8 +317,44 @@ func TestHandleGetOASOperation_NoOASRef(t *testing.T) {
 	srv := newOASTestServer(t)
 	result := callTool(t, srv.handleGetOASOperation, map[string]any{"node": "noOAS"})
 	assert.True(t, result.IsError)
-	assert.Contains(t, resultText(t, result), "no OAS reference")
-	assert.Contains(t, resultText(t, result), "inspect_template")
+	text := resultText(t, result)
+	assert.Contains(t, text, "no OAS reference")
+	// Default (all) persona should suggest inspect_template.
+	assert.Contains(t, text, "inspect_template")
+	// Should include the adapter name.
+	assert.Contains(t, text, "adapter: noOAS")
+}
+
+func TestHandleGetOASOperation_NoOASRef_IntegrationPersona(t *testing.T) {
+	doc := loadRichPetstore(t)
+	specPath := filepath.Join(testdataDir(), "richpetstore.yaml")
+
+	g := &graph.Graph{
+		OAS: specPath,
+		Nodes: map[string]*graph.Node{
+			"noOAS": {
+				Name:    "noOAS",
+				Adapter: "noOASAdapter",
+			},
+		},
+	}
+
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+		OASSpecs: map[string]*v3high.Document{specPath: doc},
+		GraphDir: testdataDir(),
+	}
+	srv := NewIntegrationServer(ctx)
+
+	result := callTool(t, srv.handleGetOASOperation, map[string]any{"node": "noOAS"})
+	assert.True(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "no OAS reference")
+	// Integration persona should suggest inspect_request_template.
+	assert.Contains(t, text, "inspect_request_template")
+	assert.Contains(t, text, "adapter: noOASAdapter")
 }
 
 func TestHandleGetOASOperation_MissingParam(t *testing.T) {
@@ -298,11 +521,79 @@ func TestHandleSearchOASSchemas_InvalidRegex(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "Invalid pattern")
 }
 
-func TestHandleSearchOASSchemas_MissingParam(t *testing.T) {
+func TestHandleSearchOASSchemas_NoFilters(t *testing.T) {
 	srv := newOASTestServer(t)
 	result := callTool(t, srv.handleSearchOASSchemas, nil)
 	assert.True(t, result.IsError)
-	assert.Contains(t, resultText(t, result), "missing required parameter")
+	assert.Contains(t, resultText(t, result), "At least one filter required")
+}
+
+func TestHandleSearchOASSchemas_HasPropertyFilter(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleSearchOASSchemas, map[string]any{"has_property": "street"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "Address")
+	// Pet also has address via allOf but not street directly — CreatePetRequest has address ref
+	assert.NotContains(t, text, "Category")
+}
+
+func TestHandleSearchOASSchemas_ExtendsFilter(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleSearchOASSchemas, map[string]any{"extends": "BaseEntity"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "Pet")
+	assert.NotContains(t, text, "BaseEntity")
+	assert.NotContains(t, text, "Address")
+}
+
+func TestHandleSearchOASSchemas_CombinedFilters(t *testing.T) {
+	srv := newOASTestServer(t)
+	// Pattern + hasProperty: schemas matching "Pet" that have a "name" property
+	result := callTool(t, srv.handleSearchOASSchemas, map[string]any{
+		"pattern":      "Pet",
+		"has_property": "name",
+	})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "CreatePetRequest")
+	assert.Contains(t, text, "UpdatePetRequest")
+}
+
+func TestHandleSearchOASSchemas_NoMatchesWithFilters(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleSearchOASSchemas, map[string]any{
+		"extends": "NonexistentBase",
+	})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "No schemas matching")
+}
+
+func TestHandleSearchOASSchemas_HasDiscriminatorFilter(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleSearchOASSchemas, map[string]any{"has_discriminator": true})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "Animal")
+	assert.NotContains(t, text, "Pet")
+	assert.NotContains(t, text, "Address")
+}
+
+func TestHandleSearchOASSchemas_PatternOnlyBackwardCompat(t *testing.T) {
+	srv := newOASTestServer(t)
+	// Verify pattern-only still works (backward compatibility)
+	result := callTool(t, srv.handleSearchOASSchemas, map[string]any{"pattern": "^Create"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "CreatePetRequest")
 }
 
 func TestHandleSearchOASSchemas_NoSpecs(t *testing.T) {
@@ -506,6 +797,58 @@ func TestHandleBuildOASExample_RequiredFieldsListed(t *testing.T) {
 	assert.Contains(t, text, "Required fields")
 	assert.Contains(t, text, "name")
 	assert.Contains(t, text, "species")
+}
+
+func TestHandleBuildOASExample_CustomValues(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleBuildOASExample, map[string]any{
+		"node":          "createPet",
+		"custom_values": `{"name":"Buddy","species":"dog"}`,
+	})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, `"name": "Buddy"`)
+	assert.Contains(t, text, `"species": "dog"`)
+}
+
+func TestHandleBuildOASExample_CustomValuesNested(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleBuildOASExample, map[string]any{
+		"node":          "createPet",
+		"scenario":      "full",
+		"custom_values": `{"address":{"city":"Portland"}}`,
+	})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, `"city": "Portland"`)
+	// Other address fields should still be present from the example
+	assert.Contains(t, text, `"street"`)
+}
+
+func TestHandleBuildOASExample_CustomValuesInvalidJSON(t *testing.T) {
+	srv := newOASTestServer(t)
+	result := callTool(t, srv.handleBuildOASExample, map[string]any{
+		"node":          "createPet",
+		"custom_values": `{invalid}`,
+	})
+
+	assert.True(t, result.IsError)
+	assert.Contains(t, resultText(t, result), "Invalid custom_values JSON")
+}
+
+func TestHandleBuildOASExample_CustomValuesEmpty(t *testing.T) {
+	srv := newOASTestServer(t)
+	// Empty string should be treated as no custom values
+	result := callTool(t, srv.handleBuildOASExample, map[string]any{
+		"node":          "createPet",
+		"custom_values": "",
+	})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "```json")
 }
 
 func TestHandleBuildOASExample_UpdatePet(t *testing.T) {

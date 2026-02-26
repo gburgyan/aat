@@ -75,9 +75,12 @@ func (s *Server) registerIntegrationServer() {
 	s.registerIntegrationGraphTools()
 	s.registerIntegrationTemplateTools()
 	s.registerIntegrationDomainTools()
-	s.registerOASTools()
+	if len(s.ctx.OASSpecs) > 0 {
+		s.registerOASTools()
+	}
 	s.registerIntegrationDocsTools()
 	s.registerIntegrationWorkflowTools()
+	s.registerSampleResponseTool()
 	s.registerIntegrationResources()
 	s.registerIntegrationPrompts()
 }
@@ -101,12 +104,15 @@ func (s *Server) registerAllServer() {
 	s.registerGraphTools()
 	s.registerTemplateTools()
 	s.registerDomainTools()
-	s.registerOASTools()
+	if len(s.ctx.OASSpecs) > 0 {
+		s.registerOASTools()
+	}
 	s.registerDocsTools()
 	s.registerPlanTools()
 	s.registerWorkflowTools()
 	s.registerExecTools()
 	s.registerArchiveTools()
+	s.registerSampleResponseTool()
 	s.registerResources()
 	s.registerPrompts()
 	s.registerWorkflowPrompts()

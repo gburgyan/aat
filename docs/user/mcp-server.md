@@ -22,7 +22,7 @@ The MCP server supports **personas** that tailor the tool set for different work
 
 ```
 aat mcp serve                   # all tools (backward compatible)
-aat mcp serve --persona api     # API knowledge tools (~21 tools)
+aat mcp serve --persona api     # API knowledge tools (~22 tools)
 aat mcp serve --persona test    # test lifecycle tools (~26 tools)
 ```
 
@@ -100,25 +100,25 @@ Consult your IDE's MCP documentation for the exact settings location.
 
 ## Tools — API Persona
 
-The API persona registers 21 tools focused on understanding and integrating with the API.
+The API persona registers 22 tools focused on understanding and integrating with the API.
 
 ### API Operations (7 tools)
 
 | Tool | Description |
 |------|-------------|
 | `list_api_operations` | List all API operations with descriptions and input/output counts |
-| `describe_operation` | Show full details for an API operation: inputs, outputs, dependencies, and OAS reference |
+| `describe_operation` | Show full details for an API operation: inputs, outputs, dependencies, OAS reference, and Lua transform indicator |
 | `trace_dependency_chain` | Trace the dependency chain for a target operation using backward chaining |
 | `search_api` | Search for API operations by keyword across names, descriptions, and input/output names |
 | `get_data_flow` | Show how data flows between two API operations: which outputs map to which inputs |
-| `get_response_shape` | Show the output fields for an API operation with extraction paths and downstream consumers |
+| `get_response_shape` | Show the output fields for an API operation with extraction paths, downstream consumers, and transform notes |
 | `explain_field` | Show everything known about a specific field: type, domain concept, value pool, constraints, and which operations produce/consume it |
 
 ### Request Templates (1 tool)
 
 | Tool | Description |
 |------|-------------|
-| `inspect_request_template` | Show the HTTP request template for an API operation: method, path, headers, body, and response extraction rules |
+| `inspect_request_template` | Show the HTTP request template for an API operation: method, path, headers, body, response extraction rules, and Lua transforms |
 
 ### Domain Knowledge (4 tools)
 
@@ -129,10 +129,12 @@ The API persona registers 21 tools focused on understanding and integrating with
 | `list_value_pools` | List all value pools with type, sample values, and total count |
 | `explain_concept` | Show full detail for a concept: description, constraints, examples, and related types/pools |
 
-### OpenAPI (5 tools)
+### OpenAPI (7 tools)
 
 | Tool | Description |
 |------|-------------|
+| `list_oas_operations` | List operations from loaded OAS specs with optional filters (tag, keyword, HTTP method) |
+| `list_oas_subtypes` | Show polymorphic subtypes for a schema (discriminator mappings, oneOf/anyOf, allOf) |
 | `get_oas_operation` | Show OAS operation details for a graph node: HTTP method, path, parameters, request/response schemas |
 | `get_oas_schema` | Resolve and display a component schema by name, including allOf inheritance and validation constraints |
 | `search_oas_schemas` | Search for component schema names matching a regex pattern across all loaded OAS specs |
@@ -151,7 +153,13 @@ The API persona registers 21 tools focused on understanding and integrating with
 | Tool | Description |
 |------|-------------|
 | `list_integration_flows` | List all integration flows with decision points (slots) and optional extensions (addons) |
-| `get_integration_flow` | Show an enriched step-by-step recipe for an integration flow: HTTP methods, data flow, selections, outputs |
+| `get_integration_flow` | Show an enriched step-by-step recipe for an integration flow: HTTP methods, data flow, selections, outputs, and operation name mapping |
+
+### Sample Responses (1 tool)
+
+| Tool | Description |
+|------|-------------|
+| `get_sample_response` | Get a sample API response for an operation from run archives, showing response body, status code, and extracted outputs |
 
 ## Tools — Test Persona
 
@@ -327,6 +335,29 @@ When the AI uses `get_node_documentation`, AAT merges three sources:
 3. **OAS details** — operation description, parameters, and schemas from the OpenAPI spec
 
 This merged view gives the AI rich context for authoring plans, generating client code, or explaining API behavior.
+
+## UX Features
+
+The MCP tools include several features designed to reduce friction when AI assistants use them.
+
+### Step IDs vs Operation Names
+
+Workflow templates assign step IDs that may differ from the underlying graph node (operation) name. For example, a round-trip booking workflow might use step IDs like `searchNextLeg2` while the graph node is `searchFlightsNextLeg`.
+
+- **`get_integration_flow` / `get_workflow_detail`** shows the operation name under each step when the step ID differs: `**Operation:** searchFlightsNextLeg`. This makes the mapping visible so you know which name to use in other tools.
+- **Error messages** across `describe_operation`, `get_data_flow`, `get_response_shape`, `explain_field`, `inspect_request_template`, and `get_sample_response` suggest checking the workflow detail if the name looks like a step ID.
+
+### Lua Transform Indicators
+
+Only some templates have Lua transforms, but they contain critical post-processing logic. Rather than requiring a separate `inspect_request_template` call to discover this:
+
+- **`describe_operation` / `describe_node`** shows a `**Transform:** Lua (summary)` line when the node's template has a Lua transform script. The summary is extracted from the leading comment block.
+- **`get_response_shape`** adds a note when outputs are post-processed by a transform, since extract paths alone don't tell the full story.
+- **`inspect_request_template`** shows the full Lua script with syntax highlighting and a comment summary.
+
+### Data Flow Guidance
+
+When `get_data_flow` finds no direct graph connection between two operations, it suggests using `get_integration_flow` or `get_workflow_detail` to see step-level data flow within workflows — since many connections are established through workflow composition rather than direct graph edges.
 
 ## Server Context
 

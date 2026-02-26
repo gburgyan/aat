@@ -203,7 +203,7 @@ func TestHandleInspectTemplate_UnknownAdapter(t *testing.T) {
 	result := callTool(t, srv.handleInspectTemplate, map[string]any{"adapter": "nonexistent"})
 
 	assert.True(t, result.IsError)
-	assert.Contains(t, resultText(t, result), "unknown adapter")
+	assert.Contains(t, resultText(t, result), "unknown adapter or node")
 }
 
 func TestHandleInspectTemplate_NonTemplateAdapter(t *testing.T) {
@@ -224,4 +224,337 @@ func TestHandleInspectTemplate_MissingParam(t *testing.T) {
 
 	assert.True(t, result.IsError)
 	assert.Contains(t, resultText(t, result), "missing required parameter")
+}
+
+// --- node name resolution ---
+
+func TestHandleInspectTemplate_NodeNameResolvesToAdapter(t *testing.T) {
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("searchTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "searchTmpl",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/api/search"},
+	})))
+
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name:    "searchFlights",
+				Adapter: "searchTmpl",
+			},
+		},
+	}
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+	srv := NewServer(ctx)
+
+	result := callTool(t, srv.handleInspectTemplate, map[string]any{"adapter": "searchFlights"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	// Should show the note about adapter vs node name.
+	assert.Contains(t, text, "adapter \"searchTmpl\"")
+	assert.Contains(t, text, "node \"searchFlights\"")
+	// Should contain the template content.
+	assert.Contains(t, text, "**Method:** POST")
+	assert.Contains(t, text, "/api/search")
+}
+
+func TestHandleInspectTemplate_NodeNameSameAsAdapter(t *testing.T) {
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("search", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "search",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "GET", Path: "/search"},
+	})))
+
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "search",
+			},
+		},
+	}
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+	srv := NewServer(ctx)
+
+	// When adapter name == node name, direct adapter lookup wins (no note).
+	result := callTool(t, srv.handleInspectTemplate, map[string]any{"adapter": "search"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.NotContains(t, text, "Showing template for adapter")
+	assert.Contains(t, text, "**Method:** GET")
+}
+
+func TestHandleInspectTemplate_DirectAdapterStillWorks(t *testing.T) {
+	reg := adapter.NewRegistry()
+	require.NoError(t, reg.Register("myAdapter", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "myAdapter",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "PUT", Path: "/update"},
+	})))
+
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"someNode": {
+				Name:    "someNode",
+				Adapter: "myAdapter",
+			},
+		},
+	}
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+	srv := NewServer(ctx)
+
+	// Direct adapter name lookup should still work without any note.
+	result := callTool(t, srv.handleInspectTemplate, map[string]any{"adapter": "myAdapter"})
+
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.NotContains(t, text, "Showing template for adapter")
+	assert.Contains(t, text, "**Method:** PUT")
+}
+
+// --- detectResponseEnvelope ---
+
+func TestDetectResponseEnvelope_CommonRoot(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"offerings": {Path: "CatalogProductOfferingsResponse.CatalogProductOfferings"},
+		"nextStep":  {Path: "CatalogProductOfferingsResponse.NextSteps"},
+	}
+	assert.Equal(t, "CatalogProductOfferingsResponse", detectResponseEnvelope(extract))
+}
+
+func TestDetectResponseEnvelope_MixedRoots(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"offerings": {Path: "CatalogProductOfferingsResponse.data"},
+		"contacts":  {Path: "PrimaryContactResponse.data"},
+	}
+	assert.Equal(t, "", detectResponseEnvelope(extract))
+}
+
+func TestDetectResponseEnvelope_SingleRule(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"result": {Path: "ReservationResponse.Reservation"},
+	}
+	assert.Equal(t, "ReservationResponse", detectResponseEnvelope(extract))
+}
+
+func TestDetectResponseEnvelope_WithDollarPrefix(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"a": {Path: "$.Envelope.data"},
+		"b": {Path: "$.Envelope.meta"},
+	}
+	assert.Equal(t, "Envelope", detectResponseEnvelope(extract))
+}
+
+func TestDetectResponseEnvelope_NoDot(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"a": {Path: "data"},
+		"b": {Path: "data"},
+	}
+	// Single segment paths — still common root
+	assert.Equal(t, "data", detectResponseEnvelope(extract))
+}
+
+func TestDetectResponseEnvelope_EmptyPaths(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"a": {Path: ""},
+		"b": {Path: ""},
+	}
+	assert.Equal(t, "", detectResponseEnvelope(extract))
+}
+
+func TestDetectResponseEnvelope_EmptyExtract(t *testing.T) {
+	assert.Equal(t, "", detectResponseEnvelope(map[string]adapter.ExtractRule{}))
+}
+
+func TestFormatTemplate_ShowsEnvelopeNote(t *testing.T) {
+	tmpl := &adapter.Template{
+		Adapter:  "search",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/api/search"},
+		Response: adapter.TemplateResponse{
+			Extract: map[string]adapter.ExtractRule{
+				"results": {Path: "SearchResponse.results"},
+				"count":   {Path: "SearchResponse.count"},
+			},
+		},
+	}
+	text := formatTemplate(tmpl)
+	assert.Contains(t, text, "**Response envelope:**")
+	assert.Contains(t, text, "`SearchResponse`")
+}
+
+func TestFormatTemplate_NoEnvelopeNote_MixedRoots(t *testing.T) {
+	tmpl := &adapter.Template{
+		Adapter:  "search",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/api/search"},
+		Response: adapter.TemplateResponse{
+			Extract: map[string]adapter.ExtractRule{
+				"a": {Path: "ResponseA.data"},
+				"b": {Path: "ResponseB.data"},
+			},
+		},
+	}
+	text := formatTemplate(tmpl)
+	assert.NotContains(t, text, "Response envelope")
+}
+
+// --- needsPathLegend ---
+
+func TestNeedsPathLegend_WithHash(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"items": {Path: "data.items.#.id"},
+	}
+	assert.True(t, needsPathLegend(extract))
+}
+
+func TestNeedsPathLegend_WithArrayIndex(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"first": {Path: "data.items.0.id"},
+	}
+	assert.True(t, needsPathLegend(extract))
+}
+
+func TestNeedsPathLegend_WithFlatten(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"flat": {Path: "data.nested|@flatten"},
+	}
+	assert.True(t, needsPathLegend(extract))
+}
+
+func TestNeedsPathLegend_InFields(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"items": {Path: "data", Fields: map[string]string{
+			"id": "items.#.id",
+		}},
+	}
+	assert.True(t, needsPathLegend(extract))
+}
+
+func TestNeedsPathLegend_SimplePaths(t *testing.T) {
+	extract := map[string]adapter.ExtractRule{
+		"results": {Path: "data.results"},
+		"count":   {Path: "data.count"},
+	}
+	assert.False(t, needsPathLegend(extract))
+}
+
+func TestFormatTemplate_ShowsPathLegend(t *testing.T) {
+	tmpl := &adapter.Template{
+		Adapter:  "search",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/api/search"},
+		Response: adapter.TemplateResponse{
+			Extract: map[string]adapter.ExtractRule{
+				"items": {Path: "data.items.#.id|@flatten"},
+			},
+		},
+	}
+	text := formatTemplate(tmpl)
+	assert.Contains(t, text, "**Path notation (gjson):**")
+	assert.Contains(t, text, "`#` = iterate all array elements")
+	assert.Contains(t, text, "`|@flatten` = flatten nested arrays")
+}
+
+func TestFormatTemplate_NoPathLegend_SimplePaths(t *testing.T) {
+	tmpl := &adapter.Template{
+		Adapter:  "search",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/api/search"},
+		Response: adapter.TemplateResponse{
+			Extract: map[string]adapter.ExtractRule{
+				"results": {Path: "data.results"},
+			},
+		},
+	}
+	text := formatTemplate(tmpl)
+	assert.NotContains(t, text, "Path notation")
+}
+
+// --- extractTransformSummary ---
+
+func TestExtractTransformSummary_MultiLine(t *testing.T) {
+	script := `-- Resolve GDS ReferenceList cross-references.
+-- In GDS mode, CatalogProductOfferings contain only reference strings.
+local data = json.decode(raw)`
+	result := extractTransformSummary(script)
+	assert.Contains(t, result, "Resolve GDS ReferenceList cross-references.")
+	assert.Contains(t, result, "reference strings.")
+}
+
+func TestExtractTransformSummary_NoComments(t *testing.T) {
+	script := `local data = json.decode(raw)
+result = data`
+	assert.Equal(t, "", extractTransformSummary(script))
+}
+
+func TestExtractTransformSummary_SingleLine(t *testing.T) {
+	script := `-- Strip wrapper
+local data = json.decode(raw)`
+	assert.Equal(t, "Strip wrapper", extractTransformSummary(script))
+}
+
+func TestExtractTransformSummary_EmptyScript(t *testing.T) {
+	assert.Equal(t, "", extractTransformSummary(""))
+}
+
+func TestExtractTransformSummary_BlankLineGap(t *testing.T) {
+	script := `-- First line
+
+-- Still part of header
+local data = json.decode(raw)`
+	result := extractTransformSummary(script)
+	assert.Contains(t, result, "First line")
+	assert.Contains(t, result, "Still part of header")
+}
+
+func TestExtractTransformSummary_EmptyCommentLine(t *testing.T) {
+	script := `--
+-- Real comment
+local x = 1`
+	result := extractTransformSummary(script)
+	assert.Equal(t, "Real comment", result)
+}
+
+func TestFormatTemplate_ShowsTransformSummary(t *testing.T) {
+	tmpl := &adapter.Template{
+		Adapter:  "search",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/api/search"},
+		Response: adapter.TemplateResponse{
+			Transform: "-- Resolve cross-references.\nlocal data = json.decode(raw)\nresult = data",
+		},
+	}
+	text := formatTemplate(tmpl)
+	assert.Contains(t, text, "> Resolve cross-references.")
+	assert.Contains(t, text, "```lua")
+}
+
+func TestFormatTemplate_NoTransformSummary_NoComments(t *testing.T) {
+	tmpl := &adapter.Template{
+		Adapter:  "search",
+		Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/api/search"},
+		Response: adapter.TemplateResponse{
+			Transform: "result = raw\nresult.extra = 'added'",
+		},
+	}
+	text := formatTemplate(tmpl)
+	assert.Contains(t, text, "## Transform (Lua)")
+	assert.NotContains(t, text, "> ")
 }

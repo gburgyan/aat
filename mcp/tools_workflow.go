@@ -410,6 +410,10 @@ func formatWorkflowDetail(wf graph.Workflow, p *plan.Plan, g *graph.Graph, reg *
 	for i, step := range p.Execution.Steps {
 		fmt.Fprintf(&b, "\n### %d. %s\n", i+1, step.StepID())
 
+		if step.Node != step.StepID() {
+			fmt.Fprintf(&b, "**Operation:** %s\n", step.Node)
+		}
+
 		node := g.Nodes[step.Node]
 
 		if step.Description != "" {

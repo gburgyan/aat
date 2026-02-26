@@ -208,7 +208,7 @@ func TestCollectSpecPaths_NoSpecs(t *testing.T) {
 		},
 	}
 
-	paths := collectSpecPaths(g, "/base")
+	paths := collectSpecPaths(g, "/base", nil)
 	assert.Empty(t, paths)
 }
 
@@ -220,7 +220,7 @@ func TestCollectSpecPaths_GraphLevel(t *testing.T) {
 		},
 	}
 
-	paths := collectSpecPaths(g, "/base")
+	paths := collectSpecPaths(g, "/base", nil)
 	assert.Equal(t, []string{"/base/spec.yaml"}, paths)
 }
 
@@ -234,7 +234,7 @@ func TestCollectSpecPaths_NodeLevel(t *testing.T) {
 		},
 	}
 
-	paths := collectSpecPaths(g, "/base")
+	paths := collectSpecPaths(g, "/base", nil)
 	assert.Equal(t, []string{"/base/node-spec.yaml"}, paths)
 }
 
@@ -253,7 +253,7 @@ func TestCollectSpecPaths_Deduplication(t *testing.T) {
 		},
 	}
 
-	paths := collectSpecPaths(g, "/base")
+	paths := collectSpecPaths(g, "/base", nil)
 	// "spec.yaml" should appear only once
 	assert.Len(t, paths, 1)
 	assert.Equal(t, "/base/spec.yaml", paths[0])
@@ -267,6 +267,39 @@ func TestCollectSpecPaths_AbsoluteSpec(t *testing.T) {
 		},
 	}
 
-	paths := collectSpecPaths(g, "/base")
+	paths := collectSpecPaths(g, "/base", nil)
 	assert.Equal(t, []string{"/absolute/spec.yaml"}, paths)
+}
+
+func TestCollectSpecPaths_ManifestPaths(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"a": {Name: "a"},
+		},
+	}
+	manifest := &ProjectManifest{
+		OASPaths: []string{"/resolved/spec.yaml", "/resolved/other.json"},
+	}
+
+	paths := collectSpecPaths(g, "/base", manifest)
+	require.Len(t, paths, 2)
+	assert.Equal(t, "/resolved/spec.yaml", paths[0])
+	assert.Equal(t, "/resolved/other.json", paths[1])
+}
+
+func TestCollectSpecPaths_ManifestAndGraphDedup(t *testing.T) {
+	g := &graph.Graph{
+		OAS: "spec.yaml",
+		Nodes: map[string]*graph.Node{
+			"a": {Name: "a"},
+		},
+	}
+	manifest := &ProjectManifest{
+		OASPaths: []string{"/base/spec.yaml"}, // same after resolution
+	}
+
+	paths := collectSpecPaths(g, "/base", manifest)
+	// Should deduplicate — both resolve to /base/spec.yaml
+	assert.Len(t, paths, 1)
+	assert.Equal(t, "/base/spec.yaml", paths[0])
 }

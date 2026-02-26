@@ -1,0 +1,25 @@
+metadata:
+  prompt: "round trip booking"
+execution:
+  steps:
+    - node: search
+      description: Search first leg
+      values:
+        origin: "DEN"
+        destination: "SFO"
+    - id: searchNextLeg2
+      node: search
+      dependsOn: [search]
+      description: Search return leg
+      values:
+        origin: "SFO"
+        destination: "DEN"
+    - node: book
+      dependsOn: [search, searchNextLeg2]
+      description: Book the flights
+      values:
+        flightId:
+          from: search.results
+  cleanup:
+    - node: cancel
+      runOn: always

@@ -574,6 +574,116 @@ func TestJoinPath(t *testing.T) {
 	assert.Equal(t, "$.address.street", joinPath("$.address", "street"))
 }
 
+// --- applyCustomValues ---
+
+func TestApplyCustomValues_SimpleOverride(t *testing.T) {
+	example := map[string]any{"name": "string", "species": "string"}
+	custom := map[string]any{"name": "Buddy"}
+
+	result := applyCustomValues(example, custom)
+	obj, ok := result.(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "Buddy", obj["name"])
+	assert.Equal(t, "string", obj["species"])
+}
+
+func TestApplyCustomValues_NestedMerge(t *testing.T) {
+	example := map[string]any{
+		"name": "string",
+		"address": map[string]any{
+			"street": "123 Main",
+			"city":   "Portland",
+		},
+	}
+	custom := map[string]any{
+		"address": map[string]any{
+			"city": "Seattle",
+		},
+	}
+
+	result := applyCustomValues(example, custom)
+	obj := result.(map[string]any)
+	addr := obj["address"].(map[string]any)
+	assert.Equal(t, "123 Main", addr["street"]) // preserved
+	assert.Equal(t, "Seattle", addr["city"])    // overridden
+}
+
+func TestApplyCustomValues_AddNewKey(t *testing.T) {
+	example := map[string]any{"name": "string"}
+	custom := map[string]any{"extra": "value"}
+
+	result := applyCustomValues(example, custom)
+	obj := result.(map[string]any)
+	assert.Equal(t, "value", obj["extra"])
+	assert.Equal(t, "string", obj["name"])
+}
+
+func TestApplyCustomValues_NonMapExample(t *testing.T) {
+	result := applyCustomValues("plain string", map[string]any{"key": "val"})
+	assert.Equal(t, "plain string", result) // unchanged
+}
+
 func TestSchemaType(t *testing.T) {
 	assert.Equal(t, "", schemaType(nil))
+}
+
+// --- schemaHasProperty ---
+
+func TestSchemaHasProperty_DirectProperty(t *testing.T) {
+	doc := loadRichPetstore(t)
+	schema := findSchema(t, doc, "Address")
+	assert.True(t, schemaHasProperty(schema, "street"))
+	assert.True(t, schemaHasProperty(schema, "city"))
+	assert.False(t, schemaHasProperty(schema, "nonexistent"))
+}
+
+func TestSchemaHasProperty_AllOfMember(t *testing.T) {
+	doc := loadRichPetstore(t)
+	schema := findSchema(t, doc, "Pet")
+	// "id" comes from BaseEntity via allOf
+	assert.True(t, schemaHasProperty(schema, "id"))
+	// "name" comes from the inline allOf member
+	assert.True(t, schemaHasProperty(schema, "name"))
+	assert.False(t, schemaHasProperty(schema, "nonexistent"))
+}
+
+func TestSchemaHasProperty_Nil(t *testing.T) {
+	assert.False(t, schemaHasProperty(nil, "anything"))
+}
+
+// --- schemaExtends ---
+
+func TestSchemaExtends_AllOfRef(t *testing.T) {
+	doc := loadRichPetstore(t)
+	schema := findSchema(t, doc, "Pet")
+	assert.True(t, schemaExtends(schema, "BaseEntity"))
+	assert.False(t, schemaExtends(schema, "Address"))
+}
+
+func TestSchemaExtends_NoAllOf(t *testing.T) {
+	doc := loadRichPetstore(t)
+	schema := findSchema(t, doc, "Address")
+	assert.False(t, schemaExtends(schema, "BaseEntity"))
+}
+
+func TestSchemaExtends_Nil(t *testing.T) {
+	assert.False(t, schemaExtends(nil, "anything"))
+}
+
+// --- schemaHasDiscriminator ---
+
+func TestSchemaHasDiscriminator_WithDiscriminator(t *testing.T) {
+	doc := loadRichPetstore(t)
+	schema := findSchema(t, doc, "Animal")
+	assert.True(t, schemaHasDiscriminator(schema))
+}
+
+func TestSchemaHasDiscriminator_NoDiscriminator(t *testing.T) {
+	doc := loadRichPetstore(t)
+	schema := findSchema(t, doc, "Pet")
+	assert.False(t, schemaHasDiscriminator(schema))
+}
+
+func TestSchemaHasDiscriminator_Nil(t *testing.T) {
+	assert.False(t, schemaHasDiscriminator(nil))
 }

@@ -217,10 +217,55 @@ func (s *Server) handleDescribeNode(_ context.Context, req mcp.CallToolRequest) 
 
 	node := s.ctx.Graph.Nodes[nodeName]
 	if node == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q", nodeName)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q — if this is a workflow step ID, check the workflow detail for the underlying operation name", nodeName)), nil
 	}
 
-	return mcp.NewToolResultText(formatNodeDetail(node, s.ctx.Graph)), nil
+	output := formatNodeDetail(node, s.ctx.Graph)
+
+	if node.Adapter != "" {
+		if tmpl, ok := s.ctx.Registry.GetTemplate(node.Adapter); ok && tmpl.Response.Transform != "" {
+			summary := extractTransformSummary(tmpl.Response.Transform)
+			if summary != "" {
+				output += fmt.Sprintf("\n**Transform:** Lua (%s)\n", summary)
+			} else {
+				output += "\n**Transform:** Lua\n"
+			}
+		}
+	}
+
+	output += s.formatNextSteps(node, nodeName)
+
+	return mcp.NewToolResultText(output), nil
+}
+
+// formatNextSteps appends persona-aware tool suggestions after the node detail.
+func (s *Server) formatNextSteps(node *graph.Node, nodeName string) string {
+	var hints []string
+
+	if node.Adapter != "" {
+		templateTool := "inspect_template"
+		if s.persona == PersonaIntegration {
+			templateTool = "inspect_request_template"
+		}
+		hints = append(hints, fmt.Sprintf("- `%s` with **%s** — see the HTTP request template", templateTool, node.Adapter))
+	}
+
+	if node.OAS != nil {
+		oasTool := "get_oas_operation"
+		hints = append(hints, fmt.Sprintf("- `%s` with **%s** — see the OAS spec details", oasTool, nodeName))
+	}
+
+	if len(hints) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n## Next Steps\n\n")
+	for _, h := range hints {
+		b.WriteString(h)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // handleTraceWorkflow traces backward from a goal node and returns the
@@ -351,11 +396,11 @@ func (s *Server) handleGetDataFlow(_ context.Context, req mcp.CallToolRequest) (
 	g := s.ctx.Graph
 	fromNode := g.Nodes[nodeFrom]
 	if fromNode == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q", nodeFrom)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q — if this is a workflow step ID, check the workflow detail for the underlying operation name", nodeFrom)), nil
 	}
 	toNode := g.Nodes[nodeTo]
 	if toNode == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q", nodeTo)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q — if this is a workflow step ID, check the workflow detail for the underlying operation name", nodeTo)), nil
 	}
 
 	// Build set of tokens satisfied by nodeFrom.
@@ -410,7 +455,7 @@ func (s *Server) handleGetDataFlow(_ context.Context, req mcp.CallToolRequest) (
 	}
 
 	if len(mappings) == 0 {
-		return mcp.NewToolResultText(fmt.Sprintf("No direct data flow from %s to %s found in the graph.", nodeFrom, nodeTo)), nil
+		return mcp.NewToolResultText(fmt.Sprintf("No direct data flow from %s to %s found in the graph. If these operations are connected within a workflow, use `get_integration_flow` or `get_workflow_detail` to see step-level data flow.", nodeFrom, nodeTo)), nil
 	}
 
 	var b strings.Builder
@@ -453,7 +498,7 @@ func (s *Server) handleGetResponseShape(_ context.Context, req mcp.CallToolReque
 	g := s.ctx.Graph
 	node := g.Nodes[nodeName]
 	if node == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q", nodeName)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q — if this is a workflow step ID, check the workflow detail for the underlying operation name", nodeName)), nil
 	}
 
 	if len(node.Outputs) == 0 {
@@ -462,6 +507,17 @@ func (s *Server) handleGetResponseShape(_ context.Context, req mcp.CallToolReque
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Response Shape: %s\n\n", nodeName)
+
+	if node.Adapter != "" {
+		if tmpl, ok := s.ctx.Registry.GetTemplate(node.Adapter); ok && tmpl.Response.Transform != "" {
+			summary := extractTransformSummary(tmpl.Response.Transform)
+			if summary != "" {
+				fmt.Fprintf(&b, "> **Note:** Outputs are post-processed by a Lua transform — %s\n\n", summary)
+			} else {
+				fmt.Fprintf(&b, "> **Note:** Outputs are post-processed by a Lua transform. Use `inspect_request_template` for details.\n\n")
+			}
+		}
+	}
 
 	// Extract rules from template.
 	var extractRules map[string]string
@@ -530,7 +586,7 @@ func (s *Server) handleExplainField(_ context.Context, req mcp.CallToolRequest) 
 	g := s.ctx.Graph
 	node := g.Nodes[nodeName]
 	if node == nil {
-		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q", nodeName)), nil
+		return mcp.NewToolResultError(fmt.Sprintf("unknown node %q — if this is a workflow step ID, check the workflow detail for the underlying operation name", nodeName)), nil
 	}
 
 	var b strings.Builder

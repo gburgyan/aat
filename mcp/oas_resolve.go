@@ -200,7 +200,15 @@ func (s *Server) resolveNodeOperation(nodeName string) (*v3high.Operation, strin
 	}
 
 	if node.OAS == nil {
-		return nil, "", "", nil, fmt.Sprintf("Node %q has no OAS reference. Use inspect_template for adapter details.", nodeName)
+		toolName := "inspect_template"
+		if s.persona == PersonaIntegration {
+			toolName = "inspect_request_template"
+		}
+		adapterInfo := ""
+		if node.Adapter != "" {
+			adapterInfo = fmt.Sprintf(" (adapter: %s)", node.Adapter)
+		}
+		return nil, "", "", nil, fmt.Sprintf("Node %q has no OAS reference%s. Use %s with that adapter name for HTTP details.", nodeName, adapterInfo, toolName)
 	}
 
 	if len(s.ctx.OASSpecs) == 0 {
@@ -261,12 +269,29 @@ func (s *Server) findSchemaByName(name string) (*base.Schema, string, string) {
 	return nil, "", ""
 }
 
+// schemaSearchFilters holds the optional filter parameters for schema search.
+type schemaSearchFilters struct {
+	Pattern          string // regex pattern for schema name (optional if other filters set)
+	HasProperty      string // schema must have this property
+	Extends          string // schema must extend this base via allOf $ref
+	HasDiscriminator *bool  // schema must have/not have a discriminator
+}
+
 // searchSchemaNames returns all component schema names matching a regex pattern,
 // grouped by spec path.
 func (s *Server) searchSchemaNames(pattern string) (map[string][]string, error) {
-	re, err := regexp.Compile("(?i)" + pattern)
-	if err != nil {
-		return nil, fmt.Errorf("invalid regex: %w", err)
+	return s.searchSchemasFiltered(schemaSearchFilters{Pattern: pattern})
+}
+
+// searchSchemasFiltered returns schema names matching the given filters, grouped by spec path.
+func (s *Server) searchSchemasFiltered(filters schemaSearchFilters) (map[string][]string, error) {
+	var re *regexp.Regexp
+	if filters.Pattern != "" {
+		var err error
+		re, err = regexp.Compile("(?i)" + filters.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("invalid regex: %w", err)
+		}
 	}
 
 	results := make(map[string][]string)
@@ -274,10 +299,30 @@ func (s *Server) searchSchemaNames(pattern string) (map[string][]string, error) 
 		if doc.Components == nil || doc.Components.Schemas == nil {
 			continue
 		}
-		for schemaName := range doc.Components.Schemas.KeysFromOldest() {
-			if re.MatchString(schemaName) {
-				results[specPath] = append(results[specPath], schemaName)
+		for schemaName, schemaProxy := range doc.Components.Schemas.FromOldest() {
+			// Pattern filter
+			if re != nil && !re.MatchString(schemaName) {
+				continue
 			}
+
+			schema := schemaProxy.Schema()
+
+			// HasProperty filter
+			if filters.HasProperty != "" && !schemaHasProperty(schema, filters.HasProperty) {
+				continue
+			}
+
+			// Extends filter
+			if filters.Extends != "" && !schemaExtends(schema, filters.Extends) {
+				continue
+			}
+
+			// HasDiscriminator filter
+			if filters.HasDiscriminator != nil && schemaHasDiscriminator(schema) != *filters.HasDiscriminator {
+				continue
+			}
+
+			results[specPath] = append(results[specPath], schemaName)
 		}
 	}
 
@@ -903,6 +948,331 @@ func formatValidationErrors(errs []validationError) string {
 		fmt.Fprintf(&b, "- `%s`: %s\n", e.Path, e.Message)
 	}
 	return b.String()
+}
+
+// oasOperation describes a single operation discovered from OAS specs.
+type oasOperation struct {
+	OperationID string
+	Method      string
+	Path        string
+	Summary     string
+	Tags        []string
+	Deprecated  bool
+	GraphNode   string // non-empty if mapped to a graph node
+}
+
+// listAllOperations scans all loaded specs and returns every operation,
+// with optional filters for tag, keyword, and method.
+func (s *Server) listAllOperations(tag, keyword, method string) []oasOperation {
+	mapped := s.graphMappedOperations()
+
+	var ops []oasOperation
+	for _, doc := range s.ctx.OASSpecs {
+		if doc.Paths == nil || doc.Paths.PathItems == nil {
+			continue
+		}
+		for pathStr, pathItem := range doc.Paths.PathItems.FromOldest() {
+			for _, pair := range []struct {
+				method string
+				op     *v3high.Operation
+			}{
+				{"GET", pathItem.Get},
+				{"POST", pathItem.Post},
+				{"PUT", pathItem.Put},
+				{"DELETE", pathItem.Delete},
+				{"PATCH", pathItem.Patch},
+			} {
+				if pair.op == nil {
+					continue
+				}
+
+				// Method filter
+				if method != "" && !strings.EqualFold(pair.method, method) {
+					continue
+				}
+
+				// Tag filter
+				if tag != "" {
+					found := false
+					for _, t := range pair.op.Tags {
+						if strings.EqualFold(t, tag) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						continue
+					}
+				}
+
+				// Keyword filter (searches operationId, summary, description)
+				if keyword != "" {
+					kw := strings.ToLower(keyword)
+					match := false
+					if pair.op.OperationId != "" && strings.Contains(strings.ToLower(pair.op.OperationId), kw) {
+						match = true
+					}
+					if !match && pair.op.Summary != "" && strings.Contains(strings.ToLower(pair.op.Summary), kw) {
+						match = true
+					}
+					if !match && pair.op.Description != "" && strings.Contains(strings.ToLower(pair.op.Description), kw) {
+						match = true
+					}
+					if !match {
+						continue
+					}
+				}
+
+				op := oasOperation{
+					OperationID: pair.op.OperationId,
+					Method:      pair.method,
+					Path:        pathStr,
+					Summary:     pair.op.Summary,
+					Tags:        pair.op.Tags,
+					Deprecated:  pair.op.Deprecated != nil && *pair.op.Deprecated,
+					GraphNode:   mapped[pair.op.OperationId],
+				}
+				ops = append(ops, op)
+			}
+		}
+	}
+
+	// Sort by path, then method for stable output
+	sort.Slice(ops, func(i, j int) bool {
+		if ops[i].Path != ops[j].Path {
+			return ops[i].Path < ops[j].Path
+		}
+		return ops[i].Method < ops[j].Method
+	})
+
+	return ops
+}
+
+// graphMappedOperations returns a map from operationID → graph node name
+// for all nodes that have an OAS reference.
+func (s *Server) graphMappedOperations() map[string]string {
+	result := make(map[string]string)
+	for name, node := range s.ctx.Graph.Nodes {
+		if node != nil && node.OAS != nil && node.OAS.OperationID != "" {
+			result[node.OAS.OperationID] = name
+		}
+	}
+	return result
+}
+
+// applyCustomValues recursively merges custom values onto a generated example.
+// For maps, custom values are merged key-by-key; for other types, custom values replace.
+func applyCustomValues(example any, custom map[string]any) any {
+	exMap, exIsMap := example.(map[string]any)
+	if !exIsMap {
+		// Can't merge into non-map; return example unchanged
+		return example
+	}
+
+	result := make(map[string]any, len(exMap))
+	for k, v := range exMap {
+		result[k] = v
+	}
+
+	for k, cv := range custom {
+		existing, exists := result[k]
+		// If both are maps, merge recursively
+		if exists {
+			if existingMap, ok := existing.(map[string]any); ok {
+				if cvMap, ok := cv.(map[string]any); ok {
+					result[k] = applyCustomValues(existingMap, cvMap)
+					continue
+				}
+			}
+		}
+		// Otherwise, custom value wins
+		result[k] = cv
+	}
+
+	return result
+}
+
+// subtypeResult holds the polymorphism analysis for a schema.
+type subtypeResult struct {
+	SchemaName        string
+	DiscriminatorProp string            // discriminator property name, if any
+	DiscriminatorMap  map[string]string // value → schema name mapping
+	OneOfVariants     []string          // oneOf variant names
+	AnyOfVariants     []string          // anyOf variant names
+	ExtendingSchemas  []string          // schemas that extend via allOf $ref
+}
+
+// findSubtypes analyzes polymorphism for a named schema across all specs.
+func (s *Server) findSubtypes(schemaName string) *subtypeResult {
+	schema, resolvedName, _ := s.findSchemaByName(schemaName)
+	if schema == nil {
+		return nil
+	}
+
+	result := &subtypeResult{SchemaName: resolvedName}
+
+	// 1. Check discriminator
+	if schema.Discriminator != nil && schema.Discriminator.PropertyName != "" {
+		result.DiscriminatorProp = schema.Discriminator.PropertyName
+		if schema.Discriminator.Mapping != nil {
+			result.DiscriminatorMap = make(map[string]string)
+			for k, v := range schema.Discriminator.Mapping.FromOldest() {
+				result.DiscriminatorMap[k] = refBaseName(v)
+			}
+		}
+	}
+
+	// 2. Check oneOf variants
+	for _, proxy := range schema.OneOf {
+		if proxy == nil {
+			continue
+		}
+		if proxy.IsReference() {
+			result.OneOfVariants = append(result.OneOfVariants, refBaseName(proxy.GetReference()))
+		}
+	}
+	sort.Strings(result.OneOfVariants)
+
+	// 3. Check anyOf variants
+	for _, proxy := range schema.AnyOf {
+		if proxy == nil {
+			continue
+		}
+		if proxy.IsReference() {
+			result.AnyOfVariants = append(result.AnyOfVariants, refBaseName(proxy.GetReference()))
+		}
+	}
+	sort.Strings(result.AnyOfVariants)
+
+	// 4. Reverse scan: find schemas that extend this one via allOf
+	for _, doc := range s.ctx.OASSpecs {
+		if doc.Components == nil || doc.Components.Schemas == nil {
+			continue
+		}
+		for name, proxy := range doc.Components.Schemas.FromOldest() {
+			if name == resolvedName {
+				continue
+			}
+			childSchema := proxy.Schema()
+			if childSchema != nil && schemaExtends(childSchema, resolvedName) {
+				result.ExtendingSchemas = append(result.ExtendingSchemas, name)
+			}
+		}
+	}
+	sort.Strings(result.ExtendingSchemas)
+
+	return result
+}
+
+// formatSubtypeResult renders a subtypeResult as Markdown.
+func formatSubtypeResult(r *subtypeResult) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Subtypes of %s\n\n", r.SchemaName)
+
+	hasContent := false
+
+	if r.DiscriminatorProp != "" {
+		hasContent = true
+		fmt.Fprintf(&b, "## Discriminator\n\n")
+		fmt.Fprintf(&b, "**Property:** `%s`\n\n", r.DiscriminatorProp)
+		if len(r.DiscriminatorMap) > 0 {
+			b.WriteString("| Value | Schema |\n")
+			b.WriteString("|-------|--------|\n")
+			// Sort keys for stable output
+			keys := make([]string, 0, len(r.DiscriminatorMap))
+			for k := range r.DiscriminatorMap {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				fmt.Fprintf(&b, "| %s | %s |\n", k, r.DiscriminatorMap[k])
+			}
+			b.WriteString("\n")
+		}
+	}
+
+	if len(r.OneOfVariants) > 0 {
+		hasContent = true
+		fmt.Fprintf(&b, "## oneOf Variants\n\n")
+		for _, v := range r.OneOfVariants {
+			fmt.Fprintf(&b, "- %s\n", v)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.AnyOfVariants) > 0 {
+		hasContent = true
+		fmt.Fprintf(&b, "## anyOf Variants\n\n")
+		for _, v := range r.AnyOfVariants {
+			fmt.Fprintf(&b, "- %s\n", v)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.ExtendingSchemas) > 0 {
+		hasContent = true
+		fmt.Fprintf(&b, "## Extending Schemas (via allOf)\n\n")
+		for _, v := range r.ExtendingSchemas {
+			fmt.Fprintf(&b, "- %s\n", v)
+		}
+		b.WriteString("\n")
+	}
+
+	if !hasContent {
+		b.WriteString("No polymorphic subtypes found. This schema does not use discriminator, oneOf, anyOf, or allOf inheritance.\n")
+	}
+
+	return b.String()
+}
+
+// --- Schema filter helpers ---
+
+// schemaHasProperty checks if a schema (including allOf members) has a property with the given name.
+func schemaHasProperty(schema *base.Schema, propName string) bool {
+	if schema == nil {
+		return false
+	}
+	// Check direct properties
+	if schema.Properties != nil {
+		if schema.Properties.GetOrZero(propName) != nil {
+			return true
+		}
+	}
+	// Check allOf members
+	for _, memberProxy := range schema.AllOf {
+		if memberProxy == nil {
+			continue
+		}
+		member := memberProxy.Schema()
+		if member != nil && schemaHasProperty(member, propName) {
+			return true
+		}
+	}
+	return false
+}
+
+// schemaExtends checks if a schema extends the given base schema name via allOf $ref.
+func schemaExtends(schema *base.Schema, baseName string) bool {
+	if schema == nil {
+		return false
+	}
+	for _, memberProxy := range schema.AllOf {
+		if memberProxy == nil {
+			continue
+		}
+		if memberProxy.IsReference() && refBaseName(memberProxy.GetReference()) == baseName {
+			return true
+		}
+	}
+	return false
+}
+
+// schemaHasDiscriminator checks if a schema has a discriminator defined.
+func schemaHasDiscriminator(schema *base.Schema) bool {
+	if schema == nil {
+		return false
+	}
+	return schema.Discriminator != nil && schema.Discriminator.PropertyName != ""
 }
 
 // --- Utility helpers ---

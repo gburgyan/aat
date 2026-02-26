@@ -11,6 +11,7 @@ import (
 	"github.com/gburgyan/aat/plan"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -87,8 +88,25 @@ func buildPersonaTestContext() *ServerContext {
 func TestNewServer_AllPersona_RegistersAllTools(t *testing.T) {
 	srv := NewServer(buildPersonaTestContext())
 	tools := srv.mcp.ListTools()
-	// Should have all original tools + new tools (33+)
-	assert.GreaterOrEqual(t, len(tools), 32, "all-persona should have at least 32 tools, got %d", len(tools))
+	// Without OAS specs: all original tools minus 7 OAS tools (28+)
+	assert.GreaterOrEqual(t, len(tools), 28, "all-persona (no OAS) should have at least 28 tools, got %d", len(tools))
+}
+
+func TestNewServer_AllPersona_WithOAS_RegistersOASTools(t *testing.T) {
+	ctx := buildPersonaTestContext()
+	ctx.OASSpecs = map[string]*v3high.Document{"test.yaml": {}}
+	srv := NewServer(ctx)
+	tools := srv.mcp.ListTools()
+	// With OAS specs: all tools including 7 OAS tools (35+)
+	assert.GreaterOrEqual(t, len(tools), 35, "all-persona (with OAS) should have at least 35 tools, got %d", len(tools))
+	toolNames := collectToolNames(tools)
+	assert.Contains(t, toolNames, "list_oas_operations")
+	assert.Contains(t, toolNames, "get_oas_operation")
+	assert.Contains(t, toolNames, "get_oas_schema")
+	assert.Contains(t, toolNames, "search_oas_schemas")
+	assert.Contains(t, toolNames, "validate_oas_request")
+	assert.Contains(t, toolNames, "build_oas_example")
+	assert.Contains(t, toolNames, "list_oas_subtypes")
 }
 
 func TestNewIntegrationServer_ToolNames(t *testing.T) {
@@ -107,10 +125,13 @@ func TestNewIntegrationServer_ToolNames(t *testing.T) {
 	assert.Contains(t, toolNames, "explain_field")
 	assert.Contains(t, toolNames, "list_integration_flows")
 	assert.Contains(t, toolNames, "get_integration_flow")
+	assert.Contains(t, toolNames, "get_sample_response")
 
-	// OAS tools should be present.
-	assert.Contains(t, toolNames, "get_oas_operation")
-	assert.Contains(t, toolNames, "get_oas_schema")
+	// OAS tools should NOT be present (no specs loaded).
+	assert.NotContains(t, toolNames, "list_oas_operations")
+	assert.NotContains(t, toolNames, "list_oas_subtypes")
+	assert.NotContains(t, toolNames, "get_oas_operation")
+	assert.NotContains(t, toolNames, "get_oas_schema")
 
 	// Domain tools present.
 	assert.Contains(t, toolNames, "list_concepts")
@@ -124,6 +145,23 @@ func TestNewIntegrationServer_ToolNames(t *testing.T) {
 	assert.NotContains(t, toolNames, "execute_plan")
 	assert.NotContains(t, toolNames, "list_archives")
 	assert.NotContains(t, toolNames, "instantiate_workflow")
+}
+
+func TestNewIntegrationServer_WithOAS_ToolNames(t *testing.T) {
+	ctx := buildPersonaTestContext()
+	ctx.OASSpecs = map[string]*v3high.Document{"test.yaml": {}}
+	srv := NewIntegrationServer(ctx)
+	tools := srv.mcp.ListTools()
+	toolNames := collectToolNames(tools)
+
+	// OAS tools should be present when specs are loaded.
+	assert.Contains(t, toolNames, "list_oas_operations")
+	assert.Contains(t, toolNames, "list_oas_subtypes")
+	assert.Contains(t, toolNames, "get_oas_operation")
+	assert.Contains(t, toolNames, "get_oas_schema")
+	assert.Contains(t, toolNames, "search_oas_schemas")
+	assert.Contains(t, toolNames, "validate_oas_request")
+	assert.Contains(t, toolNames, "build_oas_example")
 }
 
 func TestNewTestServer_ToolNames(t *testing.T) {
@@ -150,6 +188,8 @@ func TestNewTestServer_ToolNames(t *testing.T) {
 	// API-only tools should NOT be present.
 	assert.NotContains(t, toolNames, "list_api_operations")
 	assert.NotContains(t, toolNames, "describe_operation")
+	assert.NotContains(t, toolNames, "list_oas_operations")
+	assert.NotContains(t, toolNames, "list_oas_subtypes")
 	assert.NotContains(t, toolNames, "get_oas_operation")
 	assert.NotContains(t, toolNames, "get_data_flow")
 	assert.NotContains(t, toolNames, "get_response_shape")
@@ -172,8 +212,18 @@ func TestPersona_ServerName(t *testing.T) {
 func TestNewIntegrationServer_ToolCount(t *testing.T) {
 	srv := NewIntegrationServer(buildPersonaTestContext())
 	tools := srv.mcp.ListTools()
-	// 18 base + 3 new = 21 tools
-	assert.Equal(t, 21, len(tools), "integration server should have 21 tools, got %d: %v",
+	// 24 base - 7 OAS (no specs) = 17 tools
+	assert.Equal(t, 17, len(tools), "integration server (no OAS) should have 17 tools, got %d: %v",
+		len(tools), collectToolNames(tools))
+}
+
+func TestNewIntegrationServer_WithOAS_ToolCount(t *testing.T) {
+	ctx := buildPersonaTestContext()
+	ctx.OASSpecs = map[string]*v3high.Document{"test.yaml": {}}
+	srv := NewIntegrationServer(ctx)
+	tools := srv.mcp.ListTools()
+	// 17 base + 7 OAS = 24 tools
+	assert.Equal(t, 24, len(tools), "integration server (with OAS) should have 24 tools, got %d: %v",
 		len(tools), collectToolNames(tools))
 }
 
@@ -311,6 +361,51 @@ func TestHandleGetResponseShape_UnknownNode(t *testing.T) {
 	srv := NewServer(buildPersonaTestContext())
 	result := callTool(t, srv.handleGetResponseShape, map[string]any{"node": "nonexistent"})
 	assert.True(t, result.IsError)
+}
+
+func TestHandleGetResponseShape_WithTransform(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:    "search",
+				Adapter: "searchTmpl",
+				Outputs: []graph.Output{{Name: "results", Type: "result[]"}},
+			},
+		},
+	}
+	g.BuildSatisfierIndex()
+	reg := adapter.NewRegistry()
+	_ = reg.Register("searchTmpl", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "searchTmpl", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "POST", Path: "/search"},
+		Response: adapter.TemplateResponse{
+			Extract:   map[string]adapter.ExtractRule{"results": {Path: "$.data"}},
+			Transform: "-- Flatten nested arrays\nlocal r = {}\nreturn r\n",
+		},
+	}))
+	ctx := &ServerContext{
+		Graph:    g,
+		Registry: reg,
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+	srv := NewServer(ctx)
+
+	result := callTool(t, srv.handleGetResponseShape, map[string]any{"node": "search"})
+	require.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "Lua transform")
+	assert.Contains(t, text, "Flatten nested arrays")
+}
+
+func TestHandleGetResponseShape_WithoutTransform(t *testing.T) {
+	ctx := buildPersonaTestContext()
+	srv := NewServer(ctx)
+
+	result := callTool(t, srv.handleGetResponseShape, map[string]any{"node": "search"})
+	require.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.NotContains(t, text, "transform")
+	assert.NotContains(t, text, "Transform")
 }
 
 func TestHandleExplainField_Input(t *testing.T) {
