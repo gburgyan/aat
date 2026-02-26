@@ -10,13 +10,14 @@ When the engine resolves an input for a step, it checks these sources in order a
 |----------|--------|-------------|
 | 1 | Named selection (`fromSelection`) | Reference to a pre-resolved array selection |
 | 2 | Intra-step reference (`fromResolved`) | Reference to an input resolved earlier in the same step |
-| 3 | Step output reference (`from`) | Value from a previous step's output, optionally with array `select` |
-| 4 | Plan default / expression / pool | Literal value, `{{...}}` expression, or fallback pool |
-| 5 | Graph default | Default value declared on the node's input in the graph |
-| 6 | Optional skip | Input is optional and no value was found — omit from request |
-| 7 | Error | Required input has no value |
+| 3 | Cross-step input reference (`fromInput`) | Reference to a resolved input from a previous step |
+| 4 | Step output reference (`from`) | Value from a previous step's output, optionally with array `select` |
+| 5 | Plan default / expression / pool | Literal value, `{{...}}` expression, or fallback pool |
+| 6 | Graph default | Default value declared on the node's input in the graph |
+| 7 | Optional skip | Input is optional and no value was found — omit from request |
+| 8 | Error | Required input has no value |
 
-Priorities 4 and 5 are merged during plan instantiation — graph defaults (including value pools) are copied into the plan's step values before execution, so the engine sees them at priority 4. Layers (when applied) override graph defaults at the same level. This means a well-designed graph with pools on configurable inputs can handle most values automatically — plans only need to specify values that the test requires to be specific.
+Priorities 5 and 6 are merged during plan instantiation — graph defaults (including value pools) are copied into the plan's step values before execution, so the engine sees them at priority 5. Layers (when applied) override graph defaults at the same level. This means a well-designed graph with pools on configurable inputs can handle most values automatically — plans only need to specify values that the test requires to be specific.
 
 The explicit-absence marker `{}` short-circuits this chain: it tells the engine to skip the input entirely, bypassing graph defaults and auto-wiring.
 
@@ -164,6 +165,31 @@ values:
 
 This is useful when inputs are logically related — a return trip reverses the origin and destination. The referenced input must appear before the referencing input in the node's declared input order (inputs are resolved in declaration order).
 
+## Cross-Step Input References
+
+`fromInput` references a resolved input value from a previous step:
+
+```yaml
+steps:
+  - node: searchFlights
+    values:
+      origin:
+        pool: ["DEN", "LAX", "ORD"]
+      destination: "JFK"
+
+  - node: bookFlight
+    dependsOn: [searchFlights]
+    values:
+      origin: {fromInput: searchFlights.origin}
+      destination: {fromInput: searchFlights.destination}
+```
+
+This differs from `from` (which references step *outputs* extracted from API responses). `fromInput` references the *inputs* that were sent to a previous step. This is useful when multiple steps need consistent input values — for example, using the same origin city for both a search and a booking.
+
+The syntax is `stepId.inputName`. The referenced step must be listed in `dependsOn` (or a dependency ancestor), and the input name must exist on the source step's graph node.
+
+`fromInput` is mutually exclusive with `from`, `fromSelection`, `fromResolved`, `default`, and `pool`.
+
 ## Dynamic Expressions
 
 Expressions use `{{...}}` delimiters and are evaluated at execution time.
@@ -281,7 +307,7 @@ Every input resolution is recorded in the run archive with a `ValueResolution` e
 | Field | Description |
 |-------|-------------|
 | `inputName` | Which input was resolved |
-| `source` | How it was resolved: `plan_default`, `expression`, `fallback_pool`, `plan_from`, `select_edge`, `named_selection`, `from_resolved`, `graph_default`, `optional_skip` |
+| `source` | How it was resolved: `plan_default`, `expression`, `fallback_pool`, `plan_from`, `select_edge`, `named_selection`, `from_resolved`, `from_input`, `graph_default`, `optional_skip` |
 | `rawValue` | Value before expression evaluation |
 | `finalValue` | Value after evaluation and type coercion |
 | `expression` | The `{{...}}` template if evaluated |
@@ -346,6 +372,25 @@ values:
   outboundDestination: "LAX"
   returnOrigin: {fromResolved: outboundDestination}
   returnDestination: {fromResolved: outboundOrigin}
+```
+
+### Cross-Step Input Consistency
+
+```yaml
+steps:
+  - node: searchFlights
+    values:
+      origin:
+        pool: ["DEN", "LAX", "ORD", "SFO"]
+      destination: "JFK"
+      departureDate: "{{today + 7 days}}"
+
+  - node: bookFlight
+    dependsOn: [searchFlights]
+    values:
+      origin: {fromInput: searchFlights.origin}
+      destination: {fromInput: searchFlights.destination}
+      departureDate: {fromInput: searchFlights.departureDate}
 ```
 
 ### Explicit Absence to Override Defaults

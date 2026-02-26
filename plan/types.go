@@ -119,6 +119,7 @@ type StepValue struct {
 	Select        *SelectionConfig `yaml:"select,omitempty" json:"select,omitempty"`
 	FromSelection string           `yaml:"fromSelection,omitempty" json:"fromSelection,omitempty"`
 	FromResolved  string           `yaml:"fromResolved,omitempty" json:"fromResolved,omitempty"`
+	FromInput     string           `yaml:"fromInput,omitempty" json:"fromInput,omitempty"`
 }
 
 // IsEmpty returns true when the StepValue carries no resolution information.
@@ -130,6 +131,7 @@ func (sv StepValue) IsEmpty() bool {
 		sv.From == "" &&
 		sv.FromSelection == "" &&
 		sv.FromResolved == "" &&
+		sv.FromInput == "" &&
 		sv.Select == nil &&
 		sv.Constraint == "" &&
 		len(sv.Pool) == 0 &&

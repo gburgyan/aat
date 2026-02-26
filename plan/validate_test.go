@@ -2837,3 +2837,358 @@ func TestValidate_PlanAuth_Nil(t *testing.T) {
 	err := Validate(p, g)
 	assert.NoError(t, err)
 }
+
+// --- fromInput validation tests ---
+
+func TestValidate_FromInput_Valid(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "offerId", Type: "string"},
+				},
+			},
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin":      {Default: "DEN"},
+						"destination": {Default: "JFK"},
+					},
+				},
+				{
+					Node:      "bookFlight",
+					DependsOn: []string{"searchFlights"},
+					Values: map[string]StepValue{
+						"origin":      {FromInput: "searchFlights.origin"},
+						"destination": {FromInput: "searchFlights.destination"},
+					},
+				},
+			},
+		},
+	}
+
+	err := Validate(p, g)
+	assert.NoError(t, err)
+}
+
+func TestValidate_FromInput_MissingStep(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "bookFlight",
+					Values: map[string]StepValue{
+						"origin": {FromInput: "searchFlights.origin"},
+					},
+				},
+			},
+		},
+	}
+
+	err := Validate(p, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "is not a step in this plan")
+}
+
+func TestValidate_FromInput_MissingInputOnSourceNode(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "offerId", Type: "string"},
+				},
+			},
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "carrier", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+				{
+					Node:      "bookFlight",
+					DependsOn: []string{"searchFlights"},
+					Values: map[string]StepValue{
+						"carrier": {FromInput: "searchFlights.nonexistent"},
+					},
+				},
+			},
+		},
+	}
+
+	err := Validate(p, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "input \"nonexistent\" does not exist on node")
+}
+
+func TestValidate_FromInput_MissingDependsOn(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "offerId", Type: "string"},
+				},
+			},
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+				{
+					Node: "bookFlight",
+					// missing dependsOn
+					Values: map[string]StepValue{
+						"origin": {FromInput: "searchFlights.origin"},
+					},
+				},
+			},
+		},
+	}
+
+	err := Validate(p, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "does not list it in dependsOn")
+}
+
+func TestValidate_FromInput_MutualExclusion_WithFrom(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "offerId", Type: "string"},
+				},
+			},
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+				{
+					Node:      "bookFlight",
+					DependsOn: []string{"searchFlights"},
+					Values: map[string]StepValue{
+						"origin": {
+							FromInput: "searchFlights.origin",
+							From:      "searchFlights.offerId",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := Validate(p, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive with fromInput")
+}
+
+func TestValidate_FromInput_MutualExclusion_WithDefault(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "offerId", Type: "string"},
+				},
+			},
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+				{
+					Node:      "bookFlight",
+					DependsOn: []string{"searchFlights"},
+					Values: map[string]StepValue{
+						"origin": {
+							FromInput: "searchFlights.origin",
+							Default:   "LAX",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	err := Validate(p, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mutually exclusive with fromInput")
+}
+
+func TestValidate_FromInput_InvalidFormat(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "bookFlight",
+					Values: map[string]StepValue{
+						"origin": {FromInput: "badformat"},
+					},
+				},
+			},
+		},
+	}
+
+	err := Validate(p, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid 'fromInput' reference")
+}
+
+func TestValidate_FromInput_WithStepAlias(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "offerId", Type: "string"},
+				},
+			},
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					ID:   "search_leg1",
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+				{
+					Node:      "bookFlight",
+					DependsOn: []string{"search_leg1"},
+					Values: map[string]StepValue{
+						"origin": {FromInput: "search_leg1.origin"},
+					},
+				},
+			},
+		},
+	}
+
+	err := Validate(p, g)
+	assert.NoError(t, err)
+}

@@ -317,6 +317,9 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		}
 	}
 
+	// Store resolved inputs so later steps can reference them via fromInput
+	state.StoreInputs(sid, inputs)
+
 	// Get adapter
 	adp, err := e.registry.Get(node.Adapter)
 	if err != nil {

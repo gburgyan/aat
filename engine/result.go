@@ -100,8 +100,9 @@ type ValueResolution struct {
 	// "fallback_pool", "graph_default", "llm", "optional_skip"
 	RawValue     any    // before expression evaluation (nil if N/A)
 	FinalValue   any    // after evaluation + coercion
-	FromStep     string // source step (for edge/select_edge)
+	FromStep     string // source step (for edge/select_edge/from_input)
 	FromOutput   string // source output (for edge/select_edge)
+	FromInput    string // source input name (for from_input resolution)
 	Expression   string // template string if evaluated (e.g. "{{today + 5 days}}")
 	Constraint   string // constraint expression if checked
 	ConstraintOK bool   // whether constraint passed

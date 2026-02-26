@@ -1106,6 +1106,7 @@ func toResolutionDetails(recs []archive.ValueResolutionRecord) []ResolutionDetai
 			FinalValue:   r.FinalValue,
 			FromStep:     r.FromStep,
 			FromOutput:   r.FromOutput,
+			FromInput:    r.FromInput,
 			Expression:   r.Expression,
 			Constraint:   r.Constraint,
 			ConstraintOK: r.ConstraintOK,

@@ -200,6 +200,45 @@ func Validate(p *Plan, g *graph.Graph) error {
 				}
 			}
 
+			// Validate FromInput: cross-step input reference
+			if sv.FromInput != "" {
+				// Mutual exclusion: fromInput cannot coexist with from, fromSelection, fromResolved, default, or pool
+				if sv.From != "" || sv.FromSelection != "" || sv.FromResolved != "" || sv.Default != nil || len(sv.Pool) > 0 {
+					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromInput but also has from/fromSelection/fromResolved/default/pool — these are mutually exclusive with fromInput", i, sid, name))
+				}
+				srcStepID, srcInputName, err := splitRef(sv.FromInput)
+				if err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid 'fromInput' reference %q for %q: %v", i, sid, sv.FromInput, name, err))
+				} else {
+					// Step existence
+					if !stepIDs[srcStepID] {
+						errs = append(errs, fmt.Sprintf("step %d (%s): 'fromInput' reference %q for %q: %q is not a step in this plan", i, sid, sv.FromInput, name, srcStepID))
+					} else {
+						// DependsOn required
+						if !depsSet[srcStepID] {
+							errs = append(errs, fmt.Sprintf("step %d (%s): has 'fromInput' reference to %q but does not list it in dependsOn", i, sid, srcStepID))
+						}
+						// Input existence on source step's graph node
+						srcGraphNode := srcStepID
+						if gn, ok := stepIDToNode[srcStepID]; ok {
+							srcGraphNode = gn
+						}
+						if srcNode, ok := g.Nodes[srcGraphNode]; ok {
+							found := false
+							for _, inp := range srcNode.Inputs {
+								if inp.Name == srcInputName {
+									found = true
+									break
+								}
+							}
+							if !found {
+								errs = append(errs, fmt.Sprintf("step %d (%s): 'fromInput' reference %q for %q: input %q does not exist on node %q", i, sid, sv.FromInput, name, srcInputName, srcGraphNode))
+							}
+						}
+					}
+				}
+			}
+
 			// Gap 1: Validate From field references (from uses step IDs)
 			if sv.From != "" {
 				srcStepID, srcField, err := splitRef(sv.From)

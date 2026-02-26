@@ -345,6 +345,16 @@ values:
   returnDestination: {fromResolved: origin}
 ```
 
+**Cross-step input reference** — reuse a resolved input from a previous step:
+
+```yaml
+values:
+  origin: {fromInput: searchFlights.origin}
+  destination: {fromInput: searchFlights.destination}
+```
+
+This references the *input* value that was sent to the previous step, not its response output. Useful when multiple steps need the same input values (e.g., same origin city for search and booking).
+
 **Explicit absence** — suppress auto-wiring for an optional input:
 
 ```yaml
@@ -837,6 +847,7 @@ execution:
         refInput: {from: stepId.outputName}             # step output reference
         selectedInput: {fromSelection: selName.field}   # named selection field
         resolvedInput: {fromResolved: otherInput}       # intra-step reference
+        inputRef: {fromInput: stepId.inputName}         # cross-step input reference
         absentInput: {}                                 # explicitly skip
         exprInput: "{{today + 7 days}}"                 # dynamic expression
         poolInput:                                      # value with pool fallback

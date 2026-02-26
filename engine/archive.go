@@ -171,6 +171,7 @@ func convertResolutions(resolutions []ValueResolution, secrets map[string]bool) 
 			FinalValue: archive.RedactValue(r.FinalValue, secrets),
 			FromStep:   r.FromStep,
 			FromOutput: r.FromOutput,
+			FromInput:  r.FromInput,
 			Expression: r.Expression,
 			Constraint: r.Constraint,
 			PoolIndex:  r.PoolIndex,

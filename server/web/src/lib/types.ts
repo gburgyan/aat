@@ -175,6 +175,7 @@ export interface ResolutionDetail {
   finalValue?: unknown;
   fromStep?: string;
   fromOutput?: string;
+  fromInput?: string;
   expression?: string;
   constraint?: string;
   constraintOk?: boolean | null;

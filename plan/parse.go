@@ -61,7 +61,7 @@ func (a *Assertions) UnmarshalYAML(value *yaml.Node) error {
 func (sv StepValue) MarshalYAML() (interface{}, error) {
 	if sv.From == "" && sv.Select == nil && sv.Constraint == "" &&
 		len(sv.Pool) == 0 && sv.PoolStrategy == nil &&
-		sv.FromSelection == "" && sv.FromResolved == "" && sv.Default != nil {
+		sv.FromSelection == "" && sv.FromResolved == "" && sv.FromInput == "" && sv.Default != nil {
 		return sv.Default, nil
 	}
 	type rawStepValue StepValue

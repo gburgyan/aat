@@ -24,6 +24,7 @@
   function sourceBadgeClass(source: string): string {
     switch (source) {
       case 'plan_from':
+      case 'from_input':
       case 'expression':
       case 'named_selection':
         return 'badge-primary';
@@ -73,7 +74,9 @@
         </td>
         <td class="dt-mono">{formatValue(r.finalValue ?? r.rawValue)}</td>
         <td class="dt-mono dt-muted">
-          {#if r.fromStep && r.fromOutput}
+          {#if r.fromStep && r.fromInput}
+            <a href={stepHref(r.fromStep!)} class="step-link" onclick={(e: MouseEvent) => goToStep(e, r.fromStep!)}>{r.fromStep}</a>.{r.fromInput} <span class="dt-muted" style="font-size: 0.75rem;">(input)</span>
+          {:else if r.fromStep && r.fromOutput}
             <a href={stepHref(r.fromStep!)} class="step-link" onclick={(e: MouseEvent) => goToStep(e, r.fromStep!)}>{r.fromStep}</a>.{r.fromOutput}
           {:else if r.expression}
             {r.expression}

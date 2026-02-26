@@ -400,3 +400,67 @@ func TestMarshal_StepWithoutID(t *testing.T) {
 	assert.NotContains(t, yaml, "id:")
 	assert.Contains(t, yaml, "node: searchFlights")
 }
+
+func TestMarshal_FromInput(t *testing.T) {
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin":      {Default: "DEN"},
+						"destination": {Default: "JFK"},
+					},
+				},
+				{
+					Node:      "bookFlight",
+					DependsOn: []string{"searchFlights"},
+					Values: map[string]StepValue{
+						"origin":      {FromInput: "searchFlights.origin"},
+						"destination": {FromInput: "searchFlights.destination"},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(p)
+	require.NoError(t, err)
+
+	yaml := string(data)
+	assert.Contains(t, yaml, "fromInput: searchFlights.origin")
+	assert.Contains(t, yaml, "fromInput: searchFlights.destination")
+	assert.NotContains(t, yaml, "default:")
+}
+
+func TestMarshalRoundTrip_FromInput(t *testing.T) {
+	original := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "searchFlights",
+					Values: map[string]StepValue{
+						"origin": {Default: "DEN"},
+					},
+				},
+				{
+					Node:      "bookFlight",
+					DependsOn: []string{"searchFlights"},
+					Values: map[string]StepValue{
+						"origin": {FromInput: "searchFlights.origin"},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(original)
+	require.NoError(t, err)
+
+	parsed, err := Parse(data)
+	require.NoError(t, err)
+
+	require.Len(t, parsed.Execution.Steps, 2)
+	assert.Equal(t, "searchFlights.origin", parsed.Execution.Steps[1].Values["origin"].FromInput)
+	assert.Nil(t, parsed.Execution.Steps[1].Values["origin"].Default)
+}

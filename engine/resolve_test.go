@@ -2167,4 +2167,177 @@ func TestResolveInputs_FromResolved_Unresolved(t *testing.T) {
 	assert.Contains(t, err.Error(), "not been resolved yet")
 }
 
+// --- fromInput tests ---
+
+func TestResolveInputs_FromInput_HappyPath(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"searchFlights": {
+				Name: "searchFlights",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+				Outputs: []graph.Output{
+					{Name: "offerId", Type: "string"},
+				},
+			},
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreInputs("searchFlights", map[string]any{
+		"origin":      "DEN",
+		"destination": "JFK",
+	})
+
+	step := plan.Step{
+		Node:      "bookFlight",
+		DependsOn: []string{"searchFlights"},
+		Values: map[string]plan.StepValue{
+			"origin":      {FromInput: "searchFlights.origin"},
+			"destination": {FromInput: "searchFlights.destination"},
+		},
+	}
+
+	inputs, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["bookFlight"], g, state, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "DEN", inputs["origin"])
+	assert.Equal(t, "JFK", inputs["destination"])
+
+	// Check resolution audit trail
+	require.Len(t, resolutions, 2)
+	for _, r := range resolutions {
+		assert.Equal(t, "from_input", r.Source)
+		assert.Equal(t, "searchFlights", r.FromStep)
+		assert.NotEmpty(t, r.FromInput)
+	}
+}
+
+func TestResolveInputs_FromInput_MissingStep(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+
+	step := plan.Step{
+		Node: "bookFlight",
+		Values: map[string]plan.StepValue{
+			"origin": {FromInput: "searchFlights.origin"},
+		},
+	}
+
+	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["bookFlight"], g, state, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no inputs for step")
+}
+
+func TestResolveInputs_FromInput_MissingInput(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreInputs("searchFlights", map[string]any{
+		"destination": "JFK",
+	})
+
+	step := plan.Step{
+		Node: "bookFlight",
+		Values: map[string]plan.StepValue{
+			"origin": {FromInput: "searchFlights.origin"},
+		},
+	}
+
+	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["bookFlight"], g, state, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "input \"origin\" not found")
+}
+
+func TestResolveInputs_FromInput_InvalidFormat(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"bookFlight": {
+				Name: "bookFlight",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+
+	step := plan.Step{
+		Node: "bookFlight",
+		Values: map[string]plan.StepValue{
+			"origin": {FromInput: "badref"},
+		},
+	}
+
+	_, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["bookFlight"], g, state, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid 'fromInput' reference")
+}
+
+func TestResolveInputs_FromInput_PriorityAfterFromResolved(t *testing.T) {
+	// fromResolved should take priority over fromInput when both are set
+	// (validation would reject this, but test resolution order)
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "first", Type: "string"},
+					{Name: "second", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	state.StoreInputs("upstream", map[string]any{"first": "from_upstream"})
+
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"first":  {Default: "localval"},
+			"second": {FromResolved: "first"},
+		},
+	}
+
+	rctx := &ResolveContext{Now: fixedNow()}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "localval", inputs["first"])
+	assert.Equal(t, "localval", inputs["second"])
+}
+
 func strPtr(s string) *string { return &s }

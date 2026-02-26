@@ -292,6 +292,27 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 		return val, nil, res, nil
 	}
 
+	// 1.7. FromInput: cross-step input reference
+	if sv, ok := step.Values[input.Name]; ok && sv.FromInput != "" {
+		srcStep, srcInput, err := splitRef(sv.FromInput)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid 'fromInput' reference %q: %w", sv.FromInput, err)
+		}
+		val, err := state.GetInput(srcStep, srcInput)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("fromInput reference %q: %w", sv.FromInput, err)
+		}
+		res := &ValueResolution{
+			InputName:  input.Name,
+			Source:     "from_input",
+			FinalValue: val,
+			FromStep:   srcStep,
+			FromInput:  srcInput,
+			PoolIndex:  -1,
+		}
+		return val, nil, res, nil
+	}
+
 	// 2. Plan-level "from" reference (explicit upstream output)
 	// This takes priority over graph edges because the plan is more specific:
 	// auto-wired graphs may have multiple edges for the same input, but the

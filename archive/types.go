@@ -135,6 +135,7 @@ type ValueResolutionRecord struct {
 	FinalValue   any    `json:"finalValue,omitempty"`
 	FromStep     string `json:"fromStep,omitempty"`
 	FromOutput   string `json:"fromOutput,omitempty"`
+	FromInput    string `json:"fromInput,omitempty"`
 	Expression   string `json:"expression,omitempty"`
 	Constraint   string `json:"constraint,omitempty"`
 	ConstraintOK *bool  `json:"constraintOk,omitempty"`
