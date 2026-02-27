@@ -283,6 +283,8 @@
                     <td class="cell-duration cell-dimmed">&mdash;</td>
                   </tr>
                 {:else}
+                  {@const permLayers = group.label === '(base)' ? new Set<string>() : new Set(group.label.split(', '))}
+                  {@const extraLayers = (run.layers ?? []).filter(l => !permLayers.has(l))}
                   <tr
                     class="run-row"
                     role="link"
@@ -295,6 +297,11 @@
                       {run.planName || run.runId}
                       {#if run.attempts && run.attempts > 1}
                         <span class="retry-badge" title="Took {run.attempts} attempts">{run.attempts} attempts</span>
+                      {/if}
+                      {#if extraLayers.length > 0}
+                        {#each extraLayers as layer}
+                          <span class="layer-badge" title="Layer: {layer}">{layer}</span>
+                        {/each}
                       {/if}
                     </td>
                     <td class="cell-steps">

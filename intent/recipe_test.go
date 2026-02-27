@@ -1,6 +1,8 @@
 package intent
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gburgyan/aat/graph"
@@ -288,4 +290,68 @@ func TestTargetedResponseToRecipeOverrides_EmptyMaps(t *testing.T) {
 	assert.Nil(t, ro.Selections)
 	assert.Nil(t, ro.Assertions)
 	assert.Nil(t, ro.Descriptions)
+}
+
+func TestReconstitute_MissingRecipeLayersLoadedFromDisk(t *testing.T) {
+	g := buildRecipeTestGraph()
+
+	// Create a temp layers directory with two layer files.
+	layersDir := t.TempDir()
+
+	cliLayerYAML := `name: cliLayer
+description: Layer from CLI flag
+inputs:
+  flightId:
+    value: "CLI-FLIGHT"
+`
+	recipeLayerYAML := `name: recipeLayer
+description: Layer embedded in recipe
+inputs:
+  flightId:
+    value: "RECIPE-FLIGHT"
+`
+	require.NoError(t, os.WriteFile(filepath.Join(layersDir, "cliLayer.yaml"), []byte(cliLayerYAML), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(layersDir, "recipeLayer.yaml"), []byte(recipeLayerYAML), 0644))
+
+	// Pre-load only the CLI layer (simulating what loadRunContext does).
+	preLoaded, err := graph.ResolveLayerNames([]string{"cliLayer"}, layersDir)
+	require.NoError(t, err)
+
+	recipe := &plan.Recipe{
+		Kind: "recipe",
+		Metadata: plan.Metadata{
+			Prompt: "book a flight with recipe layer",
+		},
+		Selection: plan.RecipeSelection{
+			Workflow:    "Base",
+			Description: "Book a flight",
+			Layers:      []string{"recipeLayer", "cliLayer"},
+		},
+	}
+
+	// Reconstitute with pre-loaded layers that are missing "recipeLayer".
+	p, err := Reconstitute(recipe, g, ".", WithAvailableLayers(preLoaded), WithLayersDir(layersDir))
+	require.NoError(t, err)
+	require.NotNil(t, p)
+
+	// Verify that the plan was reconstituted with both layers applied.
+	// The book step's flightId should reflect the layered default from cliLayer
+	// (applied second, so it wins over recipeLayer).
+	var bookStep *plan.Step
+	for i := range p.Execution.Steps {
+		if p.Execution.Steps[i].Node == "book" {
+			bookStep = &p.Execution.Steps[i]
+			break
+		}
+	}
+	require.NotNil(t, bookStep, "book step should exist")
+
+	// The important assertion: reconstitution succeeded even though
+	// "recipeLayer" was not in the pre-loaded set. The fix loads it from disk.
+	assert.Len(t, p.Execution.Steps, 3)
+
+	// Verify the shared pre-loaded map was NOT mutated.
+	assert.Len(t, preLoaded, 1, "pre-loaded map should not be mutated")
+	_, hasRecipeLayer := preLoaded["recipeLayer"]
+	assert.False(t, hasRecipeLayer, "recipeLayer should not appear in original pre-loaded map")
 }

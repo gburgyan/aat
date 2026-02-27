@@ -101,13 +101,31 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...
 	var layeredDefaults map[string]*graph.InputDefault
 	if len(ws.Layers) > 0 {
 		available := cfg.availableLayers
-		if available == nil && cfg.layersDir != "" {
-			var err error
-			available, err = graph.ResolveLayerNames(ws.Layers, cfg.layersDir)
+
+		// Find recipe layers missing from the pre-loaded set.
+		var missing []string
+		for _, name := range ws.Layers {
+			if available == nil || available[name] == nil {
+				missing = append(missing, name)
+			}
+		}
+
+		// Load missing layers from disk and merge.
+		if len(missing) > 0 && cfg.layersDir != "" {
+			loaded, err := graph.ResolveLayerNames(missing, cfg.layersDir)
 			if err != nil {
 				return nil, fmt.Errorf("reconstitute: loading layers: %w", err)
 			}
+			merged := make(map[string]*graph.Layer, len(available)+len(loaded))
+			for k, v := range available {
+				merged[k] = v
+			}
+			for k, v := range loaded {
+				merged[k] = v
+			}
+			available = merged
 		}
+
 		if available != nil {
 			var err error
 			layeredDefaults, err = graph.ApplyLayers(g, ws.Layers, available)
