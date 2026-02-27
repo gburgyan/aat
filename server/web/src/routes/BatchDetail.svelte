@@ -470,10 +470,10 @@
       <table class="run-table test-matrix">
         <thead>
           <tr>
-            <th class="matrix-test-name">Test</th>
-            <th>Overall</th>
+            <th class="matrix-test-name matrix-fixed-header">Test</th>
+            <th class="matrix-fixed-header">Overall</th>
             {#each permutationLabels as perm}
-              <th class="matrix-perm-header" title={perm}>{perm}</th>
+              <th class="matrix-perm-header" title={perm}><span>{perm}</span></th>
             {/each}
           </tr>
         </thead>
@@ -834,13 +834,27 @@
     white-space: nowrap;
   }
   .test-matrix thead .matrix-test-name {
-    background: var(--color-bg-secondary, #1f2937);
+    background: var(--color-bg, #111827);
+  }
+  .matrix-fixed-header {
+    vertical-align: bottom;
   }
   .matrix-perm-header {
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    vertical-align: bottom;
+    height: 160px;
+    padding: 0.25rem;
+    position: relative;
+  }
+  .matrix-perm-header span {
+    display: block;
+    transform: rotate(-45deg);
+    transform-origin: bottom left;
     white-space: nowrap;
+    font-size: 0.75rem;
+    width: max-content;
+    position: absolute;
+    bottom: 0.4rem;
+    left: 50%;
   }
   .matrix-cell {
     text-align: center;
