@@ -138,6 +138,16 @@ func (o *BatchStreamObserver) OnRunComplete(result *engine.RunResult) {
 	}
 }
 
+// OnRetryStart implements RetryNotifier for plan-level retries in sequential mode.
+func (o *BatchStreamObserver) OnRetryStart(attempt, maxAttempts int) {
+	color := o.term.IsTTY
+	label := fmt.Sprintf("retry %d/%d", attempt, maxAttempts)
+	if color {
+		label = colorYellow + label + colorReset
+	}
+	_, _ = fmt.Fprintf(o.out, "    %s\n", label)
+}
+
 // PlanProgressState tracks one plan's progress for the parallel renderer.
 type PlanProgressState struct {
 	mu             sync.Mutex
@@ -150,6 +160,8 @@ type PlanProgressState struct {
 	Done           bool
 	Outcome        string
 	DurationMs     int64
+	Attempt        int // current attempt (0 or 1 = first attempt)
+	MaxAttempts    int // total possible attempts
 }
 
 // Update safely updates the plan's progress after a step completes.
@@ -183,6 +195,8 @@ func (s *PlanProgressState) Snapshot() PlanProgressState {
 		Done:           s.Done,
 		Outcome:        s.Outcome,
 		DurationMs:     s.DurationMs,
+		Attempt:        s.Attempt,
+		MaxAttempts:    s.MaxAttempts,
 	}
 }
 
@@ -224,6 +238,17 @@ func (o *ParallelProgressObserver) OnCleanupStepComplete(index, total int, resul
 func (o *ParallelProgressObserver) OnRunComplete(result *engine.RunResult) {
 	dur := time.Since(o.state.StartTime)
 	o.state.Complete(result.Outcome.String(), dur.Milliseconds())
+}
+
+// OnRetryStart implements RetryNotifier for plan-level retries.
+func (o *ParallelProgressObserver) OnRetryStart(attempt, maxAttempts int) {
+	o.state.mu.Lock()
+	o.state.Attempt = attempt
+	o.state.MaxAttempts = maxAttempts
+	o.state.CompletedSteps = 0
+	o.state.CurrentNode = ""
+	o.state.mu.Unlock()
+	o.renderer.Refresh()
 }
 
 // ProgressRenderer draws Docker-style multi-line progress bars for concurrent plans.
@@ -430,5 +455,13 @@ func (r *ProgressRenderer) formatPlanLine(snap *PlanProgressState, denomWidth in
 		displayNode = colorCyan + rawNode + colorReset
 	}
 
-	return fmt.Sprintf("  %s  [%s] %s  %s", nameStr, bar, countStr, displayNode)
+	retrySuffix := ""
+	if snap.Attempt > 1 {
+		retrySuffix = fmt.Sprintf("  (retry %d/%d)", snap.Attempt, snap.MaxAttempts)
+		if r.color {
+			retrySuffix = "  " + colorYellow + fmt.Sprintf("(retry %d/%d)", snap.Attempt, snap.MaxAttempts) + colorReset
+		}
+	}
+
+	return fmt.Sprintf("  %s  [%s] %s  %s%s", nameStr, bar, countStr, displayNode, retrySuffix)
 }

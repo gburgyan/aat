@@ -19,6 +19,12 @@ import (
 	"github.com/gburgyan/aat/plan"
 )
 
+// RetryNotifier is an optional interface that progress observers can implement
+// to receive notifications when a plan-level retry begins.
+type RetryNotifier interface {
+	OnRetryStart(attempt, maxAttempts int)
+}
+
 // runArgs holds parsed CLI flags for the run command.
 type runArgs struct {
 	PlanPath      string
@@ -426,6 +432,9 @@ func loadAndRunPlanWithRetries(ctx context.Context, rctx *runContext, planPath, 
 
 		if attempt > 1 {
 			logf("[attempt %d/%d] retrying...\n", attempt, totalPossible)
+			if rn, ok := observer.(RetryNotifier); ok {
+				rn.OnRetryStart(attempt, totalPossible)
+			}
 			// Brief delay between retries
 			select {
 			case <-ctx.Done():

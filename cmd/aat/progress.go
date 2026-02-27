@@ -112,6 +112,16 @@ func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
 	}
 }
 
+// OnRetryStart implements RetryNotifier for plan-level retries.
+func (o *CLIProgressObserver) OnRetryStart(attempt, maxAttempts int) {
+	color := o.term.IsTTY
+	label := fmt.Sprintf("retry %d/%d", attempt, maxAttempts)
+	if color {
+		label = colorYellow + label + colorReset
+	}
+	_, _ = fmt.Fprintf(o.out, "\n%s\n", label)
+}
+
 // observerTotalDuration sums the duration of all steps and cleanup.
 func observerTotalDuration(result *engine.RunResult) string {
 	var total time.Duration
