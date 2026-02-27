@@ -231,7 +231,7 @@ func (s *Server) resolveNodeOperation(nodeName string) (*v3high.Operation, strin
 		return nil, "", "", nil, fmt.Sprintf("OAS spec %q not loaded.", specRef)
 	}
 
-	method, path, op, err := oas.FindOperation(doc, node.OAS.OperationID)
+	method, path, _, op, err := oas.FindOperation(doc, node.OAS.OperationID)
 	if err != nil {
 		return nil, "", "", nil, fmt.Sprintf("Operation %q not found in spec: %v", node.OAS.OperationID, err)
 	}

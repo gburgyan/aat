@@ -75,6 +75,15 @@
           {#if step.retryCount && step.retryCount > 0}
             <span class="step-retry-badge">{step.retryCount} retry</span>
           {/if}
+          {#if step.oasRespErrorCount && step.oasRespErrorCount > 0}
+            <span class="step-oas-badge">OAS resp {step.oasRespErrorCount}</span>
+          {/if}
+          {#if step.oasReqErrorCount && step.oasReqErrorCount > 0}
+            <span class="step-oas-req-badge">OAS req {step.oasReqErrorCount}</span>
+          {/if}
+          {#if step.oasWarningCount && step.oasWarningCount > 0 && !step.oasErrorCount}
+            <span class="step-oas-warn-badge">OAS !</span>
+          {/if}
         </div>
 
         {#if step.displayOutputs && step.displayOutputs.length > 0}

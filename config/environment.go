@@ -85,6 +85,7 @@ type RuntimeSettings struct {
 	MaxRunDuration Duration      `yaml:"maxRunDuration"`
 	DefaultRetries int           `yaml:"defaultRetries"`
 	ArchiveFormat  ArchiveFormat `yaml:"archiveFormat"`
+	OASValidation  string        `yaml:"oasValidation,omitempty"` // "auto" (default), "warn", "strict", "off"
 }
 
 // PathRewrite controls URL path rewriting for overrides.

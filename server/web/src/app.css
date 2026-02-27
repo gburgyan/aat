@@ -501,6 +501,39 @@ p {
   background: rgba(245, 158, 11, 0.12);
 }
 
+.step-oas-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-error);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.step-oas-req-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.step-oas-warn-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--color-warning);
+  background: rgba(245, 158, 11, 0.12);
+}
+
 .step-outputs {
   display: flex;
   flex-wrap: wrap;

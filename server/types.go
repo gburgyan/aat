@@ -79,6 +79,11 @@ type StepSummary struct {
 	HasSelections        bool            `json:"hasSelections,omitempty"`
 	HasResolutions       bool            `json:"hasResolutions,omitempty"`
 	HasTransform         bool            `json:"hasTransform,omitempty"`
+	HasOASValidation     bool            `json:"hasOasValidation,omitempty"`
+	OASErrorCount        int             `json:"oasErrorCount,omitempty"`
+	OASReqErrorCount     int             `json:"oasReqErrorCount,omitempty"`
+	OASRespErrorCount    int             `json:"oasRespErrorCount,omitempty"`
+	OASWarningCount      int             `json:"oasWarningCount,omitempty"`
 	RetryCount           int             `json:"retryCount,omitempty"`
 	OffsetMs             int64           `json:"offsetMs,omitempty"`
 }
@@ -110,6 +115,7 @@ type StepDetail struct {
 	ErrorClassification  *ErrorClassDetail        `json:"errorClassification,omitempty"`
 	ExpectFailure        *ExpectFailureDetail     `json:"expectFailure,omitempty"`
 	ResponseBodyError    *ResponseBodyErrorDetail `json:"responseBodyError,omitempty"`
+	OASValidation        *OASValidationDetail     `json:"oasValidation,omitempty"`
 	TransformScript      string                   `json:"transformScript,omitempty"`
 	Extractions          []ExtractionDetail       `json:"extractions,omitempty"`
 	PlanStepYAML         string                   `json:"planStepYaml,omitempty"`
@@ -247,6 +253,29 @@ type ResponseBodyErrorDetail struct {
 	Message  string `json:"message,omitempty"`
 	Code     string `json:"code,omitempty"`
 	Category string `json:"category,omitempty"`
+}
+
+// OASValidationDetail captures runtime OAS schema validation for a step.
+type OASValidationDetail struct {
+	OperationID string            `json:"operationId,omitempty"`
+	Request     *OASPayloadDetail `json:"request,omitempty"`
+	Response    *OASPayloadDetail `json:"response,omitempty"`
+	Skipped     bool              `json:"skipped,omitempty"`
+	SkipReason  string            `json:"skipReason,omitempty"`
+}
+
+// OASPayloadDetail captures validation for one direction (request or response).
+type OASPayloadDetail struct {
+	Valid               bool                       `json:"valid"`
+	ErrorCount          int                        `json:"errorCount"`
+	Errors              []OASValidationErrorDetail `json:"errors,omitempty"`
+	CompilationWarnings []string                   `json:"compilationWarnings,omitempty"`
+}
+
+// OASValidationErrorDetail captures a single OAS validation error.
+type OASValidationErrorDetail struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
 }
 
 // --- Batch types ---

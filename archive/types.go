@@ -48,6 +48,7 @@ type StepRecord struct {
 	ErrorClass        *ErrorClassRecord        `json:"errorClassification,omitempty"`
 	ExpectFailure     *ExpectFailureRecord     `json:"expectFailure,omitempty"`
 	ResponseBodyError *ResponseBodyErrorRecord `json:"responseBodyError,omitempty"`
+	OASValidation     *OASValidationRecord     `json:"oasValidation,omitempty"`
 	Error             string                   `json:"error,omitempty"`
 	RetryCount        int                      `json:"retryCount,omitempty"`
 }
@@ -73,6 +74,28 @@ type ResponseBodyErrorRecord struct {
 	Message  string `json:"message,omitempty"`
 	Code     string `json:"code,omitempty"`
 	Category string `json:"category,omitempty"`
+}
+
+// OASValidationRecord captures runtime OAS schema validation for a step.
+type OASValidationRecord struct {
+	OperationID string            `json:"operationId,omitempty"`
+	Request     *OASPayloadRecord `json:"request,omitempty"`
+	Response    *OASPayloadRecord `json:"response,omitempty"`
+	Skipped     bool              `json:"skipped,omitempty"`
+	SkipReason  string            `json:"skipReason,omitempty"`
+}
+
+// OASPayloadRecord captures validation for one direction (request or response).
+type OASPayloadRecord struct {
+	Valid               bool             `json:"valid"`
+	Errors              []OASSchemaError `json:"errors,omitempty"`
+	CompilationWarnings []string         `json:"compilationWarnings,omitempty"`
+}
+
+// OASSchemaError is a single OAS validation error in the archive.
+type OASSchemaError struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
 }
 
 // RequestRecord captures the outbound HTTP request.

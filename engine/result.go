@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
+	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 )
@@ -60,6 +61,7 @@ type StepResult struct {
 	ErrorClass        *ErrorClassification       // nil on success
 	RetryCount        int                        // number of retries performed (0 = no retries)
 	Validation        *validate.MechanicalResult // nil if no assertions configured
+	OASValidation     *oas.ValidationResult      // nil when OAS validation not configured or node has no OAS ref
 	DisplayOutputs    []DisplayOutput            // outputs tagged with display labels
 	ExpectFailure     *ExpectFailureResult       // non-nil for negative assertion steps
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body

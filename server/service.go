@@ -953,6 +953,11 @@ func toStepSummary(s archive.StepRecord, isCleanup bool, runStart time.Time) Ste
 		HasSelections:        len(s.Selections) > 0,
 		HasResolutions:       len(s.Resolutions) > 0,
 		HasTransform:         s.TransformScript != "",
+		HasOASValidation:     s.OASValidation != nil && !s.OASValidation.Skipped,
+		OASErrorCount:        oasErrorCount(s.OASValidation),
+		OASReqErrorCount:     oasReqErrorCount(s.OASValidation),
+		OASRespErrorCount:    oasRespErrorCount(s.OASValidation),
+		OASWarningCount:      oasWarningCount(s.OASValidation),
 		RetryCount:           s.RetryCount,
 		OffsetMs:             offsetMs,
 	}
@@ -1004,6 +1009,7 @@ func toStepDetail(s archive.StepRecord, isCleanup bool, nodeSteps map[string]str
 		ErrorClassification:  toErrorClassDetail(s.ErrorClass),
 		ExpectFailure:        toExpectFailureDetail(s.ExpectFailure),
 		ResponseBodyError:    toResponseBodyErrorDetail(s.ResponseBodyError),
+		OASValidation:        toOASValidationDetail(s.OASValidation),
 		TransformScript:      s.TransformScript,
 	}
 }
@@ -1178,6 +1184,81 @@ func toResponseBodyErrorDetail(r *archive.ResponseBodyErrorRecord) *ResponseBody
 		Code:     r.Code,
 		Category: r.Category,
 	}
+}
+
+func toOASValidationDetail(r *archive.OASValidationRecord) *OASValidationDetail {
+	if r == nil {
+		return nil
+	}
+	detail := &OASValidationDetail{
+		OperationID: r.OperationID,
+		Skipped:     r.Skipped,
+		SkipReason:  r.SkipReason,
+	}
+	if r.Request != nil {
+		detail.Request = toOASPayloadDetail(r.Request)
+	}
+	if r.Response != nil {
+		detail.Response = toOASPayloadDetail(r.Response)
+	}
+	return detail
+}
+
+func toOASPayloadDetail(r *archive.OASPayloadRecord) *OASPayloadDetail {
+	detail := &OASPayloadDetail{
+		Valid:               r.Valid,
+		ErrorCount:          len(r.Errors),
+		CompilationWarnings: r.CompilationWarnings,
+	}
+	for _, e := range r.Errors {
+		detail.Errors = append(detail.Errors, OASValidationErrorDetail{
+			Path:    e.Path,
+			Message: e.Message,
+		})
+	}
+	return detail
+}
+
+func oasErrorCount(r *archive.OASValidationRecord) int {
+	if r == nil {
+		return 0
+	}
+	count := 0
+	if r.Request != nil {
+		count += len(r.Request.Errors)
+	}
+	if r.Response != nil {
+		count += len(r.Response.Errors)
+	}
+	return count
+}
+
+func oasReqErrorCount(r *archive.OASValidationRecord) int {
+	if r == nil || r.Request == nil {
+		return 0
+	}
+	return len(r.Request.Errors)
+}
+
+func oasRespErrorCount(r *archive.OASValidationRecord) int {
+	if r == nil || r.Response == nil {
+		return 0
+	}
+	return len(r.Response.Errors)
+}
+
+func oasWarningCount(r *archive.OASValidationRecord) int {
+	if r == nil {
+		return 0
+	}
+	count := 0
+	if r.Request != nil {
+		count += len(r.Request.CompilationWarnings)
+	}
+	if r.Response != nil {
+		count += len(r.Response.CompilationWarnings)
+	}
+	return count
 }
 
 // --- extraction + plan step helpers ---

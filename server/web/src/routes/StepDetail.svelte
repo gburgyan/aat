@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { StepDetail } from '../lib/types';
+  import type { StepDetail, OASValidationDetail } from '../lib/types';
   import { fetchStep, fetchAttemptStep } from '../lib/api';
   import { navigate, encPath } from '../lib/router';
   import { formatDuration, httpStatusCategory } from '../lib/format';
@@ -13,6 +13,7 @@
   import ExtractionsTable from '../components/ExtractionsTable.svelte';
   import YamlViewer from '../components/YamlViewer.svelte';
   import ErrorPanel from '../components/ErrorPanel.svelte';
+  import OASValidationPanel from '../components/OASValidationPanel.svelte';
 
   interface Props {
     runId: string;
@@ -77,6 +78,10 @@
       t.push({ id: 'resolutions', label: `Resolutions (${step.resolutions.length})` });
     if (step.selections && step.selections.length > 0)
       t.push({ id: 'selections', label: `Selections (${step.selections.length})` });
+    if (step.oasValidation) {
+      const ec = oasErrorCount(step.oasValidation);
+      t.push({ id: 'oas', label: ec > 0 ? `OAS (${ec})` : 'OAS' });
+    }
     if (hasErrors)
       t.push({ id: 'errors', label: 'Errors' });
     if (step.planStepYaml)
@@ -96,6 +101,13 @@
       activeTab = tabs[0].id;
     }
   });
+
+  function oasErrorCount(v: OASValidationDetail): number {
+    let count = 0;
+    if (v.request) count += v.request.errorCount;
+    if (v.response) count += v.response.errorCount;
+    return count;
+  }
 
   let statusCat = $derived(httpStatusCategory(step?.status));
 
@@ -270,6 +282,10 @@
 
       {#if activeTab === 'selections' && step.selections}
         <SelectionsTable selections={step.selections} {runId} {attempt} />
+      {/if}
+
+      {#if activeTab === 'oas' && step.oasValidation}
+        <OASValidationPanel oasValidation={step.oasValidation} />
       {/if}
 
       {#if activeTab === 'errors'}

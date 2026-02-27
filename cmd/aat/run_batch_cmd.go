@@ -64,6 +64,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		shuffle, _ := cmd.Flags().GetBool("shuffle")
 		seed, _ := cmd.Flags().GetInt64("seed")
 		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
+		oasValidate, _ := cmd.Flags().GetString("oas-validate")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -83,6 +84,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 				LayersDir:       resolved.LayersDir,
 				LayerGroups:     layerGroups,
 				NoAutoOverrides: noAutoOverrides,
+				OASValidateMode: oasValidate,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,

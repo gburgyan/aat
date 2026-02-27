@@ -14,6 +14,7 @@ import (
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
@@ -91,6 +92,8 @@ var promptCmd = &cobra.Command{
 			}
 		}
 
+		oasValidate, _ := cmd.Flags().GetString("oas-validate")
+
 		pa := &promptArgs{
 			Prompt:            promptText,
 			EnvPath:           resolved.EnvPath,
@@ -106,6 +109,7 @@ var promptCmd = &cobra.Command{
 			Layers:            layerFlags,
 			LayersDir:         resolved.LayersDir,
 			AutoOverridesPath: autoOverridesPath,
+			OASValidateMode:   oasValidate,
 		}
 
 		return promptCommand(context.Background(), pa, os.Stdin)
@@ -126,6 +130,7 @@ func init() {
 	promptCmd.Flags().String("trace-dir", "_output/traces", "directory for plan trace output")
 	promptCmd.Flags().StringSlice("layer", nil, "data layer to apply (repeatable, e.g. --layer european --layer amex)")
 	promptCmd.Flags().Bool("no-auto-overrides", false, "disable auto-discovery of .aat-overrides.yaml")
+	promptCmd.Flags().String("oas-validate", "", "OAS validation mode: auto (default), warn, strict, off")
 }
 
 // promptArgs holds parsed CLI flags for the prompt command.
@@ -144,6 +149,7 @@ type promptArgs struct {
 	Layers            []string
 	LayersDir         string
 	AutoOverridesPath string // path to auto-discovered .aat-overrides.yaml
+	OASValidateMode   string // "auto", "warn", "strict", "off"
 }
 
 // promptCommand executes the full prompt-to-execution pipeline.
@@ -424,6 +430,30 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		WithDomain(kb).
 		WithProgress(observer).
 		WithLayers(layeredDefaults)
+
+	// OAS runtime validation
+	oasMode := resolveOASMode(args.OASValidateMode, env.Settings.OASValidation)
+	if oasMode != "off" {
+		specPaths := collectOASSpecPaths(g)
+		if len(specPaths) > 0 {
+			graphDir := filepath.Dir(args.GraphPath)
+			oasCache := oas.NewSpecCache()
+			for _, sp := range specPaths {
+				fsPath := sp
+				if !filepath.IsAbs(sp) {
+					fsPath = filepath.Join(graphDir, sp)
+				}
+				if loadErr := oasCache.Load(sp, fsPath); loadErr != nil {
+					fmt.Printf("aat: warning: could not load OAS spec %q: %s\n", sp, loadErr)
+				}
+			}
+			if oasCache.Len() > 0 {
+				eng.WithOASSpecs(oasCache, g.OAS, oasMode == "strict")
+				fmt.Printf("aat: loaded %d OAS spec(s) for runtime validation\n", oasCache.Len())
+			}
+		}
+	}
+
 	fmt.Printf("aat: executing plan (%d steps)...\n\n", len(p.Execution.Steps))
 
 	result := eng.Run(ctx, p)

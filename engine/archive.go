@@ -6,6 +6,7 @@ import (
 
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/archive"
+	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/validate"
 )
 
@@ -96,6 +97,9 @@ func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) ar
 			Category: s.ResponseBodyError.Category,
 		}
 	}
+	if s.OASValidation != nil {
+		rec.OASValidation = convertOASValidation(s.OASValidation)
+	}
 
 	return rec
 }
@@ -185,6 +189,35 @@ func convertResolutions(resolutions []ValueResolution, secrets map[string]bool) 
 		records[i] = rec
 	}
 	return records
+}
+
+func convertOASValidation(v *oas.ValidationResult) *archive.OASValidationRecord {
+	rec := &archive.OASValidationRecord{
+		OperationID: v.OperationID,
+		Skipped:     v.Skipped,
+		SkipReason:  v.SkipReason,
+	}
+	if v.Request != nil {
+		rec.Request = convertOASPayload(v.Request)
+	}
+	if v.Response != nil {
+		rec.Response = convertOASPayload(v.Response)
+	}
+	return rec
+}
+
+func convertOASPayload(p *oas.PayloadResult) *archive.OASPayloadRecord {
+	rec := &archive.OASPayloadRecord{
+		Valid:               p.Valid,
+		CompilationWarnings: p.CompilationWarnings,
+	}
+	for _, e := range p.Errors {
+		rec.Errors = append(rec.Errors, archive.OASSchemaError{
+			Path:    e.Path,
+			Message: e.Message,
+		})
+	}
+	return rec
 }
 
 // errString returns the error message or empty string for nil.

@@ -67,6 +67,11 @@ export interface StepSummary {
   hasSelections?: boolean;
   hasResolutions?: boolean;
   hasTransform?: boolean;
+  hasOasValidation?: boolean;
+  oasErrorCount?: number;
+  oasReqErrorCount?: number;
+  oasRespErrorCount?: number;
+  oasWarningCount?: number;
   retryCount?: number;
   offsetMs?: number;
 }
@@ -97,6 +102,7 @@ export interface StepDetail {
   errorClassification?: ErrorClassDetail;
   expectFailure?: ExpectFailureDetail;
   responseBodyError?: ResponseBodyErrorDetail;
+  oasValidation?: OASValidationDetail;
   transformScript?: string;
   extractions?: ExtractionDetail[];
   planStepYaml?: string;
@@ -219,6 +225,26 @@ export interface ResponseBodyErrorDetail {
   message?: string;
   code?: string;
   category?: string;
+}
+
+export interface OASValidationDetail {
+  operationId?: string;
+  request?: OASPayloadDetail;
+  response?: OASPayloadDetail;
+  skipped?: boolean;
+  skipReason?: string;
+}
+
+export interface OASPayloadDetail {
+  valid: boolean;
+  errorCount: number;
+  errors?: OASValidationErrorDetail[];
+  compilationWarnings?: string[];
+}
+
+export interface OASValidationErrorDetail {
+  path: string;
+  message: string;
 }
 
 // --- Trace types ---

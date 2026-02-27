@@ -39,6 +39,7 @@ var runPlanCmd = &cobra.Command{
 		retries, _ := cmd.Flags().GetInt("retries")
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
 		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
+		oasValidate, _ := cmd.Flags().GetString("oas-validate")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -57,6 +58,7 @@ var runPlanCmd = &cobra.Command{
 			Layers:          layerFlags,
 			LayersDir:       resolved.LayersDir,
 			NoAutoOverrides: noAutoOverrides,
+			OASValidateMode: oasValidate,
 		}
 
 		code := executeRun(ra)

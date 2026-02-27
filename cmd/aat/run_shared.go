@@ -15,6 +15,7 @@ import (
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/plan"
 )
@@ -43,6 +44,7 @@ type runArgs struct {
 	LayerGroups       [][]string // layer groups for permutation (batch only)
 	NoAutoOverrides   bool       // disable .aat-overrides.yaml auto-discovery
 	AutoOverridesPath string     // resolved path to auto-discovered overrides file
+	OASValidateMode   string     // "auto", "warn", "strict", "off"
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -213,6 +215,7 @@ func printRunSummary(result *engine.RunResult, out io.Writer, ti TerminalInfo) {
 	color := ti.IsTTY
 	ncw := nodeColWidth(ti.Width, 60)
 
+	var oasWarnings int
 	for i, step := range result.Steps {
 		nodeStr := formatNodeCol(step.Node, ncw, color)
 		prefix := fmt.Sprintf("  [%d/%d] %s", i+1, total, nodeStr)
@@ -229,7 +232,13 @@ func printRunSummary(result *engine.RunResult, out io.Writer, ti TerminalInfo) {
 			if step.Validation != nil && !step.Validation.Passed {
 				validMark = "  " + colorize("ASSERTIONS FAILED", colorYellow, color)
 			}
-			_, _ = fmt.Fprintf(out, "%s %s  %dms%s\n", prefix, status, step.Duration.Milliseconds(), validMark)
+			oasMark := ""
+			if step.OASValidation != nil && step.OASValidation.HasErrors() {
+				ec := step.OASValidation.ErrorCount()
+				oasWarnings += ec
+				oasMark = "  " + colorize(fmt.Sprintf("OAS: %d warning(s)", ec), colorYellow, color)
+			}
+			_, _ = fmt.Fprintf(out, "%s %s  %dms%s%s\n", prefix, status, step.Duration.Milliseconds(), validMark, oasMark)
 			for _, do := range step.DisplayOutputs {
 				_, _ = fmt.Fprintf(out, "        %s: %v\n", do.Label, do.Value)
 			}
@@ -264,6 +273,9 @@ func printRunSummary(result *engine.RunResult, out io.Writer, ti TerminalInfo) {
 		_, _ = fmt.Fprintf(out, "%s: %s\n", colorOutcome("FAILED", color), outcomeMessage(result))
 	case engine.OutcomeError:
 		_, _ = fmt.Fprintf(out, "%s: %s\n", colorOutcome("ERROR", color), outcomeMessage(result))
+	}
+	if oasWarnings > 0 {
+		_, _ = fmt.Fprintf(out, "OAS: %s\n", colorize(fmt.Sprintf("%d warning(s)", oasWarnings), colorYellow, color))
 	}
 }
 
@@ -561,6 +573,10 @@ type runContext struct {
 	Layers          []string                // layer names from CLI flags
 	LayersDir       string                  // directory containing layer files
 	AvailableLayers map[string]*graph.Layer // pre-loaded layers (nil until needed)
+
+	// OAS validation
+	OASCache        *oas.SpecCache // loaded specs for runtime validation (nil if none)
+	OASValidateMode string         // effective mode: "auto", "warn", "strict", "off"
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -645,6 +661,32 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 			}
 			rctx.AvailableLayers = layers
 			logf("aat: loaded %d layers\n", len(layers))
+		}
+	}
+
+	// Resolve OAS validation mode: CLI flag > env setting > "auto"
+	oasMode := resolveOASMode(args.OASValidateMode, env.Settings.OASValidation)
+	rctx.OASValidateMode = oasMode
+
+	// Load OAS specs for runtime validation (unless disabled)
+	if oasMode != "off" {
+		specPaths := collectOASSpecPaths(g)
+		if len(specPaths) > 0 {
+			graphDir := filepath.Dir(args.GraphPath)
+			oasCache := oas.NewSpecCache()
+			for _, sp := range specPaths {
+				fsPath := sp
+				if !filepath.IsAbs(sp) {
+					fsPath = filepath.Join(graphDir, sp)
+				}
+				if loadErr := oasCache.Load(sp, fsPath); loadErr != nil {
+					logf("aat: warning: could not load OAS spec %q: %s\n", sp, loadErr)
+				}
+			}
+			if oasCache.Len() > 0 {
+				rctx.OASCache = oasCache
+				logf("aat: loaded %d OAS spec(s) for runtime validation\n", oasCache.Len())
+			}
 		}
 	}
 
@@ -850,6 +892,11 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		WithDomain(rctx.KB).
 		WithProgress(observer).
 		WithLayers(layeredDefaults)
+
+	if rctx.OASCache != nil {
+		eng.WithOASSpecs(rctx.OASCache, rctx.Graph.OAS, rctx.OASValidateMode == "strict")
+	}
+
 	logf("aat: executing plan (%d steps)...\n\n", len(p.Execution.Steps))
 
 	result := eng.Run(ctx, p)
@@ -901,6 +948,35 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		err:         result.Error,
 		layers:      effectiveLayers,
 	}
+}
+
+// resolveOASMode returns the effective OAS validation mode.
+// CLI flag takes precedence over env setting; defaults to "auto".
+func resolveOASMode(cliFlag, envSetting string) string {
+	if cliFlag != "" {
+		return cliFlag
+	}
+	if envSetting != "" {
+		return envSetting
+	}
+	return "auto"
+}
+
+// collectOASSpecPaths returns the unique set of OAS spec paths from the graph.
+func collectOASSpecPaths(g *graph.Graph) []string {
+	seen := make(map[string]bool)
+	var paths []string
+	if g.OAS != "" && !seen[g.OAS] {
+		seen[g.OAS] = true
+		paths = append(paths, g.OAS)
+	}
+	for _, node := range g.Nodes {
+		if node.OAS != nil && node.OAS.Spec != "" && !seen[node.OAS.Spec] {
+			seen[node.OAS.Spec] = true
+			paths = append(paths, node.OAS.Spec)
+		}
+	}
+	return paths
 }
 
 // collectAllLayerNames returns the union of layer names from base layers and

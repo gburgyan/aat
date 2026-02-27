@@ -10,6 +10,7 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 )
@@ -37,6 +38,11 @@ type Engine struct {
 	// Keyed by "nodeName.inputName". When set, these take priority over
 	// graph-level defaults during plan instantiation.
 	layeredDefaults map[string]*graph.InputDefault
+
+	// OAS runtime validation
+	oasCache  *oas.SpecCache // nil = disabled
+	graphOAS  string         // graph-level default OAS path
+	oasStrict bool           // when true, OAS errors fail the step
 
 	// plan is set during Run() for constraint-aware resolution.
 	plan *plan.Plan
@@ -67,6 +73,15 @@ func (e *Engine) WithProgress(obs ProgressObserver) *Engine {
 // WithLayers sets data-layer overrides for graph input defaults.
 func (e *Engine) WithLayers(ld map[string]*graph.InputDefault) *Engine {
 	e.layeredDefaults = ld
+	return e
+}
+
+// WithOASSpecs enables runtime OAS validation for steps that have OAS refs.
+// When strict is true, OAS validation errors cause step failure.
+func (e *Engine) WithOASSpecs(cache *oas.SpecCache, graphOAS string, strict bool) *Engine {
+	e.oasCache = cache
+	e.graphOAS = graphOAS
+	e.oasStrict = strict
 	return e
 }
 
@@ -430,6 +445,15 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 			resp.StatusCode, assertionBody,
 			convertAssertions(step.Assertions.Mechanical),
 			plan.EvalPredicate,
+		)
+	}
+
+	// OAS schema validation
+	if e.oasCache != nil && node.OAS != nil && req != nil && resp != nil {
+		result.OASValidation = oas.ValidateStep(
+			node, e.graphOAS, e.oasCache,
+			req.Method, req.Path, req.Headers, req.Body,
+			resp.StatusCode, resp.Headers, resp.Body,
 		)
 	}
 

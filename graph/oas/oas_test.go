@@ -44,10 +44,11 @@ func TestFindOperation_Found(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.operationID, func(t *testing.T) {
-			method, path, op, err := FindOperation(model, tt.operationID)
+			method, path, pathItem, op, err := FindOperation(model, tt.operationID)
 			require.NoError(t, err)
 			assert.Equal(t, tt.wantMethod, method)
 			assert.Equal(t, tt.wantPath, path)
+			assert.NotNil(t, pathItem)
 			assert.NotNil(t, op)
 			assert.Equal(t, tt.operationID, op.OperationId)
 		})
@@ -58,7 +59,7 @@ func TestFindOperation_NotFound(t *testing.T) {
 	model, err := LoadSpec("testdata/petstore.yaml")
 	require.NoError(t, err)
 
-	_, _, _, err = FindOperation(model, "nonExistentOp")
+	_, _, _, _, err = FindOperation(model, "nonExistentOp")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nonExistentOp")
 	assert.Contains(t, err.Error(), "not found")

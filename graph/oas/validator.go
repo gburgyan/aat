@@ -98,7 +98,7 @@ func (v *Validator) Validate(g *graph.Graph) *graph.SpecValidationResult {
 		}
 
 		// Rule 4: operationId must exist in spec
-		_, _, op, err := FindOperation(model, node.OAS.OperationID)
+		_, _, _, op, err := FindOperation(model, node.OAS.OperationID)
 		if err != nil {
 			result.Issues = append(result.Issues, graph.SpecValidationIssue{
 				Severity: graph.SpecError,
