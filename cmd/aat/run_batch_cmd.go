@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gburgyan/aat/archive"
@@ -59,6 +61,8 @@ With an absolute path, treats it as a standalone plan directory.`,
 		layerGroupFlags, _ := cmd.Flags().GetStringArray("layer-group")
 		layerGroups := parseLayerGroups(layerGroupFlags)
 		noDedup, _ := cmd.Flags().GetBool("no-dedup")
+		shuffle, _ := cmd.Flags().GetBool("shuffle")
+		seed, _ := cmd.Flags().GetInt64("seed")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -82,6 +86,8 @@ With an absolute path, treats it as a standalone plan directory.`,
 			FilterPath: filterPath,
 			Parallel:   parallel,
 			NoDedup:    noDedup,
+			Shuffle:    shuffle,
+			Seed:       seed,
 		}
 
 		code := executeBatch(ba)
@@ -99,6 +105,8 @@ func init() {
 	runBatchCmd.Flags().StringArray("layer-group", nil,
 		"layer group for permutation (comma-separated names, repeatable)")
 	runBatchCmd.Flags().Bool("no-dedup", false, "disable duplicate plan detection across permutations")
+	runBatchCmd.Flags().Bool("shuffle", false, "randomize plan execution order")
+	runBatchCmd.Flags().Int64("seed", 0, "random seed for --shuffle (0 = use current time)")
 
 	runCmd.AddCommand(runBatchCmd)
 }
@@ -110,6 +118,8 @@ type batchArgs struct {
 	FilterPath string // optional subdirectory filter
 	Parallel   int    // concurrency limit; <=1 means sequential
 	NoDedup    bool   // disable duplicate plan detection
+	Shuffle    bool   // randomize plan execution order
+	Seed       int64  // random seed for shuffle (0 = use current time)
 }
 
 // BatchSummary is the machine-readable JSON output for batch CI/CD pipelines.
@@ -162,6 +172,9 @@ func executeBatch(ba *batchArgs) int {
 		ba.Quiet = true
 	}
 
+	ti := DetectTerminal()
+	color := ti.IsTTY
+
 	var out io.Writer = os.Stdout
 	if ba.Quiet {
 		out = io.Discard
@@ -197,25 +210,25 @@ func executeBatch(ba *batchArgs) int {
 			}
 			switch r.Outcome {
 			case "passed":
-				_, _ = fmt.Fprintf(os.Stdout, "%s: PASSED%s\n", name, attemptSuffix)
+				_, _ = fmt.Fprintf(os.Stdout, "%s: %s%s\n", name, colorOutcome("PASSED", color), attemptSuffix)
 			case "failed":
-				_, _ = fmt.Fprintf(os.Stdout, "%s: FAILED: %s%s\n", name, r.Error, attemptSuffix)
+				_, _ = fmt.Fprintf(os.Stdout, "%s: %s: %s%s\n", name, colorOutcome("FAILED", color), r.Error, attemptSuffix)
 			case "error":
-				_, _ = fmt.Fprintf(os.Stdout, "%s: ERROR: %s%s\n", name, r.Error, attemptSuffix)
+				_, _ = fmt.Fprintf(os.Stdout, "%s: %s: %s%s\n", name, colorOutcome("ERROR", color), r.Error, attemptSuffix)
 			case "skipped":
-				_, _ = fmt.Fprintf(os.Stdout, "%s: SKIPPED (duplicate of %s)\n", name, r.DuplicateOf)
+				_, _ = fmt.Fprintf(os.Stdout, "%s: %s (duplicate of %s)\n", name, colorOutcome("SKIPPED", color), r.DuplicateOf)
 			}
 		}
-		_, _ = fmt.Fprintf(os.Stdout, "Batch: %d/%d PASSED",
-			res.summary.Summary.PassedPlans, res.summary.Summary.TotalPlans)
+		_, _ = fmt.Fprintf(os.Stdout, "Batch: %d/%d %s",
+			res.summary.Summary.PassedPlans, res.summary.Summary.TotalPlans, colorOutcome("PASSED", color))
 		if res.summary.Summary.FailedPlans > 0 {
-			_, _ = fmt.Fprintf(os.Stdout, ", %d FAILED", res.summary.Summary.FailedPlans)
+			_, _ = fmt.Fprintf(os.Stdout, ", %d %s", res.summary.Summary.FailedPlans, colorOutcome("FAILED", color))
 		}
 		if res.summary.Summary.ErrorPlans > 0 {
-			_, _ = fmt.Fprintf(os.Stdout, ", %d ERROR", res.summary.Summary.ErrorPlans)
+			_, _ = fmt.Fprintf(os.Stdout, ", %d %s", res.summary.Summary.ErrorPlans, colorOutcome("ERROR", color))
 		}
 		if res.summary.Summary.SkippedPlans > 0 {
-			_, _ = fmt.Fprintf(os.Stdout, ", %d SKIPPED", res.summary.Summary.SkippedPlans)
+			_, _ = fmt.Fprintf(os.Stdout, ", %d %s", res.summary.Summary.SkippedPlans, colorOutcome("SKIPPED", color))
 		}
 		_, _ = fmt.Fprintln(os.Stdout)
 		if res.batchDir != "" {
@@ -385,9 +398,23 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		}
 	}
 
+	// 3b. Shuffle specs if requested
+	if args.Shuffle {
+		seed := args.Seed
+		if seed == 0 {
+			seed = time.Now().UnixNano()
+		}
+		rng := rand.New(rand.NewSource(seed))
+		rng.Shuffle(len(specs), func(i, j int) { specs[i], specs[j] = specs[j], specs[i] })
+		logf("aat: shuffled %d specs (seed=%d)\n", len(specs), seed)
+	}
+
 	// 4. Generate batch ID and create batch directory
 	batchID := archive.GenerateBatchID()
 	batchDir := filepath.Join(args.OutputDir, batchID)
+
+	// Detect terminal for progress rendering and color
+	ti := DetectTerminal()
 
 	logf("\n")
 
@@ -397,9 +424,9 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	var batchEntries []archive.BatchRunEntry
 
 	if args.Parallel > 1 {
-		runs, batchEntries = batchParallel(ctx, rctx, specs, batchDir, args, out)
+		runs, batchEntries = batchParallel(ctx, rctx, specs, batchDir, args, out, ti)
 	} else {
-		runs, batchEntries = batchSequential(ctx, rctx, specs, batchDir, args, out)
+		runs, batchEntries = batchSequential(ctx, rctx, specs, batchDir, args, out, ti)
 	}
 
 	totalDur := time.Since(batchStart)
@@ -509,12 +536,12 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 }
 
 // batchSequential executes specs one at a time with streaming step output.
-func batchSequential(ctx context.Context, rctx *runContext, specs []batchRunSpec, batchDir string, args *batchArgs, out io.Writer) ([]BatchRunResult, []archive.BatchRunEntry) {
+func batchSequential(ctx context.Context, rctx *runContext, specs []batchRunSpec, batchDir string, args *batchArgs, out io.Writer, ti TerminalInfo) ([]BatchRunResult, []archive.BatchRunEntry) {
 	var runs []BatchRunResult
 	var batchEntries []archive.BatchRunEntry
 	noopLogf := func(string, ...any) {}
 
-	for _, spec := range specs {
+	for i, spec := range specs {
 		planName := planBaseName(spec.entry.Name)
 		displayName := specDisplayName(planName, spec.permutation)
 
@@ -524,7 +551,7 @@ func batchSequential(ctx context.Context, rctx *runContext, specs []batchRunSpec
 		// Create streaming observer for sequential mode (unless output suppressed)
 		var observer engine.ProgressObserver
 		if out != io.Discard {
-			observer = NewBatchStreamObserver(out, displayName)
+			observer = NewBatchStreamObserver(out, displayName, ti, i, len(specs))
 		}
 
 		var res *runResult
@@ -558,7 +585,7 @@ func batchSequential(ctx context.Context, rctx *runContext, specs []batchRunSpec
 }
 
 // batchParallel executes specs concurrently using errgroup with a concurrency limit.
-func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, batchDir string, args *batchArgs, out io.Writer) ([]BatchRunResult, []archive.BatchRunEntry) {
+func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, batchDir string, args *batchArgs, out io.Writer, ti TerminalInfo) ([]BatchRunResult, []archive.BatchRunEntry) {
 	n := len(specs)
 	results := make([]runResult, n)
 	displayNames := make([]string, n)
@@ -569,15 +596,16 @@ func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, 
 		displayNames[i] = specDisplayName(planNames[i], spec.permutation)
 	}
 
-	// Detect terminal for progress rendering
-	ti := DetectTerminal()
 	var renderer *ProgressRenderer
 	if out != io.Discard && ti.IsTTY {
-		renderer = NewProgressRenderer(out, ti.Width)
+		renderer = NewProgressRenderer(out, ti.Width, ti.IsTTY, n)
 	}
 
 	// Shared mutex for non-TTY output
 	var outputMu sync.Mutex
+
+	// Atomic counter for completed plan progress (parallel mode)
+	var completedCount atomic.Int64
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.SetLimit(args.Parallel)
@@ -613,9 +641,11 @@ func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, 
 				results[i] = *res
 			}
 
-			// Build result line for completion
+			// Build result line for completion with plan counter
 			br, _ := buildPlanResult(planNames[i], spec.permutation, res)
-			resultLine := formatBatchResultLine(displayNames[i], br)
+			completed := completedCount.Add(1)
+			counterPrefix := fmt.Sprintf("[%d/%d]", completed, n)
+			resultLine := counterPrefix + formatBatchResultLine(displayNames[i], br, ti.IsTTY)
 
 			if renderer != nil {
 				// Find the state from the observer and complete it
@@ -716,17 +746,17 @@ func buildPlanResult(planName, permutation string, res *runResult) (BatchRunResu
 }
 
 // formatBatchResultLine formats a single plan result as a display line.
-func formatBatchResultLine(displayName string, br BatchRunResult) string {
+func formatBatchResultLine(displayName string, br BatchRunResult, color bool) string {
 	dur := formatDuration(time.Duration(br.DurationMs) * time.Millisecond)
 	switch br.Outcome {
 	case "passed":
-		return fmt.Sprintf("  %s  PASSED (%d steps, %s)", displayName, br.StepCount, dur)
+		return fmt.Sprintf("  %s  %s (%d steps, %s)", displayName, colorOutcome("PASSED", color), br.StepCount, dur)
 	case "failed":
-		return fmt.Sprintf("  %s  FAILED (%d steps, %s)", displayName, br.StepCount, dur)
+		return fmt.Sprintf("  %s  %s (%d steps, %s)", displayName, colorOutcome("FAILED", color), br.StepCount, dur)
 	case "error":
-		return fmt.Sprintf("  %s  ERROR: %s", displayName, br.Error)
+		return fmt.Sprintf("  %s  %s: %s", displayName, colorOutcome("ERROR", color), br.Error)
 	case "skipped":
-		return fmt.Sprintf("  %s  SKIPPED (duplicate of %s)", displayName, br.DuplicateOf)
+		return fmt.Sprintf("  %s  %s (duplicate of %s)", displayName, colorOutcome("SKIPPED", color), br.DuplicateOf)
 	default:
 		return fmt.Sprintf("  %s  %s", displayName, br.Outcome)
 	}

@@ -352,7 +352,8 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	}
 
 	// Create engine and run
-	observer := &CLIProgressObserver{out: os.Stdout}
+	ti := DetectTerminal()
+	observer := &CLIProgressObserver{out: os.Stdout, term: ti}
 	eng := engine.NewEngine(g, registry, router).
 		WithDomain(kb).
 		WithProgress(observer).

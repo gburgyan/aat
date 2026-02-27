@@ -15,7 +15,11 @@ type TerminalInfo struct {
 
 // DetectTerminal checks whether stdout is a terminal and queries its size.
 // Returns sensible defaults (80x24, non-TTY) on failure.
+// Honors NO_COLOR (https://no-color.org/) by forcing non-TTY mode.
 func DetectTerminal() TerminalInfo {
+	if os.Getenv("NO_COLOR") != "" {
+		return TerminalInfo{IsTTY: false, Width: 80, Height: 24}
+	}
 	fd := int(os.Stdout.Fd())
 	if !term.IsTerminal(fd) {
 		return TerminalInfo{IsTTY: false, Width: 80, Height: 24}

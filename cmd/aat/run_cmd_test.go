@@ -24,7 +24,7 @@ func TestRunCommand_MissingPlan(t *testing.T) {
 		EnvPath:       "x",
 		GraphPath:     "x",
 		TemplatesPath: "x",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "plan path is required")
 }
@@ -34,7 +34,7 @@ func TestRunCommand_MissingEnv(t *testing.T) {
 		PlanPath:      "x",
 		GraphPath:     "x",
 		TemplatesPath: "x",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "--env is required")
 }
@@ -44,7 +44,7 @@ func TestRunCommand_MissingGraph(t *testing.T) {
 		PlanPath:      "x",
 		EnvPath:       "x",
 		TemplatesPath: "x",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "--graph is required")
 }
@@ -54,7 +54,7 @@ func TestRunCommand_MissingTemplates(t *testing.T) {
 		PlanPath:  "x",
 		EnvPath:   "x",
 		GraphPath: "x",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "--templates is required")
 }
@@ -65,7 +65,7 @@ func TestRunCommand_InvalidEnvPath(t *testing.T) {
 		EnvPath:       "testdata/nonexistent.yaml",
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "loading environment")
 }
@@ -77,7 +77,7 @@ func TestRunCommand_InvalidGraphPath(t *testing.T) {
 		EnvPath:       envFile,
 		GraphPath:     "testdata/nonexistent.yaml",
 		TemplatesPath: "testdata/templates",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "loading graph")
 }
@@ -89,7 +89,7 @@ func TestRunCommand_InvalidPlanPath(t *testing.T) {
 		EnvPath:       envFile,
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "loading plan")
 }
@@ -101,7 +101,7 @@ func TestRunCommand_InvalidTemplatesPath(t *testing.T) {
 		EnvPath:       envFile,
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/nonexistent",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "loading templates")
 }
@@ -122,7 +122,7 @@ func TestRunCommand_SuccessfulRun(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     outputDir,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.NoError(t, res.err)
 
 	// Verify archive was written
@@ -149,7 +149,7 @@ func TestRunCommand_FailedStep(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     outputDir,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err, "should fail when API returns 500")
 }
 
@@ -173,7 +173,7 @@ func TestRunCommand_WithCustomHeaders(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     outputDir,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	require.NoError(t, res.err)
 	assert.Equal(t, "test-value", receivedHeader)
 }
@@ -194,7 +194,7 @@ func TestExitCode_Passed(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     filepath.Join(t.TempDir(), "runs"),
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	assert.Equal(t, engine.OutcomePassed, res.outcome)
 	assert.Equal(t, 0, exitCode(res))
@@ -215,7 +215,7 @@ func TestExitCode_FailedStep(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     filepath.Join(t.TempDir(), "runs"),
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	assert.Equal(t, engine.OutcomeFailed, res.outcome)
 	assert.Equal(t, 1, exitCode(res))
@@ -227,7 +227,7 @@ func TestExitCode_InfraError_MissingPlanFile(t *testing.T) {
 		EnvPath:       writeTestEnv(t, "none", ""),
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	assert.Equal(t, exitCodeInfra, exitCode(res))
 }
@@ -241,7 +241,7 @@ func TestExitCode_InfraError_InvalidYAML(t *testing.T) {
 		EnvPath:       writeTestEnv(t, "none", ""),
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	assert.Equal(t, exitCodeInfra, exitCode(res))
 }
@@ -258,7 +258,7 @@ func TestExitCode_PlanValidationError(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     filepath.Join(t.TempDir(), "runs"),
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "plan validation")
@@ -281,7 +281,7 @@ func TestJSON_SuccessfulRun(t *testing.T) {
 		OutputDir:     filepath.Join(t.TempDir(), "runs"),
 		JSON:          true,
 		Quiet:         true,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	require.NotNil(t, res.summary)
 
@@ -320,7 +320,7 @@ func TestJSON_FailedRun(t *testing.T) {
 		OutputDir:     filepath.Join(t.TempDir(), "runs"),
 		JSON:          true,
 		Quiet:         true,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	require.NotNil(t, res.summary)
 	assert.Equal(t, "failed", res.summary.Outcome)
@@ -341,7 +341,7 @@ func TestJSON_InfraError(t *testing.T) {
 		TemplatesPath: "testdata/templates",
 		JSON:          true,
 		Quiet:         true,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	assert.Nil(t, res.summary, "no summary for setup errors")
 	assert.Error(t, res.err)
@@ -366,7 +366,7 @@ func TestQuiet_SuppressesProgressMessages(t *testing.T) {
 		TemplatesPath: "testdata/templates",
 		OutputDir:     filepath.Join(t.TempDir(), "runs"),
 		Quiet:         true,
-	}, &progressBuf)
+	}, &progressBuf, TerminalInfo{Width: 80})
 
 	require.NoError(t, res.err)
 	// In quiet mode, the caller passes io.Discard. Here we passed a buffer
@@ -381,7 +381,7 @@ func TestQuiet_SuppressesProgressMessages(t *testing.T) {
 		TemplatesPath: "testdata/templates",
 		OutputDir:     filepath.Join(t.TempDir(), "runs2"),
 		Quiet:         true,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 	assert.Empty(t, discardBuf.String(), "nothing should be written to discard")
 
 	// But a summary should still be available
@@ -405,7 +405,7 @@ func TestProgressOutput_NotQuiet(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     filepath.Join(t.TempDir(), "runs"),
-	}, &buf)
+	}, &buf, TerminalInfo{Width: 80})
 
 	require.NoError(t, res.err)
 	output := buf.String()
@@ -429,7 +429,7 @@ func TestRunSummary_ArchivePath(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     outputDir,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	require.NotNil(t, res.summary)
 	assert.NotEmpty(t, res.summary.ArchivePath)
@@ -498,7 +498,7 @@ func TestPrintRunSummary_DisplayOutputs(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printRunSummary(result, &buf)
+	printRunSummary(result, &buf, TerminalInfo{Width: 80})
 	output := buf.String()
 
 	assert.Contains(t, output, "PNR: ABCDEF")
@@ -518,7 +518,7 @@ func TestPrintRunSummary_NoDisplayOutputs(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printRunSummary(result, &buf)
+	printRunSummary(result, &buf, TerminalInfo{Width: 80})
 	output := buf.String()
 
 	// Should not contain any "Label: Value" display lines
@@ -634,7 +634,7 @@ execution:
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     outputDir,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	require.NoError(t, res.err)
 	assert.Equal(t, "Bearer plan-token-123", receivedAuth)
@@ -675,7 +675,7 @@ execution:
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     outputDir,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	require.NoError(t, res.err)
 	assert.Equal(t, "env-value", receivedHeaders.Get("X-Env-Header"))
@@ -705,7 +705,7 @@ func TestRunCommand_NoPlanAuth_UsesEnvAuth(t *testing.T) {
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     outputDir,
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	require.NoError(t, res.err)
 	assert.Equal(t, "Bearer env-token-456", receivedAuth)
@@ -732,7 +732,7 @@ execution:
 		GraphPath:     "testdata/test_graph.yaml",
 		TemplatesPath: "testdata/templates",
 		OutputDir:     filepath.Join(t.TempDir(), "runs"),
-	}, io.Discard)
+	}, io.Discard, TerminalInfo{})
 
 	require.Error(t, res.err)
 	assert.Contains(t, res.err.Error(), "plan validation")

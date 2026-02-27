@@ -13,6 +13,7 @@ import (
 // It prints each step result as it completes, matching the format of printRunSummary.
 type CLIProgressObserver struct {
 	out   io.Writer
+	term  TerminalInfo
 	total int // cached from OnRunStart for duration calculation
 }
 
@@ -27,22 +28,39 @@ func (o *CLIProgressObserver) OnStepStart(index, total int, step plan.Step) {
 func (o *CLIProgressObserver) OnStepComplete(index, total int, result engine.StepResult) {
 	totalStr := fmt.Sprintf("%d", total)
 	width := len(totalStr)
+	color := o.term.IsTTY
+
+	// Dynamic node column width (overhead=60 gives ncw=20 at 80-col terminal)
+	ncw := nodeColWidth(o.term.Width, 60)
+	nodeStr := formatNodeCol(result.Node, ncw, color)
+
 	// indent = "  [" (3) + width + "/" (1) + len(totalStr) + "] " (2)
 	indent := 6 + width + len(totalStr)
-	prefix := fmt.Sprintf("  [%*d/%s] %-20s", width, index+1, totalStr, result.Node)
+	prefix := fmt.Sprintf("  [%*d/%s] %s", width, index+1, totalStr, nodeStr)
+
 	if result.Error != nil {
+		errLabel := colorize("ERROR", colorRed, color)
 		if result.RetryCount > 0 {
-			_, _ = fmt.Fprintf(o.out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(result), result.RetryCount)
+			cat := errorCategory(result)
+			if o.term.Width > 100 && result.StatusCode > 0 {
+				_, _ = fmt.Fprintf(o.out, "%s %s [%s] (retried %dx, last status %d)\n", prefix, errLabel, cat, result.RetryCount, result.StatusCode)
+			} else {
+				_, _ = fmt.Fprintf(o.out, "%s %s [%s] (after %d retries)\n", prefix, errLabel, cat, result.RetryCount)
+			}
 		} else {
-			_, _ = fmt.Fprintf(o.out, "%s ERROR: %s\n", prefix, result.Error)
+			_, _ = fmt.Fprintf(o.out, "%s %s: %s\n", prefix, errLabel, result.Error)
 		}
 	} else if result.Response != nil {
-		status := fmt.Sprintf("%d", result.StatusCode)
+		status := colorStatus(result.StatusCode, color)
+		durStr := fmt.Sprintf("%dms", result.Duration.Milliseconds())
+		if color {
+			durStr = colorDim + durStr + colorReset
+		}
 		validMark := ""
 		if result.Validation != nil && !result.Validation.Passed {
-			validMark = "  ASSERTIONS FAILED"
+			validMark = "  " + colorize("ASSERTIONS FAILED", colorYellow, color)
 		}
-		_, _ = fmt.Fprintf(o.out, "%s %s  %dms%s\n", prefix, status, result.Duration.Milliseconds(), validMark)
+		_, _ = fmt.Fprintf(o.out, "%s %s  %s%s\n", prefix, status, durStr, validMark)
 		for _, do := range result.DisplayOutputs {
 			_, _ = fmt.Fprintf(o.out, "%*s%s: %v\n", indent, "", do.Label, do.Value)
 		}
@@ -52,30 +70,45 @@ func (o *CLIProgressObserver) OnStepComplete(index, total int, result engine.Ste
 }
 
 func (o *CLIProgressObserver) OnCleanupStart(total int) {
-	_, _ = fmt.Fprintln(o.out, "\n  cleanup:")
+	if o.term.IsTTY {
+		_, _ = fmt.Fprintf(o.out, "\n  %scleanup:%s\n", colorDim, colorReset)
+	} else {
+		_, _ = fmt.Fprintln(o.out, "\n  cleanup:")
+	}
 }
 
 func (o *CLIProgressObserver) OnCleanupStepComplete(index, total int, result engine.StepResult) {
-	prefix := fmt.Sprintf("    %-22s", result.Node)
+	color := o.term.IsTTY
+	ncw := nodeColWidth(o.term.Width, 58)
+	node := fmt.Sprintf("%-*s", ncw, truncateNode(result.Node, ncw))
+	prefix := fmt.Sprintf("    %s", node)
+
 	if result.Error != nil {
-		_, _ = fmt.Fprintf(o.out, "%s ERROR: %s\n", prefix, result.Error)
+		errLabel := colorize("ERROR", colorRed, color)
+		_, _ = fmt.Fprintf(o.out, "%s %s: %s\n", prefix, errLabel, result.Error)
 	} else if result.Response != nil {
-		_, _ = fmt.Fprintf(o.out, "%s %d  %dms\n", prefix, result.StatusCode, result.Duration.Milliseconds())
+		status := colorStatus(result.StatusCode, color)
+		durStr := fmt.Sprintf("%dms", result.Duration.Milliseconds())
+		if color {
+			durStr = colorDim + durStr + colorReset
+		}
+		_, _ = fmt.Fprintf(o.out, "%s %s  %s\n", prefix, status, durStr)
 	} else {
 		_, _ = fmt.Fprintf(o.out, "%s (no response)\n", prefix)
 	}
 }
 
 func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
+	color := o.term.IsTTY
 	_, _ = fmt.Fprintln(o.out)
 	total := len(result.Steps)
 	switch result.Outcome {
 	case engine.OutcomePassed:
-		_, _ = fmt.Fprintf(o.out, "PASSED (%d/%d steps, %s)\n", total, total, observerTotalDuration(result))
+		_, _ = fmt.Fprintf(o.out, "%s (%d/%d steps, %s)\n", colorOutcome("PASSED", color), total, total, observerTotalDuration(result))
 	case engine.OutcomeFailed:
-		_, _ = fmt.Fprintf(o.out, "FAILED: %s\n", outcomeMessage(result))
+		_, _ = fmt.Fprintf(o.out, "%s: %s\n", colorOutcome("FAILED", color), outcomeMessage(result))
 	case engine.OutcomeError:
-		_, _ = fmt.Fprintf(o.out, "ERROR: %s\n", outcomeMessage(result))
+		_, _ = fmt.Fprintf(o.out, "%s: %s\n", colorOutcome("ERROR", color), outcomeMessage(result))
 	}
 }
 

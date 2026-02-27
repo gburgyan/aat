@@ -14,18 +14,24 @@ import (
 // BatchStreamObserver implements engine.ProgressObserver for sequential batch mode.
 // It wraps the existing CLIProgressObserver formatting but adds plan header/footer lines.
 type BatchStreamObserver struct {
-	out      io.Writer
-	planName string
-	total    int
-	mode     string
-	start    time.Time
+	out       io.Writer
+	planName  string
+	term      TerminalInfo
+	planIndex int // 0-based index into the batch
+	planTotal int // total plans in the batch
+	total     int
+	mode      string
+	start     time.Time
 }
 
 // NewBatchStreamObserver creates a BatchStreamObserver for a single plan in a sequential batch.
-func NewBatchStreamObserver(out io.Writer, planName string) *BatchStreamObserver {
+func NewBatchStreamObserver(out io.Writer, planName string, term TerminalInfo, planIndex, planTotal int) *BatchStreamObserver {
 	return &BatchStreamObserver{
-		out:      out,
-		planName: planName,
+		out:       out,
+		planName:  planName,
+		term:      term,
+		planIndex: planIndex,
+		planTotal: planTotal,
 	}
 }
 
@@ -33,7 +39,13 @@ func (o *BatchStreamObserver) OnRunStart(total int, mode string) {
 	o.total = total
 	o.mode = mode
 	o.start = time.Now()
-	_, _ = fmt.Fprintf(o.out, "  ── %s (%d steps, mode=%s) ──\n", o.planName, total, mode)
+	color := o.term.IsTTY
+	name := o.planName
+	if color {
+		name = colorCyan + name + colorReset
+	}
+	counter := fmt.Sprintf(" [plan %d/%d]", o.planIndex+1, o.planTotal)
+	_, _ = fmt.Fprintf(o.out, "  ── %s (%d steps, mode=%s)%s ──\n", name, total, mode, counter)
 }
 
 func (o *BatchStreamObserver) OnStepStart(index, total int, step plan.Step) {}
@@ -41,21 +53,35 @@ func (o *BatchStreamObserver) OnStepStart(index, total int, step plan.Step) {}
 func (o *BatchStreamObserver) OnStepComplete(index, total int, result engine.StepResult) {
 	totalStr := fmt.Sprintf("%d", total)
 	width := len(totalStr)
+	color := o.term.IsTTY
+	ncw := nodeColWidth(o.term.Width, 60)
+	nodeStr := formatNodeCol(result.Node, ncw, color)
 	indent := 6 + width + len(totalStr)
-	prefix := fmt.Sprintf("    [%*d/%s] %-20s", width, index+1, totalStr, result.Node)
+	prefix := fmt.Sprintf("    [%*d/%s] %s", width, index+1, totalStr, nodeStr)
+
 	if result.Error != nil {
+		errLabel := colorize("ERROR", colorRed, color)
 		if result.RetryCount > 0 {
-			_, _ = fmt.Fprintf(o.out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(result), result.RetryCount)
+			cat := errorCategory(result)
+			if o.term.Width > 100 && result.StatusCode > 0 {
+				_, _ = fmt.Fprintf(o.out, "%s %s [%s] (retried %dx, last status %d)\n", prefix, errLabel, cat, result.RetryCount, result.StatusCode)
+			} else {
+				_, _ = fmt.Fprintf(o.out, "%s %s [%s] (after %d retries)\n", prefix, errLabel, cat, result.RetryCount)
+			}
 		} else {
-			_, _ = fmt.Fprintf(o.out, "%s ERROR: %s\n", prefix, result.Error)
+			_, _ = fmt.Fprintf(o.out, "%s %s: %s\n", prefix, errLabel, result.Error)
 		}
 	} else if result.Response != nil {
-		status := fmt.Sprintf("%d", result.StatusCode)
+		status := colorStatus(result.StatusCode, color)
+		durStr := fmt.Sprintf("%dms", result.Duration.Milliseconds())
+		if color {
+			durStr = colorDim + durStr + colorReset
+		}
 		validMark := ""
 		if result.Validation != nil && !result.Validation.Passed {
-			validMark = "  ASSERTIONS FAILED"
+			validMark = "  " + colorize("ASSERTIONS FAILED", colorYellow, color)
 		}
-		_, _ = fmt.Fprintf(o.out, "%s %s  %dms%s\n", prefix, status, result.Duration.Milliseconds(), validMark)
+		_, _ = fmt.Fprintf(o.out, "%s %s  %s%s\n", prefix, status, durStr, validMark)
 		for _, do := range result.DisplayOutputs {
 			_, _ = fmt.Fprintf(o.out, "%*s  %s: %v\n", indent, "", do.Label, do.Value)
 		}
@@ -65,15 +91,29 @@ func (o *BatchStreamObserver) OnStepComplete(index, total int, result engine.Ste
 }
 
 func (o *BatchStreamObserver) OnCleanupStart(total int) {
-	_, _ = fmt.Fprintln(o.out, "    cleanup:")
+	if o.term.IsTTY {
+		_, _ = fmt.Fprintf(o.out, "    %scleanup:%s\n", colorDim, colorReset)
+	} else {
+		_, _ = fmt.Fprintln(o.out, "    cleanup:")
+	}
 }
 
 func (o *BatchStreamObserver) OnCleanupStepComplete(index, total int, result engine.StepResult) {
-	prefix := fmt.Sprintf("      %-22s", result.Node)
+	color := o.term.IsTTY
+	ncw := nodeColWidth(o.term.Width, 58)
+	node := fmt.Sprintf("%-*s", ncw, truncateNode(result.Node, ncw))
+	prefix := fmt.Sprintf("      %s", node)
+
 	if result.Error != nil {
-		_, _ = fmt.Fprintf(o.out, "%s ERROR: %s\n", prefix, result.Error)
+		errLabel := colorize("ERROR", colorRed, color)
+		_, _ = fmt.Fprintf(o.out, "%s %s: %s\n", prefix, errLabel, result.Error)
 	} else if result.Response != nil {
-		_, _ = fmt.Fprintf(o.out, "%s %d  %dms\n", prefix, result.StatusCode, result.Duration.Milliseconds())
+		status := colorStatus(result.StatusCode, color)
+		durStr := fmt.Sprintf("%dms", result.Duration.Milliseconds())
+		if color {
+			durStr = colorDim + durStr + colorReset
+		}
+		_, _ = fmt.Fprintf(o.out, "%s %s  %s\n", prefix, status, durStr)
 	} else {
 		_, _ = fmt.Fprintf(o.out, "%s (no response)\n", prefix)
 	}
@@ -82,13 +122,19 @@ func (o *BatchStreamObserver) OnCleanupStepComplete(index, total int, result eng
 func (o *BatchStreamObserver) OnRunComplete(result *engine.RunResult) {
 	dur := time.Since(o.start)
 	total := len(result.Steps)
+	color := o.term.IsTTY
+	name := o.planName
+	if color {
+		name = colorCyan + name + colorReset
+	}
+	counter := fmt.Sprintf(" [plan %d/%d]", o.planIndex+1, o.planTotal)
 	switch result.Outcome {
 	case engine.OutcomePassed:
-		_, _ = fmt.Fprintf(o.out, "  ── %s: PASSED (%d steps, %s) ──\n", o.planName, total, formatDuration(dur))
+		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%d steps, %s)%s ──\n", name, colorOutcome("PASSED", color), total, formatDuration(dur), counter)
 	case engine.OutcomeFailed:
-		_, _ = fmt.Fprintf(o.out, "  ── %s: FAILED (%s) ──\n", o.planName, formatDuration(dur))
+		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%s)%s ──\n", name, colorOutcome("FAILED", color), formatDuration(dur), counter)
 	case engine.OutcomeError:
-		_, _ = fmt.Fprintf(o.out, "  ── %s: ERROR (%s) ──\n", o.planName, formatDuration(dur))
+		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%s)%s ──\n", name, colorOutcome("ERROR", color), formatDuration(dur), counter)
 	}
 }
 
@@ -186,6 +232,9 @@ type ProgressRenderer struct {
 	mu         sync.Mutex
 	out        io.Writer
 	termWidth  int
+	color      bool
+	planTotal  int // total plans in the batch
+	completed  int // number of plans completed so far
 	plans      []*PlanProgressState
 	nameWidth  int // max plan name width for alignment
 	denomWidth int // max digit width of TotalSteps across plans, for slash-aligned counts
@@ -193,10 +242,12 @@ type ProgressRenderer struct {
 }
 
 // NewProgressRenderer creates a renderer targeting the given writer with terminal width.
-func NewProgressRenderer(out io.Writer, termWidth int) *ProgressRenderer {
+func NewProgressRenderer(out io.Writer, termWidth int, color bool, planTotal int) *ProgressRenderer {
 	return &ProgressRenderer{
 		out:       out,
 		termWidth: termWidth,
+		color:     color,
+		planTotal: planTotal,
 	}
 }
 
@@ -217,6 +268,8 @@ func (r *ProgressRenderer) AddPlan(state *PlanProgressState) {
 func (r *ProgressRenderer) CompletePlan(state *PlanProgressState, resultLine string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	r.completed++
 
 	// Erase the progress area
 	r.eraseLocked()
@@ -284,6 +337,16 @@ func (r *ProgressRenderer) renderLocked() {
 		return
 	}
 
+	// Status bar: "Batch: 5/82 completed, 20 running"
+	if r.planTotal > 0 {
+		status := fmt.Sprintf("Batch: %d/%d completed, %d running", r.completed, r.planTotal, len(r.plans))
+		if r.color {
+			status = colorDim + status + colorReset
+		}
+		_, _ = fmt.Fprintln(r.out, status)
+		r.lines++
+	}
+
 	for _, p := range r.plans {
 		snap := p.Snapshot()
 		line := r.formatPlanLine(&snap, r.denomWidth)
@@ -297,22 +360,29 @@ func (r *ProgressRenderer) renderLocked() {
 // denomWidth is the digit width of the largest TotalSteps; both numerator and
 // denominator are padded to this width so the slash aligns across plans.
 func (r *ProgressRenderer) formatPlanLine(snap *PlanProgressState, denomWidth int) string {
+	tw := r.termWidth
+	if tw == 0 {
+		tw = 80
+	}
+
+	// Name column: accommodate actual plan names, scaling cap with terminal width.
 	nameCol := r.nameWidth
 	if nameCol < 10 {
 		nameCol = 10
 	}
-	if nameCol > 30 {
-		nameCol = 30
+	maxName := tw / 3
+	if maxName < 30 {
+		maxName = 30
+	}
+	if nameCol > maxName {
+		nameCol = maxName
 	}
 
-	name := snap.PlanName
-	if len(name) > nameCol {
-		name = name[:nameCol-1] + "~"
-	}
+	nameStr := formatNodeCol(snap.PlanName, nameCol, r.color)
 
 	if snap.TotalSteps == 0 {
 		// OnRunStart not called yet
-		return fmt.Sprintf("  %-*s  [waiting...]", nameCol, name)
+		return fmt.Sprintf("  %s  [waiting...]", nameStr)
 	}
 
 	// Count column: " 3/7 " with both sides padded to denomWidth so slashes align.
@@ -321,22 +391,28 @@ func (r *ProgressRenderer) formatPlanLine(snap *PlanProgressState, denomWidth in
 	}
 	countStr := fmt.Sprintf("%*d/%-*d", denomWidth, snap.CompletedSteps, denomWidth, snap.TotalSteps)
 
-	// Node column — truncate if needed
-	nodeCol := 20
-	node := snap.CurrentNode
-	if len(node) > nodeCol {
-		node = node[:nodeCol-1] + "~"
+	// Node column: scales with terminal width.
+	nodeCol := tw / 6
+	if nodeCol < 20 {
+		nodeCol = 20
 	}
+	if nodeCol > 30 {
+		nodeCol = 30
+	}
+	rawNode := truncateNode(snap.CurrentNode, nodeCol)
 
-	// Calculate bar width:
-	// "  " (2) + name (nameCol) + "  [" (3) + bar + "] " (2) + count + "  " (2) + node
-	overhead := 2 + nameCol + 3 + 2 + len(countStr) + 2 + len(node)
-	barWidth := r.termWidth - overhead
+	// Bar fills remaining space, capped at 1/3 of terminal width.
+	fixedOverhead := 2 + nameCol + 3 + 2 + len(countStr) + 2 + nodeCol
+	barWidth := tw - fixedOverhead
 	if barWidth < 10 {
 		barWidth = 10
 	}
-	if barWidth > 40 {
-		barWidth = 40
+	maxBar := tw / 3
+	if maxBar < 30 {
+		maxBar = 30
+	}
+	if barWidth > maxBar {
+		barWidth = maxBar
 	}
 
 	filled := 0
@@ -348,5 +424,11 @@ func (r *ProgressRenderer) formatPlanLine(snap *PlanProgressState, denomWidth in
 	}
 	bar := strings.Repeat("#", filled) + strings.Repeat("-", barWidth-filled)
 
-	return fmt.Sprintf("  %-*s  [%s] %s  %s", nameCol, name, bar, countStr, node)
+	// Color the current node name if enabled
+	displayNode := rawNode
+	if r.color {
+		displayNode = colorCyan + rawNode + colorReset
+	}
+
+	return fmt.Sprintf("  %s  [%s] %s  %s", nameStr, bar, countStr, displayNode)
 }

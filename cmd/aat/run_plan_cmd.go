@@ -79,13 +79,16 @@ func executeRun(ra *runArgs) int {
 		ra.Quiet = true
 	}
 
+	ti := DetectTerminal()
+	color := ti.IsTTY
+
 	// Choose output writer: --quiet suppresses progress
 	var out io.Writer = os.Stdout
 	if ra.Quiet {
 		out = io.Discard
 	}
 
-	res := runCommand(context.Background(), ra, out)
+	res := runCommand(context.Background(), ra, out, ti)
 
 	// JSON output
 	if ra.JSON {
@@ -114,11 +117,11 @@ func executeRun(ra *runArgs) int {
 		}
 		switch res.summary.Outcome {
 		case "passed":
-			_, _ = fmt.Fprintf(os.Stdout, "PASSED (%d/%d steps)%s\n", res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps, attemptSuffix)
+			_, _ = fmt.Fprintf(os.Stdout, "%s (%d/%d steps)%s\n", colorOutcome("PASSED", color), res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps, attemptSuffix)
 		case "failed":
-			_, _ = fmt.Fprintf(os.Stdout, "FAILED: %s%s\n", res.summary.Error, attemptSuffix)
+			_, _ = fmt.Fprintf(os.Stdout, "%s: %s%s\n", colorOutcome("FAILED", color), res.summary.Error, attemptSuffix)
 		case "error":
-			_, _ = fmt.Fprintf(os.Stdout, "ERROR: %s%s\n", res.summary.Error, attemptSuffix)
+			_, _ = fmt.Fprintf(os.Stdout, "%s: %s%s\n", colorOutcome("ERROR", color), res.summary.Error, attemptSuffix)
 		}
 		if res.archivePath != "" {
 			_, _ = fmt.Fprintf(os.Stdout, "Archive: %s\n", res.archivePath)
@@ -135,7 +138,7 @@ func executeRun(ra *runArgs) int {
 
 // runCommand executes the full run pipeline. Extracted for testability.
 // The out writer receives progress messages; callers pass io.Discard for quiet mode.
-func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
+func runCommand(ctx context.Context, args *runArgs, out io.Writer, ti TerminalInfo) *runResult {
 	logf := func(format string, a ...any) {
 		_, _ = fmt.Fprintf(out, format, a...)
 	}
@@ -154,7 +157,7 @@ func runCommand(ctx context.Context, args *runArgs, out io.Writer) *runResult {
 	// Create observer
 	var observer engine.ProgressObserver
 	if out != io.Discard {
-		observer = &CLIProgressObserver{out: out}
+		observer = &CLIProgressObserver{out: out, term: ti}
 	}
 
 	if args.MaxRetries > 0 {

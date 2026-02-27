@@ -200,21 +200,26 @@ func toStepSummary(step engine.StepResult) StepSummary {
 }
 
 // printRunSummary writes a human-readable step-by-step summary to the given writer.
-func printRunSummary(result *engine.RunResult, out io.Writer) {
+func printRunSummary(result *engine.RunResult, out io.Writer, ti TerminalInfo) {
 	total := len(result.Steps)
+	color := ti.IsTTY
+	ncw := nodeColWidth(ti.Width, 60)
+
 	for i, step := range result.Steps {
-		prefix := fmt.Sprintf("  [%d/%d] %-20s", i+1, total, step.Node)
+		nodeStr := formatNodeCol(step.Node, ncw, color)
+		prefix := fmt.Sprintf("  [%d/%d] %s", i+1, total, nodeStr)
 		if step.Error != nil {
+			errLabel := colorize("ERROR", colorRed, color)
 			if step.RetryCount > 0 {
-				_, _ = fmt.Fprintf(out, "%s ERROR [%s] (after %d retries)\n", prefix, errorCategory(step), step.RetryCount)
+				_, _ = fmt.Fprintf(out, "%s %s [%s] (after %d retries)\n", prefix, errLabel, errorCategory(step), step.RetryCount)
 			} else {
-				_, _ = fmt.Fprintf(out, "%s ERROR: %s\n", prefix, step.Error)
+				_, _ = fmt.Fprintf(out, "%s %s: %s\n", prefix, errLabel, step.Error)
 			}
 		} else if step.Response != nil {
-			status := fmt.Sprintf("%d", step.StatusCode)
+			status := colorStatus(step.StatusCode, color)
 			validMark := ""
 			if step.Validation != nil && !step.Validation.Passed {
-				validMark = "  ASSERTIONS FAILED"
+				validMark = "  " + colorize("ASSERTIONS FAILED", colorYellow, color)
 			}
 			_, _ = fmt.Fprintf(out, "%s %s  %dms%s\n", prefix, status, step.Duration.Milliseconds(), validMark)
 			for _, do := range step.DisplayOutputs {
@@ -227,12 +232,16 @@ func printRunSummary(result *engine.RunResult, out io.Writer) {
 
 	if len(result.CleanupResults) > 0 {
 		_, _ = fmt.Fprintln(out, "\n  cleanup:")
+		cleanupNCW := nodeColWidth(ti.Width, 58)
 		for _, step := range result.CleanupResults {
-			prefix := fmt.Sprintf("    %-22s", step.Node)
+			node := fmt.Sprintf("%-*s", cleanupNCW, truncateNode(step.Node, cleanupNCW))
+			prefix := fmt.Sprintf("    %s", node)
 			if step.Error != nil {
-				_, _ = fmt.Fprintf(out, "%s ERROR: %s\n", prefix, step.Error)
+				errLabel := colorize("ERROR", colorRed, color)
+				_, _ = fmt.Fprintf(out, "%s %s: %s\n", prefix, errLabel, step.Error)
 			} else if step.Response != nil {
-				_, _ = fmt.Fprintf(out, "%s %d  %dms\n", prefix, step.StatusCode, step.Duration.Milliseconds())
+				status := colorStatus(step.StatusCode, color)
+				_, _ = fmt.Fprintf(out, "%s %s  %dms\n", prefix, status, step.Duration.Milliseconds())
 			} else {
 				_, _ = fmt.Fprintf(out, "%s (no response)\n", prefix)
 			}
@@ -242,11 +251,11 @@ func printRunSummary(result *engine.RunResult, out io.Writer) {
 	_, _ = fmt.Fprintln(out)
 	switch result.Outcome {
 	case engine.OutcomePassed:
-		_, _ = fmt.Fprintf(out, "PASSED (%d/%d steps, %s)\n", total, total, totalDuration(result))
+		_, _ = fmt.Fprintf(out, "%s (%d/%d steps, %s)\n", colorOutcome("PASSED", color), total, total, totalDuration(result))
 	case engine.OutcomeFailed:
-		_, _ = fmt.Fprintf(out, "FAILED: %s\n", outcomeMessage(result))
+		_, _ = fmt.Fprintf(out, "%s: %s\n", colorOutcome("FAILED", color), outcomeMessage(result))
 	case engine.OutcomeError:
-		_, _ = fmt.Fprintf(out, "ERROR: %s\n", outcomeMessage(result))
+		_, _ = fmt.Fprintf(out, "%s: %s\n", colorOutcome("ERROR", color), outcomeMessage(result))
 	}
 }
 
@@ -795,7 +804,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 
 	// Print human-readable summary only when no observer is active
 	if observer == nil {
-		printRunSummary(result, io.Discard)
+		printRunSummary(result, io.Discard, TerminalInfo{})
 	}
 
 	// 7. Write archive

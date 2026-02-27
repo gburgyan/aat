@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -18,7 +19,7 @@ import (
 
 func TestBatchStreamObserver_Lifecycle(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "roundtrip-booking")
+	obs := NewBatchStreamObserver(&buf, "roundtrip-booking", noColorTerm, 0, 3)
 
 	obs.OnRunStart(3, "strict")
 	obs.OnStepStart(0, 3, stepForNode("searchFlights"))
@@ -51,8 +52,9 @@ func TestBatchStreamObserver_Lifecycle(t *testing.T) {
 
 	output := buf.String()
 
-	// Header
-	assert.Contains(t, output, "── roundtrip-booking (3 steps, mode=strict) ──")
+	// Header with plan counter
+	assert.Contains(t, output, "── roundtrip-booking (3 steps, mode=strict)")
+	assert.Contains(t, output, "[plan 1/3]")
 
 	// Steps are indented with 4 spaces
 	assert.Contains(t, output, "[1/3]")
@@ -70,7 +72,7 @@ func TestBatchStreamObserver_Lifecycle(t *testing.T) {
 
 func TestBatchStreamObserver_ErrorStep(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "test-plan")
+	obs := NewBatchStreamObserver(&buf, "test-plan", noColorTerm, 0, 1)
 
 	obs.OnRunStart(1, "strict")
 	obs.OnStepComplete(0, 1, engine.StepResult{
@@ -89,7 +91,7 @@ func TestBatchStreamObserver_ErrorStep(t *testing.T) {
 
 func TestBatchStreamObserver_FailedStep(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "test-plan")
+	obs := NewBatchStreamObserver(&buf, "test-plan", noColorTerm, 0, 1)
 
 	obs.OnRunStart(1, "strict")
 	obs.OnStepComplete(0, 1, engine.StepResult{
@@ -109,7 +111,7 @@ func TestBatchStreamObserver_FailedStep(t *testing.T) {
 
 func TestBatchStreamObserver_AssertionsFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "test-plan")
+	obs := NewBatchStreamObserver(&buf, "test-plan", noColorTerm, 0, 1)
 
 	obs.OnRunStart(1, "strict")
 	obs.OnStepComplete(0, 1, engine.StepResult{
@@ -126,7 +128,7 @@ func TestBatchStreamObserver_AssertionsFailed(t *testing.T) {
 
 func TestBatchStreamObserver_WithRetries(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "test-plan")
+	obs := NewBatchStreamObserver(&buf, "test-plan", noColorTerm, 0, 1)
 
 	obs.OnRunStart(1, "strict")
 	obs.OnStepComplete(0, 1, engine.StepResult{
@@ -143,7 +145,7 @@ func TestBatchStreamObserver_WithRetries(t *testing.T) {
 
 func TestBatchStreamObserver_CleanupOutput(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "test-plan")
+	obs := NewBatchStreamObserver(&buf, "test-plan", noColorTerm, 0, 1)
 
 	obs.OnRunStart(1, "strict")
 	obs.OnCleanupStart(1)
@@ -162,7 +164,7 @@ func TestBatchStreamObserver_CleanupOutput(t *testing.T) {
 
 func TestBatchStreamObserver_CleanupError(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "test-plan")
+	obs := NewBatchStreamObserver(&buf, "test-plan", noColorTerm, 0, 1)
 
 	obs.OnCleanupStart(1)
 	obs.OnCleanupStepComplete(0, 1, engine.StepResult{
@@ -177,7 +179,7 @@ func TestBatchStreamObserver_CleanupError(t *testing.T) {
 
 func TestBatchStreamObserver_NoResponse(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "test-plan")
+	obs := NewBatchStreamObserver(&buf, "test-plan", noColorTerm, 0, 1)
 
 	obs.OnRunStart(1, "strict")
 	obs.OnStepComplete(0, 1, engine.StepResult{
@@ -190,7 +192,7 @@ func TestBatchStreamObserver_NoResponse(t *testing.T) {
 
 func TestBatchStreamObserver_DisplayOutputs(t *testing.T) {
 	var buf bytes.Buffer
-	obs := NewBatchStreamObserver(&buf, "test-plan")
+	obs := NewBatchStreamObserver(&buf, "test-plan", noColorTerm, 0, 1)
 
 	obs.OnRunStart(1, "strict")
 	obs.OnStepComplete(0, 1, engine.StepResult{
@@ -205,6 +207,45 @@ func TestBatchStreamObserver_DisplayOutputs(t *testing.T) {
 
 	output := buf.String()
 	assert.Contains(t, output, "PNR: ABC123")
+}
+
+func TestBatchStreamObserver_PlanCounter(t *testing.T) {
+	var buf bytes.Buffer
+	obs := NewBatchStreamObserver(&buf, "my-plan", noColorTerm, 4, 18)
+
+	obs.OnRunStart(3, "strict")
+	obs.OnStepComplete(0, 3, engine.StepResult{
+		Node:       "step1",
+		StatusCode: 200,
+		Response:   &adapter.Response{StatusCode: 200},
+		Duration:   50 * time.Millisecond,
+	})
+	obs.OnRunComplete(&engine.RunResult{
+		Outcome: engine.OutcomePassed,
+		Steps: []engine.StepResult{
+			{Duration: 50 * time.Millisecond},
+			{Duration: 50 * time.Millisecond},
+			{Duration: 50 * time.Millisecond},
+		},
+	})
+
+	output := buf.String()
+	// Plan counter should show 5/18 (0-based index 4 → display 5)
+	assert.Contains(t, output, "[plan 5/18]")
+	// Counter should appear in both header and footer
+	lines := strings.Split(output, "\n")
+	headerFound := false
+	footerFound := false
+	for _, line := range lines {
+		if strings.Contains(line, "──") && strings.Contains(line, "mode=strict") && strings.Contains(line, "[plan 5/18]") {
+			headerFound = true
+		}
+		if strings.Contains(line, "──") && strings.Contains(line, "PASSED") && strings.Contains(line, "[plan 5/18]") {
+			footerFound = true
+		}
+	}
+	assert.True(t, headerFound, "header should contain plan counter")
+	assert.True(t, footerFound, "footer should contain plan counter")
 }
 
 // --- PlanProgressState tests ---
@@ -252,7 +293,7 @@ func TestPlanProgressState_ConcurrentAccess(t *testing.T) {
 
 func TestProgressRenderer_AddPlan_Waiting(t *testing.T) {
 	var buf bytes.Buffer
-	r := NewProgressRenderer(&buf, 80)
+	r := NewProgressRenderer(&buf, 80, false, 0)
 
 	state := &PlanProgressState{PlanName: "search-plan", PlanIndex: 0}
 	r.AddPlan(state)
@@ -264,7 +305,7 @@ func TestProgressRenderer_AddPlan_Waiting(t *testing.T) {
 
 func TestProgressRenderer_Refresh_WithProgress(t *testing.T) {
 	var buf bytes.Buffer
-	r := NewProgressRenderer(&buf, 80)
+	r := NewProgressRenderer(&buf, 80, false, 0)
 
 	state := &PlanProgressState{
 		PlanName:       "booking-plan",
@@ -291,7 +332,7 @@ func TestProgressRenderer_Refresh_WithProgress(t *testing.T) {
 
 func TestProgressRenderer_CompletePlan(t *testing.T) {
 	var buf bytes.Buffer
-	r := NewProgressRenderer(&buf, 80)
+	r := NewProgressRenderer(&buf, 80, false, 0)
 
 	state := &PlanProgressState{
 		PlanName:   "test-plan",
@@ -313,7 +354,7 @@ func TestProgressRenderer_CompletePlan(t *testing.T) {
 
 func TestProgressRenderer_MultiplePlans(t *testing.T) {
 	var buf bytes.Buffer
-	r := NewProgressRenderer(&buf, 80)
+	r := NewProgressRenderer(&buf, 80, false, 0)
 
 	s1 := &PlanProgressState{PlanName: "plan-a", TotalSteps: 5, CompletedSteps: 2, CurrentNode: "step2"}
 	s2 := &PlanProgressState{PlanName: "plan-b", TotalSteps: 3, CompletedSteps: 1, CurrentNode: "step1"}
@@ -336,7 +377,7 @@ func TestProgressRenderer_MultiplePlans(t *testing.T) {
 
 func TestProgressRenderer_Finish(t *testing.T) {
 	var buf bytes.Buffer
-	r := NewProgressRenderer(&buf, 80)
+	r := NewProgressRenderer(&buf, 80, false, 0)
 
 	state := &PlanProgressState{PlanName: "test", TotalSteps: 1}
 	r.AddPlan(state)
@@ -351,7 +392,7 @@ func TestProgressRenderer_Finish(t *testing.T) {
 
 func TestProgressRenderer_FinishEmpty(t *testing.T) {
 	var buf bytes.Buffer
-	r := NewProgressRenderer(&buf, 80)
+	r := NewProgressRenderer(&buf, 80, false, 0)
 
 	// Finish with no plans should not produce any output
 	r.Finish()
@@ -459,7 +500,7 @@ func TestProgressRenderer_FormatPlanLine_CountAlignment(t *testing.T) {
 
 func TestParallelProgressObserver_OnRunStart(t *testing.T) {
 	var buf bytes.Buffer
-	renderer := NewProgressRenderer(&buf, 80)
+	renderer := NewProgressRenderer(&buf, 80, false, 0)
 	state := &PlanProgressState{PlanName: "test-plan"}
 	renderer.AddPlan(state)
 
@@ -472,7 +513,7 @@ func TestParallelProgressObserver_OnRunStart(t *testing.T) {
 
 func TestParallelProgressObserver_StepUpdatesState(t *testing.T) {
 	var buf bytes.Buffer
-	renderer := NewProgressRenderer(&buf, 80)
+	renderer := NewProgressRenderer(&buf, 80, false, 0)
 	state := &PlanProgressState{PlanName: "test-plan", TotalSteps: 5}
 	renderer.AddPlan(state)
 
@@ -491,7 +532,7 @@ func TestParallelProgressObserver_StepUpdatesState(t *testing.T) {
 
 func TestParallelProgressObserver_OnRunComplete(t *testing.T) {
 	var buf bytes.Buffer
-	renderer := NewProgressRenderer(&buf, 80)
+	renderer := NewProgressRenderer(&buf, 80, false, 0)
 	state := &PlanProgressState{
 		PlanName:   "test-plan",
 		TotalSteps: 3,
@@ -513,7 +554,7 @@ func TestParallelProgressObserver_OnRunComplete(t *testing.T) {
 
 func TestProgressRenderer_AddPlan_NoLineInflation(t *testing.T) {
 	var buf bytes.Buffer
-	r := NewProgressRenderer(&buf, 80)
+	r := NewProgressRenderer(&buf, 80, false, 0)
 
 	// Add 5 plans in quick succession (simulating parallel goroutines).
 	// Before the fix, r.lines would be 1+2+3+4+5 = 15 instead of 5.
@@ -532,11 +573,62 @@ func TestProgressRenderer_AddPlan_NoLineInflation(t *testing.T) {
 	r.mu.Unlock()
 }
 
+func TestProgressRenderer_StatusBar(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewProgressRenderer(&buf, 120, false, 82)
+
+	state := &PlanProgressState{
+		PlanName:       "2-leg-card [amex, european]",
+		PlanIndex:      4,
+		TotalSteps:     9,
+		CompletedSteps: 3,
+		CurrentNode:    "addOfferReference",
+		StartTime:      time.Now(),
+	}
+	r.AddPlan(state)
+
+	output := buf.String()
+	// Status bar should show batch progress
+	assert.Contains(t, output, "Batch: 0/82 completed, 1 running")
+	// Plan line should NOT have per-line counter
+	assert.Contains(t, output, "2-leg-card [amex, european]")
+	assert.Contains(t, output, "3/9")
+	assert.Contains(t, output, "addOfferReference")
+
+	// Complete the plan and verify counter updates
+	buf.Reset()
+	state.Complete("passed", 1000)
+	r.CompletePlan(state, "[1/82]  2-leg-card [amex, european]  PASSED (9 steps, 1.0s)")
+	// After completion, re-render should show updated completed count
+	// (but no active plans left, so no status bar)
+}
+
+func TestProgressRenderer_StatusBar_Updates(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewProgressRenderer(&buf, 120, false, 10)
+
+	for i := 0; i < 3; i++ {
+		s := &PlanProgressState{
+			PlanName:   fmt.Sprintf("plan-%d", i),
+			PlanIndex:  i,
+			TotalSteps: 5,
+			StartTime:  time.Now(),
+		}
+		r.AddPlan(s)
+	}
+
+	// Complete one plan
+	buf.Reset()
+	r.CompletePlan(r.plans[0], "[1/10]  plan-0  PASSED")
+	output := buf.String()
+	assert.Contains(t, output, "Batch: 1/10 completed, 2 running")
+}
+
 // --- Race condition test ---
 
 func TestProgressRenderer_ConcurrentRefresh(t *testing.T) {
 	var buf bytes.Buffer
-	r := NewProgressRenderer(&buf, 80)
+	r := NewProgressRenderer(&buf, 80, false, 0)
 
 	for i := 0; i < 5; i++ {
 		s := &PlanProgressState{
@@ -647,11 +739,18 @@ func TestFormatBatchResultLine(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			line := formatBatchResultLine("my-plan", tc.br)
+			line := formatBatchResultLine("my-plan", tc.br, false)
 			assert.Contains(t, line, "my-plan")
 			assert.Contains(t, line, tc.contains)
 		})
 	}
+}
+
+func TestFormatBatchResultLine_WithColor(t *testing.T) {
+	line := formatBatchResultLine("my-plan", BatchRunResult{Outcome: "passed", StepCount: 3, DurationMs: 150}, true)
+	assert.Contains(t, line, colorGreen)
+	assert.Contains(t, line, "PASSED")
+	assert.Contains(t, line, colorReset)
 }
 
 // helper to create a step for OnStepStart

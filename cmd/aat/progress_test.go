@@ -12,9 +12,11 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+var noColorTerm = TerminalInfo{IsTTY: false, Width: 80}
+
 func TestCLIProgressObserver_StepComplete_Success(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnStepComplete(0, 3, engine.StepResult{
 		Node:       "searchFlights",
@@ -32,7 +34,7 @@ func TestCLIProgressObserver_StepComplete_Success(t *testing.T) {
 
 func TestCLIProgressObserver_StepComplete_Error(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnStepComplete(1, 3, engine.StepResult{
 		Node:  "commitReservation",
@@ -47,7 +49,7 @@ func TestCLIProgressObserver_StepComplete_Error(t *testing.T) {
 
 func TestCLIProgressObserver_StepComplete_WithRetries(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnStepComplete(0, 1, engine.StepResult{
 		Node:       "searchFlights",
@@ -63,7 +65,7 @@ func TestCLIProgressObserver_StepComplete_WithRetries(t *testing.T) {
 
 func TestCLIProgressObserver_StepComplete_DisplayOutputs(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnStepComplete(0, 1, engine.StepResult{
 		Node:       "commitReservation",
@@ -83,7 +85,7 @@ func TestCLIProgressObserver_StepComplete_DisplayOutputs(t *testing.T) {
 
 func TestCLIProgressObserver_StepComplete_AssertionsFailed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnStepComplete(0, 1, engine.StepResult{
 		Node:       "verify",
@@ -99,7 +101,7 @@ func TestCLIProgressObserver_StepComplete_AssertionsFailed(t *testing.T) {
 
 func TestCLIProgressObserver_StepComplete_NoResponse(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnStepComplete(0, 1, engine.StepResult{
 		Node: "brokenStep",
@@ -111,7 +113,7 @@ func TestCLIProgressObserver_StepComplete_NoResponse(t *testing.T) {
 
 func TestCLIProgressObserver_CleanupOutput(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnCleanupStart(2)
 	obs.OnCleanupStepComplete(0, 2, engine.StepResult{
@@ -135,7 +137,7 @@ func TestCLIProgressObserver_CleanupOutput(t *testing.T) {
 
 func TestCLIProgressObserver_RunComplete_Passed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnRunComplete(&engine.RunResult{
 		Outcome: engine.OutcomePassed,
@@ -151,7 +153,7 @@ func TestCLIProgressObserver_RunComplete_Passed(t *testing.T) {
 
 func TestCLIProgressObserver_RunComplete_Failed(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnRunComplete(&engine.RunResult{
 		Outcome: engine.OutcomeFailed,
@@ -165,7 +167,7 @@ func TestCLIProgressObserver_RunComplete_Failed(t *testing.T) {
 
 func TestCLIProgressObserver_RunComplete_Error(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnRunComplete(&engine.RunResult{
 		Outcome: engine.OutcomeError,
@@ -178,7 +180,7 @@ func TestCLIProgressObserver_RunComplete_Error(t *testing.T) {
 
 func TestCLIProgressObserver_OnStepStart_NoOp(t *testing.T) {
 	var buf bytes.Buffer
-	obs := &CLIProgressObserver{out: &buf}
+	obs := &CLIProgressObserver{out: &buf, term: noColorTerm}
 
 	obs.OnStepStart(0, 3, plan.Step{Node: "test"})
 
@@ -186,7 +188,61 @@ func TestCLIProgressObserver_OnStepStart_NoOp(t *testing.T) {
 }
 
 func TestCLIProgressObserver_OnRunStart_CachesTotal(t *testing.T) {
-	obs := &CLIProgressObserver{}
+	obs := &CLIProgressObserver{term: noColorTerm}
 	obs.OnRunStart(5, "lean")
 	assert.Equal(t, 5, obs.total)
+}
+
+func TestCLIProgressObserver_StepComplete_WithColor(t *testing.T) {
+	var buf bytes.Buffer
+	obs := &CLIProgressObserver{out: &buf, term: TerminalInfo{IsTTY: true, Width: 80}}
+
+	obs.OnStepComplete(0, 3, engine.StepResult{
+		Node:       "searchFlights",
+		StatusCode: 200,
+		Response:   &adapter.Response{StatusCode: 200},
+		Duration:   150 * time.Millisecond,
+	})
+
+	output := buf.String()
+	// Should contain ANSI codes for cyan node and green status
+	assert.Contains(t, output, colorCyan)
+	assert.Contains(t, output, colorGreen)
+	assert.Contains(t, output, colorReset)
+	assert.Contains(t, output, "searchFlights")
+	assert.Contains(t, output, "200")
+}
+
+func TestCLIProgressObserver_WideTerminal_NodeTruncation(t *testing.T) {
+	var buf bytes.Buffer
+	// Narrow terminal: node column = max(15, 50-60) = 15
+	obs := &CLIProgressObserver{out: &buf, term: TerminalInfo{IsTTY: false, Width: 50}}
+
+	obs.OnStepComplete(0, 1, engine.StepResult{
+		Node:       "veryLongNodeNameThatExceedsColumn",
+		StatusCode: 200,
+		Response:   &adapter.Response{StatusCode: 200},
+		Duration:   50 * time.Millisecond,
+	})
+
+	output := buf.String()
+	assert.Contains(t, output, "~")
+	assert.Contains(t, output, "200")
+}
+
+func TestCLIProgressObserver_WideTerminal_RetryDetail(t *testing.T) {
+	var buf bytes.Buffer
+	obs := &CLIProgressObserver{out: &buf, term: TerminalInfo{IsTTY: false, Width: 120}}
+
+	obs.OnStepComplete(0, 1, engine.StepResult{
+		Node:       "searchFlights",
+		Error:      assert.AnError,
+		RetryCount: 2,
+		StatusCode: 502,
+		ErrorClass: &engine.ErrorClassification{Category: engine.CategoryServer},
+	})
+
+	output := buf.String()
+	assert.Contains(t, output, "retried 2x")
+	assert.Contains(t, output, "last status 502")
 }

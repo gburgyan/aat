@@ -822,6 +822,106 @@ func TestDeduplicateSpecs_MultipleGroups(t *testing.T) {
 	assert.Len(t, result.skipped, 2, "should skip one duplicate per plan")
 }
 
+// --- Shuffle tests ---
+
+func TestShuffleDeterministic(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+	}))
+	defer apiServer.Close()
+
+	planDir := t.TempDir()
+	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon"} {
+		writeFile(t, filepath.Join(planDir, name+".yaml"),
+			"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: "+name+"\n")
+	}
+
+	envFile := writeTestEnv(t, "none", apiServer.URL)
+
+	runOnce := func(seed int64) []string {
+		outputDir := filepath.Join(t.TempDir(), "runs")
+		res := batchCommand(context.Background(), &batchArgs{
+			runArgs: runArgs{
+				EnvPath:       envFile,
+				GraphPath:     "testdata/test_graph.yaml",
+				TemplatesPath: "testdata/templates",
+				OutputDir:     outputDir,
+			},
+			PlanDirs: []string{planDir},
+			Shuffle:  true,
+			Seed:     seed,
+		}, io.Discard)
+		require.NotNil(t, res.summary)
+		var names []string
+		for _, r := range res.summary.Runs {
+			names = append(names, r.PlanName)
+		}
+		return names
+	}
+
+	order1 := runOnce(42)
+	order2 := runOnce(42)
+	assert.Equal(t, order1, order2, "same seed should produce same order")
+}
+
+func TestShuffleDifferentFromOriginal(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+	}))
+	defer apiServer.Close()
+
+	planDir := t.TempDir()
+	// Use enough plans that the probability of shuffle matching alphabetical is negligible
+	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"} {
+		writeFile(t, filepath.Join(planDir, name+".yaml"),
+			"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: "+name+"\n")
+	}
+
+	envFile := writeTestEnv(t, "none", apiServer.URL)
+
+	// Unshuffled order (alphabetical)
+	outputDir1 := filepath.Join(t.TempDir(), "runs")
+	unshuffled := batchCommand(context.Background(), &batchArgs{
+		runArgs: runArgs{
+			EnvPath:       envFile,
+			GraphPath:     "testdata/test_graph.yaml",
+			TemplatesPath: "testdata/templates",
+			OutputDir:     outputDir1,
+		},
+		PlanDirs: []string{planDir},
+	}, io.Discard)
+	require.NotNil(t, unshuffled.summary)
+	var origOrder []string
+	for _, r := range unshuffled.summary.Runs {
+		origOrder = append(origOrder, r.PlanName)
+	}
+
+	// Shuffled order with a fixed seed
+	outputDir2 := filepath.Join(t.TempDir(), "runs")
+	shuffled := batchCommand(context.Background(), &batchArgs{
+		runArgs: runArgs{
+			EnvPath:       envFile,
+			GraphPath:     "testdata/test_graph.yaml",
+			TemplatesPath: "testdata/templates",
+			OutputDir:     outputDir2,
+		},
+		PlanDirs: []string{planDir},
+		Shuffle:  true,
+		Seed:     12345,
+	}, io.Discard)
+	require.NotNil(t, shuffled.summary)
+	var shuffledOrder []string
+	for _, r := range shuffled.summary.Runs {
+		shuffledOrder = append(shuffledOrder, r.PlanName)
+	}
+
+	assert.NotEqual(t, origOrder, shuffledOrder, "shuffled order should differ from alphabetical")
+	// Same plans, just different order
+	assert.ElementsMatch(t, origOrder, shuffledOrder, "should contain the same plans")
+}
+
 // --- Helpers ---
 
 func writeFile(t *testing.T, path, content string) {
