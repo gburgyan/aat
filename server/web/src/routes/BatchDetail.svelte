@@ -31,7 +31,27 @@
     try { localStorage.setItem(`aat:${key}`, value ? '1' : '0'); } catch {}
   }
 
+  function readStringPref(key: string, fallback: string): string {
+    try {
+      const v = localStorage.getItem(`aat:${key}`);
+      return v === null ? fallback : v;
+    } catch { return fallback; }
+  }
+
+  function writeStringPref(key: string, value: string) {
+    try { localStorage.setItem(`aat:${key}`, value); } catch {}
+  }
+
   let hideSkipped = $state(readPref('hideSkipped', true));
+
+  type BatchViewMode = 'layers' | 'tests';
+  let viewMode = $state<BatchViewMode>(
+    readStringPref('batchViewMode', 'layers') as BatchViewMode
+  );
+  function setViewMode(mode: BatchViewMode) {
+    viewMode = mode;
+    writeStringPref('batchViewMode', mode);
+  }
 
   function toggleHideSkipped() {
     hideSkipped = !hideSkipped;
@@ -94,7 +114,7 @@
       return a.localeCompare(b);
     });
     return labels.map(label => {
-      const runs = groupMap.get(label)!;
+      const runs = groupMap.get(label)!.sort((a, b) => a.planName.localeCompare(b.planName));
       const hasError = runs.some(r => r.outcome === 'error');
       const hasFailed = runs.some(r => r.outcome === 'failed');
       const hasPassed = runs.some(r => r.outcome === 'passed');
@@ -135,8 +155,54 @@
 
   let visibleFlatRuns = $derived.by(() => {
     if (!batch) return [];
-    if (!hideSkipped) return batch.runs;
-    return batch.runs.filter(r => !r.skipped);
+    const runs = hideSkipped ? batch.runs.filter(r => !r.skipped) : [...batch.runs];
+    return runs.sort((a, b) => a.planName.localeCompare(b.planName));
+  });
+
+  let permutationLabels = $derived.by((): string[] => {
+    if (!batch || !hasPermutations) return [];
+    const labelSet = new Set<string>();
+    for (const run of batch.runs) {
+      labelSet.add(run.permutation || '(base)');
+    }
+    return [...labelSet].sort((a, b) => {
+      if (a === '(base)') return -1;
+      if (b === '(base)') return 1;
+      return a.localeCompare(b);
+    });
+  });
+
+  interface TestMatrixCell {
+    run: BatchRunSummary;
+  }
+
+  interface TestMatrixRow {
+    planName: string;
+    cells: Map<string, TestMatrixCell>;
+    overallOutcome: Outcome;
+  }
+
+  let testMatrix = $derived.by((): TestMatrixRow[] => {
+    if (!batch || !hasPermutations) return [];
+    const byName = new Map<string, Map<string, TestMatrixCell>>();
+    for (const run of batch.runs) {
+      if (hideSkipped && run.skipped) continue;
+      const perm = run.permutation || '(base)';
+      if (!byName.has(run.planName)) byName.set(run.planName, new Map());
+      byName.get(run.planName)!.set(perm, { run });
+    }
+    const rows: TestMatrixRow[] = [];
+    for (const [planName, cells] of byName) {
+      const runs = [...cells.values()].map(c => c.run);
+      const hasError = runs.some(r => r.outcome === 'error');
+      const hasFailed = runs.some(r => r.outcome === 'failed');
+      const hasPassed = runs.some(r => r.outcome === 'passed');
+      const allSkipped = runs.every(r => r.outcome === 'skipped');
+      const overallOutcome: Outcome = hasError ? 'error' : hasFailed ? 'failed' : allSkipped ? 'skipped' : hasPassed ? 'passed' : 'skipped';
+      rows.push({ planName, cells, overallOutcome });
+    }
+    rows.sort((a, b) => a.planName.localeCompare(b.planName));
+    return rows;
   });
 
   function toggleGroup(label: string) {
@@ -292,12 +358,30 @@
     </div>
   </div>
 
-  {#if skippedCount > 0}
-    <div class="skipped-toggle">
-      <label class="toggle-label">
-        <input type="checkbox" checked={hideSkipped} onchange={toggleHideSkipped} />
-        Hide skipped runs ({skippedCount})
-      </label>
+  {#if skippedCount > 0 || hasPermutations}
+    <div class="batch-controls">
+      {#if skippedCount > 0}
+        <div class="skipped-toggle">
+          <label class="toggle-label">
+            <input type="checkbox" checked={hideSkipped} onchange={toggleHideSkipped} />
+            Hide skipped runs ({skippedCount})
+          </label>
+        </div>
+      {/if}
+      {#if hasPermutations}
+        <div class="view-toggle" role="group" aria-label="View mode">
+          <button
+            class="view-toggle-btn"
+            class:active={viewMode === 'layers'}
+            onclick={() => setViewMode('layers')}
+          >By Layers</button>
+          <button
+            class="view-toggle-btn"
+            class:active={viewMode === 'tests'}
+            onclick={() => setViewMode('tests')}
+          >By Test</button>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -305,7 +389,7 @@
     <div class="empty-state">
       <p>No runs in this batch</p>
     </div>
-  {:else if hasPermutations}
+  {:else if hasPermutations && viewMode === 'layers'}
     {#each visiblePermutationGroups as group (group.label)}
       <div class="permutation-group">
         <button
@@ -381,6 +465,51 @@
         {/if}
       </div>
     {/each}
+  {:else if hasPermutations && viewMode === 'tests'}
+    <div class="test-matrix-wrapper">
+      <table class="run-table test-matrix">
+        <thead>
+          <tr>
+            <th class="matrix-test-name">Test</th>
+            <th>Overall</th>
+            {#each permutationLabels as perm}
+              <th class="matrix-perm-header" title={perm}>{perm}</th>
+            {/each}
+          </tr>
+        </thead>
+        <tbody>
+          {#each testMatrix as row (row.planName)}
+            <tr class="matrix-row">
+              <td class="matrix-test-name" title={row.planName}>{row.planName}</td>
+              <td><OutcomeBadge outcome={row.overallOutcome} size="sm" /></td>
+              {#each permutationLabels as perm}
+                {@const cell = row.cells.get(perm)}
+                <td class="matrix-cell">
+                  {#if !cell}
+                    <span class="matrix-empty">&mdash;</span>
+                  {:else if cell.run.skipped || !cell.run.runId}
+                    <span class="matrix-skipped" title={cell.run.duplicateOf ? `Duplicate of ${cell.run.duplicateOf}` : cell.run.error || 'Skipped'}>
+                      <OutcomeBadge outcome={cell.run.outcome || 'skipped'} size="sm" />
+                    </span>
+                  {:else}
+                    <button
+                      class="matrix-cell-btn"
+                      onclick={() => goToRun(cell.run.runId)}
+                      title="{cell.run.planName} — {perm}"
+                    >
+                      <OutcomeBadge outcome={cell.run.outcome} size="sm" />
+                      {#if cell.run.attempts && cell.run.attempts > 1}
+                        <span class="matrix-retry" title="Took {cell.run.attempts} attempts">!</span>
+                      {/if}
+                    </button>
+                  {/if}
+                </td>
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {:else}
     <table class="run-table">
       <thead>
@@ -637,9 +766,6 @@
   .steps-skipped {
     color: var(--color-text-muted, #9ca3af);
   }
-  .skipped-toggle {
-    margin-bottom: 0.75rem;
-  }
   .toggle-label {
     display: inline-flex;
     align-items: center;
@@ -651,5 +777,107 @@
   .toggle-label input[type="checkbox"] {
     accent-color: var(--color-primary, #6366f1);
     cursor: pointer;
+  }
+  .batch-controls {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .view-toggle {
+    display: inline-flex;
+    border: 1px solid var(--color-border, #374151);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .view-toggle-btn {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.4;
+    border: none;
+    background: transparent;
+    color: var(--color-text-muted, #9ca3af);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .view-toggle-btn:not(:last-child) {
+    border-right: 1px solid var(--color-border, #374151);
+  }
+  .view-toggle-btn:hover {
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
+    color: var(--color-text, #f3f4f6);
+  }
+  .view-toggle-btn.active {
+    background: var(--color-primary, #6366f1);
+    color: #fff;
+  }
+  .view-toggle-btn:focus-visible {
+    outline: 2px solid var(--color-primary, #6366f1);
+    outline-offset: -2px;
+  }
+  .test-matrix-wrapper {
+    overflow-x: auto;
+  }
+  .test-matrix {
+    white-space: nowrap;
+  }
+  .test-matrix .matrix-test-name {
+    position: sticky;
+    left: 0;
+    background: var(--color-bg, #111827);
+    z-index: 1;
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .test-matrix thead .matrix-test-name {
+    background: var(--color-bg-secondary, #1f2937);
+  }
+  .matrix-perm-header {
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .matrix-cell {
+    text-align: center;
+    padding: 0.25rem 0.4rem;
+  }
+  .matrix-cell-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0.15rem 0.3rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .matrix-cell-btn:hover {
+    border-color: var(--color-border, #374151);
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
+  }
+  .matrix-cell-btn:focus-visible {
+    outline: 2px solid var(--color-primary, #6366f1);
+    outline-offset: 1px;
+  }
+  .matrix-empty {
+    color: var(--color-text-muted, #9ca3af);
+    opacity: 0.4;
+  }
+  .matrix-skipped {
+    opacity: 0.5;
+  }
+  .matrix-retry {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--color-warning, #f59e0b);
+  }
+  .matrix-row:hover .matrix-test-name {
+    color: var(--color-text, #f3f4f6);
   }
 </style>
