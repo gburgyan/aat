@@ -63,24 +63,26 @@ With an absolute path, treats it as a standalone plan directory.`,
 		noDedup, _ := cmd.Flags().GetBool("no-dedup")
 		shuffle, _ := cmd.Flags().GetBool("shuffle")
 		seed, _ := cmd.Flags().GetInt64("seed")
+		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
 		ba := &batchArgs{
 			runArgs: runArgs{
-				EnvPath:       resolved.EnvPath,
-				GraphPath:     resolved.GraphPath,
-				TemplatesPath: resolved.TemplatesPath,
-				OutputDir:     outputDir,
-				DomainPath:    resolved.DomainPath,
-				JSON:          jsonFlag,
-				Quiet:         quiet,
-				Overrides:     overrideFlags,
-				EnvOverlay:    envOverlay,
-				MaxRetries:    retries,
-				Layers:        layerFlags,
-				LayersDir:     resolved.LayersDir,
-				LayerGroups:   layerGroups,
+				EnvPath:         resolved.EnvPath,
+				GraphPath:       resolved.GraphPath,
+				TemplatesPath:   resolved.TemplatesPath,
+				OutputDir:       outputDir,
+				DomainPath:      resolved.DomainPath,
+				JSON:            jsonFlag,
+				Quiet:           quiet,
+				Overrides:       overrideFlags,
+				EnvOverlay:      envOverlay,
+				MaxRetries:      retries,
+				Layers:          layerFlags,
+				LayersDir:       resolved.LayersDir,
+				LayerGroups:     layerGroups,
+				NoAutoOverrides: noAutoOverrides,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,

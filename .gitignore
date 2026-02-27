@@ -31,6 +31,9 @@ server/web/dist/assets/
 .env
 .env.*
 
+# Local override dotfiles
+.aat-overrides.yaml
+
 # Environment configs (may contain credentials)
 environments/
 /setup-local.sh

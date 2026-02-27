@@ -272,6 +272,8 @@ This flag is repeatable for multiple overrides.
 aat run plan checkout.yaml --env-overlay local-routing.yaml
 ```
 
+**`.aat-overrides.yaml` dotfile** — auto-discovered by walking up from your working directory. Same format as an overlay file, but requires no flags. Ideal for [local development](local-dev.md) where you always want traffic routed to your local service. Use `--no-auto-overrides` to disable.
+
 See the Overlay Files section below.
 
 ## Overlay Files

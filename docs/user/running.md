@@ -83,6 +83,7 @@ These flags apply to both `run plan` and `run batch`.
 | `--env-overlay` | path | — | Overlay YAML with additional environment overrides |
 | `--retries` | int | `0` | Max plan-level retries on failure |
 | `--layer` | string | — | Data layer to apply (repeatable) |
+| `--no-auto-overrides` | bool | `false` | Disable auto-discovery of `.aat-overrides.yaml` |
 | `--json` | bool | `false` | Machine-readable JSON summary to stdout |
 | `--quiet` | bool | `false` | Suppress progress, show final line only |
 
@@ -94,6 +95,8 @@ The `run batch` command adds:
 | `--layer-group` | string | — | Comma-separated layer names for permutations (repeatable) |
 
 When a manifest is discoverable, `--env`, `--graph`, `--templates`, and `--domain` are optional. Explicit flags always override manifest paths. See [Project Setup: Auto-Discovery](project-setup.md#auto-discovery) for how manifest resolution works.
+
+AAT also auto-discovers a `.aat-overrides.yaml` dotfile for personal, per-project routing overrides. This is especially useful for [local development](local-dev.md) — drop the file once and every run picks it up without extra flags. Use `--no-auto-overrides` to disable this for CI or clean runs.
 
 ## Output Modes
 

@@ -27,20 +27,22 @@ type RetryNotifier interface {
 
 // runArgs holds parsed CLI flags for the run command.
 type runArgs struct {
-	PlanPath      string
-	EnvPath       string
-	GraphPath     string
-	TemplatesPath string
-	OutputDir     string
-	DomainPath    string
-	JSON          bool
-	Quiet         bool
-	Overrides     []string   // "nodeName=http://url" pairs
-	EnvOverlay    string     // path to overlay YAML
-	MaxRetries    int        // max plan-level retries (0 = no retries)
-	Layers        []string   // layer names to apply
-	LayersDir     string     // directory containing layer files
-	LayerGroups   [][]string // layer groups for permutation (batch only)
+	PlanPath          string
+	EnvPath           string
+	GraphPath         string
+	TemplatesPath     string
+	OutputDir         string
+	DomainPath        string
+	JSON              bool
+	Quiet             bool
+	Overrides         []string   // "nodeName=http://url" pairs
+	EnvOverlay        string     // path to overlay YAML
+	MaxRetries        int        // max plan-level retries (0 = no retries)
+	Layers            []string   // layer names to apply
+	LayersDir         string     // directory containing layer files
+	LayerGroups       [][]string // layer groups for permutation (batch only)
+	NoAutoOverrides   bool       // disable .aat-overrides.yaml auto-discovery
+	AutoOverridesPath string     // resolved path to auto-discovered overrides file
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -545,9 +547,10 @@ type runContext struct {
 	Secrets      map[string]bool
 	AuthProvider *config.AuthProvider // cached default auth
 
-	// Override configuration (from env-file, overlay, CLI flags)
-	Overrides  []string // CLI --override flags
-	EnvOverlay string   // path to overlay YAML
+	// Override configuration (from env-file, auto-overrides, overlay, CLI flags)
+	Overrides         []string // CLI --override flags
+	EnvOverlay        string   // path to overlay YAML
+	AutoOverridesPath string   // path to auto-discovered .aat-overrides.yaml
 
 	// Layer configuration
 	Layers          []string                // layer names from CLI flags
@@ -602,18 +605,28 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 	}
 	logf("aat: loaded %d templates\n", count)
 
+	// Discover auto-overrides if not disabled
+	autoOverridesPath := args.AutoOverridesPath
+	if autoOverridesPath == "" && !args.NoAutoOverrides {
+		autoOverridesPath = config.FindAutoOverrides()
+		if autoOverridesPath != "" {
+			logf("aat: auto-discovered overrides: %s\n", autoOverridesPath)
+		}
+	}
+
 	rctx := &runContext{
-		Env:          env,
-		Graph:        g,
-		Registry:     registry,
-		KB:           kb,
-		GraphDir:     filepath.Dir(args.GraphPath),
-		Secrets:      env.CollectSecrets(),
-		AuthProvider: config.NewAuthProvider(env.Auth),
-		Overrides:    args.Overrides,
-		EnvOverlay:   args.EnvOverlay,
-		Layers:       args.Layers,
-		LayersDir:    args.LayersDir,
+		Env:               env,
+		Graph:             g,
+		Registry:          registry,
+		KB:                kb,
+		GraphDir:          filepath.Dir(args.GraphPath),
+		Secrets:           env.CollectSecrets(),
+		AuthProvider:      config.NewAuthProvider(env.Auth),
+		Overrides:         args.Overrides,
+		EnvOverlay:        args.EnvOverlay,
+		AutoOverridesPath: autoOverridesPath,
+		Layers:            args.Layers,
+		LayersDir:         args.LayersDir,
 	}
 
 	// Pre-load layers if directory is configured and any layers are referenced
@@ -749,6 +762,31 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		}
 		if err != nil {
 			return &runResult{setupErr: true, err: fmt.Errorf("building overrides: %w", err)}
+		}
+		for _, ov := range resolvedOverrides {
+			addResolvedOverride(router, ov)
+		}
+	}
+
+	// 5a.5. Apply auto-discovered .aat-overrides.yaml
+	if rctx.AutoOverridesPath != "" {
+		autoOverrides, err := config.LoadOverlayFile(rctx.AutoOverridesPath)
+		if err != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("loading auto-overrides %s: %w", rctx.AutoOverridesPath, err)}
+		}
+		autoOverrideEnv := &config.Environment{
+			APIBaseURL: rctx.Env.APIBaseURL,
+			Auth:       effectiveAuth,
+			Overrides:  autoOverrides,
+		}
+		var resolvedOverrides []config.ResolvedOverride
+		if planOverridesAuth {
+			resolvedOverrides, err = autoOverrideEnv.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		} else {
+			resolvedOverrides, err = autoOverrideEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, rctx.AuthProvider)
+		}
+		if err != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("building auto-overrides: %w", err)}
 		}
 		for _, ov := range resolvedOverrides {
 			addResolvedOverride(router, ov)

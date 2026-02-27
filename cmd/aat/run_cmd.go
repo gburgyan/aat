@@ -24,6 +24,7 @@ func init() {
 	runCmd.PersistentFlags().String("env-overlay", "", "path to environment overlay YAML file")
 	runCmd.PersistentFlags().Int("retries", 0, "max plan-level retries on failure (0 = no retries)")
 	runCmd.PersistentFlags().StringSlice("layer", nil, "data layer to apply (repeatable, e.g. --layer european --layer amex)")
+	runCmd.PersistentFlags().Bool("no-auto-overrides", false, "disable auto-discovery of .aat-overrides.yaml")
 
 	runCmd.AddCommand(runPlanCmd)
 }

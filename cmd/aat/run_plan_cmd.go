@@ -38,23 +38,25 @@ var runPlanCmd = &cobra.Command{
 		envOverlay, _ := cmd.Flags().GetString("env-overlay")
 		retries, _ := cmd.Flags().GetInt("retries")
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
+		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
 		ra := &runArgs{
-			PlanPath:      planPath,
-			EnvPath:       resolved.EnvPath,
-			GraphPath:     resolved.GraphPath,
-			TemplatesPath: resolved.TemplatesPath,
-			OutputDir:     outputDir,
-			DomainPath:    resolved.DomainPath,
-			JSON:          jsonFlag,
-			Quiet:         quiet,
-			Overrides:     overrideFlags,
-			EnvOverlay:    envOverlay,
-			MaxRetries:    retries,
-			Layers:        layerFlags,
-			LayersDir:     resolved.LayersDir,
+			PlanPath:        planPath,
+			EnvPath:         resolved.EnvPath,
+			GraphPath:       resolved.GraphPath,
+			TemplatesPath:   resolved.TemplatesPath,
+			OutputDir:       outputDir,
+			DomainPath:      resolved.DomainPath,
+			JSON:            jsonFlag,
+			Quiet:           quiet,
+			Overrides:       overrideFlags,
+			EnvOverlay:      envOverlay,
+			MaxRetries:      retries,
+			Layers:          layerFlags,
+			LayersDir:       resolved.LayersDir,
+			NoAutoOverrides: noAutoOverrides,
 		}
 
 		code := executeRun(ra)

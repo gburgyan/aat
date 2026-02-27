@@ -8,6 +8,9 @@ AAT (Adaptive API Testing) is a CLI tool that tests API workflows end-to-end. It
 - [Running Tests](running.md) — execute plans and batches from the command line
 - [CI/CD Integration](ci-cd.md) — exit codes, JSON output, pipeline setup
 
+### I want to test against a local service
+- [Local Development](local-dev.md) — auto-discovered `.aat-overrides.yaml` for routing traffic to localhost
+
 ### I want to create tests for my API
 - [Quickstart](quickstart.md) — scaffold a graph from an OpenAPI spec and run your first test in 5 minutes
 - [Tutorial](tutorial.md) — build a complete test suite from scratch
@@ -60,6 +63,7 @@ Progressive reading order — each builds on the previous.
 | Document | What you'll learn |
 |----------|-------------------|
 | [Running Tests](running.md) | `aat run plan`, `aat run batch`, output directories, and progress display |
+| [Local Development](local-dev.md) | Auto-discovered `.aat-overrides.yaml` for routing traffic to localhost |
 | [CI/CD Integration](ci-cd.md) | Exit codes, `--json` output, `--quiet` mode, and pipeline examples |
 | [LLM-Assisted Planning](prompt.md) | `aat prompt`, interactive confirmation, plan saving, and trace debugging |
 | [Validation](validation.md) | All `aat validate` subcommands: graph, plan, workflow, and unified validation |

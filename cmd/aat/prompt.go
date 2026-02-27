@@ -80,21 +80,32 @@ var promptCmd = &cobra.Command{
 		}
 
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
+		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
+
+		// Discover auto-overrides if not disabled
+		var autoOverridesPath string
+		if !noAutoOverrides {
+			autoOverridesPath = config.FindAutoOverrides()
+			if autoOverridesPath != "" {
+				fmt.Printf("aat: auto-discovered overrides: %s\n", autoOverridesPath)
+			}
+		}
 
 		pa := &promptArgs{
-			Prompt:        promptText,
-			EnvPath:       resolved.EnvPath,
-			GraphPath:     resolved.GraphPath,
-			TemplatesPath: resolved.TemplatesPath,
-			DomainPath:    resolved.DomainPath,
-			OutputDir:     outputDir,
-			SavePlan:      savePlan,
-			SaveFull:      saveFull,
-			AutoConfirm:   autoConfirm,
-			TracePlan:     tracePlan,
-			TraceDir:      traceDir,
-			Layers:        layerFlags,
-			LayersDir:     resolved.LayersDir,
+			Prompt:            promptText,
+			EnvPath:           resolved.EnvPath,
+			GraphPath:         resolved.GraphPath,
+			TemplatesPath:     resolved.TemplatesPath,
+			DomainPath:        resolved.DomainPath,
+			OutputDir:         outputDir,
+			SavePlan:          savePlan,
+			SaveFull:          saveFull,
+			AutoConfirm:       autoConfirm,
+			TracePlan:         tracePlan,
+			TraceDir:          traceDir,
+			Layers:            layerFlags,
+			LayersDir:         resolved.LayersDir,
+			AutoOverridesPath: autoOverridesPath,
 		}
 
 		return promptCommand(context.Background(), pa, os.Stdin)
@@ -114,23 +125,25 @@ func init() {
 	promptCmd.Flags().Bool("trace", false, "capture planning pipeline trace for debugging")
 	promptCmd.Flags().String("trace-dir", "_output/traces", "directory for plan trace output")
 	promptCmd.Flags().StringSlice("layer", nil, "data layer to apply (repeatable, e.g. --layer european --layer amex)")
+	promptCmd.Flags().Bool("no-auto-overrides", false, "disable auto-discovery of .aat-overrides.yaml")
 }
 
 // promptArgs holds parsed CLI flags for the prompt command.
 type promptArgs struct {
-	Prompt        string
-	EnvPath       string
-	GraphPath     string
-	TemplatesPath string
-	DomainPath    string
-	OutputDir     string
-	SavePlan      string
-	SaveFull      bool // when true, save as full expanded plan instead of compact recipe
-	AutoConfirm   bool
-	TracePlan     bool
-	TraceDir      string
-	Layers        []string
-	LayersDir     string
+	Prompt            string
+	EnvPath           string
+	GraphPath         string
+	TemplatesPath     string
+	DomainPath        string
+	OutputDir         string
+	SavePlan          string
+	SaveFull          bool // when true, save as full expanded plan instead of compact recipe
+	AutoConfirm       bool
+	TracePlan         bool
+	TraceDir          string
+	Layers            []string
+	LayersDir         string
+	AutoOverridesPath string // path to auto-discovered .aat-overrides.yaml
 }
 
 // promptCommand executes the full prompt-to-execution pipeline.
@@ -332,6 +345,31 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		}
 		if overrideErr != nil {
 			return fmt.Errorf("building overrides: %w", overrideErr)
+		}
+		for _, ov := range resolvedOverrides {
+			addResolvedOverride(router, ov)
+		}
+	}
+
+	// Apply auto-discovered .aat-overrides.yaml
+	if args.AutoOverridesPath != "" {
+		autoOverrides, autoErr := config.LoadOverlayFile(args.AutoOverridesPath)
+		if autoErr != nil {
+			return fmt.Errorf("loading auto-overrides %s: %w", args.AutoOverridesPath, autoErr)
+		}
+		autoOverrideEnv := &config.Environment{
+			APIBaseURL: env.APIBaseURL,
+			Auth:       effectiveAuth,
+			Overrides:  autoOverrides,
+		}
+		var resolvedOverrides []config.ResolvedOverride
+		if planOverridesAuth {
+			resolvedOverrides, autoErr = autoOverrideEnv.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+		} else {
+			resolvedOverrides, autoErr = autoOverrideEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, authProvider)
+		}
+		if autoErr != nil {
+			return fmt.Errorf("building auto-overrides: %w", autoErr)
 		}
 		for _, ov := range resolvedOverrides {
 			addResolvedOverride(router, ov)

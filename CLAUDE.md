@@ -183,6 +183,7 @@ cd travelport/
 #   --quiet            suppress progress, show final line only
 #   --override NODE=URL  route a node to a different URL (repeatable)
 #   --env-overlay FILE   path to overlay YAML with additional overrides
+#   --no-auto-overrides  disable auto-discovery of .aat-overrides.yaml
 #   --retries N        max plan-level retries on failure (0 = no retries)
 ```
 
