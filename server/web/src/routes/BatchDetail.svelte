@@ -266,14 +266,17 @@
               </tr>
             </thead>
             <tbody>
-              {#each group.runs as run (run.skipped ? `${run.planName}-${run.permutation}-skipped` : run.runId)}
-                {#if run.skipped}
+              {#each group.runs as run (run.skipped || !run.runId ? `${run.planName}-${run.permutation}-nolink` : run.runId)}
+                {#if run.skipped || !run.runId}
                   <tr class="run-row run-row-skipped">
-                    <td><OutcomeBadge outcome="skipped" size="sm" /></td>
+                    <td><OutcomeBadge outcome={run.outcome || "skipped"} size="sm" /></td>
                     <td class="cell-plan cell-dimmed" title={run.planName}>
                       {run.planName}
                       {#if run.duplicateOf}
                         <span class="dedup-info" title="Duplicate of {run.duplicateOf}">duplicate of {run.duplicateOf}</span>
+                      {/if}
+                      {#if run.error}
+                        <span class="dedup-info">{run.error}</span>
                       {/if}
                     </td>
                     <td class="cell-steps cell-dimmed">&mdash;</td>
@@ -318,14 +321,17 @@
         </tr>
       </thead>
       <tbody>
-        {#each batch.runs as run (run.skipped ? `${run.planName}-skipped` : run.runId)}
-          {#if run.skipped}
+        {#each batch.runs as run (run.skipped || !run.runId ? `${run.planName}-nolink` : run.runId)}
+          {#if run.skipped || !run.runId}
             <tr class="run-row run-row-skipped">
-              <td><OutcomeBadge outcome="skipped" size="sm" /></td>
+              <td><OutcomeBadge outcome={run.outcome || "skipped"} size="sm" /></td>
               <td class="cell-plan cell-dimmed" title={run.planName}>
                 {run.planName}
                 {#if run.duplicateOf}
                   <span class="dedup-info" title="Duplicate of {run.duplicateOf}">duplicate of {run.duplicateOf}</span>
+                {/if}
+                {#if run.error}
+                  <span class="dedup-info">{run.error}</span>
                 {/if}
               </td>
               <td class="cell-steps cell-dimmed">&mdash;</td>

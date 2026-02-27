@@ -458,7 +458,12 @@ func loadAndRunPlanWithRetries(ctx context.Context, rctx *runContext, planPath, 
 			break
 		}
 
-		// Save failed attempt archive
+		// If this was the last allowed attempt, keep archive.json as the final result
+		if attempt >= totalPossible {
+			break
+		}
+
+		// Save intermediate failed attempt archive before retrying
 		if res.summary != nil {
 			// Rename the archive.json that was written to attempt-NN.json
 			attemptFile := fmt.Sprintf("attempt-%02d.json", attempt)
