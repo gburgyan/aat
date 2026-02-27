@@ -26,7 +26,7 @@ func (e *exitError) Unwrap() error { return e.Err }
 
 var rootCmd = &cobra.Command{
 	Use:     "aat",
-	Short:   "Adaptive API Testing",
+	Short:   "Adaptive API Toolkit",
 	Long:    "AAT is a CLI tool that uses LLM-assisted planning and execution to test API workflows end-to-end.",
 	Version: fmt.Sprintf("%s (commit: %s, built: %s)", version.Version, version.GitCommit, version.BuildDate),
 }

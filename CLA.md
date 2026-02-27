@@ -1,6 +1,6 @@
 # Contributor License Agreement
 
-Thank you for your interest in contributing to Adaptive API Testing (AAT). This Contributor License Agreement ("Agreement") documents the rights granted by contributors to this project.
+Thank you for your interest in contributing to Adaptive API Toolkit (AAT). This Contributor License Agreement ("Agreement") documents the rights granted by contributors to this project.
 
 By submitting a Contribution to this project, you accept and agree to the following terms and conditions for your present and future Contributions.
 
@@ -10,7 +10,7 @@ By submitting a Contribution to this project, you accept and agree to the follow
 
 **"Contribution"** means any original work of authorship, including any modifications or additions to an existing work, that is intentionally submitted by You for inclusion in this project. "Submitted" means any form of communication sent to the project maintainers, including but not limited to pull requests, issues, patches, and emails.
 
-**"Project"** means the Adaptive API Testing (AAT) project maintained at github.com/gburgyan/aat.
+**"Project"** means the Adaptive API Toolkit (AAT) project maintained at github.com/gburgyan/aat.
 
 ## 2. Grant of Copyright License
 

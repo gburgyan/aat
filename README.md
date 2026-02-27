@@ -1,4 +1,4 @@
-# AAT — Adaptive API Testing
+# AAT — Adaptive API Toolkit
 
 [![CI](https://github.com/gburgyan/aat/actions/workflows/ci.yml/badge.svg)](https://github.com/gburgyan/aat/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/gburgyan/aat)](https://goreportcard.com/report/github.com/gburgyan/aat)

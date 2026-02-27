@@ -1,6 +1,6 @@
 # AAT Documentation
 
-AAT (Adaptive API Testing) is a CLI tool that tests API workflows end-to-end. It models your API as a graph of operations, then generates and runs multi-step test plans against it.
+AAT (Adaptive API Toolkit) is a CLI tool that tests API workflows end-to-end. It models your API as a graph of operations, then generates and runs multi-step test plans against it.
 
 ## Quick Links by Role
 

@@ -1,4 +1,4 @@
-# AAT — Adaptive API Testing
+# AAT — Adaptive API Toolkit
 
 AAT is a Go CLI tool that uses LLM-assisted planning and execution to test API workflows end-to-end.
 

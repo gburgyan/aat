@@ -1,6 +1,6 @@
 # Contributing to AAT
 
-Thanks for your interest in contributing to Adaptive API Testing!
+Thanks for your interest in contributing to Adaptive API Toolkit!
 
 ## Getting started
 

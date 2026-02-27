@@ -29,7 +29,7 @@ style: |
 <!-- _class: lead -->
 
 # AAT
-## Adaptive API Testing
+## Adaptive API Toolkit
 
 **AI-Driven Orchestrated Workflow Validation**
 
@@ -675,7 +675,7 @@ If API is down, show the pre-run archive and walk through the output.
 
 # Thank You
 
-**AAT: Adaptive API Testing**
+**AAT: Adaptive API Toolkit**
 
 github.com/gburgyan/aat
 
