@@ -131,7 +131,7 @@ func TestHandleListRuns_NegativeLimit(t *testing.T) {
 
 // --- handleLatestRun ---
 
-func TestHandleLatestRun_Redirect(t *testing.T) {
+func TestHandleLatestRun_RedirectToRun(t *testing.T) {
 	dir := t.TempDir()
 	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100))
 	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
@@ -145,6 +145,28 @@ func TestHandleLatestRun_Redirect(t *testing.T) {
 
 	assert.Equal(t, http.StatusFound, rec.Code)
 	assert.Equal(t, "/api/runs/run-20260103-100000-aaaa0003", rec.Header().Get("Location"))
+}
+
+func TestHandleLatestRun_RedirectToBatch(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a run older than the batch.
+	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a1)
+
+	// Create a batch newer than the run.
+	b := makeBatchArchive("batch-20260102-100000-bbbb0001", "passed",
+		archive.BatchRunEntry{PlanName: "test", RunID: "r1", Outcome: "passed", StepCount: 1, PassedCount: 1, DurationMs: 100},
+	)
+	b.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	writeBatchArchive(t, dir, b)
+
+	s := newTestServer(dir)
+	rec := serveRequest(s, "GET", "/api/runs/latest")
+
+	assert.Equal(t, http.StatusFound, rec.Code)
+	assert.Equal(t, "/api/batches/batch-20260102-100000-bbbb0001", rec.Header().Get("Location"))
 }
 
 func TestHandleLatestRun_NoRuns(t *testing.T) {

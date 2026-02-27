@@ -21,7 +21,7 @@ var autoGenPrefixRe = regexp.MustCompile(`^(run|batch)-`)
 // ArchiveService provides read access to run archives for the web API.
 type ArchiveService interface {
 	ListRuns(limit int, savedOnly bool) ([]RunListEntry, error)
-	LatestRunID() (string, error)
+	LatestRef() (id string, refType string, err error)
 	GetRun(id string) (*RunDetail, error)
 	GetAttempt(runID string, attemptNum int) (*RunDetail, error)
 	GetStep(runID, stepID string) (*StepDetail, error)
@@ -110,16 +110,39 @@ func (s *diskArchiveService) ListRuns(limit int, savedOnly bool) ([]RunListEntry
 	return results, nil
 }
 
-// LatestRunID returns the RunID of the most recent archive, or "" if none exist.
-func (s *diskArchiveService) LatestRunID() (string, error) {
+// LatestRef returns the ID and type ("run" or "batch") of the most recent archive.
+// Returns ("", "", nil) if no runs or batches exist.
+func (s *diskArchiveService) LatestRef() (string, string, error) {
 	runs, err := s.ListRuns(1, false)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if len(runs) == 0 {
-		return "", nil
+	batches, err := s.ListBatches(1, false)
+	if err != nil {
+		return "", "", err
 	}
-	return runs[0].RunID, nil
+
+	var latestRunID string
+	var latestRunTime time.Time
+	if len(runs) > 0 {
+		latestRunID = runs[0].RunID
+		latestRunTime = runs[0].Timestamp
+	}
+
+	var latestBatchID string
+	var latestBatchTime time.Time
+	if len(batches) > 0 {
+		latestBatchID = batches[0].BatchID
+		latestBatchTime = batches[0].Timestamp
+	}
+
+	if latestRunID == "" && latestBatchID == "" {
+		return "", "", nil
+	}
+	if latestBatchID == "" || (!latestRunTime.IsZero() && latestRunTime.After(latestBatchTime)) {
+		return latestRunID, "run", nil
+	}
+	return latestBatchID, "batch", nil
 }
 
 // GetRun loads a full run overview by run ID.

@@ -313,9 +313,9 @@ func TestListRuns_NoPlan(t *testing.T) {
 	assert.Equal(t, "", runs[0].PlanName)
 }
 
-// --- LatestRunID ---
+// --- LatestRef ---
 
-func TestLatestRunID_ReturnsNewest(t *testing.T) {
+func TestLatestRef_ReturnsNewestRun(t *testing.T) {
 	dir := t.TempDir()
 
 	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100))
@@ -330,17 +330,75 @@ func TestLatestRunID_ReturnsNewest(t *testing.T) {
 	writeArchive(t, dir, a2)
 
 	svc := NewArchiveService(dir)
-	id, err := svc.LatestRunID()
+	id, refType, err := svc.LatestRef()
 	require.NoError(t, err)
 	assert.Equal(t, "run-20260103-100000-aaaa0003", id)
+	assert.Equal(t, "run", refType)
 }
 
-func TestLatestRunID_Empty(t *testing.T) {
+func TestLatestRef_Empty(t *testing.T) {
 	dir := t.TempDir()
 	svc := NewArchiveService(dir)
-	id, err := svc.LatestRunID()
+	id, refType, err := svc.LatestRef()
 	assert.NoError(t, err)
 	assert.Equal(t, "", id)
+	assert.Equal(t, "", refType)
+}
+
+func TestLatestRef_BatchNewerThanRun(t *testing.T) {
+	dir := t.TempDir()
+
+	a1 := makeArchive("run-20260101-100000-aaaa0001", "passed", makeStep("n", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a1)
+
+	b := makeBatchArchive("batch-20260102-100000-bbbb0001", "passed",
+		archive.BatchRunEntry{PlanName: "test", RunID: "r1", Outcome: "passed", StepCount: 1, PassedCount: 1, DurationMs: 100},
+	)
+	b.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	id, refType, err := svc.LatestRef()
+	require.NoError(t, err)
+	assert.Equal(t, "batch-20260102-100000-bbbb0001", id)
+	assert.Equal(t, "batch", refType)
+}
+
+func TestLatestRef_RunNewerThanBatch(t *testing.T) {
+	dir := t.TempDir()
+
+	b := makeBatchArchive("batch-20260101-100000-bbbb0001", "passed",
+		archive.BatchRunEntry{PlanName: "test", RunID: "r1", Outcome: "passed", StepCount: 1, PassedCount: 1, DurationMs: 100},
+	)
+	b.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	writeBatchArchive(t, dir, b)
+
+	a1 := makeArchive("run-20260102-100000-aaaa0001", "passed", makeStep("n", 200, 100))
+	a1.Metadata.Timestamp = time.Date(2026, 1, 2, 10, 0, 0, 0, time.UTC)
+	writeArchive(t, dir, a1)
+
+	svc := NewArchiveService(dir)
+	id, refType, err := svc.LatestRef()
+	require.NoError(t, err)
+	assert.Equal(t, "run-20260102-100000-aaaa0001", id)
+	assert.Equal(t, "run", refType)
+}
+
+func TestLatestRef_OnlyBatches(t *testing.T) {
+	dir := t.TempDir()
+
+	b := makeBatchArchive("batch-20260101-100000-bbbb0001", "passed",
+		archive.BatchRunEntry{PlanName: "test", RunID: "r1", Outcome: "passed", StepCount: 1, PassedCount: 1, DurationMs: 100},
+	)
+	b.Metadata.Timestamp = time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	writeBatchArchive(t, dir, b)
+
+	svc := NewArchiveService(dir)
+	id, refType, err := svc.LatestRef()
+	require.NoError(t, err)
+	assert.Equal(t, "batch-20260101-100000-bbbb0001", id)
+	assert.Equal(t, "batch", refType)
 }
 
 // --- stepPassed ---

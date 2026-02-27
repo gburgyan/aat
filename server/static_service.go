@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"time"
 
 	"github.com/gburgyan/aat/archive"
 )
@@ -89,15 +90,37 @@ func (s *staticArchiveService) ListRuns(limit int, _ bool) ([]RunListEntry, erro
 	return results, nil
 }
 
-func (s *staticArchiveService) LatestRunID() (string, error) {
+func (s *staticArchiveService) LatestRef() (string, string, error) {
 	runs, err := s.ListRuns(1, false)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if len(runs) == 0 {
-		return "", nil
+	batches, err := s.ListBatches(1, false)
+	if err != nil {
+		return "", "", err
 	}
-	return runs[0].RunID, nil
+
+	var latestRunID string
+	var latestRunTime time.Time
+	if len(runs) > 0 {
+		latestRunID = runs[0].RunID
+		latestRunTime = runs[0].Timestamp
+	}
+
+	var latestBatchID string
+	var latestBatchTime time.Time
+	if len(batches) > 0 {
+		latestBatchID = batches[0].BatchID
+		latestBatchTime = batches[0].Timestamp
+	}
+
+	if latestRunID == "" && latestBatchID == "" {
+		return "", "", nil
+	}
+	if latestBatchID == "" || (!latestRunTime.IsZero() && latestRunTime.After(latestBatchTime)) {
+		return latestRunID, "run", nil
+	}
+	return latestBatchID, "batch", nil
 }
 
 func (s *staticArchiveService) GetRun(id string) (*RunDetail, error) {

@@ -55,9 +55,10 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runs)
 }
 
-// handleLatestRunRedirect redirects /runs/latest to /runs/{id} so the SPA has a real run ID.
+// handleLatestRunRedirect redirects /runs/latest to /runs/{id} or /batches/{id}
+// so the SPA has a real ID in the URL.
 func (s *Server) handleLatestRunRedirect(w http.ResponseWriter, r *http.Request) {
-	id, err := s.service.LatestRunID()
+	id, refType, err := s.service.LatestRef()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -66,11 +67,15 @@ func (s *Server) handleLatestRunRedirect(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "not_found", "no runs available")
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/runs/%s", id), http.StatusFound)
+	if refType == "batch" {
+		http.Redirect(w, r, fmt.Sprintf("/batches/%s", id), http.StatusFound)
+	} else {
+		http.Redirect(w, r, fmt.Sprintf("/runs/%s", id), http.StatusFound)
+	}
 }
 
 func (s *Server) handleLatestRun(w http.ResponseWriter, r *http.Request) {
-	id, err := s.service.LatestRunID()
+	id, refType, err := s.service.LatestRef()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -79,7 +84,11 @@ func (s *Server) handleLatestRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no runs available")
 		return
 	}
-	http.Redirect(w, r, fmt.Sprintf("/api/runs/%s", id), http.StatusFound)
+	if refType == "batch" {
+		http.Redirect(w, r, fmt.Sprintf("/api/batches/%s", id), http.StatusFound)
+	} else {
+		http.Redirect(w, r, fmt.Sprintf("/api/runs/%s", id), http.StatusFound)
+	}
 }
 
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
