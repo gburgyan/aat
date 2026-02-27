@@ -20,6 +20,24 @@
   let renameError = $state('');
   let collapsedGroups = $state<Set<string>>(new Set());
 
+  function readPref(key: string, fallback: boolean): boolean {
+    try {
+      const v = localStorage.getItem(`aat:${key}`);
+      return v === null ? fallback : v === '1';
+    } catch { return fallback; }
+  }
+
+  function writePref(key: string, value: boolean) {
+    try { localStorage.setItem(`aat:${key}`, value ? '1' : '0'); } catch {}
+  }
+
+  let hideSkipped = $state(readPref('hideSkipped', true));
+
+  function toggleHideSkipped() {
+    hideSkipped = !hideSkipped;
+    writePref('hideSkipped', hideSkipped);
+  }
+
   async function load(id: string) {
     loading = true;
     error = '';
@@ -84,6 +102,41 @@
       const outcome: Outcome = hasError ? 'error' : hasFailed ? 'failed' : allSkipped ? 'skipped' : hasPassed ? 'passed' : 'skipped';
       return { label, runs, outcome };
     });
+  });
+
+  let skippedCount = $derived(batch?.skippedRuns ?? 0);
+  let effectiveTotal = $derived((batch?.totalRuns ?? 0) - skippedCount);
+
+  interface VisiblePermutationGroup extends PermutationGroup {
+    totalRunCount: number;
+    skippedInGroup: number;
+  }
+
+  let visiblePermutationGroups = $derived.by((): VisiblePermutationGroup[] => {
+    if (!hideSkipped) {
+      return permutationGroups.map(g => ({
+        ...g,
+        totalRunCount: g.runs.length,
+        skippedInGroup: g.runs.filter(r => r.skipped).length,
+      }));
+    }
+    return permutationGroups
+      .map(g => {
+        const visible = g.runs.filter(r => !r.skipped);
+        return {
+          ...g,
+          runs: visible,
+          totalRunCount: g.runs.length,
+          skippedInGroup: g.runs.length - visible.length,
+        };
+      })
+      .filter(g => g.runs.length > 0);
+  });
+
+  let visibleFlatRuns = $derived.by(() => {
+    if (!batch) return [];
+    if (!hideSkipped) return batch.runs;
+    return batch.runs.filter(r => !r.skipped);
   });
 
   function toggleGroup(label: string) {
@@ -216,8 +269,8 @@
           <span class="steps-passed">{batch.passedRuns}</span>
           {#if batch.failedRuns > 0}<span class="steps-separator"> / </span><span class="steps-failed">{batch.failedRuns}</span>{/if}
           {#if batch.errorRuns > 0}<span class="steps-separator"> / </span><span class="steps-error">{batch.errorRuns}</span>{/if}
-          {#if batch.skippedRuns && batch.skippedRuns > 0}<span class="steps-separator"> / </span><span class="steps-skipped">{batch.skippedRuns} skipped</span>{/if}
-          <span class="steps-separator">of&nbsp;</span>{batch.totalRuns}
+          <span class="steps-separator">of&nbsp;</span>{effectiveTotal}
+          {#if skippedCount > 0}<span class="steps-skipped"> ({skippedCount} skipped)</span>{/if}
         </span>
       </div>
       {#if batch.toolVersion}
@@ -239,12 +292,21 @@
     </div>
   </div>
 
+  {#if skippedCount > 0}
+    <div class="skipped-toggle">
+      <label class="toggle-label">
+        <input type="checkbox" checked={hideSkipped} onchange={toggleHideSkipped} />
+        Hide skipped runs ({skippedCount})
+      </label>
+    </div>
+  {/if}
+
   {#if batch.runs.length === 0}
     <div class="empty-state">
       <p>No runs in this batch</p>
     </div>
   {:else if hasPermutations}
-    {#each permutationGroups as group (group.label)}
+    {#each visiblePermutationGroups as group (group.label)}
       <div class="permutation-group">
         <button
           class="permutation-header"
@@ -253,7 +315,9 @@
           <span class="permutation-toggle">{collapsedGroups.has(group.label) ? '\u25b6' : '\u25bc'}</span>
           <OutcomeBadge outcome={group.outcome} size="sm" />
           <span class="permutation-label">{group.label}</span>
-          <span class="permutation-count">{group.runs.length} runs</span>
+          <span class="permutation-count">
+            {group.runs.length} runs {#if group.skippedInGroup > 0}({group.skippedInGroup} skipped){/if}
+          </span>
         </button>
         {#if !collapsedGroups.has(group.label)}
           <table class="run-table permutation-table">
@@ -328,7 +392,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each batch.runs as run, ri (run.skipped || !run.runId ? `nolink-${ri}` : run.runId)}
+        {#each visibleFlatRuns as run, ri (run.skipped || !run.runId ? `nolink-${ri}` : run.runId)}
           {#if run.skipped || !run.runId}
             <tr class="run-row run-row-skipped">
               <td><OutcomeBadge outcome={run.outcome || "skipped"} size="sm" /></td>
@@ -572,5 +636,20 @@
   }
   .steps-skipped {
     color: var(--color-text-muted, #9ca3af);
+  }
+  .skipped-toggle {
+    margin-bottom: 0.75rem;
+  }
+  .toggle-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    color: var(--color-text-muted, #9ca3af);
+    cursor: pointer;
+  }
+  .toggle-label input[type="checkbox"] {
+    accent-color: var(--color-primary, #6366f1);
+    cursor: pointer;
   }
 </style>

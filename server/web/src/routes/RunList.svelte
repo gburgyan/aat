@@ -223,7 +223,7 @@
             </td>
             <td class="cell-steps">
               <span class="steps-passed">{item.entry.passedRuns}</span>{#if item.entry.failedRuns > 0}<span class="steps-separator"> / </span><span class="steps-failed">{item.entry.failedRuns}</span>{/if}{#if item.entry.errorRuns > 0}<span class="steps-separator"> / </span><span class="steps-error">{item.entry.errorRuns}</span>{/if}
-              <span class="steps-separator"> of {item.entry.totalRuns} runs</span>
+              <span class="steps-separator"> of {item.entry.passedRuns + item.entry.failedRuns + item.entry.errorRuns} runs</span>
             </td>
             <td class="cell-duration">{formatDuration(item.entry.totalDurationMs)}</td>
             <td class="cell-when" title={formatTimestamp(item.entry.timestamp)}>{timeAgo(item.entry.timestamp)}</td>
