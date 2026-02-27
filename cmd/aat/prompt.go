@@ -207,16 +207,29 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 		return fmt.Errorf("creating LLM client: %w", err)
 	}
 
+	// 6b. Load available layers (optional)
+	var availableLayers map[string]*graph.Layer
+	if args.LayersDir != "" {
+		availableLayers, err = graph.LoadLayersFromDir(args.LayersDir)
+		if err != nil {
+			return fmt.Errorf("loading layers: %w", err)
+		}
+		if len(availableLayers) > 0 {
+			fmt.Printf("aat: loaded %d layers\n", len(availableLayers))
+		}
+	}
+
 	// 7. Interpret prompt
 	fmt.Printf("aat: analyzing prompt with LLM...\n")
 	result, err := intent.Interpret(ctx, intent.InterpretRequest{
-		Prompt:      args.Prompt,
-		Graph:       g,
-		KB:          kb,
-		Client:      llmClient,
-		EnableTrace: args.TracePlan,
-		GraphDir:    filepath.Dir(args.GraphPath),
-		Layers:      args.Layers,
+		Prompt:          args.Prompt,
+		Graph:           g,
+		KB:              kb,
+		Client:          llmClient,
+		EnableTrace:     args.TracePlan,
+		GraphDir:        filepath.Dir(args.GraphPath),
+		Layers:          args.Layers,
+		AvailableLayers: availableLayers,
 	})
 
 	// Write trace if present (even on error — partial traces aid debugging).
@@ -234,9 +247,9 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 	}
 	fmt.Printf("aat: plan generated (%d steps)\n\n", len(result.Plan.Execution.Steps))
 
-	// 8. Display plan narrative
-	narrative := plan.FormatNarrative(result.Plan, g)
-	fmt.Println(narrative)
+	// 8. Display plan summary (focused on LLM decisions)
+	summary := intent.FormatPlanSummary(result.WorkflowSelection, result.TargetedResponse, result.Plan, g)
+	fmt.Println(summary)
 
 	// 9. Save plan if --save specified
 	if args.SavePlan != "" {
@@ -286,12 +299,18 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 		break
 	}
 
-	// 11. Execute
-	return executePlan(ctx, p, g, args, apiConfig, env, kb, llmClient, authProvider)
+	// 11. Execute — use merged layers from WorkflowSelection (CLI + LLM-selected)
+	effectiveLayers := args.Layers
+	if result.WorkflowSelection != nil && len(result.WorkflowSelection.Layers) > 0 {
+		effectiveLayers = result.WorkflowSelection.Layers
+	}
+	return executePlan(ctx, p, g, args, effectiveLayers, availableLayers, apiConfig, env, kb, llmClient, authProvider)
 }
 
 // executePlan loads templates, creates the engine, runs the plan, and writes an archive.
-func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, apiConfig *config.APIConfig, env *config.Environment, kb *domain.KnowledgeBase, llmClient llm.Client, authProvider *config.AuthProvider) error {
+// effectiveLayers is the merged set of layer names (CLI + LLM-selected).
+// availableLayers is the full set of loaded layers (may be nil).
+func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, effectiveLayers []string, availableLayers map[string]*graph.Layer, apiConfig *config.APIConfig, env *config.Environment, kb *domain.KnowledgeBase, llmClient llm.Client, authProvider *config.AuthProvider) error {
 	// If the plan has its own auth (e.g., user manually edited after --save), re-authenticate
 	planOverridesAuth := p.Auth != nil
 	if planOverridesAuth {
@@ -378,14 +397,23 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 
 	// Compute layered defaults if layers are specified
 	var layeredDefaults map[string]*graph.InputDefault
-	if len(args.Layers) > 0 && args.LayersDir != "" {
-		layers, layerErr := graph.ResolveLayerNames(args.Layers, args.LayersDir)
-		if layerErr != nil {
-			return fmt.Errorf("loading layers: %w", layerErr)
+	if len(effectiveLayers) > 0 {
+		var resolvedLayers map[string]*graph.Layer
+		if availableLayers != nil {
+			resolvedLayers = availableLayers
+		} else if args.LayersDir != "" {
+			var layerErr error
+			resolvedLayers, layerErr = graph.ResolveLayerNames(effectiveLayers, args.LayersDir)
+			if layerErr != nil {
+				return fmt.Errorf("loading layers: %w", layerErr)
+			}
 		}
-		layeredDefaults, layerErr = graph.ApplyLayers(g, args.Layers, layers)
-		if layerErr != nil {
-			return fmt.Errorf("applying layers: %w", layerErr)
+		if resolvedLayers != nil {
+			var layerErr error
+			layeredDefaults, layerErr = graph.ApplyLayers(g, effectiveLayers, resolvedLayers)
+			if layerErr != nil {
+				return fmt.Errorf("applying layers: %w", layerErr)
+			}
 		}
 	}
 
@@ -401,7 +429,7 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	result := eng.Run(ctx, p)
 
 	// Write archive
-	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir, args.Layers)
+	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir, effectiveLayers)
 	if archiveErr != nil {
 		return archiveErr
 	}

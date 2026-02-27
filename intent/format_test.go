@@ -1,6 +1,7 @@
 package intent
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/gburgyan/aat/graph"
@@ -278,7 +279,7 @@ func TestFormatWorkflowMenu_Basic(t *testing.T) {
 		},
 	}
 
-	result := FormatWorkflowMenu(g)
+	result := FormatWorkflowMenu(g, nil)
 
 	// Title and version present.
 	assert.Contains(t, result, "# Travel API (version 1.0.0)")
@@ -312,7 +313,7 @@ func TestFormatWorkflowMenu_AddonsShowAfter(t *testing.T) {
 		Nodes: map[string]*graph.Node{},
 	}
 
-	result := FormatWorkflowMenu(g)
+	result := FormatWorkflowMenu(g, nil)
 
 	// Base workflow in Workflows section.
 	assert.Contains(t, result, "## Workflows")
@@ -327,7 +328,7 @@ func TestFormatWorkflowMenu_AddonsShowAfter(t *testing.T) {
 func TestFormatWorkflowMenu_NoInputsOutputs(t *testing.T) {
 	g := loadTravelportGraph(t)
 
-	result := FormatWorkflowMenu(g)
+	result := FormatWorkflowMenu(g, nil)
 
 	// The full graph format has these; the menu must not.
 	assert.NotContains(t, result, "Inputs:")
@@ -348,7 +349,7 @@ func TestFormatWorkflowMenu_WithNotes(t *testing.T) {
 		Nodes: map[string]*graph.Node{},
 	}
 
-	result := FormatWorkflowMenu(g)
+	result := FormatWorkflowMenu(g, nil)
 	assert.Contains(t, result, "## Notes")
 	assert.Contains(t, result, "Only use production credentials.")
 }
@@ -359,10 +360,106 @@ func TestFormatWorkflowMenu_EmptyWorkflows(t *testing.T) {
 		Nodes:   map[string]*graph.Node{},
 	}
 
-	result := FormatWorkflowMenu(g)
+	result := FormatWorkflowMenu(g, nil)
 
 	// Should have title but no Workflows section.
 	assert.Contains(t, result, "version 1.0.0")
 	assert.NotContains(t, result, "## Workflows")
 	assert.NotContains(t, result, "## Addons")
+}
+
+// --- FormatWorkflowMenu layer tests ---
+
+func TestFormatWorkflowMenu_WithLayers(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Booking", Template: "workflows/booking.yaml", Description: "Book a flight"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+	layers := map[string]*graph.Layer{
+		"european": {Name: "european", Description: "European airport codes for intercontinental routes"},
+		"premium":  {Name: "premium", Description: "Constrain flight searches to premium cabin classes"},
+	}
+
+	result := FormatWorkflowMenu(g, layers)
+
+	assert.Contains(t, result, "## Layers")
+	assert.Contains(t, result, "**european**: European airport codes for intercontinental routes")
+	assert.Contains(t, result, "**premium**: Constrain flight searches to premium cabin classes")
+	// Layers come between Workflows and Notes.
+	workflowIdx := strings.Index(result, "## Workflows")
+	layersIdx := strings.Index(result, "## Layers")
+	assert.Greater(t, layersIdx, workflowIdx)
+}
+
+func TestFormatWorkflowMenu_LayersSorted(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*graph.Node{},
+	}
+	layers := map[string]*graph.Layer{
+		"zebra": {Name: "zebra", Description: "Z layer"},
+		"alpha": {Name: "alpha", Description: "A layer"},
+		"mid":   {Name: "mid", Description: "M layer"},
+	}
+
+	result := FormatWorkflowMenu(g, layers)
+
+	alphaIdx := strings.Index(result, "**alpha**")
+	midIdx := strings.Index(result, "**mid**")
+	zebraIdx := strings.Index(result, "**zebra**")
+	assert.Less(t, alphaIdx, midIdx)
+	assert.Less(t, midIdx, zebraIdx)
+}
+
+func TestFormatWorkflowMenu_NilLayers(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.NotContains(t, result, "## Layers")
+}
+
+func TestFormatWorkflowMenu_EmptyLayers(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, map[string]*graph.Layer{})
+	assert.NotContains(t, result, "## Layers")
+}
+
+func TestFormatWorkflowMenu_LayerNoDescription(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*graph.Node{},
+	}
+	layers := map[string]*graph.Layer{
+		"mystery": {Name: "mystery"},
+	}
+
+	result := FormatWorkflowMenu(g, layers)
+	assert.Contains(t, result, "**mystery**: (no description)")
+}
+
+func TestFormatWorkflowMenu_LayersBeforeNotes(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Notes:   "Important notes.",
+		Nodes:   map[string]*graph.Node{},
+	}
+	layers := map[string]*graph.Layer{
+		"test": {Name: "test", Description: "Test layer"},
+	}
+
+	result := FormatWorkflowMenu(g, layers)
+
+	layersIdx := strings.Index(result, "## Layers")
+	notesIdx := strings.Index(result, "## Notes")
+	assert.Greater(t, notesIdx, layersIdx)
 }

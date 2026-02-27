@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,13 +17,14 @@ import (
 
 // InterpretRequest holds the inputs for prompt-to-plan transformation.
 type InterpretRequest struct {
-	Prompt      string
-	Graph       *graph.Graph
-	KB          *domain.KnowledgeBase // may be nil
-	Client      llm.Client
-	EnableTrace bool     // when true, pipeline observability data is captured in the result
-	GraphDir    string   // directory containing graph file; for resolving template paths
-	Layers      []string // layer names to apply (from CLI flags)
+	Prompt          string
+	Graph           *graph.Graph
+	KB              *domain.KnowledgeBase // may be nil
+	Client          llm.Client
+	EnableTrace     bool                    // when true, pipeline observability data is captured in the result
+	GraphDir        string                  // directory containing graph file; for resolving template paths
+	Layers          []string                // layer names to apply (from CLI flags)
+	AvailableLayers map[string]*graph.Layer // all layers from layers dir; nil = no layers available
 }
 
 // InterpretResult holds the outputs of prompt-to-plan transformation.
@@ -45,32 +47,6 @@ type WorkflowSelection struct {
 	Choices     map[string]string `json:"choices,omitempty"` // slot name → option name
 	Addons      []string          `json:"addons,omitempty"`
 	Repetitions map[string]int    `json:"repetitions,omitempty"`
-}
-
-// GoalAnalysis captures the output of the first LLM call.
-type GoalAnalysis struct {
-	Goal             string            `json:"goal"`
-	Description      string            `json:"description"`
-	ConditionContext map[string]any    `json:"conditionContext"`
-	PathPreferences  map[string]string `json:"pathPreferences"`
-	Constraints      ConstraintSet     `json:"constraints"`
-	Workflow         string            `json:"workflow,omitempty"`    // selected workflow name
-	Repetitions      map[string]int    `json:"repetitions,omitempty"` // node → count (e.g. {"addTraveler": 2})
-	Addons           []string          `json:"addons,omitempty"`      // addon workflow names to compose
-}
-
-// ConstraintSet classifies constraints by enforcement level.
-type ConstraintSet struct {
-	Hard []ConstraintInfo `json:"hard"`
-	Soft []ConstraintInfo `json:"soft"`
-	Free []string         `json:"free"`
-}
-
-// ConstraintInfo describes a single constraint.
-type ConstraintInfo struct {
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	AppliesTo   []string `json:"appliesTo"`
 }
 
 // selectionResult is the internal return type from selectWorkflow, carrying the
@@ -133,9 +109,9 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	}
 
 	// --- Call 1: Workflow Selection ---
-	workflowMenu := FormatWorkflowMenu(req.Graph)
+	workflowMenu := FormatWorkflowMenu(req.Graph, req.AvailableLayers)
 	selStart := time.Now()
-	sr, err := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt, req.Graph, now)
+	sr, err := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt, req.Graph, req.AvailableLayers, req.Layers, now)
 	if err != nil {
 		if trace != nil && sr != nil {
 			trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), err)
@@ -199,7 +175,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		}
 
 		reselStart := time.Now()
-		reselSR, reselErr := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt+feedback, req.Graph, now)
+		reselSR, reselErr := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt+feedback, req.Graph, req.AvailableLayers, req.Layers, now)
 		if reselErr != nil {
 			return traceErr(fmt.Errorf("intent: reselection after wrong-plan: %w", reselErr))
 		}
@@ -356,10 +332,14 @@ func buildAndFillPlan(
 	}
 
 	// --- Call 2: Targeted Value Fill ---
-	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB)
+	var layerOverrides map[string]*graph.InputDefault
+	if len(ws.Layers) > 0 && req.AvailableLayers != nil {
+		layerOverrides, _ = graph.ApplyLayers(req.Graph, ws.Layers, req.AvailableLayers)
+	}
+	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB, layerOverrides)
 	selectionContexts := buildSelectionContexts(skeleton, req.Graph)
 
-	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, ws.Description, now)
+	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, ws, now)
 
 	planCallStart := time.Now()
 	planResp, err := req.Client.Complete(ctx, &llm.Request{
@@ -403,7 +383,7 @@ func buildAndFillPlan(
 		// Retry once with specific error feedback.
 		retryMsgs := formatValidationIssues(issues)
 		retrySystem, retryUser := buildTargetedRetryPrompt(
-			inputContexts, selectionContexts, req.Prompt, ws.Description, now, retryMsgs, nil,
+			inputContexts, selectionContexts, req.Prompt, ws, now, retryMsgs, nil,
 		)
 
 		retryStart := time.Now()
@@ -483,13 +463,17 @@ func retryPlanGeneration(
 	}
 
 	// Rebuild contexts for the retry skeleton.
-	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB)
+	var layerOverrides map[string]*graph.InputDefault
+	if len(ws.Layers) > 0 && req.AvailableLayers != nil {
+		layerOverrides, _ = graph.ApplyLayers(req.Graph, ws.Layers, req.AvailableLayers)
+	}
+	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB, layerOverrides)
 	selectionContexts := buildSelectionContexts(retrySkeleton, req.Graph)
 
 	now := time.Now()
 	system, user := buildTargetedRetryPrompt(
 		inputContexts, selectionContexts,
-		req.Prompt, ws.Description, now, valErr.Errors, hints,
+		req.Prompt, ws, now, valErr.Errors, hints,
 	)
 
 	retryCallStart := time.Now()
@@ -567,8 +551,8 @@ func copyPlanShallow(p *plan.Plan) *plan.Plan {
 // It validates the response and retries once if validation fails.
 // Returns a selectionResult with the parsed selection, raw JSON, LLM response
 // metadata, and prompt text.
-func selectWorkflow(ctx context.Context, client llm.Client, workflowMenu, prompt string, g *graph.Graph, now time.Time) (*selectionResult, error) {
-	system, user := buildWorkflowSelectionPrompt(workflowMenu, prompt, now)
+func selectWorkflow(ctx context.Context, client llm.Client, workflowMenu, prompt string, g *graph.Graph, availableLayers map[string]*graph.Layer, preSelectedLayers []string, now time.Time) (*selectionResult, error) {
+	system, user := buildWorkflowSelectionPrompt(workflowMenu, prompt, preSelectedLayers, now)
 
 	resp, err := client.Complete(ctx, &llm.Request{
 		Messages: []llm.Message{
@@ -604,7 +588,7 @@ func selectWorkflow(ctx context.Context, client llm.Client, workflowMenu, prompt
 	}
 
 	// Validate the selection.
-	validationErrors := validateWorkflowSelection(&ws, g)
+	validationErrors := validateWorkflowSelection(&ws, g, availableLayers)
 	if len(validationErrors) == 0 {
 		return sr, nil
 	}
@@ -646,7 +630,7 @@ func selectWorkflow(ctx context.Context, client llm.Client, workflowMenu, prompt
 	}
 
 	// Use retry result regardless of whether it passes validation — we only retry once.
-	retryValidationErrors := validateWorkflowSelection(&retryWS, g)
+	retryValidationErrors := validateWorkflowSelection(&retryWS, g, availableLayers)
 	if len(retryValidationErrors) == 0 {
 		retrySR.RetriedFrom = sr
 		return retrySR, nil
@@ -658,7 +642,7 @@ func selectWorkflow(ctx context.Context, client llm.Client, workflowMenu, prompt
 
 // validateWorkflowSelection checks that the LLM's workflow selection is valid
 // against the graph. Returns human-readable error strings (empty = valid).
-func validateWorkflowSelection(ws *WorkflowSelection, g *graph.Graph) []string {
+func validateWorkflowSelection(ws *WorkflowSelection, g *graph.Graph, availableLayers map[string]*graph.Layer) []string {
 	var errs []string
 
 	if ws.Workflow == "" {
@@ -725,6 +709,27 @@ func validateWorkflowSelection(ws *WorkflowSelection, g *graph.Graph) []string {
 		}
 		if addon.Template == "" {
 			errs = append(errs, fmt.Sprintf("addon %q has no template", addonName))
+		}
+	}
+
+	// Check layers if availableLayers is provided.
+	if availableLayers != nil && len(ws.Layers) > 0 {
+		layerSeen := map[string]bool{}
+		for _, layerName := range ws.Layers {
+			if layerSeen[layerName] {
+				errs = append(errs, fmt.Sprintf("duplicate layer %q", layerName))
+				continue
+			}
+			layerSeen[layerName] = true
+
+			if _, ok := availableLayers[layerName]; !ok {
+				var available []string
+				for k := range availableLayers {
+					available = append(available, k)
+				}
+				sort.Strings(available)
+				errs = append(errs, fmt.Sprintf("layer %q not found; available: %s", layerName, strings.Join(available, ", ")))
+			}
 		}
 	}
 

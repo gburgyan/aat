@@ -85,7 +85,7 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 		default:
 		}
 
-		val, decision, resolution, err := resolveInputEnhanced(ctx, input, step, g, state, dedupCache, namedSelections, rctx, ectx, inputs)
+		val, decision, resolution, err := resolveInput(ctx, input, step, g, state, dedupCache, namedSelections, rctx, ectx, inputs)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
@@ -200,8 +200,9 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 	return entry, []SelectionDecision{decision}, nil
 }
 
-// resolveInputEnhanced resolves a single input with optional enhanced features.
-// When rctx/ectx are nil, it behaves identically to the original resolveInput.
+// resolveInput resolves a single input value for a step. When rctx/ectx are
+// non-nil, expression evaluation, constraint checking, and fallback pools are
+// activated. When nil, only literal values and upstream references are resolved.
 //
 // Resolution priority (after plan instantiation, graph defaults are in step.Values):
 //  1. Plan-level fromSelection (named selection reference)
@@ -209,7 +210,7 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 //  3. Plan default (literal value, expression, or fallback pool)
 //  4. Optional → skip
 //  5. Error: required input has no value
-func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, namedSelections map[string]*namedSelectionEntry, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
+func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, namedSelections map[string]*namedSelectionEntry, rctx *ResolveContext, ectx *plan.ExprContext, resolvedInputs map[string]any) (any, *SelectionDecision, *ValueResolution, error) {
 	// 0. Empty StepValue (e.g., `returnDate: {}`) → treat as explicitly absent.
 	// Skip all plan-level resolution and graph edges; fall through to
 	// graph default / optional skip / required error.
@@ -359,7 +360,7 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 	// 3. Plan StepValue default / pool
 	if sv, ok := step.Values[input.Name]; ok {
 		if sv.Default != nil {
-			// Enhanced path: evaluate expressions, check constraints, try pool
+			// Full resolution: evaluate expressions, check constraints, try pool
 			if rctx != nil && ectx != nil {
 				return resolveWithFallback(ctx, sv, input, *ectx, resolvedInputs, rctx)
 			}
@@ -374,7 +375,7 @@ func resolveInputEnhanced(ctx context.Context, input graph.Input, step plan.Step
 			return sv.Default, nil, res, nil
 		}
 		// StepValue exists but no Default and no From+Select:
-		// try pool if enhanced context is available
+		// try pool if resolve context is available
 		if rctx != nil && ectx != nil && len(sv.Pool) > 0 {
 			return resolveWithFallback(ctx, sv, input, *ectx, resolvedInputs, rctx)
 		}

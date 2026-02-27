@@ -954,12 +954,13 @@ func TestBuildWorkflowSelectionPrompt_CompactMenu(t *testing.T) {
 	// Menu is now in the user prompt, not the system prompt.
 	menu := "## Workflows\n\n- **Booking**: Full booking flow\n\n## Addons\n\n- **Ancillary** (splices after: addTraveler): Add ancillary services\n"
 
-	system, user := buildWorkflowSelectionPrompt(menu, "book a flight", fixedNow())
+	system, user := buildWorkflowSelectionPrompt(menu, "book a flight", nil, fixedNow())
 
 	// System prompt has format instructions, not workflow details.
 	assert.Contains(t, system, "workflow")
 	assert.Contains(t, system, "repetitions")
 	assert.Contains(t, system, "addons")
+	assert.Contains(t, system, "layers")
 	assert.NotContains(t, system, "Booking")
 	assert.NotContains(t, system, "Ancillary")
 
@@ -974,9 +975,28 @@ func TestBuildWorkflowSelectionPrompt_CompactMenu(t *testing.T) {
 
 func TestBuildWorkflowSelectionPrompt_NoConstraints(t *testing.T) {
 	// System prompt should NOT contain constraint classification instructions.
-	system, _ := buildWorkflowSelectionPrompt("menu", "test", fixedNow())
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil, fixedNow())
 	assert.NotContains(t, system, "Hard constraints")
 	assert.NotContains(t, system, "Soft constraints")
 	assert.NotContains(t, system, "Free parameters")
 	assert.NotContains(t, system, "appliesTo")
+}
+
+func TestBuildWorkflowSelectionPrompt_WithPreSelectedLayers(t *testing.T) {
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", []string{"european", "amex"}, fixedNow())
+
+	assert.Contains(t, system, "ALREADY selected")
+	assert.Contains(t, system, "european, amex")
+	assert.Contains(t, system, "do not re-select")
+}
+
+func TestBuildWorkflowSelectionPrompt_NoPreSelectedLayers(t *testing.T) {
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil, fixedNow())
+	assert.NotContains(t, system, "ALREADY selected")
+}
+
+func TestBuildWorkflowSelectionPrompt_LayersInJSON(t *testing.T) {
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil, fixedNow())
+	// The JSON template should include the "layers" field.
+	assert.Contains(t, system, `"layers"`)
 }

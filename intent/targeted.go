@@ -62,6 +62,7 @@ type InputContext struct {
 	CurrentDefault   string // template default value, if any (e.g., "DEN")
 	HasTemplatePool  bool   // true if template has a pool of curated values
 	FromResolved     string // non-empty if auto-wired from sibling input (e.g., "leg1Destination")
+	LayerHandled     bool   // true when a layer provides a value/pool for this input
 
 	// Validation metadata from graph.Input.Constraints — used by validateTargetedResponse.
 	ConstraintPattern   string // regex pattern (e.g., "^[A-Z]{3}$")
@@ -81,8 +82,9 @@ type SelectionContext struct {
 }
 
 // buildInputContexts walks unfed inputs in the skeleton and resolves domain
-// type/pool/concepts per input.
-func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.KnowledgeBase) []InputContext {
+// type/pool/concepts per input. layerOverrides (keyed by "nodeName.inputName")
+// marks inputs that have runtime overrides from data layers.
+func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.KnowledgeBase, layerOverrides map[string]*graph.InputDefault) []InputContext {
 	var contexts []InputContext
 
 	for _, step := range skeleton.Execution.Steps {
@@ -102,6 +104,14 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 				NodeDesc:         node.Description,
 				InputDescription: inp.Description,
 				IsConfigurable:   inp.Configurable,
+			}
+
+			// Check if a layer provides a value/pool for this input.
+			if layerOverrides != nil {
+				layerKey := step.Node + "." + inp.Name
+				if _, ok := layerOverrides[layerKey]; ok {
+					ic.LayerHandled = true
+				}
 			}
 
 			// Check for fromResolved auto-wiring.

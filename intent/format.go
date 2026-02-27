@@ -193,7 +193,8 @@ func formatConstraintAnnotation(c *graph.Constraint) string {
 // suitable for the workflow selection LLM call. It includes only graph metadata
 // and workflow descriptions — no nodes, inputs, outputs, or element fields.
 // This reduces Call 1 token usage by ~88% compared to FormatGraph.
-func FormatWorkflowMenu(g *graph.Graph) string {
+// If layers is non-nil and non-empty, a Layers section is appended after Addons.
+func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 	var b strings.Builder
 
 	// Title + version.
@@ -274,6 +275,29 @@ func FormatWorkflowMenu(g *graph.Graph) string {
 		fmt.Fprintf(&b, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After.String(), desc)
 	}
 	if hasAddon {
+		b.WriteString("\n")
+	}
+
+	// Layers.
+	if len(layers) > 0 {
+		b.WriteString("## Layers\n\n")
+		b.WriteString("Layers override input defaults for test variation. Select when the user's intent aligns with a layer's purpose. Multiple layers can be combined.\n\n")
+
+		// Sort layer names for deterministic output.
+		layerNames := make([]string, 0, len(layers))
+		for name := range layers {
+			layerNames = append(layerNames, name)
+		}
+		sort.Strings(layerNames)
+
+		for _, name := range layerNames {
+			layer := layers[name]
+			desc := layer.Description
+			if desc == "" {
+				desc = "(no description)"
+			}
+			fmt.Fprintf(&b, "- **%s**: %s\n", name, desc)
+		}
 		b.WriteString("\n")
 	}
 

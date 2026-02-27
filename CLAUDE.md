@@ -39,7 +39,6 @@ make clean      # Remove binary and frontend artifacts (node_modules, dist)
 | `config/` | Configuration, environments, local storage |
 | `server/` | Local web API server (chi), embedded Svelte SPA frontend, archive viewer |
 | `mcp/` | MCP server: API lifecycle platform for IDE-based AI tools (stdio transport) |
-| `gateway/` | LLM gateway proxy logic (stub — deferred) |
 | `internal/testutil/` | Shared test helpers and fixtures |
 | `internal/version/` | Build version info |
 

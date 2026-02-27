@@ -9,7 +9,9 @@ import (
 // buildWorkflowSelectionPrompt constructs the messages for the first LLM call
 // (workflow selection). The user prompt contains the compact workflow menu and
 // the user's intent. The system prompt contains format instructions and rules.
-func buildWorkflowSelectionPrompt(workflowMenu, userPrompt string, now time.Time) (system, user string) {
+// preSelectedLayers are layers already selected via CLI flags — the LLM should
+// not re-select them but may add others.
+func buildWorkflowSelectionPrompt(workflowMenu, userPrompt string, preSelectedLayers []string, now time.Time) (system, user string) {
 	dateStr := now.Format("2006-01-02")
 
 	system = `You are an API testing assistant. Given available workflows and a user's testing intent, select the appropriate workflow.
@@ -20,6 +22,7 @@ Respond with a JSON object (no markdown fencing, just raw JSON):
   "description": "brief description of what will be tested",
   "choices": {"slotName": "Option Name"},
   "addons": ["Addon Name 1"],
+  "layers": ["layer-name"],
   "repetitions": {"nodeName": N}
 }
 
@@ -28,8 +31,13 @@ Rules:
 - Use the EXACT workflow name from the available list
 - The "choices" object maps slot names to their chosen option for workflows with choice points. Use the EXACT option name from the slot's options list. Omit "choices" if the workflow has no slots, or to use all defaults.
 - The "addons" array lists addon workflows to compose into the main workflow. Include addons when the user mentions capabilities matching an addon's description. Omit "addons" if no addons are needed.
+- The "layers" array lists data layers to apply. Select when the user's intent aligns with a layer's description. Use EXACT layer names. Omit "layers" if no layers are needed.
 - The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addItem": 3} for three items). Omit if no nodes need repeating.
 - Today's date is ` + dateStr + `. When generating dates, default to at least 7 days in the future or past depending on context. The user's prompt takes priority (e.g., "tomorrow" → {{today + 1 day}}).`
+
+	if len(preSelectedLayers) > 0 {
+		system += "\n- The following layers are ALREADY selected (do not re-select, but you may add others): " + strings.Join(preSelectedLayers, ", ")
+	}
 
 	user = fmt.Sprintf("## Available Workflows\n\n%s\n## User Intent\n\n%s", workflowMenu, userPrompt)
 	return system, user
@@ -48,12 +56,12 @@ func buildTargetedPlanPrompt(
 	inputContexts []InputContext,
 	selectionContexts []SelectionContext,
 	userPrompt string,
-	workflowDescription string,
+	ws *WorkflowSelection,
 	now time.Time,
 ) (system, user string) {
 	dateStr := now.Format("2006-01-02")
 
-	system = `You are an API testing value generator. A workflow has been composed and all data flow is pre-wired. Your ONLY job is to pick concrete values for unfed inputs.
+	system = `You are an API testing value generator. A workflow has been composed and all data flow is pre-wired. Your ONLY job is to pick concrete values for unfed inputs. Some inputs are handled by data layers — skip them unless the user's intent conflicts.
 
 Respond with a JSON object (no markdown fencing, just raw JSON):
 {
@@ -117,15 +125,17 @@ Rules:
 
 	var ub strings.Builder
 
-	// Separate required vs pool vs auto-wired vs configurable inputs.
-	// Priority: auto-wired > pool > configurable > required.
+	// Separate layer-handled inputs first, then classify the rest.
+	// Priority: layer-handled > auto-wired > pool > configurable > required.
 	// An input that is both configurable and pool-backed should land in
 	// the pool section so the LLM gets the "omit unless user specifies"
 	// guard-rail. Similarly, auto-wired inputs keep their wiring even
 	// when configurable.
-	var requiredInputs, poolInputs, autoWiredInputs, configurableInputs []InputContext
+	var requiredInputs, poolInputs, autoWiredInputs, configurableInputs, layerHandledInputs []InputContext
 	for _, ic := range inputContexts {
-		if ic.FromResolved != "" {
+		if ic.LayerHandled {
+			layerHandledInputs = append(layerHandledInputs, ic)
+		} else if ic.FromResolved != "" {
 			autoWiredInputs = append(autoWiredInputs, ic)
 		} else if ic.IsPoolInput {
 			poolInputs = append(poolInputs, ic)
@@ -208,11 +218,38 @@ Rules:
 		}
 	}
 
-	// Workflow context (from Call 1 description).
-	if workflowDescription != "" {
-		ub.WriteString("## Workflow Context\n\n")
-		ub.WriteString(workflowDescription)
-		ub.WriteString("\n\n")
+	// Selected Configuration (from Call 1).
+	if ws != nil && (ws.Workflow != "" || ws.Description != "") {
+		ub.WriteString("## Selected Configuration\n\n")
+		if ws.Description != "" {
+			fmt.Fprintf(&ub, "Workflow: %s (%s)\n", ws.Workflow, ws.Description)
+		} else {
+			fmt.Fprintf(&ub, "Workflow: %s\n", ws.Workflow)
+		}
+		if len(ws.Choices) > 0 {
+			var choiceParts []string
+			for slot, option := range ws.Choices {
+				choiceParts = append(choiceParts, fmt.Sprintf("%s → %s", slot, option))
+			}
+			fmt.Fprintf(&ub, "Choices: %s\n", strings.Join(choiceParts, ", "))
+		}
+		if len(ws.Addons) > 0 {
+			fmt.Fprintf(&ub, "Addons: %s\n", strings.Join(ws.Addons, ", "))
+		}
+		if len(ws.Layers) > 0 {
+			fmt.Fprintf(&ub, "Layers: %s\n", strings.Join(ws.Layers, ", "))
+		}
+		ub.WriteString("\n")
+	}
+
+	// Layer-handled inputs — listed separately so the LLM knows to skip them.
+	if len(layerHandledInputs) > 0 {
+		ub.WriteString("## Layer-Handled Inputs — skip unless user intent conflicts\n\n")
+		ub.WriteString("These inputs have runtime overrides from data layers. Omit them unless the user explicitly requests different values.\n\n")
+		for _, ic := range layerHandledInputs {
+			fmt.Fprintf(&ub, "- %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
+		}
+		ub.WriteString("\n")
 	}
 
 	// User's prompt.
@@ -282,12 +319,12 @@ func buildTargetedRetryPrompt(
 	inputContexts []InputContext,
 	selectionContexts []SelectionContext,
 	userPrompt string,
-	workflowDescription string,
+	ws *WorkflowSelection,
 	now time.Time,
 	validationErrors []string,
 	hints []string,
 ) (system, user string) {
-	system, user = buildTargetedPlanPrompt(inputContexts, selectionContexts, userPrompt, workflowDescription, now)
+	system, user = buildTargetedPlanPrompt(inputContexts, selectionContexts, userPrompt, ws, now)
 
 	// Append validation error context to the system prompt.
 	var sb strings.Builder

@@ -770,7 +770,7 @@ func TestValidateWorkflowSelection_Valid(t *testing.T) {
 		Description: "Book an item",
 	}
 
-	errs := validateWorkflowSelection(ws, g)
+	errs := validateWorkflowSelection(ws, g, nil)
 	assert.Empty(t, errs)
 }
 
@@ -779,7 +779,7 @@ func TestValidateWorkflowSelection_EmptyWorkflow(t *testing.T) {
 
 	ws := &WorkflowSelection{Workflow: ""}
 
-	errs := validateWorkflowSelection(ws, g)
+	errs := validateWorkflowSelection(ws, g, nil)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "empty")
 }
@@ -789,7 +789,7 @@ func TestValidateWorkflowSelection_UnknownWorkflow(t *testing.T) {
 
 	ws := &WorkflowSelection{Workflow: "Nonexistent"}
 
-	errs := validateWorkflowSelection(ws, g)
+	errs := validateWorkflowSelection(ws, g, nil)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "not found")
 	assert.Contains(t, errs[0], "Nonexistent")
@@ -800,7 +800,7 @@ func TestValidateWorkflowSelection_TemplateLessWorkflow(t *testing.T) {
 
 	ws := &WorkflowSelection{Workflow: "No Template Flow"}
 
-	errs := validateWorkflowSelection(ws, g)
+	errs := validateWorkflowSelection(ws, g, nil)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "no template")
 }
@@ -820,7 +820,7 @@ func TestValidateWorkflowSelection_NonAddonAsAddon(t *testing.T) {
 		Addons:   []string{"Extra"},
 	}
 
-	errs := validateWorkflowSelection(ws, g)
+	errs := validateWorkflowSelection(ws, g, nil)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "not an addon")
 }
@@ -840,7 +840,7 @@ func TestValidateWorkflowSelection_DuplicateAddon(t *testing.T) {
 		Addons:   []string{"Seat", "Seat"},
 	}
 
-	errs := validateWorkflowSelection(ws, g)
+	errs := validateWorkflowSelection(ws, g, nil)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "duplicate")
 }
@@ -857,9 +857,96 @@ func TestValidateWorkflowSelection_AddonSelectedAsBase(t *testing.T) {
 
 	ws := &WorkflowSelection{Workflow: "Seat"}
 
-	errs := validateWorkflowSelection(ws, g)
+	errs := validateWorkflowSelection(ws, g, nil)
 	require.Len(t, errs, 1)
 	assert.Contains(t, errs[0], "addon, not a base workflow")
+}
+
+func TestValidateWorkflowSelection_UnknownLayer(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "workflows/main.yaml"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+	available := map[string]*graph.Layer{
+		"european": {Name: "european", Description: "European airports"},
+		"premium":  {Name: "premium", Description: "Premium cabin"},
+	}
+
+	ws := &WorkflowSelection{
+		Workflow: "Main",
+		Layers:   []string{"nonexistent"},
+	}
+
+	errs := validateWorkflowSelection(ws, g, available)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "nonexistent")
+	assert.Contains(t, errs[0], "not found")
+}
+
+func TestValidateWorkflowSelection_DuplicateLayer(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "workflows/main.yaml"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+	available := map[string]*graph.Layer{
+		"european": {Name: "european", Description: "European airports"},
+	}
+
+	ws := &WorkflowSelection{
+		Workflow: "Main",
+		Layers:   []string{"european", "european"},
+	}
+
+	errs := validateWorkflowSelection(ws, g, available)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "duplicate")
+}
+
+func TestValidateWorkflowSelection_ValidLayers(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "workflows/main.yaml"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+	available := map[string]*graph.Layer{
+		"european": {Name: "european", Description: "European airports"},
+		"premium":  {Name: "premium", Description: "Premium cabin"},
+	}
+
+	ws := &WorkflowSelection{
+		Workflow: "Main",
+		Layers:   []string{"european", "premium"},
+	}
+
+	errs := validateWorkflowSelection(ws, g, available)
+	assert.Empty(t, errs)
+}
+
+func TestValidateWorkflowSelection_LayersSkippedWhenNilAvailable(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "workflows/main.yaml"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	// LLM returns layers, but availableLayers is nil — skip validation.
+	ws := &WorkflowSelection{
+		Workflow: "Main",
+		Layers:   []string{"anything"},
+	}
+
+	errs := validateWorkflowSelection(ws, g, nil)
+	assert.Empty(t, errs)
 }
 
 func TestSelectWorkflow_RetryOnInvalid(t *testing.T) {
@@ -873,7 +960,7 @@ func TestSelectWorkflow_RetryOnInvalid(t *testing.T) {
 		},
 	}
 
-	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, fixedNow())
+	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, nil, nil, fixedNow())
 
 	require.NoError(t, err)
 	assert.Equal(t, "Booking Flow", sr.Selection.Workflow)
@@ -894,7 +981,7 @@ func TestSelectWorkflow_NoRetryWhenValid(t *testing.T) {
 		},
 	}
 
-	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, fixedNow())
+	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, nil, nil, fixedNow())
 
 	require.NoError(t, err)
 	assert.Equal(t, "Booking Flow", sr.Selection.Workflow)
