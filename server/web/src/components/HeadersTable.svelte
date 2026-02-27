@@ -16,7 +16,7 @@
     </tr>
   </thead>
   <tbody>
-    {#each headers as h (h.name)}
+    {#each headers as h, i (i)}
       <tr>
         <td class="dt-mono dt-muted">{h.name}</td>
         <td class="dt-mono">{h.value}</td>
