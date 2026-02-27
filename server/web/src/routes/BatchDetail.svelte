@@ -266,7 +266,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each group.runs as run (run.skipped || !run.runId ? `${run.planName}-${run.permutation}-nolink` : run.runId)}
+              {#each group.runs as run, ri (run.skipped || !run.runId ? `nolink-${ri}` : run.runId)}
                 {#if run.skipped || !run.runId}
                   <tr class="run-row run-row-skipped">
                     <td><OutcomeBadge outcome={run.outcome || "skipped"} size="sm" /></td>
@@ -321,7 +321,7 @@
         </tr>
       </thead>
       <tbody>
-        {#each batch.runs as run (run.skipped || !run.runId ? `${run.planName}-nolink` : run.runId)}
+        {#each batch.runs as run, ri (run.skipped || !run.runId ? `nolink-${ri}` : run.runId)}
           {#if run.skipped || !run.runId}
             <tr class="run-row run-row-skipped">
               <td><OutcomeBadge outcome={run.outcome || "skipped"} size="sm" /></td>
