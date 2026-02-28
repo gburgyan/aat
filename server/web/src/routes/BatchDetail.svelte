@@ -53,6 +53,19 @@
     writeStringPref('batchViewMode', mode);
   }
 
+  // Dimension filter state: undefined = All, null = pin to (none), string = pin to value
+  let groupFilters = $state<(string | null | undefined)[]>([]);
+
+  function setGroupFilter(gi: number, raw: string) {
+    const next = [...groupFilters];
+    next[gi] = raw === '__all__' ? undefined : raw === '__none__' ? null : raw;
+    groupFilters = next;
+  }
+
+  function clearGroupFilters() {
+    groupFilters = batch?.layerGroups?.map(() => undefined) ?? [];
+  }
+
   function toggleHideSkipped() {
     hideSkipped = !hideSkipped;
     writePref('hideSkipped', hideSkipped);
@@ -65,6 +78,7 @@
     collapsedGroups = new Set();
     try {
       batch = await fetchBatch(id);
+      groupFilters = batch.layerGroups?.map(() => undefined) ?? [];
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load batch';
     } finally {
@@ -169,6 +183,28 @@
       if (a === '(base)') return -1;
       if (b === '(base)') return 1;
       return a.localeCompare(b);
+    });
+  });
+
+  function decomposePermutation(label: string, groups: string[][]): (string | null)[] {
+    if (label === '(base)') return groups.map(() => null);
+    const tokens = new Set(label.split(', '));
+    return groups.map(g => g.find(v => tokens.has(v)) ?? null);
+  }
+
+  let groupLabels = $derived(batch?.layerGroups?.map(g => g.join(' / ')) ?? []);
+
+  let hasActiveGroupFilters = $derived(groupFilters.some(f => f !== undefined));
+
+  let filteredPermutationLabels = $derived.by((): string[] => {
+    if (!batch?.layerGroups || !hasActiveGroupFilters) return permutationLabels;
+    return permutationLabels.filter(label => {
+      const vals = decomposePermutation(label, batch!.layerGroups!);
+      return vals.every((v, i) => {
+        const f = groupFilters[i];
+        if (f === undefined) return true;  // "All"
+        return f === null ? v === null : v === f;
+      });
     });
   });
 
@@ -493,57 +529,89 @@
       </div>
     {/each}
   {:else if hasPermutations && viewMode === 'tests'}
-    <div class="test-matrix-wrapper">
-      <table class="run-table test-matrix">
-        <thead>
-          <tr>
-            <th class="matrix-test-name matrix-fixed-header">Test</th>
-            <th class="matrix-fixed-header">Overall</th>
-            {#each permutationLabels as perm}
-              <th class="matrix-perm-header" title={perm}><span>{perm}</span></th>
-            {/each}
-          </tr>
-        </thead>
-        <tbody>
-          {#each testMatrix as row (row.planName)}
-            <tr class="matrix-row">
-              <td class="matrix-test-name" title={row.planName}>{row.planName}</td>
-              <td><OutcomeBadge outcome={row.overallOutcome} size="sm" /></td>
-              {#each permutationLabels as perm}
-                {@const cell = row.cells.get(perm)}
-                <td class="matrix-cell">
-                  {#if !cell}
-                    <span class="matrix-empty">&mdash;</span>
-                  {:else if cell.run.skipped || !cell.run.runId}
-                    {@const rep = cell.run.duplicateOf ? representativeMap.get(cell.run.duplicateOf) : undefined}
-                    {#if hideSkipped && rep}
-                      <span class="matrix-proxy" title="Duplicate of {cell.run.duplicateOf}">
-                        <OutcomeBadge outcome={rep.outcome} size="sm" />
-                      </span>
-                    {:else}
-                      <span class="matrix-skipped" title={cell.run.duplicateOf ? `Duplicate of ${cell.run.duplicateOf}` : cell.run.error || 'Skipped'}>
-                        <OutcomeBadge outcome={cell.run.outcome || 'skipped'} size="sm" />
-                      </span>
-                    {/if}
-                  {:else}
-                    <button
-                      class="matrix-cell-btn"
-                      onclick={() => goToRun(cell.run.runId)}
-                      title="{cell.run.planName} — {perm}"
-                    >
-                      <OutcomeBadge outcome={cell.run.outcome} size="sm" />
-                      {#if cell.run.attempts && cell.run.attempts > 1}
-                        <span class="matrix-retry" title="Took {cell.run.attempts} attempts">!</span>
-                      {/if}
-                    </button>
-                  {/if}
-                </td>
+    {#if batch.layerGroups && batch.layerGroups.length > 0}
+      <div class="dimension-filters">
+        {#each batch.layerGroups as group, gi}
+          <div class="dimension-filter">
+            <label class="dimension-filter-label" for="group-filter-{gi}">{groupLabels[gi]}</label>
+            <select
+              id="group-filter-{gi}"
+              class="dimension-filter-select"
+              value={groupFilters[gi] === undefined ? '__all__' : groupFilters[gi] === null ? '__none__' : groupFilters[gi]}
+              onchange={(e: Event) => setGroupFilter(gi, (e.target as HTMLSelectElement).value)}
+            >
+              <option value="__all__">All</option>
+              <option value="__none__">(none)</option>
+              {#each group as val}
+                <option value={val}>{val}</option>
+              {/each}
+            </select>
+          </div>
+        {/each}
+        {#if hasActiveGroupFilters}
+          <button class="dimension-clear-btn" onclick={clearGroupFilters}>Clear filters</button>
+          <span class="dimension-count">{filteredPermutationLabels.length} of {permutationLabels.length} permutations</span>
+        {/if}
+      </div>
+    {/if}
+    {#if filteredPermutationLabels.length === 0}
+      <div class="empty-state">
+        <p>No permutations match the current filters</p>
+        <button class="dimension-clear-btn" onclick={clearGroupFilters}>Clear filters</button>
+      </div>
+    {:else}
+      <div class="test-matrix-wrapper">
+        <table class="run-table test-matrix">
+          <thead>
+            <tr>
+              <th class="matrix-test-name matrix-fixed-header">Test</th>
+              <th class="matrix-fixed-header">Overall</th>
+              {#each filteredPermutationLabels as perm}
+                <th class="matrix-perm-header" title={perm}><span>{perm}</span></th>
               {/each}
             </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {#each testMatrix as row (row.planName)}
+              <tr class="matrix-row">
+                <td class="matrix-test-name" title={row.planName}>{row.planName}</td>
+                <td><OutcomeBadge outcome={row.overallOutcome} size="sm" /></td>
+                {#each filteredPermutationLabels as perm}
+                  {@const cell = row.cells.get(perm)}
+                  <td class="matrix-cell">
+                    {#if !cell}
+                      <span class="matrix-empty">&mdash;</span>
+                    {:else if cell.run.skipped || !cell.run.runId}
+                      {@const rep = cell.run.duplicateOf ? representativeMap.get(cell.run.duplicateOf) : undefined}
+                      {#if hideSkipped && rep}
+                        <span class="matrix-proxy" title="Duplicate of {cell.run.duplicateOf}">
+                          <OutcomeBadge outcome={rep.outcome} size="sm" />
+                        </span>
+                      {:else}
+                        <span class="matrix-skipped" title={cell.run.duplicateOf ? `Duplicate of ${cell.run.duplicateOf}` : cell.run.error || 'Skipped'}>
+                          <OutcomeBadge outcome={cell.run.outcome || 'skipped'} size="sm" />
+                        </span>
+                      {/if}
+                    {:else}
+                      <button
+                        class="matrix-cell-btn"
+                        onclick={() => goToRun(cell.run.runId)}
+                        title="{cell.run.planName} — {perm}"
+                      >
+                        <OutcomeBadge outcome={cell.run.outcome} size="sm" />
+                        {#if cell.run.attempts && cell.run.attempts > 1}
+                          <span class="matrix-retry" title="Took {cell.run.attempts} attempts">!</span>
+                        {/if}
+                      </button>
+                    {/if}
+                  </td>
+                {/each}
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
   {:else}
     <table class="run-table">
       <thead>
@@ -948,5 +1016,55 @@
   }
   .matrix-row:hover .matrix-test-name {
     color: var(--color-text, #f3f4f6);
+  }
+  .dimension-filters {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+  }
+  .dimension-filter {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .dimension-filter-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-muted, #9ca3af);
+    white-space: nowrap;
+  }
+  .dimension-filter-select {
+    padding: 0.2rem 0.4rem;
+    font-size: 0.8rem;
+    border: 1px solid var(--color-border, #374151);
+    background: var(--color-bg-secondary, #1f2937);
+    color: var(--color-text, #f3f4f6);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .dimension-filter-select:focus {
+    outline: none;
+    border-color: var(--color-primary, #6366f1);
+  }
+  .dimension-clear-btn {
+    padding: 0.2rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border: 1px solid var(--color-border, #374151);
+    background: transparent;
+    color: var(--color-text-muted, #9ca3af);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .dimension-clear-btn:hover {
+    background: var(--color-bg-hover, rgba(99, 102, 241, 0.08));
+    color: var(--color-text, #f3f4f6);
+  }
+  .dimension-count {
+    font-size: 0.75rem;
+    color: var(--color-text-muted, #9ca3af);
   }
 </style>
