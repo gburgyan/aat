@@ -376,12 +376,12 @@
                   <span class="flight-number">{seg.flightNumber}</span>
                   <span class="route">
                     <span class="station">{seg.origin}</span>
-                    <span class="route-arrow">\u2192</span>
+                    <span class="route-arrow">→</span>
                     <span class="station">{seg.destination}</span>
                   </span>
                   <span class="times">
                     {seg.departureTime}
-                    <span class="time-arrow">\u2013</span>
+                    <span class="time-arrow">–</span>
                     {seg.arrivalTime}
                   </span>
                   {#if i === 0}
