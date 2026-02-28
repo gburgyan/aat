@@ -56,12 +56,18 @@ var webCmd = &cobra.Command{
 			tracesDir = resolved.TracesDir
 		}
 
+		visualizerDir := ""
+		if resolved.VisualizersDir != "" {
+			visualizerDir = resolved.VisualizersDir
+		}
+
 		return webServeCommand(&webArgs{
-			Port:       port,
-			Open:       openFlag,
-			DevMode:    devMode,
-			ArchiveDir: outputDir,
-			TracesDir:  tracesDir,
+			Port:          port,
+			Open:          openFlag,
+			DevMode:       devMode,
+			ArchiveDir:    outputDir,
+			TracesDir:     tracesDir,
+			VisualizerDir: visualizerDir,
 		})
 	},
 }
@@ -119,7 +125,12 @@ loaded directly into memory — no project setup or manifest is needed.`,
 			tracesDir = resolved.TracesDir
 		}
 
-		return webViewCommand(port, ref, outputDir, tracesDir)
+		visualizerDir := ""
+		if resolved.VisualizersDir != "" {
+			visualizerDir = resolved.VisualizersDir
+		}
+
+		return webViewCommand(port, ref, outputDir, tracesDir, visualizerDir)
 	},
 }
 
@@ -155,12 +166,17 @@ var webViewTraceCmd = &cobra.Command{
 			tracesDir = resolved.TracesDir
 		}
 
+		visualizerDir := ""
+		if resolved.VisualizersDir != "" {
+			visualizerDir = resolved.VisualizersDir
+		}
+
 		traceRef := ""
 		if len(args) > 0 {
 			traceRef = args[0]
 		}
 
-		return webViewTraceCommand(port, traceRef, outputDir, tracesDir)
+		return webViewTraceCommand(port, traceRef, outputDir, tracesDir, visualizerDir)
 	},
 }
 
@@ -185,21 +201,23 @@ func init() {
 
 // webArgs holds parsed CLI flags for the web serve command.
 type webArgs struct {
-	Port       int
-	Open       bool
-	DevMode    bool
-	ArchiveDir string
-	TracesDir  string
-	OpenURL    string // specific URL to open; if empty and Open is true, opens the base URL
+	Port          int
+	Open          bool
+	DevMode       bool
+	ArchiveDir    string
+	TracesDir     string
+	VisualizerDir string
+	OpenURL       string // specific URL to open; if empty and Open is true, opens the base URL
 }
 
 // webServeCommand starts the web server and blocks until interrupted.
 func webServeCommand(args *webArgs) error {
 	srv := server.NewServer(server.ServerOptions{
-		Port:       args.Port,
-		ArchiveDir: args.ArchiveDir,
-		TracesDir:  args.TracesDir,
-		DevMode:    args.DevMode,
+		Port:          args.Port,
+		ArchiveDir:    args.ArchiveDir,
+		TracesDir:     args.TracesDir,
+		VisualizerDir: args.VisualizerDir,
+		DevMode:       args.DevMode,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -238,7 +256,7 @@ func webServeCommand(args *webArgs) error {
 
 // webViewCommand opens a run in the browser. If no server is running on the
 // given port, it starts a temporary one that serves until interrupted.
-func webViewCommand(port int, ref string, archiveDir string, tracesDir string) error {
+func webViewCommand(port int, ref string, archiveDir string, tracesDir string, visualizerDir string) error {
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 
 	if err := checkServerHealth(baseURL); err == nil {
@@ -250,17 +268,18 @@ func webViewCommand(port int, ref string, archiveDir string, tracesDir string) e
 	// No server running — start an ephemeral one and open the ref URL.
 	fmt.Fprintf(os.Stderr, "aat web: no server running on port %d, starting one...\n", port)
 	return webServeCommand(&webArgs{
-		Port:       port,
-		Open:       true,
-		OpenURL:    buildViewURL(port, ref, archiveDir),
-		ArchiveDir: archiveDir,
-		TracesDir:  tracesDir,
+		Port:          port,
+		Open:          true,
+		OpenURL:       buildViewURL(port, ref, archiveDir),
+		ArchiveDir:    archiveDir,
+		TracesDir:     tracesDir,
+		VisualizerDir: visualizerDir,
 	})
 }
 
 // webViewTraceCommand opens the trace viewer in the browser. If no server is
 // running on the given port, it starts a temporary one that serves until interrupted.
-func webViewTraceCommand(port int, traceRef string, archiveDir string, tracesDir string) error {
+func webViewTraceCommand(port int, traceRef string, archiveDir string, tracesDir string, visualizerDir string) error {
 	baseURL := fmt.Sprintf("http://localhost:%d", port)
 
 	url := buildTraceViewURL(port, traceRef)
@@ -271,11 +290,12 @@ func webViewTraceCommand(port int, traceRef string, archiveDir string, tracesDir
 
 	fmt.Fprintf(os.Stderr, "aat web: no server running on port %d, starting one...\n", port)
 	return webServeCommand(&webArgs{
-		Port:       port,
-		Open:       true,
-		OpenURL:    url,
-		ArchiveDir: archiveDir,
-		TracesDir:  tracesDir,
+		Port:          port,
+		Open:          true,
+		OpenURL:       url,
+		ArchiveDir:    archiveDir,
+		TracesDir:     tracesDir,
+		VisualizerDir: visualizerDir,
 	})
 }
 

@@ -123,6 +123,7 @@ type StepDetail struct {
 	InstantiatedStepYAML string                   `json:"instantiatedStepYaml,omitempty"`
 	PrevStepID           string                   `json:"prevStepId,omitempty"`
 	NextStepID           string                   `json:"nextStepId,omitempty"`
+	Visualizers          []VisualizerHit          `json:"visualizers,omitempty"`
 }
 
 // ExtractionDetail captures a single output value and which downstream steps consumed it.

@@ -151,12 +151,12 @@ func TestWebViewTraceCommand_ServerAlreadyRunning(t *testing.T) {
 	defer func() { openURLFunc = orig }()
 
 	// No ref → opens trace list.
-	err := webViewTraceCommand(19225, "", t.TempDir(), "")
+	err := webViewTraceCommand(19225, "", t.TempDir(), "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "http://localhost:19225/traces", opened)
 
 	// With ref → opens specific trace.
-	err = webViewTraceCommand(19225, "trace-abc123", t.TempDir(), "")
+	err = webViewTraceCommand(19225, "trace-abc123", t.TempDir(), "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "http://localhost:19225/traces/trace-abc123", opened)
 }
@@ -219,7 +219,7 @@ func TestWebViewCommand_ServerAlreadyRunning(t *testing.T) {
 	defer func() { openURLFunc = orig }()
 
 	// Should open immediately without starting a new server.
-	err := webViewCommand(19223, "latest", t.TempDir(), "")
+	err := webViewCommand(19223, "latest", t.TempDir(), "", "")
 	require.NoError(t, err)
 	assert.Equal(t, "http://localhost:19223/runs/latest", opened)
 }
@@ -240,7 +240,7 @@ func TestWebViewCommand_StartsEphemeralServer(t *testing.T) {
 	// We run it in a goroutine because it blocks until signal.
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- webViewCommand(19224, "latest", archiveDir, "")
+		errCh <- webViewCommand(19224, "latest", archiveDir, "", "")
 	}()
 
 	// Wait for the ephemeral server to come up and open the browser.

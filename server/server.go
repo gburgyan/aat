@@ -15,11 +15,12 @@ import (
 
 // ServerOptions configures the web server.
 type ServerOptions struct {
-	Port       int
-	ArchiveDir string
-	TracesDir  string
-	DevMode    bool
-	ViteURL    string // Vite dev server URL for dev proxy (default http://localhost:5173)
+	Port          int
+	ArchiveDir    string
+	TracesDir     string
+	VisualizerDir string
+	DevMode       bool
+	ViteURL       string // Vite dev server URL for dev proxy (default http://localhost:5173)
 }
 
 // Server is the AAT web API server.
@@ -27,6 +28,7 @@ type Server struct {
 	opts         ServerOptions
 	service      ArchiveService
 	traceService *TraceService
+	visualizers  []VisualizerDef
 	router       chi.Router
 	httpServer   *http.Server
 	mu           sync.Mutex
@@ -40,10 +42,16 @@ func NewServer(opts ServerOptions) *Server {
 		opts.Port = 9119
 	}
 
+	vizDefs, err := LoadVisualizers(opts.VisualizerDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "aat web: warning: loading visualizers: %s\n", err)
+	}
+
 	s := &Server{
 		opts:         opts,
 		service:      NewArchiveService(opts.ArchiveDir),
 		traceService: NewTraceService(opts.TracesDir),
+		visualizers:  vizDefs,
 	}
 	s.router = s.buildRouter()
 	return s
@@ -99,6 +107,8 @@ func (s *Server) buildRouter() chi.Router {
 
 		r.Get("/traces", s.handleListTraces)
 		r.Get("/traces/{id}", s.handleGetTrace)
+
+		r.Get("/visualizers/{id}", s.handleGetVisualizer)
 	})
 
 	// Resolve /runs/latest to the actual run ID so the SPA has a real ID in the URL.

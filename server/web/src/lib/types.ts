@@ -110,6 +110,12 @@ export interface StepDetail {
   instantiatedStepYaml?: string;
   prevStepId?: string;
   nextStepId?: string;
+  visualizers?: VisualizerHit[];
+}
+
+export interface VisualizerHit {
+  id: string;
+  name: string;
 }
 
 export interface ExtractionDetail {

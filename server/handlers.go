@@ -187,6 +187,7 @@ func (s *Server) handleGetAttemptStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	s.enrichStepVisualizers(step)
 	writeJSON(w, http.StatusOK, step)
 }
 
@@ -203,6 +204,7 @@ func (s *Server) handleGetStep(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	s.enrichStepVisualizers(step)
 	writeJSON(w, http.StatusOK, step)
 }
 

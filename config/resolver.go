@@ -9,16 +9,17 @@ import (
 // ProjectPaths holds resolved file paths for a project's artifacts.
 // Empty string means "not resolved from any source."
 type ProjectPaths struct {
-	GraphPath     string
-	TemplatesPath string
-	EnvPath       string
-	DomainPath    string
-	WorkflowsDir  string
-	LayersDir     string
-	PlanDirs      []string
-	ArchiveDir    string
-	TracesDir     string
-	ManifestPath  string // path to aat-project.yaml if found
+	GraphPath      string
+	TemplatesPath  string
+	EnvPath        string
+	DomainPath     string
+	WorkflowsDir   string
+	LayersDir      string
+	PlanDirs       []string
+	ArchiveDir     string
+	TracesDir      string
+	VisualizersDir string
+	ManifestPath   string // path to aat-project.yaml if found
 
 	ExplicitManifest string // --manifest flag value; takes priority over auto-discovery
 }
@@ -89,6 +90,9 @@ func ResolveProjectPaths(overrides ProjectPaths) (*ProjectPaths, error) {
 	if overrides.TracesDir != "" {
 		result.TracesDir = overrides.TracesDir
 	}
+	if overrides.VisualizersDir != "" {
+		result.VisualizersDir = overrides.VisualizersDir
+	}
 	// ManifestPath is only set from discovery, not from overrides.
 
 	return result, nil
@@ -135,6 +139,9 @@ func applyManifest(result *ProjectPaths, pathOrDir string) {
 	}
 	if m.TracesDir != "" {
 		result.TracesDir = m.TracesDir
+	}
+	if m.VisualizersDir != "" {
+		result.VisualizersDir = m.VisualizersDir
 	}
 }
 

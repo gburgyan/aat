@@ -14,6 +14,7 @@
   import YamlViewer from '../components/YamlViewer.svelte';
   import ErrorPanel from '../components/ErrorPanel.svelte';
   import OASValidationPanel from '../components/OASValidationPanel.svelte';
+  import VisualizerFrame from '../components/VisualizerFrame.svelte';
 
   interface Props {
     runId: string;
@@ -65,6 +66,11 @@
     const t: TabDef[] = [];
     if (step.request) t.push({ id: 'request', label: 'Request' });
     if (step.response) t.push({ id: 'response', label: 'Response' });
+    if (step.visualizers && step.visualizers.length > 0) {
+      for (const viz of step.visualizers) {
+        t.push({ id: `viz-${viz.id}`, label: viz.name });
+      }
+    }
     if (step.extractions && step.extractions.length > 0)
       t.push({ id: 'extractions', label: `Extractions (${step.extractions.length})` });
     if (step.transformScript && step.outputs)
@@ -262,6 +268,14 @@
           <h4 class="section-heading">Body</h4>
           <JsonViewer data={step.response.body} />
         {/if}
+      {/if}
+
+      {#if step.visualizers && step.visualizers.length > 0}
+        {#each step.visualizers as viz}
+          {#if activeTab === `viz-${viz.id}` && step.response?.body}
+            <VisualizerFrame visualizerId={viz.id} responseBody={step.response.body} />
+          {/if}
+        {/each}
       {/if}
 
       {#if activeTab === 'extractions' && step.extractions}
