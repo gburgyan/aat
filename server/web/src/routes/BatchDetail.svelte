@@ -186,14 +186,13 @@
     if (!batch || !hasPermutations) return [];
     const byName = new Map<string, Map<string, TestMatrixCell>>();
     for (const run of batch.runs) {
-      if (hideSkipped && run.skipped) continue;
       const perm = run.permutation || '(base)';
       if (!byName.has(run.planName)) byName.set(run.planName, new Map());
       byName.get(run.planName)!.set(perm, { run });
     }
     const rows: TestMatrixRow[] = [];
     for (const [planName, cells] of byName) {
-      const runs = [...cells.values()].map(c => c.run);
+      const runs = [...cells.values()].map(c => c.run).filter(r => !r.skipped);
       const hasError = runs.some(r => r.outcome === 'error');
       const hasFailed = runs.some(r => r.outcome === 'failed');
       const hasPassed = runs.some(r => r.outcome === 'passed');
@@ -203,6 +202,19 @@
     }
     rows.sort((a, b) => a.planName.localeCompare(b.planName));
     return rows;
+  });
+
+  let representativeMap = $derived.by((): Map<string, BatchRunSummary> => {
+    if (!batch) return new Map();
+    const map = new Map<string, BatchRunSummary>();
+    for (const run of batch.runs) {
+      if (run.skipped || !run.runId) continue;
+      const key = run.permutation
+        ? `${run.planName} [${run.permutation}]`
+        : run.planName;
+      map.set(key, run);
+    }
+    return map;
   });
 
   function toggleGroup(label: string) {
@@ -488,9 +500,16 @@
                   {#if !cell}
                     <span class="matrix-empty">&mdash;</span>
                   {:else if cell.run.skipped || !cell.run.runId}
-                    <span class="matrix-skipped" title={cell.run.duplicateOf ? `Duplicate of ${cell.run.duplicateOf}` : cell.run.error || 'Skipped'}>
-                      <OutcomeBadge outcome={cell.run.outcome || 'skipped'} size="sm" />
-                    </span>
+                    {@const rep = cell.run.duplicateOf ? representativeMap.get(cell.run.duplicateOf) : undefined}
+                    {#if hideSkipped && rep}
+                      <span class="matrix-proxy" title="Duplicate of {cell.run.duplicateOf}">
+                        <OutcomeBadge outcome={rep.outcome} size="sm" />
+                      </span>
+                    {:else}
+                      <span class="matrix-skipped" title={cell.run.duplicateOf ? `Duplicate of ${cell.run.duplicateOf}` : cell.run.error || 'Skipped'}>
+                        <OutcomeBadge outcome={cell.run.outcome || 'skipped'} size="sm" />
+                      </span>
+                    {/if}
                   {:else}
                     <button
                       class="matrix-cell-btn"
@@ -878,6 +897,9 @@
   .matrix-cell-btn:focus-visible {
     outline: 2px solid var(--color-primary, #6366f1);
     outline-offset: 1px;
+  }
+  .matrix-proxy {
+    opacity: 0.35;
   }
   .matrix-empty {
     color: var(--color-text-muted, #9ca3af);
