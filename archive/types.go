@@ -170,17 +170,18 @@ type ValueResolutionRecord struct {
 // RunSummary is a lightweight summary of a run, written alongside the full
 // archive as summary.json to avoid reading multi-megabyte archives for listing.
 type RunSummary struct {
-	RunID         string    `json:"runId"`
-	Timestamp     time.Time `json:"timestamp"`
-	Outcome       string    `json:"outcome"`
-	StepCount     int       `json:"stepCount"`
-	PassedCount   int       `json:"passedCount"`
-	FailedCount   int       `json:"failedCount"`
-	DurationMs    int64     `json:"durationMs"`
-	PlanName      string    `json:"planName,omitempty"`
-	Attempt       int       `json:"attempt,omitempty"`
-	TotalAttempts int       `json:"totalAttempts,omitempty"`
-	Layers        []string  `json:"layers,omitempty"`
+	RunID         string         `json:"runId"`
+	Timestamp     time.Time      `json:"timestamp"`
+	Outcome       string         `json:"outcome"`
+	StepCount     int            `json:"stepCount"`
+	PassedCount   int            `json:"passedCount"`
+	FailedCount   int            `json:"failedCount"`
+	DurationMs    int64          `json:"durationMs"`
+	PlanName      string         `json:"planName,omitempty"`
+	Attempt       int            `json:"attempt,omitempty"`
+	TotalAttempts int            `json:"totalAttempts,omitempty"`
+	Layers        []string       `json:"layers,omitempty"`
+	Issues        map[string]int `json:"issues,omitempty"`
 }
 
 // ArchiveResult captures the overall outcome of a run.
@@ -209,19 +210,20 @@ type BatchMetadata struct {
 
 // BatchRunEntry is a summary of a single run within a batch.
 type BatchRunEntry struct {
-	PlanName    string   `json:"planName"`
-	RunID       string   `json:"runId"`
-	Outcome     string   `json:"outcome"`
-	StepCount   int      `json:"stepCount"`
-	PassedCount int      `json:"passedCount"`
-	FailedCount int      `json:"failedCount"`
-	DurationMs  int64    `json:"durationMs"`
-	Error       string   `json:"error,omitempty"`
-	Attempts    int      `json:"attempts,omitempty"`    // total attempts (omitted if 1)
-	Layers      []string `json:"layers,omitempty"`      // effective layers for this run
-	Permutation string   `json:"permutation,omitempty"` // permutation label for grouping
-	Skipped     bool     `json:"skipped,omitempty"`     // true if this run was skipped as a duplicate
-	DuplicateOf string   `json:"duplicateOf,omitempty"` // display name of canonical run (when skipped)
+	PlanName    string         `json:"planName"`
+	RunID       string         `json:"runId"`
+	Outcome     string         `json:"outcome"`
+	StepCount   int            `json:"stepCount"`
+	PassedCount int            `json:"passedCount"`
+	FailedCount int            `json:"failedCount"`
+	DurationMs  int64          `json:"durationMs"`
+	Error       string         `json:"error,omitempty"`
+	Attempts    int            `json:"attempts,omitempty"`    // total attempts (omitted if 1)
+	Layers      []string       `json:"layers,omitempty"`      // effective layers for this run
+	Permutation string         `json:"permutation,omitempty"` // permutation label for grouping
+	Skipped     bool           `json:"skipped,omitempty"`     // true if this run was skipped as a duplicate
+	DuplicateOf string         `json:"duplicateOf,omitempty"` // display name of canonical run (when skipped)
+	Issues      map[string]int `json:"issues,omitempty"`
 }
 
 // BatchResult captures the aggregate outcome of a batch.

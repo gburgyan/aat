@@ -2,7 +2,7 @@
   import type { BatchDetail, BatchRunSummary, Outcome } from '../lib/types';
   import { fetchBatch, renameBatch, unnameBatch, exportBatchUrl } from '../lib/api';
   import { navigate, encPath } from '../lib/router';
-  import { formatDuration, timeAgo, formatTimestamp } from '../lib/format';
+  import { formatDuration, timeAgo, formatTimestamp, totalIssueCount, issueTooltip } from '../lib/format';
   import LoadingSpinner from '../components/LoadingSpinner.svelte';
   import OutcomeBadge from '../components/OutcomeBadge.svelte';
 
@@ -367,6 +367,16 @@
           </span>
         </div>
       {/if}
+      {#if totalIssueCount(batch.issues) > 0}
+        <div class="run-detail-meta-item">
+          <span class="meta-label">Issues</span>
+          <span class="meta-value">
+            <span class="issues-badge" title={issueTooltip(batch.issues)}>
+              {totalIssueCount(batch.issues)} issues
+            </span>
+          </span>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -462,6 +472,11 @@
                         {#each extraLayers as layer}
                           <span class="layer-badge" title="Layer: {layer}">{layer}</span>
                         {/each}
+                      {/if}
+                      {#if totalIssueCount(run.issues) > 0}
+                        <span class="issues-badge" title={issueTooltip(run.issues)}>
+                          {totalIssueCount(run.issues)} issues
+                        </span>
                       {/if}
                     </td>
                     <td class="cell-steps">
@@ -574,6 +589,11 @@
                   {#each run.layers as layer}
                     <span class="layer-badge" title="Layer: {layer}">{layer}</span>
                   {/each}
+                {/if}
+                {#if totalIssueCount(run.issues) > 0}
+                  <span class="issues-badge" title={issueTooltip(run.issues)}>
+                    {totalIssueCount(run.issues)} issues
+                  </span>
                 {/if}
               </td>
               <td class="cell-steps">
@@ -719,6 +739,19 @@
     letter-spacing: 0.03em;
     color: var(--color-primary, #6366f1);
     background: rgba(99, 102, 241, 0.12);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    margin-left: 0.4rem;
+    vertical-align: baseline;
+  }
+  .issues-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--color-warning, #f59e0b);
+    background: rgba(245, 158, 11, 0.12);
     padding: 0.1rem 0.35rem;
     border-radius: 3px;
     margin-left: 0.4rem;

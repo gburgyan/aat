@@ -27,6 +27,12 @@ func BuildRunSummary(a *Archive) *RunSummary {
 		totalDur += s.DurationMs
 	}
 
+	// Count categorized issues across all steps (main + cleanup).
+	var allSteps []StepRecord
+	allSteps = append(allSteps, a.Steps...)
+	allSteps = append(allSteps, a.Cleanup...)
+	issues := countIssues(allSteps)
+
 	return &RunSummary{
 		RunID:         a.Metadata.RunID,
 		Timestamp:     a.Metadata.Timestamp,
@@ -39,6 +45,7 @@ func BuildRunSummary(a *Archive) *RunSummary {
 		Attempt:       a.Metadata.Attempt,
 		TotalAttempts: a.Metadata.TotalAttempts,
 		Layers:        a.Metadata.Layers,
+		Issues:        issues,
 	}
 }
 
@@ -91,6 +98,31 @@ func stepRecordPassed(s StepRecord) bool {
 		return false
 	}
 	return true
+}
+
+// countIssues counts categorized issues across all steps. Returns nil when
+// no issues exist so omitempty works correctly.
+func countIssues(steps []StepRecord) map[string]int {
+	var issues map[string]int
+	for _, s := range steps {
+		if s.OASValidation == nil || s.OASValidation.Skipped {
+			continue
+		}
+		n := 0
+		if s.OASValidation.Request != nil {
+			n += len(s.OASValidation.Request.Errors)
+		}
+		if s.OASValidation.Response != nil {
+			n += len(s.OASValidation.Response.Errors)
+		}
+		if n > 0 {
+			if issues == nil {
+				issues = make(map[string]int)
+			}
+			issues["oas"] += n
+		}
+	}
+	return issues
 }
 
 // extractPlanName returns a human-readable name for the plan, preferring

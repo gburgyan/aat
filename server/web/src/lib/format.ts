@@ -32,6 +32,20 @@ export function formatTimestamp(date: string): string {
   return new Date(date).toLocaleString();
 }
 
+/** Total count of all categorized issues. */
+export function totalIssueCount(issues?: Record<string, number>): number {
+  if (!issues) return 0;
+  return Object.values(issues).reduce((sum, n) => sum + n, 0);
+}
+
+/** Tooltip text with per-category breakdown. */
+export function issueTooltip(issues?: Record<string, number>): string {
+  if (!issues) return '';
+  return Object.entries(issues)
+    .map(([cat, n]) => `${cat.toUpperCase()}: ${n}`)
+    .join(', ');
+}
+
 /** Map an HTTP status code to a semantic category for CSS class selection. */
 export function httpStatusCategory(
   status: number | undefined,

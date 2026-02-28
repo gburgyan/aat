@@ -83,10 +83,11 @@ type DisplayOutputEntry struct {
 
 // SummaryStats is the aggregate counts in the JSON summary.
 type SummaryStats struct {
-	TotalSteps  int   `json:"total_steps"`
-	PassedSteps int   `json:"passed_steps"`
-	FailedSteps int   `json:"failed_steps"`
-	DurationMs  int64 `json:"duration_ms"`
+	TotalSteps  int            `json:"total_steps"`
+	PassedSteps int            `json:"passed_steps"`
+	FailedSteps int            `json:"failed_steps"`
+	DurationMs  int64          `json:"duration_ms"`
+	Issues      map[string]int `json:"issues,omitempty"`
 }
 
 // runResult is the internal result from runCommand, used by executeRun
@@ -155,9 +156,32 @@ func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
 		PassedSteps: passed,
 		FailedSteps: failed,
 		DurationMs:  totalDur.Milliseconds(),
+		Issues:      countEngineIssues(result),
 	}
 
 	return s
+}
+
+// countEngineIssues counts categorized issues across engine step results.
+// Returns nil when no issues exist so omitempty works correctly.
+func countEngineIssues(result *engine.RunResult) map[string]int {
+	var issues map[string]int
+	allSteps := make([]engine.StepResult, 0, len(result.Steps)+len(result.CleanupResults))
+	allSteps = append(allSteps, result.Steps...)
+	allSteps = append(allSteps, result.CleanupResults...)
+	for _, step := range allSteps {
+		if step.OASValidation == nil {
+			continue
+		}
+		n := step.OASValidation.ErrorCount()
+		if n > 0 {
+			if issues == nil {
+				issues = make(map[string]int)
+			}
+			issues["oas"] += n
+		}
+	}
+	return issues
 }
 
 // toStepSummary converts a single engine.StepResult to a StepSummary.

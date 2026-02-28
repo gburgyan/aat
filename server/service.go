@@ -803,6 +803,7 @@ func summaryToRunListEntry(s *archive.RunSummary) RunListEntry {
 		Attempt:       s.Attempt,
 		TotalAttempts: s.TotalAttempts,
 		Layers:        s.Layers,
+		Issues:        s.Issues,
 	}
 }
 
@@ -821,6 +822,7 @@ func toBatchListEntry(b *archive.BatchArchive) BatchListEntry {
 		Source:          b.Metadata.Source,
 		ToolVersion:     b.Metadata.ToolVersion,
 		Layers:          b.Metadata.Layers,
+		Issues:          aggregateIssues(b.Runs),
 	}
 }
 
@@ -841,6 +843,7 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 			Permutation: r.Permutation,
 			Skipped:     r.Skipped,
 			DuplicateOf: r.DuplicateOf,
+			Issues:      r.Issues,
 		}
 	}
 
@@ -860,6 +863,7 @@ func toBatchDetail(b *archive.BatchArchive) *BatchDetail {
 		Runs:            runs,
 		Layers:          b.Metadata.Layers,
 		LayerGroups:     b.Metadata.LayerGroups,
+		Issues:          aggregateIssues(b.Runs),
 	}
 }
 
@@ -1217,6 +1221,24 @@ func toOASPayloadDetail(r *archive.OASPayloadRecord) *OASPayloadDetail {
 		})
 	}
 	return detail
+}
+
+// aggregateIssues sums issue maps across non-skipped batch run entries.
+// Returns nil when no issues exist.
+func aggregateIssues(runs []archive.BatchRunEntry) map[string]int {
+	var agg map[string]int
+	for _, r := range runs {
+		if r.Skipped {
+			continue
+		}
+		for cat, n := range r.Issues {
+			if agg == nil {
+				agg = make(map[string]int)
+			}
+			agg[cat] += n
+		}
+	}
+	return agg
 }
 
 func oasErrorCount(r *archive.OASValidationRecord) int {

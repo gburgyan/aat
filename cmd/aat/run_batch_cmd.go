@@ -747,6 +747,11 @@ func buildPlanResult(planName, permutation string, res *runResult) (BatchRunResu
 	be.Layers = res.layers
 	br.Layers = res.layers
 
+	// Propagate categorized issues
+	if res.summary != nil {
+		be.Issues = res.summary.Summary.Issues
+	}
+
 	return br, be
 }
 

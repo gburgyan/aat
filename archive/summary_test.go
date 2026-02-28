@@ -376,6 +376,102 @@ func TestWriteReadSummary_RoundTrip_NilLayers(t *testing.T) {
 	assert.NotContains(t, string(data), `"layers"`)
 }
 
+func TestBuildRunSummary_WithOASIssues(t *testing.T) {
+	a := &Archive{
+		Metadata: ArchiveMetadata{RunID: "run-oas"},
+		Steps: []StepRecord{
+			{Node: "step1", DurationMs: 100, Inputs: map[string]any{},
+				OASValidation: &OASValidationRecord{
+					Request:  &OASPayloadRecord{Valid: false, Errors: []OASSchemaError{{Path: "/a", Message: "bad"}}},
+					Response: &OASPayloadRecord{Valid: false, Errors: []OASSchemaError{{Path: "/b", Message: "wrong"}, {Path: "/c", Message: "missing"}}},
+				}},
+			{Node: "step2", DurationMs: 100, Inputs: map[string]any{},
+				OASValidation: &OASValidationRecord{
+					Response: &OASPayloadRecord{Valid: false, Errors: []OASSchemaError{{Path: "/d", Message: "extra"}}},
+				}},
+		},
+		Cleanup: []StepRecord{
+			{Node: "cleanup1", DurationMs: 50, Inputs: map[string]any{},
+				OASValidation: &OASValidationRecord{
+					Request: &OASPayloadRecord{Valid: false, Errors: []OASSchemaError{{Path: "/e", Message: "cleanup err"}}},
+				}},
+		},
+		Result: ArchiveResult{Outcome: "passed"},
+	}
+
+	s := BuildRunSummary(a)
+
+	require.NotNil(t, s.Issues)
+	assert.Equal(t, 5, s.Issues["oas"]) // 1 + 2 + 1 + 1 (cleanup)
+}
+
+func TestBuildRunSummary_NoOASIssues(t *testing.T) {
+	a := &Archive{
+		Metadata: ArchiveMetadata{RunID: "run-no-oas"},
+		Steps: []StepRecord{
+			{Node: "step1", DurationMs: 100, Inputs: map[string]any{}},
+		},
+		Result: ArchiveResult{Outcome: "passed"},
+	}
+
+	s := BuildRunSummary(a)
+
+	assert.Nil(t, s.Issues)
+}
+
+func TestBuildRunSummary_SkippedOAS(t *testing.T) {
+	a := &Archive{
+		Metadata: ArchiveMetadata{RunID: "run-oas-skipped"},
+		Steps: []StepRecord{
+			{Node: "step1", DurationMs: 100, Inputs: map[string]any{},
+				OASValidation: &OASValidationRecord{
+					Skipped:    true,
+					SkipReason: "no spec",
+				}},
+		},
+		Result: ArchiveResult{Outcome: "passed"},
+	}
+
+	s := BuildRunSummary(a)
+
+	assert.Nil(t, s.Issues)
+}
+
+func TestWriteReadSummary_RoundTrip_WithIssues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+
+	original := &RunSummary{
+		RunID:   "run-issues-rt",
+		Outcome: "passed",
+		Issues:  map[string]int{"oas": 5},
+	}
+
+	err := WriteSummary(original, path)
+	require.NoError(t, err)
+
+	loaded, err := ReadSummary(path)
+	require.NoError(t, err)
+
+	assert.Equal(t, original.Issues, loaded.Issues)
+}
+
+func TestReadSummary_BackwardCompat_NoIssuesField(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+
+	// Write a summary JSON without the "issues" field (old format)
+	oldJSON := `{"runId":"run-old","outcome":"passed","stepCount":1,"passedCount":1,"failedCount":0,"durationMs":100}`
+	err := os.WriteFile(path, []byte(oldJSON), 0o644)
+	require.NoError(t, err)
+
+	loaded, err := ReadSummary(path)
+	require.NoError(t, err)
+
+	assert.Nil(t, loaded.Issues)
+	assert.Equal(t, "run-old", loaded.RunID)
+}
+
 func TestWriteArchive_CreatesSummaryJSON(t *testing.T) {
 	dir := t.TempDir()
 	runDir := filepath.Join(dir, "run-test-summary")
