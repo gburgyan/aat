@@ -81,6 +81,7 @@ Everything else is optional. When omitted, commands that need those paths will e
 | Plans | `plans` | string or list | Path(s) to plan directories |
 | Archives | `archives` | string | Path to the run archive directory |
 | Traces | `traces` | string | Path to the planning trace directory |
+| Visualizers | `visualizers` | string | Path to the visualizer plugins directory |
 | Environment | `environment` | string | Path to the default environment YAML file |
 
 The `plans` field accepts either a single path or a list of paths:
@@ -227,6 +228,7 @@ layers: layers/                    # optional — graph layers directory
 plans: plans/                      # optional — plan directory (string or list)
 archives: runs/                    # optional — run archive output directory
 traces: traces/                    # optional — planning trace output directory
+visualizers: visualizers/          # optional — visualizer plugins directory
 ```
 
 ---

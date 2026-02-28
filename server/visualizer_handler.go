@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -13,7 +14,7 @@ func (s *Server) handleGetVisualizer(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	// Find the visualizer definition.
-	var def *VisualizerDef
+	var def *config.VisualizerDef
 	for i := range s.visualizers {
 		if s.visualizers[i].ID == id {
 			def = &s.visualizers[i]

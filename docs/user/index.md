@@ -68,6 +68,7 @@ Progressive reading order — each builds on the previous.
 | [LLM-Assisted Planning](prompt.md) | `aat prompt`, interactive confirmation, plan saving, and trace debugging |
 | [Validation](validation.md) | All `aat validate` subcommands: graph, plan, workflow, and unified validation |
 | [Web UI and Archives](web-ui.md) | Run archives, the Svelte web viewer, Gantt timelines, and step inspection |
+| [Visualizers](visualizers.md) | Custom HTML renderers for API response data in the web UI |
 | [MCP Server](mcp-server.md) | IDE AI integration via stdio transport, available tools, and resource URIs |
 | [AI Assistant Primer](llms.md) | Structural reference for AI coding assistants working with AAT projects |
 
@@ -135,6 +136,9 @@ A YAML file defining the HTTP request shape and response extraction rules for a 
 
 ### Value Pool
 A curated list of valid values for a domain type, used by the engine when resolving inputs. [-> domain.md](domain.md)
+
+### Visualizer
+A standalone HTML plugin that renders API response data in the web UI, turning complex reference-based JSON into readable visual displays. [-> visualizers.md](visualizers.md)
 
 ### Workflow
 A reusable plan skeleton with steps, slots, and composition rules that `aat prompt` can select and customize. [-> workflows.md](workflows.md)

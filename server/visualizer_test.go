@@ -8,110 +8,17 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// --- LoadVisualizers ---
-
-func TestLoadVisualizers_EmptyDir(t *testing.T) {
-	defs, err := LoadVisualizers("")
-	require.NoError(t, err)
-	assert.Nil(t, defs)
-}
-
-func TestLoadVisualizers_NoManifest(t *testing.T) {
-	dir := t.TempDir()
-	defs, err := LoadVisualizers(dir)
-	require.NoError(t, err)
-	assert.Nil(t, defs)
-}
-
-func TestLoadVisualizers_ValidManifest(t *testing.T) {
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "visualizers.yaml"), `
-visualizers:
-  - id: flight-search
-    name: Flight Search Results
-    file: flight-search.html
-    match:
-      bodyContains: CatalogProductOfferingsResponse
-  - id: reservation
-    name: Reservation Detail
-    file: reservation.html
-    match:
-      node: CreateReservation
-`)
-	writeTestFile(t, filepath.Join(dir, "flight-search.html"), "<html>flight</html>")
-	writeTestFile(t, filepath.Join(dir, "reservation.html"), "<html>reservation</html>")
-
-	defs, err := LoadVisualizers(dir)
-	require.NoError(t, err)
-	require.Len(t, defs, 2)
-
-	assert.Equal(t, "flight-search", defs[0].ID)
-	assert.Equal(t, "Flight Search Results", defs[0].Name)
-	assert.Equal(t, "flight-search.html", defs[0].File)
-	assert.Equal(t, "CatalogProductOfferingsResponse", defs[0].Match.BodyContains)
-
-	assert.Equal(t, "reservation", defs[1].ID)
-	assert.Equal(t, "CreateReservation", defs[1].Match.Node)
-}
-
-func TestLoadVisualizers_MissingID(t *testing.T) {
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "visualizers.yaml"), `
-visualizers:
-  - name: Test
-    file: test.html
-    match:
-      node: Foo
-`)
-	writeTestFile(t, filepath.Join(dir, "test.html"), "<html></html>")
-
-	_, err := LoadVisualizers(dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "missing required field: id")
-}
-
-func TestLoadVisualizers_MissingFile(t *testing.T) {
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "visualizers.yaml"), `
-visualizers:
-  - id: test
-    file: missing.html
-    match:
-      node: Foo
-`)
-
-	_, err := LoadVisualizers(dir)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "not found")
-}
-
-func TestLoadVisualizers_DefaultName(t *testing.T) {
-	dir := t.TempDir()
-	writeTestFile(t, filepath.Join(dir, "visualizers.yaml"), `
-visualizers:
-  - id: test-viz
-    file: test.html
-    match:
-      node: Foo
-`)
-	writeTestFile(t, filepath.Join(dir, "test.html"), "<html></html>")
-
-	defs, err := LoadVisualizers(dir)
-	require.NoError(t, err)
-	require.Len(t, defs, 1)
-	assert.Equal(t, "test-viz", defs[0].Name) // defaults to ID
-}
-
 // --- matchVisualizers ---
 
 func TestMatchVisualizers_BodyContains(t *testing.T) {
-	defs := []VisualizerDef{
-		{ID: "flight", Name: "Flight", Match: VisualizerMatch{BodyContains: "CatalogProductOfferingsResponse"}},
-		{ID: "hotel", Name: "Hotel", Match: VisualizerMatch{BodyContains: "HotelResponse"}},
+	defs := []config.VisualizerDef{
+		{ID: "flight", Name: "Flight", Match: config.VisualizerMatch{BodyContains: "CatalogProductOfferingsResponse"}},
+		{ID: "hotel", Name: "Hotel", Match: config.VisualizerMatch{BodyContains: "HotelResponse"}},
 	}
 
 	body := json.RawMessage(`{"CatalogProductOfferingsResponse":{"offers":[]},"transactionId":"abc"}`)
@@ -121,8 +28,8 @@ func TestMatchVisualizers_BodyContains(t *testing.T) {
 }
 
 func TestMatchVisualizers_NodeFilter(t *testing.T) {
-	defs := []VisualizerDef{
-		{ID: "res", Name: "Reservation", Match: VisualizerMatch{Node: "CreateReservation"}},
+	defs := []config.VisualizerDef{
+		{ID: "res", Name: "Reservation", Match: config.VisualizerMatch{Node: "CreateReservation"}},
 	}
 
 	body := json.RawMessage(`{"ReservationResponse":{}}`)
@@ -138,8 +45,8 @@ func TestMatchVisualizers_NodeFilter(t *testing.T) {
 }
 
 func TestMatchVisualizers_CombinedMatch(t *testing.T) {
-	defs := []VisualizerDef{
-		{ID: "flight", Name: "Flight", Match: VisualizerMatch{
+	defs := []config.VisualizerDef{
+		{ID: "flight", Name: "Flight", Match: config.VisualizerMatch{
 			Node:         "CatalogProductOfferings",
 			BodyContains: "CatalogProductOfferingsResponse",
 		}},
@@ -167,16 +74,16 @@ func TestMatchVisualizers_EmptyDefs(t *testing.T) {
 }
 
 func TestMatchVisualizers_EmptyBody(t *testing.T) {
-	defs := []VisualizerDef{
-		{ID: "test", Name: "Test", Match: VisualizerMatch{BodyContains: "Foo"}},
+	defs := []config.VisualizerDef{
+		{ID: "test", Name: "Test", Match: config.VisualizerMatch{BodyContains: "Foo"}},
 	}
 	hits := matchVisualizers(defs, "Node", nil)
 	assert.Nil(t, hits)
 }
 
 func TestMatchVisualizers_NoMatchCriteria(t *testing.T) {
-	defs := []VisualizerDef{
-		{ID: "empty", Name: "Empty", Match: VisualizerMatch{}},
+	defs := []config.VisualizerDef{
+		{ID: "empty", Name: "Empty", Match: config.VisualizerMatch{}},
 	}
 	body := json.RawMessage(`{"Foo":{}}`)
 	hits := matchVisualizers(defs, "Node", body)
@@ -246,8 +153,8 @@ visualizers:
 
 func TestEnrichStepVisualizers(t *testing.T) {
 	s := &Server{
-		visualizers: []VisualizerDef{
-			{ID: "flight", Name: "Flight Search", Match: VisualizerMatch{BodyContains: "CatalogProductOfferingsResponse"}},
+		visualizers: []config.VisualizerDef{
+			{ID: "flight", Name: "Flight Search", Match: config.VisualizerMatch{BodyContains: "CatalogProductOfferingsResponse"}},
 		},
 	}
 
@@ -267,8 +174,8 @@ func TestEnrichStepVisualizers(t *testing.T) {
 
 func TestEnrichStepVisualizers_NoMatch(t *testing.T) {
 	s := &Server{
-		visualizers: []VisualizerDef{
-			{ID: "flight", Name: "Flight", Match: VisualizerMatch{BodyContains: "CatalogProductOfferingsResponse"}},
+		visualizers: []config.VisualizerDef{
+			{ID: "flight", Name: "Flight", Match: config.VisualizerMatch{BodyContains: "CatalogProductOfferingsResponse"}},
 		},
 	}
 
@@ -300,6 +207,14 @@ func TestEnrichStepVisualizers_NoVisualizers(t *testing.T) {
 }
 
 // --- Integration: step endpoint returns visualizers ---
+
+// --- helpers ---
+
+func writeTestFile(t *testing.T, path, content string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+}
 
 func TestGetStep_WithVisualizers(t *testing.T) {
 	archiveDir := t.TempDir()
@@ -338,12 +253,4 @@ visualizers:
 	require.Len(t, step.Visualizers, 1)
 	assert.Equal(t, "flight", step.Visualizers[0].ID)
 	assert.Equal(t, "Flight Search", step.Visualizers[0].Name)
-}
-
-// --- helpers ---
-
-func writeTestFile(t *testing.T, path, content string) {
-	t.Helper()
-	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
-	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 }

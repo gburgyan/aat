@@ -145,6 +145,10 @@ Clicking a step in the timeline opens the step detail with tabbed panels:
 | Extractions | Output values extracted from the response |
 | Error | Error classification, message, and details (when step failed) |
 
+### Visualizer Tabs
+
+When [visualizer plugins](visualizers.md) are configured, matching steps show additional tabs in the step detail view. Each tab renders the response data through a custom HTML visualizer in a sandboxed iframe. Visualizers are matched by response body content or node name — see the [visualizers documentation](visualizers.md) for how matching works.
+
 ### Batch Detail
 
 Batch detail shows an aggregate view with outcome counts and a per-plan list. Click any plan to drill down to its individual run detail.
@@ -219,6 +223,7 @@ The web server exposes a REST API that you can use programmatically.
 | `POST` | `/api/import` | Import an archive file |
 | `GET` | `/api/traces` | List plan traces |
 | `GET` | `/api/traces/{id}` | Get trace detail |
+| `GET` | `/api/visualizers/{id}` | Get visualizer HTML file |
 
 ## Development Mode
 

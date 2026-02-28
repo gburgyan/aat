@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gburgyan/aat/config"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -28,7 +29,7 @@ type Server struct {
 	opts         ServerOptions
 	service      ArchiveService
 	traceService *TraceService
-	visualizers  []VisualizerDef
+	visualizers  []config.VisualizerDef
 	router       chi.Router
 	httpServer   *http.Server
 	mu           sync.Mutex
@@ -42,7 +43,7 @@ func NewServer(opts ServerOptions) *Server {
 		opts.Port = 9119
 	}
 
-	vizDefs, err := LoadVisualizers(opts.VisualizerDir)
+	vizDefs, err := config.LoadVisualizers(opts.VisualizerDir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "aat web: warning: loading visualizers: %s\n", err)
 	}
