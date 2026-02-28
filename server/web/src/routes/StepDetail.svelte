@@ -14,6 +14,7 @@
   import YamlViewer from '../components/YamlViewer.svelte';
   import ErrorPanel from '../components/ErrorPanel.svelte';
   import OASValidationPanel from '../components/OASValidationPanel.svelte';
+  import FlightSearchVisualizer from '../components/FlightSearchVisualizer.svelte';
 
   interface Props {
     runId: string;
@@ -65,6 +66,7 @@
     const t: TabDef[] = [];
     if (step.request) t.push({ id: 'request', label: 'Request' });
     if (step.response) t.push({ id: 'response', label: 'Response' });
+    if (hasVisualize) t.push({ id: 'visualize', label: 'Visualize' });
     if (step.extractions && step.extractions.length > 0)
       t.push({ id: 'extractions', label: `Extractions (${step.extractions.length})` });
     if (step.transformScript && step.outputs)
@@ -89,6 +91,13 @@
     if (step.instantiatedStepYaml)
       t.push({ id: 'instantiated', label: 'Instantiated' });
     return t;
+  });
+
+  let hasVisualize = $derived.by(() => {
+    if (!step?.response?.body || typeof step.response.body !== 'object') return false;
+    const b = step.response.body as Record<string, unknown>;
+    const resp = b['CatalogProductOfferingsResponse'];
+    return resp != null && typeof resp === 'object' && (resp as Record<string, unknown>)['@type'] === 'CatalogProductOfferingsResponse';
   });
 
   let hasErrors = $derived(
@@ -262,6 +271,10 @@
           <h4 class="section-heading">Body</h4>
           <JsonViewer data={step.response.body} />
         {/if}
+      {/if}
+
+      {#if activeTab === 'visualize' && step.response}
+        <FlightSearchVisualizer body={step.response.body} />
       {/if}
 
       {#if activeTab === 'extractions' && step.extractions}
