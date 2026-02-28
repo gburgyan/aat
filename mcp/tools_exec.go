@@ -12,6 +12,7 @@ import (
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/intent"
+	"github.com/gburgyan/aat/internal/version"
 	"github.com/gburgyan/aat/plan"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -159,7 +160,7 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		Plan:         p,
 		Environment:  s.ctx.Environment.Name,
 		GraphVersion: s.ctx.Graph.Version,
-		ToolVersion:  "0.1.0",
+		ToolVersion:  version.Version,
 	}
 	secrets := s.ctx.Environment.CollectSecrets()
 	if p.Auth != nil {

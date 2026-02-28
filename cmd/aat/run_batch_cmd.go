@@ -18,6 +18,7 @@ import (
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/intent"
+	"github.com/gburgyan/aat/internal/version"
 	"github.com/gburgyan/aat/plan"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
@@ -490,7 +491,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			BatchID:     batchID,
 			Timestamp:   batchStart,
 			Source:      source,
-			ToolVersion: "0.1.0",
+			ToolVersion: version.Version,
 			Layers:      args.Layers,
 			LayerGroups: args.LayerGroups,
 		},

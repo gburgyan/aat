@@ -17,6 +17,7 @@ import (
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/intent"
+	"github.com/gburgyan/aat/internal/version"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -372,7 +373,7 @@ func writeRunArchiveWithSecrets(result *engine.RunResult, p *plan.Plan, env *con
 		Plan:         p,
 		Environment:  env.Name,
 		GraphVersion: g.Version,
-		ToolVersion:  "0.1.0",
+		ToolVersion:  version.Version,
 		Layers:       layers,
 	}
 	arc := engine.ToArchive(result, meta, env.APIBaseURL, secrets)
@@ -924,7 +925,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		Plan:          p,
 		Environment:   rctx.Env.Name,
 		GraphVersion:  rctx.Graph.Version,
-		ToolVersion:   "0.1.0",
+		ToolVersion:   version.Version,
 		Attempt:       attempt,
 		TotalAttempts: totalAttempts,
 		Layers:        effectiveLayers,

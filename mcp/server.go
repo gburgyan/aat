@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"github.com/gburgyan/aat/internal/version"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -50,7 +51,7 @@ func newServer(ctx *ServerContext, persona ServerPersona) *Server {
 		name += ":" + string(persona)
 	}
 
-	mcpServer := server.NewMCPServer(name, "0.1.0")
+	mcpServer := server.NewMCPServer(name, version.Version)
 
 	s := &Server{
 		mcp:     mcpServer,
