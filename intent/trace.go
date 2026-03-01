@@ -39,10 +39,8 @@ type PlanTrace struct {
 	ReselectionCall *LLMCallTrace    `json:"reselectionCall,omitempty"`
 
 	// Workflow template fields.
-	WorkflowName     string         `json:"workflowName,omitempty"`
-	TemplatePath     string         `json:"templatePath,omitempty"`
-	Repetitions      map[string]int `json:"repetitions,omitempty"`
-	TemplateExpanded *plan.Plan     `json:"templateExpanded,omitempty"`
+	WorkflowName string `json:"workflowName,omitempty"`
+	TemplatePath string `json:"templatePath,omitempty"`
 
 	// Recipe YAML (compact representation of LLM decisions).
 	RecipeYAML string `json:"recipeYaml,omitempty"`

@@ -1583,6 +1583,182 @@ func buildSlotTestGraph() *graph.Graph {
 	return g
 }
 
+// --- Inject Tests ---
+
+func TestComposeWithSlots_InjectAppliesValue(t *testing.T) {
+	g := buildSlotTestGraph()
+
+	// Add a "passengers" input to the search node so inject can target it.
+	searchNode := g.Nodes["search"]
+	searchNode.Inputs = append(searchNode.Inputs, graph.Input{Name: "passengers", Type: "integer"})
+
+	// Add an inject-bearing slot option and a traveler slot to the base workflow.
+	g.Workflows = append(g.Workflows,
+		graph.Workflow{
+			Name:     "TwoTravelers",
+			Kind:     "slot",
+			Template: "testdata/compose/slot_option_a.yaml", // reuse — steps don't matter for inject test
+			Inject:   map[string]any{"passengers": 2},
+		},
+	)
+
+	// Add a traveler slot to SlotBase.
+	for i, wf := range g.Workflows {
+		if wf.Name == "SlotBase" {
+			g.Workflows[i].Slots = append(g.Workflows[i].Slots, graph.SlotDef{
+				Name:    "traveler",
+				Options: []string{"OptionA", "TwoTravelers"},
+				Default: "OptionA",
+			})
+			break
+		}
+	}
+
+	// We need to add the traveler slot marker to the base template plan.
+	// Since the test template is a file, we'll compose manually with a plan
+	// that has the slot marker.
+	basePlan := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "createWorkbench"},
+				{Slot: "trip-search"},
+				{Slot: "traveler", DependsOn: []string{"trip-search"}},
+				{Node: "finalStep", DependsOn: []string{"traveler"}, Values: map[string]plan.StepValue{
+					"workbenchId": {From: "createWorkbench.workbenchId"},
+					"amount":      {Default: "AUTOWIRE"},
+				}},
+			},
+		},
+	}
+
+	// Manually replicate what ComposeWithSlots does but with our custom base plan.
+	// Use the exported function by writing a temp file. Instead, let's just call
+	// applyInjectValues directly since we want to test the inject mechanism.
+	applyInjectValues(basePlan, map[string]any{"passengers": 2}, g)
+
+	// search is not in the basePlan steps, so nothing should be injected.
+	// Let's test with a plan that has the search step.
+	planWithSearch := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "createWorkbench"},
+				{Node: "search"},
+				{Node: "addTraveler", Values: map[string]plan.StepValue{
+					"workbenchId": {From: "createWorkbench.workbenchId"},
+				}},
+				{Node: "finalStep", Values: map[string]plan.StepValue{
+					"workbenchId": {From: "createWorkbench.workbenchId"},
+				}},
+			},
+		},
+	}
+
+	applyInjectValues(planWithSearch, map[string]any{"passengers": 2}, g)
+
+	// search step should now have passengers=2
+	searchStep := planWithSearch.Execution.Steps[1]
+	assert.Equal(t, "search", searchStep.Node)
+	require.NotNil(t, searchStep.Values)
+	assert.Equal(t, 2, searchStep.Values["passengers"].Default)
+
+	// addTraveler doesn't have "passengers" input, so no injection.
+	travelerStep := planWithSearch.Execution.Steps[2]
+	_, hasPassengers := travelerStep.Values["passengers"]
+	assert.False(t, hasPassengers)
+}
+
+func TestApplyInjectValues_SkipsExistingValues(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:   "search",
+				Inputs: []graph.Input{{Name: "passengers", Type: "integer"}},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{
+					"passengers": {Default: 5},
+				}},
+			},
+		},
+	}
+
+	applyInjectValues(p, map[string]any{"passengers": 2}, g)
+
+	// Should keep the existing value of 5, not overwrite with 2.
+	assert.Equal(t, 5, p.Execution.Steps[0].Values["passengers"].Default)
+}
+
+func TestApplyInjectValues_SkipsFromWiring(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name:   "search",
+				Inputs: []graph.Input{{Name: "passengers", Type: "integer"}},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{
+					"passengers": {From: "config.passengers"},
+				}},
+			},
+		},
+	}
+
+	applyInjectValues(p, map[string]any{"passengers": 2}, g)
+
+	// Should keep the from wiring, not overwrite.
+	assert.Equal(t, "config.passengers", p.Execution.Steps[0].Values["passengers"].From)
+	assert.Nil(t, p.Execution.Steps[0].Values["passengers"].Default)
+}
+
+func TestApplyInjectValues_MultipleSteps(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"searchOutbound": {
+				Name:   "searchOutbound",
+				Inputs: []graph.Input{{Name: "passengers", Type: "integer"}, {Name: "origin", Type: "string"}},
+			},
+			"searchReturn": {
+				Name:   "searchReturn",
+				Inputs: []graph.Input{{Name: "passengers", Type: "integer"}, {Name: "origin", Type: "string"}},
+			},
+			"addTraveler": {
+				Name:   "addTraveler",
+				Inputs: []graph.Input{{Name: "name", Type: "string"}},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "searchOutbound"},
+				{Node: "searchReturn"},
+				{Node: "addTraveler"},
+			},
+		},
+	}
+
+	applyInjectValues(p, map[string]any{"passengers": 2}, g)
+
+	// Both search steps get passengers=2.
+	assert.Equal(t, 2, p.Execution.Steps[0].Values["passengers"].Default)
+	assert.Equal(t, 2, p.Execution.Steps[1].Values["passengers"].Default)
+
+	// addTraveler has no "passengers" input — no injection.
+	_, has := p.Execution.Steps[2].Values["passengers"]
+	assert.False(t, has)
+}
+
 // buildComposeTestGraph creates a synthetic graph for composition tests.
 func buildComposeTestGraph() *graph.Graph {
 	return &graph.Graph{

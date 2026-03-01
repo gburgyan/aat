@@ -46,7 +46,6 @@ type WorkflowSelection struct {
 	Layers      []string          `json:"layers,omitempty"`
 	Choices     map[string]string `json:"choices,omitempty"` // slot name → option name
 	Addons      []string          `json:"addons,omitempty"`
-	Repetitions map[string]int    `json:"repetitions,omitempty"`
 }
 
 // selectionResult is the internal return type from selectWorkflow, carrying the
@@ -304,13 +303,6 @@ func buildAndFillPlan(
 	if trace != nil {
 		trace.WorkflowName = ws.Workflow
 		trace.TemplatePath = templatePath
-		trace.Repetitions = ws.Repetitions
-	}
-
-	ExpandMultiplicity(tpl, ws.Repetitions)
-
-	if trace != nil {
-		trace.TemplateExpanded = copyPlanShallow(tpl)
 	}
 
 	skeleton := tpl

@@ -22,8 +22,7 @@ Respond with a JSON object (no markdown fencing, just raw JSON):
   "description": "brief description of what will be tested",
   "choices": {"slotName": "Option Name"},
   "addons": ["Addon Name 1"],
-  "layers": ["layer-name"],
-  "repetitions": {"nodeName": N}
+  "layers": ["layer-name"]
 }
 
 Rules:
@@ -32,7 +31,6 @@ Rules:
 - The "choices" object maps slot names to their chosen option for workflows with choice points. Use the EXACT option name from the slot's options list. Omit "choices" if the workflow has no slots, or to use all defaults.
 - The "addons" array lists addon workflows to compose into the main workflow. Include addons when the user mentions capabilities matching an addon's description. Omit "addons" if no addons are needed.
 - The "layers" array lists data layers to apply. Select when the user's intent aligns with a layer's description. Use EXACT layer names. Omit "layers" if no layers are needed.
-- The "repetitions" field maps node names to how many times they should be repeated (e.g., {"addItem": 3} for three items). Omit if no nodes need repeating.
 - Today's date is ` + dateStr + `. When generating dates, default to at least 7 days in the future or past depending on context. The user's prompt takes priority (e.g., "tomorrow" → {{today + 1 day}}).`
 
 	if len(preSelectedLayers) > 0 {

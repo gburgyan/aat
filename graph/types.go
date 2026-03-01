@@ -102,6 +102,7 @@ type Workflow struct {
 	Wire        map[string]string `yaml:"wire,omitempty"`     // addon: default AUTOWIRE overrides
 	Priority    int               `yaml:"priority,omitempty"` // addon: composition ordering (lower = earlier, default 0)
 	Slots       []SlotDef         `yaml:"slots,omitempty"`    // choice points (only on base workflows)
+	Inject      map[string]any    `yaml:"inject,omitempty"`   // slot option: input values to apply across the composed plan
 }
 
 // SlotDef describes a named decision point in a workflow with mutually exclusive options.

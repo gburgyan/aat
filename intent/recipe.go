@@ -33,11 +33,10 @@ func WithAvailableLayers(layers map[string]*graph.Layer) ReconstituteOption {
 // produce a full Plan. The steps mirror what Interpret does after Call 1/2:
 //  1. Convert RecipeSelection → WorkflowSelection
 //  2. Load + compose workflow template (slots + addons)
-//  3. ExpandMultiplicity
-//  4. Convert RecipeOverrides → TargetedResponse
-//  5. applyTargetedResponse (with unfedInputSet)
-//  6. PostProcess
-//  7. Apply layers (if any) and plan.InstantiateAndValidate
+//  3. Convert RecipeOverrides → TargetedResponse
+//  4. applyTargetedResponse (with unfedInputSet)
+//  5. PostProcess
+//  6. Apply layers (if any) and plan.InstantiateAndValidate
 func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...ReconstituteOption) (*plan.Plan, error) {
 	if recipe == nil {
 		return nil, fmt.Errorf("reconstitute: recipe is nil")
@@ -81,9 +80,6 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...
 		}
 		tpl = loaded
 	}
-
-	// 3. Expand multiplicity.
-	ExpandMultiplicity(tpl, ws.Repetitions)
 
 	skeleton := tpl
 
@@ -151,7 +147,6 @@ func recipeSelectionToWorkflowSelection(rs plan.RecipeSelection) WorkflowSelecti
 		Layers:      rs.Layers,
 		Choices:     rs.Choices,
 		Addons:      rs.Addons,
-		Repetitions: rs.Repetitions,
 	}
 }
 
@@ -207,7 +202,6 @@ func WorkflowSelectionToRecipeSelection(ws *WorkflowSelection) plan.RecipeSelect
 		Layers:      ws.Layers,
 		Choices:     ws.Choices,
 		Addons:      ws.Addons,
-		Repetitions: ws.Repetitions,
 	}
 }
 

@@ -334,15 +334,6 @@ func TestGetTrace_TemplateFields(t *testing.T) {
 	tr := makeTrace("trace-20260101-100000-aaaa0001", "book a flight")
 	tr.WorkflowName = "roundtrip-booking"
 	tr.TemplatePath = "workflows/roundtrip-booking.yaml"
-	tr.Repetitions = map[string]int{"leg": 2}
-	tr.TemplateExpanded = &plan.Plan{
-		Execution: plan.Execution{
-			Steps: []plan.Step{
-				{Node: "SearchOffers", Description: "Leg 1"},
-				{Node: "SearchOffers", Description: "Leg 2"},
-			},
-		},
-	}
 	writeTrace(t, dir, tr)
 
 	svc := NewTraceService(dir)
@@ -351,8 +342,6 @@ func TestGetTrace_TemplateFields(t *testing.T) {
 
 	assert.Equal(t, "roundtrip-booking", detail.WorkflowName)
 	assert.Equal(t, "workflows/roundtrip-booking.yaml", detail.TemplatePath)
-	require.NotNil(t, detail.Repetitions)
-	assert.Contains(t, detail.TemplateExpandedYAML, "Leg 1")
 }
 
 // --- countLLMCalls ---

@@ -44,11 +44,9 @@ type TraceDetail struct {
 	ReselectionCall *LLMCallDetail `json:"reselectionCall,omitempty"`
 
 	// Workflow metadata.
-	WorkflowName         string `json:"workflowName,omitempty"`
-	TemplatePath         string `json:"templatePath,omitempty"`
-	Repetitions          any    `json:"repetitions,omitempty"`
-	TemplateExpandedYAML string `json:"templateExpandedYaml,omitempty"`
-	RecipeYAML           string `json:"recipeYaml,omitempty"`
+	WorkflowName string `json:"workflowName,omitempty"`
+	TemplatePath string `json:"templatePath,omitempty"`
+	RecipeYAML   string `json:"recipeYaml,omitempty"`
 }
 
 // SkeletonDetail captures the skeleton plan construction step.

@@ -25,7 +25,6 @@ type RecipeSelection struct {
 	Layers      []string          `yaml:"layers,omitempty"`
 	Choices     map[string]string `yaml:"choices,omitempty"`
 	Addons      []string          `yaml:"addons,omitempty"`
-	Repetitions map[string]int    `yaml:"repetitions,omitempty"`
 }
 
 // RecipeOverrides captures the LLM's creative decisions: literal values,

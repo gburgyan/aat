@@ -209,7 +209,6 @@ func TestWorkflowSelectionToRecipeSelection_RoundTrip(t *testing.T) {
 		Description: "Book a flight",
 		Choices:     map[string]string{"trip-search": "Round-Trip"},
 		Addons:      []string{"Seat Selection"},
-		Repetitions: map[string]int{"addTraveler": 2},
 	}
 
 	rs := WorkflowSelectionToRecipeSelection(ws)
@@ -218,7 +217,6 @@ func TestWorkflowSelectionToRecipeSelection_RoundTrip(t *testing.T) {
 	assert.Equal(t, ws.Description, rs.Description)
 	assert.Equal(t, ws.Choices, rs.Choices)
 	assert.Equal(t, ws.Addons, rs.Addons)
-	assert.Equal(t, ws.Repetitions, rs.Repetitions)
 
 	// Convert back.
 	ws2 := recipeSelectionToWorkflowSelection(rs)
@@ -226,7 +224,6 @@ func TestWorkflowSelectionToRecipeSelection_RoundTrip(t *testing.T) {
 	assert.Equal(t, ws.Description, ws2.Description)
 	assert.Equal(t, ws.Choices, ws2.Choices)
 	assert.Equal(t, ws.Addons, ws2.Addons)
-	assert.Equal(t, ws.Repetitions, ws2.Repetitions)
 }
 
 func TestTargetedResponseToRecipeOverrides_RoundTrip(t *testing.T) {

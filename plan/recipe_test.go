@@ -135,7 +135,6 @@ func TestMarshalRecipe_RoundTrip(t *testing.T) {
 			Description: "Book a flight",
 			Choices:     map[string]string{"trip-search": "One-Way"},
 			Addons:      []string{"Seat Selection"},
-			Repetitions: map[string]int{"addTraveler": 2},
 		},
 		Overrides: RecipeOverrides{
 			Values: map[string]any{
@@ -170,7 +169,6 @@ func TestMarshalRecipe_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.Selection.Description, parsed.Selection.Description)
 	assert.Equal(t, original.Selection.Choices, parsed.Selection.Choices)
 	assert.Equal(t, original.Selection.Addons, parsed.Selection.Addons)
-	assert.Equal(t, original.Selection.Repetitions, parsed.Selection.Repetitions)
 	assert.Equal(t, original.Overrides.Values["searchFlights.origin"], parsed.Overrides.Values["searchFlights.origin"])
 	assert.Equal(t, original.Overrides.Selections["priceOfferReference.offering"].Strategy, parsed.Overrides.Selections["priceOfferReference.offering"].Strategy)
 	assert.Equal(t, original.Overrides.Descriptions["searchFlights"], parsed.Overrides.Descriptions["searchFlights"])

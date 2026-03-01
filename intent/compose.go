@@ -86,8 +86,8 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 		// Prefix sub-workflow step IDs and rewrite internal references.
 		prefixStepRefs(sub, prefix)
 
-		// Resolve $after. wire references to the matched node name.
-		resolvedWire := resolveAfterWire(addon.Wire, matchedAfter)
+		// Resolve $after. wire references to the actual step ID.
+		resolvedWire := resolveAfterWire(addon.Wire, afterStep)
 
 		// Auto-wire AUTOWIRE values in sub-workflow steps using addon's Wire.
 		autoWirePlaceholders(sub, outputMap, resolvedWire, g)
@@ -132,15 +132,18 @@ func ComposeWithAddons(base graph.Workflow, addonNames []string, g *graph.Graph,
 	return ComposeWorkflowTemplate(base, addons, graphDir, g)
 }
 
-// findStepByNode returns the step ID of the first step in the plan whose
-// Node field matches nodeName, or empty string if not found.
+// findStepByNode returns the step ID of the last step in the plan whose
+// Node field matches nodeName, or empty string if not found. Returning the
+// last match ensures that addons splice after the final instance when
+// multiple steps share a node (e.g., two addTraveler steps from a slot).
 func findStepByNode(p *plan.Plan, nodeName string) string {
+	last := ""
 	for _, step := range p.Execution.Steps {
 		if step.Node == nodeName {
-			return step.StepID()
+			last = step.StepID()
 		}
 	}
-	return ""
+	return last
 }
 
 // findWorkflowByName looks up a workflow by name (case-insensitive).
@@ -450,18 +453,18 @@ func ensureFromDeps(p *plan.Plan) {
 }
 
 // resolveAfterWire creates a copy of the wire map with $after. prefixes replaced
-// by the actual matched node name. For example, if matchedAfter is "priceOfferReference"
-// and wire has {"offerListIdentifier": "$after.offerIdentifierValue"}, the result
-// will have {"offerListIdentifier": "priceOfferReference.offerIdentifierValue"}.
+// by the actual step ID. For example, if afterStep is "addTraveler_2"
+// and wire has {"travelerId": "$after.travelerIdentifierValue"}, the result
+// will have {"travelerId": "addTraveler_2.travelerIdentifierValue"}.
 // Non-$after entries are passed through unchanged.
-func resolveAfterWire(wire map[string]string, matchedAfter string) map[string]string {
+func resolveAfterWire(wire map[string]string, afterStep string) map[string]string {
 	if len(wire) == 0 {
 		return wire
 	}
 	resolved := make(map[string]string, len(wire))
 	for k, v := range wire {
 		if strings.HasPrefix(v, "$after.") {
-			resolved[k] = matchedAfter + v[len("$after"):]
+			resolved[k] = afterStep + v[len("$after"):]
 		} else {
 			resolved[k] = v
 		}
@@ -594,6 +597,21 @@ func ComposeWithSlots(base graph.Workflow, choices map[string]string, g *graph.G
 		}
 	}
 
+	// Apply inject values from slot options. For each inject entry
+	// (inputName → value), set a default on every step whose graph node
+	// has that input, unless the step already has an explicit value.
+	for slotName, sd := range slotDefs {
+		optionName := sd.Default
+		if chosen, ok := choices[slotName]; ok && chosen != "" {
+			optionName = chosen
+		}
+		optionWF, found := findWorkflowByName(g, optionName)
+		if !found || len(optionWF.Inject) == 0 {
+			continue
+		}
+		applyInjectValues(parent, optionWF.Inject, g)
+	}
+
 	// Run AUTOWIRE resolution across the full plan.
 	outputMap := buildOutputMap(parent, g)
 	autoWirePlaceholders(parent, outputMap, nil, g)
@@ -689,7 +707,7 @@ func composeAddonsOnPlan(parent *plan.Plan, base graph.Workflow, addons []graph.
 
 		outputMap := buildOutputMap(parent, g)
 		prefixStepRefs(sub, prefix)
-		resolvedWire := resolveAfterWire(addon.Wire, matchedAfter)
+		resolvedWire := resolveAfterWire(addon.Wire, afterStep)
 		autoWirePlaceholders(sub, outputMap, resolvedWire, g)
 		addInsertionDeps(sub, afterStep)
 		fixFromDependencies(sub)
@@ -701,6 +719,44 @@ func composeAddonsOnPlan(parent *plan.Plan, base graph.Workflow, addons []graph.
 	}
 
 	return parent, nil
+}
+
+// applyInjectValues sets default values on steps whose graph node has a matching
+// input. This is used by slot options to propagate values across the composed
+// plan (e.g., a two-traveler slot sets passengers=2 on search steps).
+// Steps that already have an explicit value for the input are skipped.
+func applyInjectValues(p *plan.Plan, inject map[string]any, g *graph.Graph) {
+	for inputName, value := range inject {
+		for i := range p.Execution.Steps {
+			step := &p.Execution.Steps[i]
+			node := g.Nodes[step.Node]
+			if node == nil {
+				continue
+			}
+			// Check if this node has the input.
+			hasInput := false
+			for _, inp := range node.Inputs {
+				if inp.Name == inputName {
+					hasInput = true
+					break
+				}
+			}
+			if !hasInput {
+				continue
+			}
+			// Skip if the step already has an explicit value.
+			if sv, exists := step.Values[inputName]; exists {
+				if sv.Default != nil || sv.From != "" || sv.FromSelection != "" || sv.Select != nil {
+					continue
+				}
+			}
+			// Set the injected value.
+			if step.Values == nil {
+				step.Values = make(map[string]plan.StepValue)
+			}
+			step.Values[inputName] = plan.StepValue{Default: value}
+		}
+	}
 }
 
 // ResolveWorkflowDir returns the absolute directory containing the graph file,
