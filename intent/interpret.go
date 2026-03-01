@@ -475,29 +475,17 @@ func loadComposedTemplate(ws *WorkflowSelection, g *graph.Graph, graphDir string
 		return nil, fmt.Errorf("intent: unknown or template-less workflow %q; available: %s", ws.Workflow, listWorkflowNames(g))
 	}
 
-	hasSlots := len(wf.Slots) > 0
-	hasAddons := len(ws.Addons) > 0
-
-	if hasSlots {
-		composed, err := ComposeWithSlotsAndAddons(wf, ws.Choices, ws.Addons, g, graphDir)
-		if err != nil {
-			return nil, fmt.Errorf("intent: composing slots for %q: %w", ws.Workflow, err)
-		}
-		return composed, nil
-	}
-	if hasAddons {
-		composed, err := ComposeWithAddons(wf, ws.Addons, g, graphDir)
-		if err != nil {
-			return nil, fmt.Errorf("intent: composing addons for %q: %w", ws.Workflow, err)
-		}
-		return composed, nil
-	}
-
-	loaded, err := LoadWorkflowTemplate(wf.Template, graphDir, g)
+	composed, err := Compose(ComposeRequest{
+		Base:     wf,
+		Choices:  ws.Choices,
+		Addons:   ws.Addons,
+		Graph:    g,
+		GraphDir: graphDir,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("intent: loading template for %q: %w", ws.Workflow, err)
+		return nil, fmt.Errorf("intent: composing %q: %w", ws.Workflow, err)
 	}
-	return loaded, nil
+	return composed, nil
 }
 
 // recordSelectionTrace captures the workflow selection LLM call(s) on the trace.

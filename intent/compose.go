@@ -10,40 +10,54 @@ import (
 	"github.com/gburgyan/aat/plan"
 )
 
-// ComposeWorkflowTemplate loads a base workflow template and splices in
-// addon workflow templates. Each addon uses its own After field to find
-// the insertion point (the step in the base plan whose Node matches
-// addon.After). Addon step IDs are prefixed (inc0_, inc1_, ...) to avoid
-// collisions, and AUTOWIRE values are resolved via auto-wiring from parent
-// step outputs or explicit Wire overrides from the addon definition.
-//
-// The result is a standard *plan.Plan that requires no engine changes.
-func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graphDir string, g *graph.Graph) (*plan.Plan, error) {
-	if base.Template == "" {
-		return nil, fmt.Errorf("compose: workflow %q has no template", base.Name)
+// ComposeRequest holds the parameters for composing a workflow template.
+type ComposeRequest struct {
+	Base     graph.Workflow
+	Choices  map[string]string // slot name → option name (nil = use defaults)
+	Addons   []string          // addon workflow names
+	Graph    *graph.Graph
+	GraphDir string
+}
+
+// Compose loads a base workflow template and applies slot fills and/or addon
+// composition as specified in the request. This is the single entry point for
+// all workflow composition.
+func Compose(req ComposeRequest) (*plan.Plan, error) {
+	if req.Base.Template == "" {
+		return nil, fmt.Errorf("compose: workflow %q has no template", req.Base.Name)
 	}
 
-	parent, err := LoadWorkflowTemplate(base.Template, graphDir, g)
+	parent, err := LoadWorkflowTemplate(req.Base.Template, req.GraphDir, req.Graph)
 	if err != nil {
-		return nil, fmt.Errorf("compose: loading parent template: %w", err)
+		return nil, fmt.Errorf("compose: loading template: %w", err)
 	}
 
-	if len(addons) == 0 {
-		return parent, nil
+	// Fill slots if the base workflow has them.
+	if len(req.Base.Slots) > 0 {
+		if err := fillSlots(parent, req.Base, req.Choices, req.Graph, req.GraphDir); err != nil {
+			return nil, err
+		}
 	}
 
-	if err := composeAddonList(parent, addons, graphDir, g); err != nil {
-		return nil, err
+	// Apply addons if requested.
+	if len(req.Addons) > 0 {
+		addons, err := resolveAddons(req.Addons, req.Graph)
+		if err != nil {
+			return nil, err
+		}
+		if err := composeAddonList(parent, addons, req.GraphDir, req.Graph); err != nil {
+			return nil, err
+		}
 	}
 
 	return parent, nil
 }
 
-// ComposeWithAddons looks up addon workflows by name, validates them, and
-// delegates to ComposeWorkflowTemplate.
-func ComposeWithAddons(base graph.Workflow, addonNames []string, g *graph.Graph, graphDir string) (*plan.Plan, error) {
+// resolveAddons looks up addon workflows by name, validates they are
+// proper addons with after fields, and returns the resolved workflows.
+func resolveAddons(names []string, g *graph.Graph) ([]graph.Workflow, error) {
 	var addons []graph.Workflow
-	for _, name := range addonNames {
+	for _, name := range names {
 		addon, found := findWorkflowByName(g, name)
 		if !found {
 			return nil, fmt.Errorf("compose: unknown addon workflow %q", name)
@@ -56,7 +70,7 @@ func ComposeWithAddons(base graph.Workflow, addonNames []string, g *graph.Graph,
 		}
 		addons = append(addons, addon)
 	}
-	return ComposeWorkflowTemplate(base, addons, graphDir, g)
+	return addons, nil
 }
 
 // findStepByNode returns the step ID of the last step in the plan whose
@@ -87,7 +101,7 @@ func findWorkflowByName(g *graph.Graph, name string) (graph.Workflow, bool) {
 // outputName → "stepID.outputName" for all outputs produced by those steps.
 // Last producer wins. All parent outputs are available for auto-wiring
 // because the engine resolves execution order via dependsOn, not step list
-// position. fixFromDependencies ensures the correct dependencies are added.
+// position. ensureFromDeps ensures the correct dependencies are added.
 func buildOutputMap(p *plan.Plan, g *graph.Graph) map[string]string {
 	outputMap := make(map[string]string)
 	for _, step := range p.Execution.Steps {
@@ -215,6 +229,18 @@ func isPlaceholder(sv plan.StepValue) bool {
 	return ok && (s == "AUTOWIRE" || s == "PLACEHOLDER")
 }
 
+// isRootStep returns true if the step has no dependencies within the given
+// step ID set. A root step either has no deps at all or all its deps point
+// outside the set.
+func isRootStep(step plan.Step, withinSet map[string]bool) bool {
+	for _, dep := range step.DependsOn {
+		if withinSet[dep] {
+			return false
+		}
+	}
+	return true
+}
+
 // addInsertionDeps adds the insertion point step as a dependency to all
 // sub-workflow root steps (steps that have no dependencies or whose
 // dependencies are all within the sub-workflow).
@@ -231,15 +257,7 @@ func addInsertionDeps(sub *plan.Plan, afterStep string) {
 
 	for i := range sub.Execution.Steps {
 		step := &sub.Execution.Steps[i]
-		// A root step has no deps, or all deps are outside the sub-workflow.
-		isRoot := true
-		for _, dep := range step.DependsOn {
-			if subStepIDs[dep] {
-				isRoot = false
-				break
-			}
-		}
-		if isRoot {
+		if isRootStep(*step, subStepIDs) {
 			step.DependsOn = append(step.DependsOn, afterStep)
 		}
 	}
@@ -288,57 +306,14 @@ func mergeCleanup(parent, sub *plan.Plan) {
 	}
 }
 
-// fixFromDependencies scans all from references in sub-workflow step values
-// and selections. If a from reference points to a step outside the sub-workflow
-// (i.e., a parent step), that step is added to dependsOn if not already present.
-func fixFromDependencies(sub *plan.Plan) {
-	// Collect sub-workflow step IDs.
-	subStepIDs := make(map[string]bool)
-	for _, step := range sub.Execution.Steps {
-		subStepIDs[step.StepID()] = true
-	}
-
-	for i := range sub.Execution.Steps {
-		step := &sub.Execution.Steps[i]
-
-		depSet := make(map[string]bool)
-		for _, dep := range step.DependsOn {
-			depSet[dep] = true
-		}
-
-		// Collect all from-referenced step IDs.
-		var refs []string
-		for _, sv := range step.Values {
-			if sv.From != "" {
-				refs = append(refs, splitNodeName(sv.From))
-			}
-			if sv.FromInput != "" {
-				refs = append(refs, splitNodeName(sv.FromInput))
-			}
-		}
-		for _, sel := range step.Selections {
-			if sel.From != "" {
-				refs = append(refs, splitNodeName(sel.From))
-			}
-		}
-
-		// Add missing parent step dependencies.
-		for _, ref := range refs {
-			if !subStepIDs[ref] && !depSet[ref] {
-				step.DependsOn = append(step.DependsOn, ref)
-				depSet[ref] = true
-			}
-		}
-	}
-}
-
 // ensureFromDeps scans all from references in the plan and ensures that
-// referenced steps are in the referencing step's dependsOn. Unlike
-// fixFromDependencies (which only adds deps for external refs), this adds
-// deps for ALL from references — needed after slot composition where all
-// steps are in the same flat plan.
-func ensureFromDeps(p *plan.Plan) {
-	// Build step ID set for validation.
+// referenced steps are in the referencing step's dependsOn.
+//
+// When externalOnly is true, only references pointing OUTSIDE the plan's step
+// set are added (used per-addon before splice). When false, all valid from
+// references are added (used after slot composition on the flat plan).
+func ensureFromDeps(p *plan.Plan, externalOnly bool) {
+	// Build step ID set.
 	stepIDs := make(map[string]bool, len(p.Execution.Steps))
 	for _, step := range p.Execution.Steps {
 		stepIDs[step.StepID()] = true
@@ -368,12 +343,23 @@ func ensureFromDeps(p *plan.Plan) {
 			}
 		}
 
-		// Add missing dependencies — self-refs are excluded.
 		sid := step.StepID()
 		for _, ref := range refs {
-			if ref != sid && !depSet[ref] && stepIDs[ref] {
-				step.DependsOn = append(step.DependsOn, ref)
-				depSet[ref] = true
+			if ref == sid || depSet[ref] {
+				continue
+			}
+			if externalOnly {
+				// Only add deps for refs pointing outside the plan.
+				if !stepIDs[ref] {
+					step.DependsOn = append(step.DependsOn, ref)
+					depSet[ref] = true
+				}
+			} else {
+				// Add deps for all valid refs within the plan.
+				if stepIDs[ref] {
+					step.DependsOn = append(step.DependsOn, ref)
+					depSet[ref] = true
+				}
 			}
 		}
 	}
@@ -399,28 +385,18 @@ func resolveAfterWire(wire map[string]string, afterStep string) map[string]strin
 	return resolved
 }
 
-// ComposeWithSlots fills slot marker steps in a base workflow template with
-// the chosen slot option templates. For each slot marker in the base plan:
+// fillSlots fills slot marker steps in the parent plan with the chosen slot
+// option templates. For each slot marker:
 //  1. Look up the chosen option (from choices map, falling back to slot default)
 //  2. Load the option's template
 //  3. Replace the marker step with the option's steps (unprefixed)
 //  4. Rewrite dependsOn: references to the slot name → last step of the option
 //
-// After all slots are filled, AUTOWIRE resolution and fixFromDependencies run
-// across the full plan. The result can then be passed to ComposeWithAddons
-// for addon composition.
-func ComposeWithSlots(base graph.Workflow, choices map[string]string, g *graph.Graph, graphDir string) (*plan.Plan, error) {
-	if base.Template == "" {
-		return nil, fmt.Errorf("compose: workflow %q has no template", base.Name)
-	}
-
-	parent, err := LoadWorkflowTemplate(base.Template, graphDir, g)
-	if err != nil {
-		return nil, fmt.Errorf("compose: loading base template: %w", err)
-	}
-
+// After all slots are filled, AUTOWIRE resolution and ensureFromDeps run
+// across the full plan. Modifies parent in-place.
+func fillSlots(parent *plan.Plan, base graph.Workflow, choices map[string]string, g *graph.Graph, graphDir string) error {
 	if len(base.Slots) == 0 {
-		return parent, nil
+		return nil
 	}
 
 	// Build slot definitions map for lookup.
@@ -441,26 +417,26 @@ func ComposeWithSlots(base graph.Workflow, choices map[string]string, g *graph.G
 			optionName = chosen
 		}
 		if optionName == "" {
-			return nil, fmt.Errorf("compose: slot %q has no choice and no default", slotName)
+			return fmt.Errorf("compose: slot %q has no choice and no default", slotName)
 		}
 
 		// Look up the option workflow.
 		optionWF, found := findWorkflowByName(g, optionName)
 		if !found {
-			return nil, fmt.Errorf("compose: slot %q option %q not found in graph", slotName, optionName)
+			return fmt.Errorf("compose: slot %q option %q not found in graph", slotName, optionName)
 		}
 		if optionWF.Template == "" {
-			return nil, fmt.Errorf("compose: slot %q option %q has no template", slotName, optionName)
+			return fmt.Errorf("compose: slot %q option %q has no template", slotName, optionName)
 		}
 
 		// Load the option template.
 		optionPlan, loadErr := LoadWorkflowTemplate(optionWF.Template, graphDir, g)
 		if loadErr != nil {
-			return nil, fmt.Errorf("compose: loading slot %q option %q: %w", slotName, optionName, loadErr)
+			return fmt.Errorf("compose: loading slot %q option %q: %w", slotName, optionName, loadErr)
 		}
 
 		if len(optionPlan.Execution.Steps) == 0 {
-			return nil, fmt.Errorf("compose: slot %q option %q has no steps", slotName, optionName)
+			return fmt.Errorf("compose: slot %q option %q has no steps", slotName, optionName)
 		}
 
 		// Find the slot marker in the parent plan.
@@ -474,7 +450,7 @@ func ComposeWithSlots(base graph.Workflow, choices map[string]string, g *graph.G
 			}
 		}
 		if markerIdx < 0 {
-			return nil, fmt.Errorf("compose: slot %q marker not found in base template", slotName)
+			return fmt.Errorf("compose: slot %q marker not found in base template", slotName)
 		}
 
 		// Replace the marker with option steps.
@@ -486,21 +462,13 @@ func ComposeWithSlots(base graph.Workflow, choices map[string]string, g *graph.G
 		parent.Execution.Steps = newSteps
 
 		// Add the marker's dependsOn to root steps of the option.
-		// A root step is one whose deps are all within the option itself.
 		optionStepIDs := make(map[string]bool, len(optionPlan.Execution.Steps))
 		for _, s := range optionPlan.Execution.Steps {
 			optionStepIDs[s.StepID()] = true
 		}
 		for i := markerIdx; i < markerIdx+len(optionPlan.Execution.Steps); i++ {
 			step := &parent.Execution.Steps[i]
-			isRoot := true
-			for _, dep := range step.DependsOn {
-				if optionStepIDs[dep] {
-					isRoot = false
-					break
-				}
-			}
-			if isRoot && len(markerDeps) > 0 {
+			if isRootStep(*step, optionStepIDs) && len(markerDeps) > 0 {
 				step.DependsOn = append(step.DependsOn, markerDeps...)
 			}
 		}
@@ -524,9 +492,7 @@ func ComposeWithSlots(base graph.Workflow, choices map[string]string, g *graph.G
 		}
 	}
 
-	// Apply inject values from slot options. For each inject entry
-	// (inputName → value), set a default on every step whose graph node
-	// has that input, unless the step already has an explicit value.
+	// Apply inject values from slot options.
 	for slotName, sd := range slotDefs {
 		optionName := sd.Default
 		if chosen, ok := choices[slotName]; ok && chosen != "" {
@@ -544,59 +510,9 @@ func ComposeWithSlots(base graph.Workflow, choices map[string]string, g *graph.G
 	autoWirePlaceholders(parent, outputMap, nil, g)
 
 	// Ensure all from-referenced steps are in dependsOn.
-	// Use ensureFromDeps (not fixFromDependencies) because the full plan
-	// is one flat step list — fixFromDependencies only adds deps for
-	// steps outside the plan.
-	ensureFromDeps(parent)
+	ensureFromDeps(parent, false)
 
-	return parent, nil
-}
-
-// ComposeWithSlotsAndAddons composes a workflow with both slot choices and addons.
-// It first fills slots, then delegates to ComposeWithAddons for addon composition.
-func ComposeWithSlotsAndAddons(base graph.Workflow, choices map[string]string, addonNames []string, g *graph.Graph, graphDir string) (*plan.Plan, error) {
-	slotPlan, err := ComposeWithSlots(base, choices, g, graphDir)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(addonNames) == 0 {
-		return slotPlan, nil
-	}
-
-	// Build addon list.
-	var addons []graph.Workflow
-	for _, name := range addonNames {
-		addon, found := findWorkflowByName(g, name)
-		if !found {
-			return nil, fmt.Errorf("compose: unknown addon workflow %q", name)
-		}
-		if !addon.IsAddon() {
-			return nil, fmt.Errorf("compose: workflow %q is not an addon", name)
-		}
-		if !addon.After.IsSet() {
-			return nil, fmt.Errorf("compose: addon %q has no after field", name)
-		}
-		addons = append(addons, addon)
-	}
-
-	// Use ComposeWorkflowTemplate with the slot-filled plan as the parent.
-	// We need to pass the slotPlan directly instead of loading from template.
-	return composeAddonsOnPlan(slotPlan, base, addons, graphDir, g)
-}
-
-// composeAddonsOnPlan applies addon composition to an already-loaded plan.
-// This is used when slot composition has already produced the base plan.
-func composeAddonsOnPlan(parent *plan.Plan, base graph.Workflow, addons []graph.Workflow, graphDir string, g *graph.Graph) (*plan.Plan, error) {
-	if len(addons) == 0 {
-		return parent, nil
-	}
-
-	if err := composeAddonList(parent, addons, graphDir, g); err != nil {
-		return nil, err
-	}
-
-	return parent, nil
+	return nil
 }
 
 // composeAddonList is the shared implementation for addon composition. It sorts
@@ -650,7 +566,7 @@ func composeAddonList(parent *plan.Plan, addons []graph.Workflow, graphDir strin
 		resolvedWire := resolveAfterWire(addon.Wire, afterStep)
 		autoWirePlaceholders(sub, outputMap, resolvedWire, g)
 		addInsertionDeps(sub, afterStep)
-		fixFromDependencies(sub)
+		ensureFromDeps(sub, true)
 		spliceSteps(parent, sub, afterStep)
 		mergeCleanup(parent, sub)
 

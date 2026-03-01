@@ -286,26 +286,15 @@ func (s *Server) handleInstantiateWorkflow(_ context.Context, req mcp.CallToolRe
 		return mcp.NewToolResultError(fmt.Sprintf("workflow %q has no template", workflowName)), nil
 	}
 
-	var tpl *plan.Plan
-
-	if len(wf.Slots) > 0 {
-		composed, composeErr := intent.ComposeWithSlotsAndAddons(wf, choices, addons, g, s.ctx.GraphDir)
-		if composeErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
-		}
-		tpl = composed
-	} else if len(addons) > 0 {
-		composed, composeErr := intent.ComposeWithAddons(wf, addons, g, s.ctx.GraphDir)
-		if composeErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
-		}
-		tpl = composed
-	} else {
-		loaded, loadErr := intent.LoadWorkflowTemplate(wf.Template, s.ctx.GraphDir, g)
-		if loadErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("loading template: %v", loadErr)), nil
-		}
-		tpl = loaded
+	tpl, composeErr := intent.Compose(intent.ComposeRequest{
+		Base:     wf,
+		Choices:  choices,
+		Addons:   addons,
+		Graph:    g,
+		GraphDir: s.ctx.GraphDir,
+	})
+	if composeErr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
 	}
 
 	yamlBytes, err := plan.Marshal(tpl)
@@ -362,32 +351,14 @@ func (s *Server) handleGetWorkflowDetail(_ context.Context, req mcp.CallToolRequ
 		return mcp.NewToolResultError(fmt.Sprintf("workflow %q has no template", workflowName)), nil
 	}
 
-	var p *plan.Plan
-	if len(wf.Slots) > 0 {
-		// For workflows with slots, use defaults for get_workflow_detail.
-		composed, composeErr := intent.ComposeWithSlots(wf, nil, g, s.ctx.GraphDir)
-		if composeErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("slot composition failed: %v", composeErr)), nil
-		}
-		if len(addons) > 0 {
-			composed, composeErr = intent.ComposeWithSlotsAndAddons(wf, nil, addons, g, s.ctx.GraphDir)
-			if composeErr != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
-			}
-		}
-		p = composed
-	} else if len(addons) > 0 {
-		composed, composeErr := intent.ComposeWithAddons(wf, addons, g, s.ctx.GraphDir)
-		if composeErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
-		}
-		p = composed
-	} else {
-		loaded, loadErr := intent.LoadWorkflowTemplate(wf.Template, s.ctx.GraphDir, g)
-		if loadErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("loading template: %v", loadErr)), nil
-		}
-		p = loaded
+	p, composeErr := intent.Compose(intent.ComposeRequest{
+		Base:     wf,
+		Addons:   addons,
+		Graph:    g,
+		GraphDir: s.ctx.GraphDir,
+	})
+	if composeErr != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("composition failed: %v", composeErr)), nil
 	}
 
 	summaryMode := req.GetBool("summary", true)

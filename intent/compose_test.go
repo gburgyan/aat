@@ -503,9 +503,9 @@ func TestFindStepByNode(t *testing.T) {
 	assert.Equal(t, "", findStepByNode(p, "nonexistent"))
 }
 
-// --- ComposeWorkflowTemplate integration tests ---
+// --- Compose integration tests ---
 
-func TestComposeWorkflowTemplate_NoAddons(t *testing.T) {
+func TestCompose_NoAddons(t *testing.T) {
 	g := buildComposeTestGraph()
 
 	base := graph.Workflow{
@@ -513,32 +513,22 @@ func TestComposeWorkflowTemplate_NoAddons(t *testing.T) {
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	p, err := ComposeWorkflowTemplate(base, nil, ".", g)
+	p, err := Compose(ComposeRequest{Base: base, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 	require.Len(t, p.Execution.Steps, 3)
 	assert.Equal(t, "search", p.Execution.Steps[0].Node)
 }
 
-func TestComposeWorkflowTemplate_WithAddon(t *testing.T) {
+func TestCompose_WithAddon(t *testing.T) {
 	g := buildComposeTestGraph()
+	setWorkflowWire(g, "Addon", map[string]string{"specialInput": "MANUAL"})
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-			Wire: map[string]string{
-				"specialInput": "MANUAL",
-			},
-		},
-	}
 
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Parent has 3 steps, addon has 2 steps = 5 total.
@@ -573,63 +563,52 @@ func TestComposeWorkflowTemplate_WithAddon(t *testing.T) {
 	assert.Len(t, p.Execution.Cleanup, 1)
 }
 
-func TestComposeWorkflowTemplate_NoTemplate(t *testing.T) {
+func TestCompose_NoTemplate(t *testing.T) {
 	g := buildComposeTestGraph()
 
 	base := graph.Workflow{
 		Name: "NoTemplate",
 	}
 
-	_, err := ComposeWorkflowTemplate(base, nil, ".", g)
+	_, err := Compose(ComposeRequest{Base: base, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no template")
 }
 
-func TestComposeWorkflowTemplate_AddonAfterNotInBase(t *testing.T) {
+func TestCompose_AddonAfterNotInBase(t *testing.T) {
 	g := buildComposeTestGraph()
+	setWorkflowAfter(g, "Addon", graph.AfterSpec{"nonexistentNode"})
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"nonexistentNode"},
-		},
-	}
 
-	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	_, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon"}, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "found in base plan steps")
 }
 
-func TestComposeWorkflowTemplate_AddonNoTemplate(t *testing.T) {
+func TestCompose_AddonNoTemplate(t *testing.T) {
 	g := buildComposeTestGraph()
+	g.Workflows = append(g.Workflows, graph.Workflow{
+		Name:  "BadAddon",
+		Kind:  "addon",
+		After: graph.AfterSpec{"book"},
+		// No Template
+	})
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
-	addons := []graph.Workflow{
-		{
-			Name:  "BadAddon",
-			Kind:  "addon",
-			After: graph.AfterSpec{"book"},
-			// No Template
-		},
-	}
 
-	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	_, err := Compose(ComposeRequest{Base: base, Addons: []string{"BadAddon"}, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no template")
 }
 
-// --- ComposeWithAddons ---
-
-func TestComposeWithAddons_Success(t *testing.T) {
+func TestCompose_WithAddons_Success(t *testing.T) {
 	g := buildComposeTestGraph()
 
 	base := graph.Workflow{
@@ -637,14 +616,14 @@ func TestComposeWithAddons_Success(t *testing.T) {
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	p, err := ComposeWithAddons(base, []string{"Addon"}, g, ".")
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Parent 3 + addon 2 = 5 steps.
 	require.Len(t, p.Execution.Steps, 5)
 }
 
-func TestComposeWithAddons_UnknownAddon(t *testing.T) {
+func TestCompose_UnknownAddon(t *testing.T) {
 	g := buildComposeTestGraph()
 
 	base := graph.Workflow{
@@ -652,12 +631,12 @@ func TestComposeWithAddons_UnknownAddon(t *testing.T) {
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	_, err := ComposeWithAddons(base, []string{"NonExistent"}, g, ".")
+	_, err := Compose(ComposeRequest{Base: base, Addons: []string{"NonExistent"}, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown addon workflow")
 }
 
-func TestComposeWithAddons_NotAnAddon(t *testing.T) {
+func TestCompose_NotAnAddon(t *testing.T) {
 	g := buildComposeTestGraph()
 	// Add a non-addon workflow.
 	g.Workflows = append(g.Workflows, graph.Workflow{
@@ -670,14 +649,14 @@ func TestComposeWithAddons_NotAnAddon(t *testing.T) {
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	_, err := ComposeWithAddons(base, []string{"Regular"}, g, ".")
+	_, err := Compose(ComposeRequest{Base: base, Addons: []string{"Regular"}, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "is not an addon")
 }
 
 // --- Auto-chaining tests ---
 
-func TestComposeWorkflowTemplate_AutoChainSameAfterNode(t *testing.T) {
+func TestCompose_AutoChainSameAfterNode(t *testing.T) {
 	g := buildComposeTestGraph()
 
 	base := graph.Workflow{
@@ -685,23 +664,8 @@ func TestComposeWorkflowTemplate_AutoChainSameAfterNode(t *testing.T) {
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	// Two addons that both target "book" — should be auto-chained.
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-		},
-		{
-			Name:     "Addon2",
-			Kind:     "addon",
-			Template: "testdata/compose/addon2.yaml",
-			After:    graph.AfterSpec{"book"},
-		},
-	}
-
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	// Both addons target "book" (default in test graph) — should be auto-chained.
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon", "Addon2"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Parent has 3 steps, addon1 has 2, addon2 has 2 = 7 total.
@@ -718,38 +682,23 @@ func TestComposeWorkflowTemplate_AutoChainSameAfterNode(t *testing.T) {
 	assert.Contains(t, addon1Root.DependsOn, "book")
 
 	// Second addon root (inc1_addon3) should depend on inc0_addon2
-	// (last step of first addon) via auto-chaining. It may also have
-	// additional deps from auto-wired from refs.
+	// (last step of first addon) via auto-chaining.
 	addon2Root := stepsByID["inc1_addon3"]
 	assert.Contains(t, addon2Root.DependsOn, "inc0_addon2",
 		"auto-chained addon should depend on last step of previous addon")
 }
 
-func TestComposeWorkflowTemplate_DifferentAfterNodesNotChained(t *testing.T) {
+func TestCompose_DifferentAfterNodesNotChained(t *testing.T) {
 	g := buildComposeTestGraph()
+	setWorkflowAfter(g, "Addon2", graph.AfterSpec{"search"})
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	// Two addons targeting different nodes — should NOT be auto-chained.
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-		},
-		{
-			Name:     "Addon2",
-			Kind:     "addon",
-			Template: "testdata/compose/addon2.yaml",
-			After:    graph.AfterSpec{"search"},
-		},
-	}
-
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	// Addon targets "book", Addon2 targets "search" — should NOT be auto-chained.
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon", "Addon2"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	require.Len(t, p.Execution.Steps, 7)
@@ -771,8 +720,15 @@ func TestComposeWorkflowTemplate_DifferentAfterNodesNotChained(t *testing.T) {
 		"addon with different after node should not be chained to first addon")
 }
 
-func TestComposeWorkflowTemplate_ThreeAddonsChained(t *testing.T) {
+func TestCompose_ThreeAddonsChained(t *testing.T) {
 	g := buildComposeTestGraph()
+	// Add a third addon targeting "book".
+	g.Workflows = append(g.Workflows, graph.Workflow{
+		Name:     "Addon3",
+		Kind:     "addon",
+		Template: "testdata/compose/addon.yaml",
+		After:    graph.AfterSpec{"book"},
+	})
 
 	base := graph.Workflow{
 		Name:     "Base",
@@ -780,28 +736,7 @@ func TestComposeWorkflowTemplate_ThreeAddonsChained(t *testing.T) {
 	}
 
 	// Three addons sharing "book" — chain all three sequentially.
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-		},
-		{
-			Name:     "Addon2",
-			Kind:     "addon",
-			Template: "testdata/compose/addon2.yaml",
-			After:    graph.AfterSpec{"book"},
-		},
-		{
-			Name:     "Addon3",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-		},
-	}
-
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon", "Addon2", "Addon3"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Parent 3 + addon1 2 + addon2 2 + addon3 2 = 9 steps.
@@ -825,34 +760,19 @@ func TestComposeWorkflowTemplate_ThreeAddonsChained(t *testing.T) {
 
 // --- Priority sorting tests ---
 
-func TestComposeWorkflowTemplate_PrioritySortsAddons(t *testing.T) {
+func TestCompose_PrioritySortsAddons(t *testing.T) {
 	g := buildComposeTestGraph()
+	setWorkflowPriority(g, "Addon", 20)
+	setWorkflowPriority(g, "Addon2", 90)
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	// Addons given in wrong order: cancel (90) before seat (20).
-	// Priority sort should reorder seat before cancel.
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon2",
-			Kind:     "addon",
-			Template: "testdata/compose/addon2.yaml",
-			After:    graph.AfterSpec{"book"},
-			Priority: 90,
-		},
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-			Priority: 20,
-		},
-	}
-
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	// Addons given in wrong order: Addon2 (90) before Addon (20).
+	// Priority sort should reorder Addon before Addon2.
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon2", "Addon"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Parent 3 + addon1 (priority 20) 2 + addon2 (priority 90) 2 = 7.
@@ -877,33 +797,17 @@ func TestComposeWorkflowTemplate_PrioritySortsAddons(t *testing.T) {
 	assert.Contains(t, stepsByID["inc1_addon3"].DependsOn, "inc0_addon2")
 }
 
-func TestComposeWorkflowTemplate_EqualPriorityPreservesOrder(t *testing.T) {
+func TestCompose_EqualPriorityPreservesOrder(t *testing.T) {
 	g := buildComposeTestGraph()
+	setWorkflowPriority(g, "Addon", 10)
+	setWorkflowPriority(g, "Addon2", 10)
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	// Both addons have same priority — original order should be preserved.
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-			Priority: 10,
-		},
-		{
-			Name:     "Addon2",
-			Kind:     "addon",
-			Template: "testdata/compose/addon2.yaml",
-			After:    graph.AfterSpec{"book"},
-			Priority: 10,
-		},
-	}
-
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon", "Addon2"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 	require.Len(t, p.Execution.Steps, 7)
 
@@ -920,7 +824,7 @@ func TestComposeWorkflowTemplate_EqualPriorityPreservesOrder(t *testing.T) {
 	assert.True(t, hasAddon3, "second addon should keep inc1_ prefix")
 }
 
-func TestComposeWorkflowTemplate_ZeroPriorityDefault(t *testing.T) {
+func TestCompose_ZeroPriorityDefault(t *testing.T) {
 	g := buildComposeTestGraph()
 
 	base := graph.Workflow{
@@ -929,22 +833,7 @@ func TestComposeWorkflowTemplate_ZeroPriorityDefault(t *testing.T) {
 	}
 
 	// No priority set (default 0) — should work exactly like before.
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-		},
-		{
-			Name:     "Addon2",
-			Kind:     "addon",
-			Template: "testdata/compose/addon2.yaml",
-			After:    graph.AfterSpec{"book"},
-		},
-	}
-
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon", "Addon2"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 	require.Len(t, p.Execution.Steps, 7)
 
@@ -959,43 +848,6 @@ func TestComposeWorkflowTemplate_ZeroPriorityDefault(t *testing.T) {
 
 	_, hasAddon3 := stepsByID["inc1_addon3"]
 	assert.True(t, hasAddon3)
-}
-
-func TestComposeWorkflowTemplate_DoesNotMutateCallerSlice(t *testing.T) {
-	g := buildComposeTestGraph()
-
-	base := graph.Workflow{
-		Name:     "Base",
-		Template: "testdata/compose/parent.yaml",
-	}
-
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon2",
-			Kind:     "addon",
-			Template: "testdata/compose/addon2.yaml",
-			After:    graph.AfterSpec{"book"},
-			Priority: 90,
-		},
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-			Priority: 20,
-		},
-	}
-
-	// Save original order.
-	originalFirst := addons[0].Name
-	originalSecond := addons[1].Name
-
-	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
-	require.NoError(t, err)
-
-	// Caller's slice should not be reordered.
-	assert.Equal(t, originalFirst, addons[0].Name)
-	assert.Equal(t, originalSecond, addons[1].Name)
 }
 
 // --- resolveAfterWire ---
@@ -1042,24 +894,16 @@ func TestResolveAfterWire(t *testing.T) {
 
 // --- Multi-After composition tests ---
 
-func TestComposeWorkflowTemplate_MultiAfterFirstMatch(t *testing.T) {
+func TestCompose_MultiAfterFirstMatch(t *testing.T) {
 	g := buildComposeTestGraph()
+	setWorkflowAfter(g, "Addon", graph.AfterSpec{"search", "book"})
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
-	// Addon with multi-after: [search, book] — search is first and present in base.
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"search", "book"},
-		},
-	}
 
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Should splice after "search" (first match).
@@ -1069,24 +913,16 @@ func TestComposeWorkflowTemplate_MultiAfterFirstMatch(t *testing.T) {
 	assert.Contains(t, p.Execution.Steps[1].DependsOn, "search")
 }
 
-func TestComposeWorkflowTemplate_MultiAfterSecondMatch(t *testing.T) {
+func TestCompose_MultiAfterSecondMatch(t *testing.T) {
 	g := buildComposeTestGraph()
+	setWorkflowAfter(g, "Addon", graph.AfterSpec{"nonexistent", "book"})
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
-	// Addon with multi-after: [nonexistent, book] — only book is present.
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"nonexistent", "book"},
-		},
-	}
 
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Should splice after "book" (second match).
@@ -1096,51 +932,36 @@ func TestComposeWorkflowTemplate_MultiAfterSecondMatch(t *testing.T) {
 	assert.Contains(t, p.Execution.Steps[2].DependsOn, "book")
 }
 
-func TestComposeWorkflowTemplate_MultiAfterNoneFound(t *testing.T) {
+func TestCompose_MultiAfterNoneFound(t *testing.T) {
 	g := buildComposeTestGraph()
+	setWorkflowAfter(g, "Addon", graph.AfterSpec{"missing1", "missing2"})
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"missing1", "missing2"},
-		},
-	}
 
-	_, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	_, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon"}, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "found in base plan steps")
 }
 
-func TestComposeWorkflowTemplate_AfterWireSubstitution(t *testing.T) {
+func TestCompose_AfterWireSubstitution(t *testing.T) {
 	g := buildComposeTestGraph()
 	// Add an offerIdentifierValue output to the book node for wire testing.
 	g.Nodes["book"].Outputs = append(g.Nodes["book"].Outputs,
 		graph.Output{Name: "offerIdentifierValue", Type: "string"})
+	setWorkflowWire(g, "Addon", map[string]string{
+		"workbenchId":  "$after.offerIdentifierValue",
+		"specialInput": "MANUAL",
+	})
 
 	base := graph.Workflow{
 		Name:     "Base",
 		Template: "testdata/compose/parent.yaml",
 	}
-	addons := []graph.Workflow{
-		{
-			Name:     "Addon",
-			Kind:     "addon",
-			Template: "testdata/compose/addon.yaml",
-			After:    graph.AfterSpec{"book"},
-			Wire: map[string]string{
-				"workbenchId":  "$after.offerIdentifierValue",
-				"specialInput": "MANUAL",
-			},
-		},
-	}
 
-	p, err := ComposeWorkflowTemplate(base, addons, ".", g)
+	p, err := Compose(ComposeRequest{Base: base, Addons: []string{"Addon"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	addon1 := p.Execution.Steps[2]
@@ -1151,17 +972,16 @@ func TestComposeWorkflowTemplate_AfterWireSubstitution(t *testing.T) {
 	assert.Empty(t, addon1.Values["specialInput"].From)
 }
 
-// --- ComposeWithSlots tests ---
+// --- Compose with slots tests ---
 
-func TestComposeWithSlots_BasicReplacement(t *testing.T) {
+func TestCompose_Slots_BasicReplacement(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	p, err := ComposeWithSlots(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionA",
 		"payment":     "CashPayment",
-	}, g, ".")
+	}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Base has: createWorkbench, [trip-search], addTraveler, [payment], finalStep
@@ -1179,15 +999,14 @@ func TestComposeWithSlots_BasicReplacement(t *testing.T) {
 	assert.Equal(t, "finalStep", p.Execution.Steps[5].Node)
 }
 
-func TestComposeWithSlots_DependsOnRewriting(t *testing.T) {
+func TestCompose_Slots_DependsOnRewriting(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	p, err := ComposeWithSlots(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionA",
 		"payment":     "CashPayment",
-	}, g, ".")
+	}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// addTraveler originally depends on "trip-search" slot → rewritten to "book" (last step of OptionA).
@@ -1210,15 +1029,14 @@ func TestComposeWithSlots_DependsOnRewriting(t *testing.T) {
 	assert.NotContains(t, finalStep.DependsOn, "payment")
 }
 
-func TestComposeWithSlots_AutoWiring(t *testing.T) {
+func TestCompose_Slots_AutoWiring(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	p, err := ComposeWithSlots(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionA",
 		"payment":     "CashPayment",
-	}, g, ".")
+	}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// finalStep has amount: AUTOWIRE → should be wired to addCashPayment.amount
@@ -1229,17 +1047,16 @@ func TestComposeWithSlots_AutoWiring(t *testing.T) {
 	assert.Nil(t, finalStep.Values["amount"].Default, "AUTOWIRE default should be cleared")
 }
 
-func TestComposeWithSlots_CrossSlotFromRef(t *testing.T) {
+func TestCompose_Slots_CrossSlotFromRef(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	p, err := ComposeWithSlots(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "CashPayment", // Intentionally wrong to use CashPayment as trip-search
 		"payment":     "CashPayment",
-	}, g, ".")
+	}, Graph: g, GraphDir: "."})
 	// CashPayment has a from: createWorkbench.workbenchId — this is a cross-slot
-	// ref to a base template step. fixFromDependencies should add createWorkbench
+	// ref to a base template step. ensureFromDeps should add createWorkbench
 	// to the step's dependsOn.
 	require.NoError(t, err)
 
@@ -1247,18 +1064,17 @@ func TestComposeWithSlots_CrossSlotFromRef(t *testing.T) {
 	cashStep := p.Execution.Steps[1]
 	assert.Equal(t, "addCashPayment", cashStep.Node)
 	assert.Contains(t, cashStep.DependsOn, "createWorkbench",
-		"cross-slot from ref should add dependency via fixFromDependencies")
+		"cross-slot from ref should add dependency via ensureFromDeps")
 }
 
-func TestComposeWithSlots_OptionBMultiStep(t *testing.T) {
+func TestCompose_Slots_OptionBMultiStep(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	p, err := ComposeWithSlots(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionB",
 		"payment":     "CashPayment",
-	}, g, ".")
+	}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// OptionB has 3 steps: search, searchLeg2, book
@@ -1277,13 +1093,12 @@ func TestComposeWithSlots_OptionBMultiStep(t *testing.T) {
 	assert.Contains(t, p.Execution.Steps[4].DependsOn, "book")
 }
 
-func TestComposeWithSlots_DefaultChoice(t *testing.T) {
+func TestCompose_Slots_DefaultChoice(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
 	// Provide no choices — should use defaults.
-	p, err := ComposeWithSlots(base, nil, g, ".")
+	p, err := Compose(ComposeRequest{Base: base, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Default trip-search is OptionA (2 steps), default payment is CashPayment (1 step).
@@ -1291,56 +1106,43 @@ func TestComposeWithSlots_DefaultChoice(t *testing.T) {
 	assert.Equal(t, "search", p.Execution.Steps[1].Node)
 }
 
-func TestComposeWithSlots_PartialChoices(t *testing.T) {
+func TestCompose_Slots_PartialChoices(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
 	// Only specify trip-search — payment should default to CashPayment.
-	p, err := ComposeWithSlots(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionB",
-	}, g, ".")
+	}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// OptionB (3 steps) + CashPayment (1 step) + createWorkbench + addTraveler + finalStep = 7
 	require.Len(t, p.Execution.Steps, 7)
 }
 
-func TestComposeWithSlots_UnknownOption(t *testing.T) {
+func TestCompose_Slots_UnknownOption(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	_, err := ComposeWithSlots(base, map[string]string{
+	_, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "NonExistent",
-	}, g, ".")
+	}, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found in graph")
 }
 
-func TestComposeWithSlots_NoDefaultNoChoice(t *testing.T) {
+func TestCompose_Slots_NoDefaultNoChoice(t *testing.T) {
 	g := buildSlotTestGraph()
 
-	// Add a slot with no default.
 	base := findSlotBaseWorkflow(g)
-	base.Slots = append(base.Slots, graph.SlotDef{
-		Name:    "extra",
-		Options: []string{"OptionA"},
-		// No Default
-	})
-
-	// Modify base template to include the slot marker. Instead of modifying the
-	// file, we skip the extra slot — ComposeWithSlots will fail at "marker not found"
-	// which is a different error. Let's test the "no choice and no default" by
-	// clearing the default of an existing slot.
 	base.Slots[0].Default = "" // trip-search has no default now
 
-	_, err := ComposeWithSlots(base, nil, g, ".")
+	_, err := Compose(ComposeRequest{Base: base, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no choice and no default")
 }
 
-func TestComposeWithSlots_NoSlots(t *testing.T) {
+func TestCompose_NoSlots(t *testing.T) {
 	g := buildSlotTestGraph()
 
 	// Use a workflow with no slots — should just load the template.
@@ -1349,20 +1151,19 @@ func TestComposeWithSlots_NoSlots(t *testing.T) {
 		Template: "testdata/compose/parent.yaml",
 	}
 
-	p, err := ComposeWithSlots(noSlotWF, nil, g, ".")
+	p, err := Compose(ComposeRequest{Base: noSlotWF, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 	require.Len(t, p.Execution.Steps, 3) // parent.yaml has 3 steps
 }
 
-func TestComposeWithSlots_CleanupMerge(t *testing.T) {
+func TestCompose_Slots_CleanupMerge(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	p, err := ComposeWithSlots(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionA",
 		"payment":     "CashPayment",
-	}, g, ".")
+	}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// Base has cleanup: commit (always). Options have no cleanup.
@@ -1370,15 +1171,14 @@ func TestComposeWithSlots_CleanupMerge(t *testing.T) {
 	assert.Equal(t, "commit", p.Execution.Cleanup[0].Node)
 }
 
-func TestComposeWithSlotsAndAddons_Success(t *testing.T) {
+func TestCompose_SlotsAndAddons_Success(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	p, err := ComposeWithSlotsAndAddons(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionA",
 		"payment":     "CashPayment",
-	}, []string{"Addon"}, g, ".")
+	}, Addons: []string{"Addon"}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
 	// 6 from slot composition + 2 from addon = 8
@@ -1393,30 +1193,28 @@ func TestComposeWithSlotsAndAddons_Success(t *testing.T) {
 	assert.Contains(t, stepIDs, "inc0_addon2")
 }
 
-func TestComposeWithSlotsAndAddons_NoAddons(t *testing.T) {
+func TestCompose_SlotsAndAddons_NoAddons(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	p, err := ComposeWithSlotsAndAddons(base, map[string]string{
+	p, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionA",
 		"payment":     "CashPayment",
-	}, nil, g, ".")
+	}, Graph: g, GraphDir: "."})
 	require.NoError(t, err)
 
-	// Same as ComposeWithSlots — 6 steps.
+	// Same as slots only — 6 steps.
 	require.Len(t, p.Execution.Steps, 6)
 }
 
-func TestComposeWithSlotsAndAddons_BadAddon(t *testing.T) {
+func TestCompose_SlotsAndAddons_BadAddon(t *testing.T) {
 	g := buildSlotTestGraph()
-
 	base := findSlotBaseWorkflow(g)
 
-	_, err := ComposeWithSlotsAndAddons(base, map[string]string{
+	_, err := Compose(ComposeRequest{Base: base, Choices: map[string]string{
 		"trip-search": "OptionA",
 		"payment":     "CashPayment",
-	}, []string{"NonExistent"}, g, ".")
+	}, Addons: []string{"NonExistent"}, Graph: g, GraphDir: "."})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown addon")
 }
@@ -1445,7 +1243,7 @@ func TestEnsureFromDeps_AddsFromRefDeps(t *testing.T) {
 		},
 	}
 
-	ensureFromDeps(p)
+	ensureFromDeps(p, false)
 
 	// addOffer should gain createWorkbench dep from from ref.
 	assert.Contains(t, p.Execution.Steps[1].DependsOn, "createWorkbench")
@@ -1472,7 +1270,7 @@ func TestEnsureFromDeps_NoDuplicateDeps(t *testing.T) {
 		},
 	}
 
-	ensureFromDeps(p)
+	ensureFromDeps(p, false)
 
 	// "a" should appear only once in b's dependsOn.
 	count := 0
@@ -1498,7 +1296,7 @@ func TestEnsureFromDeps_SkipsSelfRef(t *testing.T) {
 		},
 	}
 
-	ensureFromDeps(p)
+	ensureFromDeps(p, false)
 	assert.Empty(t, p.Execution.Steps[0].DependsOn, "self-ref should not add self to dependsOn")
 }
 
@@ -1585,7 +1383,7 @@ func buildSlotTestGraph() *graph.Graph {
 
 // --- Inject Tests ---
 
-func TestComposeWithSlots_InjectAppliesValue(t *testing.T) {
+func TestCompose_Slots_InjectAppliesValue(t *testing.T) {
 	g := buildSlotTestGraph()
 
 	// Add a "passengers" input to the search node so inject can target it.
@@ -1631,9 +1429,7 @@ func TestComposeWithSlots_InjectAppliesValue(t *testing.T) {
 		},
 	}
 
-	// Manually replicate what ComposeWithSlots does but with our custom base plan.
-	// Use the exported function by writing a temp file. Instead, let's just call
-	// applyInjectValues directly since we want to test the inject mechanism.
+	// Call applyInjectValues directly to test the inject mechanism.
 	applyInjectValues(basePlan, map[string]any{"passengers": 2}, g)
 
 	// search is not in the basePlan steps, so nothing should be injected.
@@ -1757,6 +1553,38 @@ func TestApplyInjectValues_MultipleSteps(t *testing.T) {
 	// addTraveler has no "passengers" input — no injection.
 	_, has := p.Execution.Steps[2].Values["passengers"]
 	assert.False(t, has)
+}
+
+// --- Test graph helpers ---
+
+// setWorkflowWire modifies the Wire field of a named workflow in the graph.
+func setWorkflowWire(g *graph.Graph, name string, wire map[string]string) {
+	for i, wf := range g.Workflows {
+		if wf.Name == name {
+			g.Workflows[i].Wire = wire
+			return
+		}
+	}
+}
+
+// setWorkflowAfter modifies the After field of a named workflow in the graph.
+func setWorkflowAfter(g *graph.Graph, name string, after graph.AfterSpec) {
+	for i, wf := range g.Workflows {
+		if wf.Name == name {
+			g.Workflows[i].After = after
+			return
+		}
+	}
+}
+
+// setWorkflowPriority modifies the Priority field of a named workflow in the graph.
+func setWorkflowPriority(g *graph.Graph, name string, priority int) {
+	for i, wf := range g.Workflows {
+		if wf.Name == name {
+			g.Workflows[i].Priority = priority
+			return
+		}
+	}
 }
 
 // buildComposeTestGraph creates a synthetic graph for composition tests.
