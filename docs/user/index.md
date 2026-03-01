@@ -63,6 +63,7 @@ Progressive reading order — each builds on the previous.
 | Document | What you'll learn |
 |----------|-------------------|
 | [Running Tests](running.md) | `aat run plan`, `aat run batch`, output directories, and progress display |
+| [Matrix Testing](batch-layers.md) | Layer groups, cartesian product batches, duplicate detection, and the test matrix |
 | [Local Development](local-dev.md) | Auto-discovered `.aat-overrides.yaml` for routing traffic to localhost |
 | [CI/CD Integration](ci-cd.md) | Exit codes, `--json` output, `--quiet` mode, and pipeline examples |
 | [LLM-Assisted Planning](prompt.md) | `aat prompt`, interactive confirmation, plan saving, and trace debugging |
@@ -109,6 +110,9 @@ A YAML model of your API's operations — nodes with typed inputs and outputs, o
 
 ### Layer
 A YAML overlay that provides alternate test data for a plan without duplicating the entire plan structure. [-> plans.md](plans.md)
+
+### Layer Group
+A set of mutually exclusive layers combined via `--layer-group` to produce a cartesian product of batch permutations, with automatic duplicate detection. [-> batch-layers.md](batch-layers.md)
 
 ### Manifest
 The `aat-project.yaml` file that marks a project root and declares paths to all project artifacts. [-> project-setup.md](project-setup.md)
