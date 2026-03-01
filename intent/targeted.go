@@ -106,133 +106,150 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 				IsConfigurable:   inp.Configurable,
 			}
 
-			// Check if a layer provides a value/pool for this input.
-			if layerOverrides != nil {
-				layerKey := step.Node + "." + inp.Name
-				if _, ok := layerOverrides[layerKey]; ok {
-					ic.LayerHandled = true
-				}
-			}
-
-			// Check for fromResolved auto-wiring.
-			if sv, exists := step.Values[inp.Name]; exists && sv.FromResolved != "" {
-				ic.FromResolved = sv.FromResolved
-			}
-
-			// Check for existing template default value.
-			if sv, exists := step.Values[inp.Name]; exists && sv.Default != nil {
-				ic.CurrentDefault = fmt.Sprintf("%v", sv.Default)
-			}
-
-			// Check for template pool values.
-			if sv, exists := step.Values[inp.Name]; exists && len(sv.Pool) > 0 {
-				var poolStrs []string
-				for _, v := range sv.Pool {
-					poolStrs = append(poolStrs, fmt.Sprintf("%v", v))
-				}
-				if len(poolStrs) > 8 {
-					poolStrs = poolStrs[:8]
-				}
-				ic.PoolValues = poolStrs
-				ic.HasTemplatePool = true
-			}
-
-			// Mark as pool input when template has a pool and no explicit default.
-			if ic.HasTemplatePool && ic.CurrentDefault == "" {
-				ic.IsPoolInput = true
-			}
-
-			// For configurable inputs, also show graph-level default.
-			if ic.CurrentDefault == "" && inp.Default != nil && inp.Default.EffectiveValue() != nil {
-				ic.CurrentDefault = fmt.Sprintf("%v", inp.Default.EffectiveValue())
-			}
-
-			// Populate pool values from graph-level pool defaults.
-			if !ic.HasTemplatePool && inp.Default != nil && len(inp.Default.Pool) > 0 {
-				var poolStrs []string
-				for _, v := range inp.Default.Pool {
-					poolStrs = append(poolStrs, fmt.Sprintf("%v", v))
-				}
-				if len(poolStrs) > 8 {
-					poolStrs = poolStrs[:8]
-				}
-				ic.PoolValues = poolStrs
-				ic.HasTemplatePool = true
-				if ic.CurrentDefault == "" {
-					ic.IsPoolInput = true
-				}
-			}
-
-			// Check for date type.
-			if inp.Type == "date" || inp.Type == "datetime" {
-				ic.IsDate = true
-			}
-
-			// Graph-level constraint annotation + validation metadata.
-			if inp.Constraints != nil {
-				if inp.Constraints.Description != "" {
-					ic.GraphConstr = inp.Constraints.Description
-				}
-				if inp.Constraints.Pattern != "" {
-					if ic.GraphConstr != "" {
-						ic.GraphConstr += " "
-					}
-					ic.GraphConstr += fmt.Sprintf("(pattern: %s)", inp.Constraints.Pattern)
-					ic.ConstraintPattern = inp.Constraints.Pattern
-				}
-				ic.ConstraintMinLength = inp.Constraints.MinLength
-				ic.ConstraintMaxLength = inp.Constraints.MaxLength
-			}
-
-			// Domain enrichment from KB.
-			if kb != nil {
-				td := kb.TypeForField(inp.Type)
-				if td != nil {
-					ic.DomainType = td.Description
-					ic.Format = td.Format
-					if td.Pool != "" {
-						ic.PoolValues = kb.SampleValues(td.Pool, 8)
-					}
-				}
-
-				// Check concepts that apply to this input.
-				concepts := kb.ConceptsForField(inp.Name)
-				for _, c := range concepts {
-					if c.Description != "" {
-						ic.DomainType = c.Description
-					}
-					if c.Constraint != "" {
-						ic.Format = c.Constraint
-					}
-					// Connect concept → TypeDef → pool.
-					// Concept name often matches TypeDef name (e.g., "airportCode").
-					if len(ic.PoolValues) == 0 {
-						if ctd := kb.GetType(c.Name); ctd != nil && ctd.Pool != "" {
-							ic.PoolValues = kb.SampleValues(ctd.Pool, 8)
-							if ic.Format == "" {
-								ic.Format = ctd.Format
-							}
-						}
-					}
-					// Include concept examples as fallback pool values.
-					if len(c.Examples) > 0 && len(ic.PoolValues) == 0 {
-						var examples []string
-						for _, vals := range c.Examples {
-							examples = append(examples, vals...)
-						}
-						if len(examples) > 8 {
-							examples = examples[:8]
-						}
-						ic.PoolValues = examples
-					}
-				}
-			}
+			enrichFromLayers(&ic, step, layerOverrides)
+			enrichFromTemplate(&ic, step)
+			enrichFromGraph(&ic, inp)
+			enrichFromDomainKB(&ic, inp, kb)
 
 			contexts = append(contexts, ic)
 		}
 	}
 
 	return contexts
+}
+
+// enrichFromLayers marks the input as layer-handled if a layer provides a value.
+func enrichFromLayers(ic *InputContext, step plan.Step, layerOverrides map[string]*graph.InputDefault) {
+	if layerOverrides == nil {
+		return
+	}
+	layerKey := step.Node + "." + ic.InputName
+	if _, ok := layerOverrides[layerKey]; ok {
+		ic.LayerHandled = true
+	}
+}
+
+// enrichFromTemplate populates fromResolved, default, and pool from step values.
+func enrichFromTemplate(ic *InputContext, step plan.Step) {
+	sv, exists := step.Values[ic.InputName]
+	if !exists {
+		return
+	}
+
+	if sv.FromResolved != "" {
+		ic.FromResolved = sv.FromResolved
+	}
+	if sv.Default != nil {
+		ic.CurrentDefault = fmt.Sprintf("%v", sv.Default)
+	}
+	if len(sv.Pool) > 0 {
+		var poolStrs []string
+		for _, v := range sv.Pool {
+			poolStrs = append(poolStrs, fmt.Sprintf("%v", v))
+		}
+		if len(poolStrs) > 8 {
+			poolStrs = poolStrs[:8]
+		}
+		ic.PoolValues = poolStrs
+		ic.HasTemplatePool = true
+	}
+
+	// Mark as pool input when template has a pool and no explicit default.
+	if ic.HasTemplatePool && ic.CurrentDefault == "" {
+		ic.IsPoolInput = true
+	}
+}
+
+// enrichFromGraph populates defaults, pools, date type, and constraints from the graph input.
+func enrichFromGraph(ic *InputContext, inp graph.Input) {
+	// Graph-level default value.
+	if ic.CurrentDefault == "" && inp.Default != nil && inp.Default.EffectiveValue() != nil {
+		ic.CurrentDefault = fmt.Sprintf("%v", inp.Default.EffectiveValue())
+	}
+
+	// Graph-level pool defaults.
+	if !ic.HasTemplatePool && inp.Default != nil && len(inp.Default.Pool) > 0 {
+		var poolStrs []string
+		for _, v := range inp.Default.Pool {
+			poolStrs = append(poolStrs, fmt.Sprintf("%v", v))
+		}
+		if len(poolStrs) > 8 {
+			poolStrs = poolStrs[:8]
+		}
+		ic.PoolValues = poolStrs
+		ic.HasTemplatePool = true
+		if ic.CurrentDefault == "" {
+			ic.IsPoolInput = true
+		}
+	}
+
+	// Date type.
+	if inp.Type == "date" || inp.Type == "datetime" {
+		ic.IsDate = true
+	}
+
+	// Constraint annotation + validation metadata.
+	if inp.Constraints != nil {
+		if inp.Constraints.Description != "" {
+			ic.GraphConstr = inp.Constraints.Description
+		}
+		if inp.Constraints.Pattern != "" {
+			if ic.GraphConstr != "" {
+				ic.GraphConstr += " "
+			}
+			ic.GraphConstr += fmt.Sprintf("(pattern: %s)", inp.Constraints.Pattern)
+			ic.ConstraintPattern = inp.Constraints.Pattern
+		}
+		ic.ConstraintMinLength = inp.Constraints.MinLength
+		ic.ConstraintMaxLength = inp.Constraints.MaxLength
+	}
+}
+
+// enrichFromDomainKB populates domain type, format, and pool values from the knowledge base.
+func enrichFromDomainKB(ic *InputContext, inp graph.Input, kb *domain.KnowledgeBase) {
+	if kb == nil {
+		return
+	}
+
+	td := kb.TypeForField(inp.Type)
+	if td != nil {
+		ic.DomainType = td.Description
+		ic.Format = td.Format
+		if td.Pool != "" {
+			ic.PoolValues = kb.SampleValues(td.Pool, 8)
+		}
+	}
+
+	// Check concepts that apply to this input.
+	concepts := kb.ConceptsForField(inp.Name)
+	for _, c := range concepts {
+		if c.Description != "" {
+			ic.DomainType = c.Description
+		}
+		if c.Constraint != "" {
+			ic.Format = c.Constraint
+		}
+		// Connect concept → TypeDef → pool.
+		if len(ic.PoolValues) == 0 {
+			if ctd := kb.GetType(c.Name); ctd != nil && ctd.Pool != "" {
+				ic.PoolValues = kb.SampleValues(ctd.Pool, 8)
+				if ic.Format == "" {
+					ic.Format = ctd.Format
+				}
+			}
+		}
+		// Include concept examples as fallback pool values.
+		if len(c.Examples) > 0 && len(ic.PoolValues) == 0 {
+			var examples []string
+			for _, vals := range c.Examples {
+				examples = append(examples, vals...)
+			}
+			if len(examples) > 8 {
+				examples = examples[:8]
+			}
+			ic.PoolValues = examples
+		}
+	}
 }
 
 // buildSelectionContexts walks named and inline selections in the skeleton,
@@ -551,36 +568,18 @@ func validateTargetedResponse(
 ) []TargetedValidationIssue {
 	var issues []TargetedValidationIssue
 
-	// Valid selection strategies (matches plan/validate.go).
-	validStrategies := map[string]bool{
-		"":       true,
-		"first":  true,
-		"last":   true,
-		"index":  true,
-		"random": true,
-		"min":    true,
-		"max":    true,
-		"match":  true,
-		"llm":    true,
-	}
+	issues = append(issues, validateUnfedInputsCovered(resp, unfedSet, inputContexts)...)
+	issues = append(issues, validateValuesAreLiteral(resp, unfedSet)...)
+	issues = append(issues, validateValueConstraints(resp, unfedSet, inputContexts)...)
+	issues = append(issues, validateSelectionStrategies(resp)...)
+	issues = append(issues, validateSelectionFilters(resp, selectionContexts)...)
 
-	// Build element field name set per selection key for filter field validation.
-	selectionFields := map[string]map[string]bool{}
-	for _, sc := range selectionContexts {
-		key := sc.StepID + "." + sc.SelectionName
-		fields := map[string]bool{}
-		for _, ef := range sc.ElementFields {
-			// Element fields are formatted as "name (type)" — extract just the name.
-			name := ef
-			if idx := strings.Index(ef, " ("); idx >= 0 {
-				name = ef[:idx]
-			}
-			fields[name] = true
-		}
-		selectionFields[key] = fields
-	}
+	return issues
+}
 
-	// Check 1: Every unfed input has a value.
+// validateUnfedInputsCovered checks that every unfed required input has a value.
+func validateUnfedInputsCovered(resp *TargetedResponse, unfedSet map[string]bool, inputContexts []InputContext) []TargetedValidationIssue {
+	var issues []TargetedValidationIssue
 	for _, ic := range inputContexts {
 		key := ic.StepID + "." + ic.InputName
 		if !unfedSet[key] {
@@ -604,15 +603,18 @@ func validateTargetedResponse(
 			})
 		}
 	}
+	return issues
+}
 
-	// Check 2: Values are plain scalars, not objects or arrays.
+// validateValuesAreLiteral checks that values are plain scalars, not objects or arrays.
+func validateValuesAreLiteral(resp *TargetedResponse, unfedSet map[string]bool) []TargetedValidationIssue {
+	var issues []TargetedValidationIssue
 	for key, val := range resp.Values {
 		if !unfedSet[key] {
 			continue
 		}
 		switch v := val.(type) {
 		case map[string]any:
-			// LLM returned an object — likely {from: ..., select: ...}.
 			issues = append(issues, TargetedValidationIssue{
 				Key:     key,
 				Kind:    "non_literal_value",
@@ -626,6 +628,12 @@ func validateTargetedResponse(
 			})
 		}
 	}
+	return issues
+}
+
+// validateValueConstraints checks regex patterns, expression syntax, and string length.
+func validateValueConstraints(resp *TargetedResponse, unfedSet map[string]bool, inputContexts []InputContext) []TargetedValidationIssue {
+	var issues []TargetedValidationIssue
 
 	// Build input context lookup for constraint checks.
 	icByKey := map[string]*InputContext{}
@@ -634,7 +642,6 @@ func validateTargetedResponse(
 		icByKey[ic.StepID+"."+ic.InputName] = ic
 	}
 
-	// Check 2b: Regex pattern, expression syntax, string length.
 	for key, val := range resp.Values {
 		if !unfedSet[key] {
 			continue
@@ -691,10 +698,26 @@ func validateTargetedResponse(
 			})
 		}
 	}
+	return issues
+}
 
-	// Check 3–5: Selection overrides.
+// validStrategies is the set of valid selection strategies (matches plan/validate.go).
+var validStrategies = map[string]bool{
+	"":       true,
+	"first":  true,
+	"last":   true,
+	"index":  true,
+	"random": true,
+	"min":    true,
+	"max":    true,
+	"match":  true,
+	"llm":    true,
+}
+
+// validateSelectionStrategies checks that selection override strategies are valid.
+func validateSelectionStrategies(resp *TargetedResponse) []TargetedValidationIssue {
+	var issues []TargetedValidationIssue
 	for key, sel := range resp.Selections {
-		// Check 3: Strategy is valid.
 		if sel.Strategy != "" && !validStrategies[sel.Strategy] {
 			issues = append(issues, TargetedValidationIssue{
 				Key:     key,
@@ -702,38 +725,66 @@ func validateTargetedResponse(
 				Message: fmt.Sprintf("%s: unknown selection strategy %q; valid: first, last, random, index, min, max, match, llm", key, sel.Strategy),
 			})
 		}
+	}
+	return issues
+}
 
-		// Check 4: Filter predicate parses.
-		if sel.Filter != "" {
-			if err := plan.ValidatePredicate(sel.Filter); err != nil {
-				issues = append(issues, TargetedValidationIssue{
-					Key:     key,
-					Kind:    "invalid_filter_syntax",
-					Message: fmt.Sprintf("%s: filter expression %q does not parse: %v", key, sel.Filter, err),
-				})
-				continue // Skip field check if syntax is bad.
+// buildSelectionFieldIndex builds a map of selection key → set of valid element
+// field names for filter field validation.
+func buildSelectionFieldIndex(selectionContexts []SelectionContext) map[string]map[string]bool {
+	selectionFields := map[string]map[string]bool{}
+	for _, sc := range selectionContexts {
+		key := sc.StepID + "." + sc.SelectionName
+		fields := map[string]bool{}
+		for _, ef := range sc.ElementFields {
+			// Element fields are formatted as "name (type)" — extract just the name.
+			name := ef
+			if idx := strings.Index(ef, " ("); idx >= 0 {
+				name = ef[:idx]
 			}
+			fields[name] = true
+		}
+		selectionFields[key] = fields
+	}
+	return selectionFields
+}
 
-			// Check 5: Filter field references are in element fields.
-			if fields, ok := selectionFields[key]; ok && len(fields) > 0 {
-				filterFields := plan.PredicateFields(sel.Filter)
-				for _, ff := range filterFields {
-					if !fields[ff] {
-						var available []string
-						for f := range fields {
-							available = append(available, f)
-						}
-						issues = append(issues, TargetedValidationIssue{
-							Key:     key,
-							Kind:    "invalid_filter_field",
-							Message: fmt.Sprintf("%s: filter references field %q which is not in element fields; available: %s", key, ff, strings.Join(available, ", ")),
-						})
+// validateSelectionFilters checks filter predicates parse and reference valid element fields.
+func validateSelectionFilters(resp *TargetedResponse, selectionContexts []SelectionContext) []TargetedValidationIssue {
+	var issues []TargetedValidationIssue
+	selectionFields := buildSelectionFieldIndex(selectionContexts)
+
+	for key, sel := range resp.Selections {
+		if sel.Filter == "" {
+			continue
+		}
+		if err := plan.ValidatePredicate(sel.Filter); err != nil {
+			issues = append(issues, TargetedValidationIssue{
+				Key:     key,
+				Kind:    "invalid_filter_syntax",
+				Message: fmt.Sprintf("%s: filter expression %q does not parse: %v", key, sel.Filter, err),
+			})
+			continue // Skip field check if syntax is bad.
+		}
+
+		// Check filter field references are in element fields.
+		if fields, ok := selectionFields[key]; ok && len(fields) > 0 {
+			filterFields := plan.PredicateFields(sel.Filter)
+			for _, ff := range filterFields {
+				if !fields[ff] {
+					var available []string
+					for f := range fields {
+						available = append(available, f)
 					}
+					issues = append(issues, TargetedValidationIssue{
+						Key:     key,
+						Kind:    "invalid_filter_field",
+						Message: fmt.Sprintf("%s: filter references field %q which is not in element fields; available: %s", key, ff, strings.Join(available, ", ")),
+					})
 				}
 			}
 		}
 	}
-
 	return issues
 }
 

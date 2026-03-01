@@ -51,34 +51,9 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...
 	ws := recipeSelectionToWorkflowSelection(recipe.Selection)
 
 	// 2. Load/compose workflow template.
-	wf, found := findWorkflowByName(g, ws.Workflow)
-	if !found || wf.Template == "" {
-		return nil, fmt.Errorf("reconstitute: unknown or template-less workflow %q; available: %s", ws.Workflow, listWorkflowNames(g))
-	}
-
-	var tpl *plan.Plan
-
-	hasSlots := len(wf.Slots) > 0
-	hasAddons := len(ws.Addons) > 0
-
-	if hasSlots {
-		composed, err := ComposeWithSlotsAndAddons(wf, ws.Choices, ws.Addons, g, graphDir)
-		if err != nil {
-			return nil, fmt.Errorf("reconstitute: composing slots for %q: %w", ws.Workflow, err)
-		}
-		tpl = composed
-	} else if hasAddons {
-		composed, err := ComposeWithAddons(wf, ws.Addons, g, graphDir)
-		if err != nil {
-			return nil, fmt.Errorf("reconstitute: composing addons for %q: %w", ws.Workflow, err)
-		}
-		tpl = composed
-	} else {
-		loaded, err := LoadWorkflowTemplate(wf.Template, graphDir, g)
-		if err != nil {
-			return nil, fmt.Errorf("reconstitute: loading template for %q: %w", ws.Workflow, err)
-		}
-		tpl = loaded
+	tpl, err := loadComposedTemplate(&ws, g, graphDir)
+	if err != nil {
+		return nil, fmt.Errorf("reconstitute: %w", err)
 	}
 
 	skeleton := tpl

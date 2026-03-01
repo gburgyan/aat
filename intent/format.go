@@ -67,71 +67,7 @@ func FormatGraph(g *graph.Graph) string {
 	// Nodes in sorted order
 	nodeNames := sortedNodeNames(g)
 	for _, name := range nodeNames {
-		node := g.Nodes[name]
-		fmt.Fprintf(&b, "## Node: %s\n", name)
-		fmt.Fprintf(&b, "%s\n", node.Description)
-		if node.Adapter != "" {
-			fmt.Fprintf(&b, "Adapter: %s\n", node.Adapter)
-		}
-		if len(node.Tags) > 0 {
-			fmt.Fprintf(&b, "Tags: %s\n", strings.Join(node.Tags, ", "))
-		}
-		if node.Cleanup != "" {
-			fmt.Fprintf(&b, "Cleanup: %s\n", node.Cleanup)
-		}
-		if node.CycleBreaker {
-			b.WriteString("CycleBreaker: true\n")
-		}
-		if node.Preferred {
-			b.WriteString("Preferred: true\n")
-		}
-		if len(node.Requires) > 0 {
-			fmt.Fprintf(&b, "Requires: %s\n", strings.Join(node.Requires, ", "))
-		}
-		if len(node.Satisfies) > 0 {
-			fmt.Fprintf(&b, "Satisfies: %s\n", strings.Join(node.Satisfies, ", "))
-		}
-
-		if len(node.Inputs) > 0 {
-			b.WriteString("Inputs:\n")
-			for _, inp := range node.Inputs {
-				opt := ""
-				if inp.Configurable {
-					opt = " (configurable)"
-				} else if inp.Optional {
-					opt = " (optional)"
-				}
-				def := ""
-				if inp.Default != nil && inp.Default.HasValue() {
-					def = formatInputDefault(inp.Default)
-				}
-				desc := ""
-				if inp.Description != "" {
-					desc = " — " + inp.Description
-				}
-				constraint := formatConstraintAnnotation(inp.Constraints)
-				fmt.Fprintf(&b, "  - %s: %s%s%s%s%s\n", inp.Name, inp.Type, constraint, opt, def, desc)
-			}
-		}
-
-		if len(node.Outputs) > 0 {
-			b.WriteString("Outputs:\n")
-			for _, out := range node.Outputs {
-				desc := ""
-				if out.Description != "" {
-					desc = " — " + out.Description
-				}
-				fmt.Fprintf(&b, "  - %s: %s%s\n", out.Name, out.Type, desc)
-				for _, ef := range out.ElementFields {
-					if ef.Path != "" && ef.Path != ef.Name {
-						fmt.Fprintf(&b, "    - %s: %s (path: %s)\n", ef.Name, ef.Type, ef.Path)
-					} else {
-						fmt.Fprintf(&b, "    - %s: %s\n", ef.Name, ef.Type)
-					}
-				}
-			}
-		}
-		b.WriteString("\n")
+		formatNodeSection(&b, name, g.Nodes[name])
 	}
 
 	// Conditions
@@ -150,6 +86,74 @@ func FormatGraph(g *graph.Graph) string {
 	}
 
 	return b.String()
+}
+
+// formatNodeSection writes the Markdown section for a single graph node.
+func formatNodeSection(b *strings.Builder, name string, node *graph.Node) {
+	fmt.Fprintf(b, "## Node: %s\n", name)
+	fmt.Fprintf(b, "%s\n", node.Description)
+	if node.Adapter != "" {
+		fmt.Fprintf(b, "Adapter: %s\n", node.Adapter)
+	}
+	if len(node.Tags) > 0 {
+		fmt.Fprintf(b, "Tags: %s\n", strings.Join(node.Tags, ", "))
+	}
+	if node.Cleanup != "" {
+		fmt.Fprintf(b, "Cleanup: %s\n", node.Cleanup)
+	}
+	if node.CycleBreaker {
+		b.WriteString("CycleBreaker: true\n")
+	}
+	if node.Preferred {
+		b.WriteString("Preferred: true\n")
+	}
+	if len(node.Requires) > 0 {
+		fmt.Fprintf(b, "Requires: %s\n", strings.Join(node.Requires, ", "))
+	}
+	if len(node.Satisfies) > 0 {
+		fmt.Fprintf(b, "Satisfies: %s\n", strings.Join(node.Satisfies, ", "))
+	}
+
+	if len(node.Inputs) > 0 {
+		b.WriteString("Inputs:\n")
+		for _, inp := range node.Inputs {
+			opt := ""
+			if inp.Configurable {
+				opt = " (configurable)"
+			} else if inp.Optional {
+				opt = " (optional)"
+			}
+			def := ""
+			if inp.Default != nil && inp.Default.HasValue() {
+				def = formatInputDefault(inp.Default)
+			}
+			desc := ""
+			if inp.Description != "" {
+				desc = " — " + inp.Description
+			}
+			constraint := formatConstraintAnnotation(inp.Constraints)
+			fmt.Fprintf(b, "  - %s: %s%s%s%s%s\n", inp.Name, inp.Type, constraint, opt, def, desc)
+		}
+	}
+
+	if len(node.Outputs) > 0 {
+		b.WriteString("Outputs:\n")
+		for _, out := range node.Outputs {
+			desc := ""
+			if out.Description != "" {
+				desc = " — " + out.Description
+			}
+			fmt.Fprintf(b, "  - %s: %s%s\n", out.Name, out.Type, desc)
+			for _, ef := range out.ElementFields {
+				if ef.Path != "" && ef.Path != ef.Name {
+					fmt.Fprintf(b, "    - %s: %s (path: %s)\n", ef.Name, ef.Type, ef.Path)
+				} else {
+					fmt.Fprintf(b, "    - %s: %s\n", ef.Name, ef.Type)
+				}
+			}
+		}
+	}
+	b.WriteString("\n")
 }
 
 // formatConstraintAnnotation returns a compact annotation string for input constraints.
@@ -210,7 +214,22 @@ func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 		b.WriteString("\n\n")
 	}
 
-	// Base workflows (non-addon, non-slot, with templates).
+	formatBaseWorkflows(&b, g)
+	formatAddonWorkflows(&b, g)
+	formatLayersSection(&b, layers)
+
+	// Notes.
+	if g.Notes != "" {
+		b.WriteString("## Notes\n\n")
+		b.WriteString(strings.TrimRight(g.Notes, "\n"))
+		b.WriteString("\n\n")
+	}
+
+	return b.String()
+}
+
+// formatBaseWorkflows writes the base (non-addon, non-slot) workflow section.
+func formatBaseWorkflows(b *strings.Builder, g *graph.Graph) {
 	var hasBase bool
 	for _, wf := range g.Workflows {
 		if wf.IsAddon() || wf.IsSlot() || wf.Template == "" {
@@ -224,7 +243,7 @@ func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(&b, "- **%s**: %s\n", wf.Name, desc)
+		fmt.Fprintf(b, "- **%s**: %s\n", wf.Name, desc)
 
 		// Render slot choices if any.
 		if len(wf.Slots) > 0 {
@@ -234,7 +253,7 @@ func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 				if sdDesc == "" {
 					sdDesc = sd.Name
 				}
-				fmt.Fprintf(&b, "    - %s: %s\n", sd.Name, sdDesc)
+				fmt.Fprintf(b, "    - %s: %s\n", sd.Name, sdDesc)
 				for _, optName := range sd.Options {
 					optDesc := "(no description)"
 					for _, owf := range g.Workflows {
@@ -249,7 +268,7 @@ func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 					if sd.Default != "" && strings.EqualFold(sd.Default, optName) {
 						defaultMarker = " (default)"
 					}
-					fmt.Fprintf(&b, "      - %s: %s%s\n", optName, optDesc, defaultMarker)
+					fmt.Fprintf(b, "      - %s: %s%s\n", optName, optDesc, defaultMarker)
 				}
 			}
 		}
@@ -257,8 +276,10 @@ func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 	if hasBase {
 		b.WriteString("\n")
 	}
+}
 
-	// Addon workflows.
+// formatAddonWorkflows writes the addon workflow section.
+func formatAddonWorkflows(b *strings.Builder, g *graph.Graph) {
 	var hasAddon bool
 	for _, wf := range g.Workflows {
 		if !wf.IsAddon() || wf.Template == "" {
@@ -272,43 +293,37 @@ func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(&b, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After.String(), desc)
+		fmt.Fprintf(b, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After.String(), desc)
 	}
 	if hasAddon {
 		b.WriteString("\n")
 	}
+}
 
-	// Layers.
-	if len(layers) > 0 {
-		b.WriteString("## Layers\n\n")
-		b.WriteString("Layers override input defaults for test variation. Select when the user's intent aligns with a layer's purpose. Multiple layers can be combined.\n\n")
-
-		// Sort layer names for deterministic output.
-		layerNames := make([]string, 0, len(layers))
-		for name := range layers {
-			layerNames = append(layerNames, name)
-		}
-		sort.Strings(layerNames)
-
-		for _, name := range layerNames {
-			layer := layers[name]
-			desc := layer.Description
-			if desc == "" {
-				desc = "(no description)"
-			}
-			fmt.Fprintf(&b, "- **%s**: %s\n", name, desc)
-		}
-		b.WriteString("\n")
+// formatLayersSection writes the layers section if any layers are available.
+func formatLayersSection(b *strings.Builder, layers map[string]*graph.Layer) {
+	if len(layers) == 0 {
+		return
 	}
+	b.WriteString("## Layers\n\n")
+	b.WriteString("Layers override input defaults for test variation. Select when the user's intent aligns with a layer's purpose. Multiple layers can be combined.\n\n")
 
-	// Notes.
-	if g.Notes != "" {
-		b.WriteString("## Notes\n\n")
-		b.WriteString(strings.TrimRight(g.Notes, "\n"))
-		b.WriteString("\n\n")
+	// Sort layer names for deterministic output.
+	layerNames := make([]string, 0, len(layers))
+	for name := range layers {
+		layerNames = append(layerNames, name)
 	}
+	sort.Strings(layerNames)
 
-	return b.String()
+	for _, name := range layerNames {
+		layer := layers[name]
+		desc := layer.Description
+		if desc == "" {
+			desc = "(no description)"
+		}
+		fmt.Fprintf(b, "- **%s**: %s\n", name, desc)
+	}
+	b.WriteString("\n")
 }
 
 // formatInputDefault renders a graph InputDefault as a compact annotation

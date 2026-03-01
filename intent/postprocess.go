@@ -45,148 +45,162 @@ func buildStepIndex(p *plan.Plan) map[string]bool {
 //  3. Existing valid dependsOn entries
 func fixDependsOn(p *plan.Plan, g *graph.Graph, stepIndex map[string]bool) {
 	// Build nodeToStepIDs: maps node name → list of step IDs using that node.
-	// For non-composed plans, step IDs == node names. For composed plans,
-	// step IDs have prefixes (e.g., inc0_searchSeatMap for node searchSeatMap).
 	nodeToStepIDs := map[string][]string{}
 	for _, step := range p.Execution.Steps {
 		nodeToStepIDs[step.Node] = append(nodeToStepIDs[step.Node], step.StepID())
 	}
 
-	// Build requires/satisfies deps scoped to composition groups.
-	// Steps with the same prefix (e.g., "inc0_") belong to the same addon;
-	// steps with no prefix belong to the base workflow. A step's requires
-	// tokens should only resolve to satisfiers within the same group to
-	// prevent cross-boundary cycles when addons share node types with the
-	// base workflow (e.g., both using addFormOfPaymentCash).
+	tokenDeps := buildTokenDeps(p, g)
+	resolver := &depResolver{
+		nodeToStepIDs: nodeToStepIDs,
+		stepIndex:     stepIndex,
+	}
+
+	for i, step := range p.Execution.Steps {
+		deps := collectStepDeps(step, g, resolver, tokenDeps)
+		p.Execution.Steps[i].DependsOn = deps
+	}
+}
+
+// buildTokenDeps builds requires/satisfies dependencies scoped to composition groups.
+// Steps with the same prefix (e.g., "inc0_") belong to the same addon;
+// steps with no prefix belong to the base workflow. A step's requires
+// tokens only resolve to satisfiers within the same group to prevent
+// cross-boundary cycles.
+func buildTokenDeps(p *plan.Plan, g *graph.Graph) map[string][]string {
 	type satisfierEntry struct {
 		stepID string
 		prefix string
 	}
-	tokenSatisfiers := map[string][]satisfierEntry{} // token → satisfier stepIDs+prefix
-	stepTokenDeps := map[string][]string{}           // stepID → satisfier stepIDs
-	if g.SatisfiersByToken != nil {
-		// Index: token → satisfier steps within each composition group.
-		for _, step := range p.Execution.Steps {
-			node := g.Nodes[step.Node]
-			if node == nil {
-				continue
-			}
-			sid := step.StepID()
-			pfx := stepPrefix(sid)
-			for _, token := range node.Satisfies {
-				tokenSatisfiers[token] = append(tokenSatisfiers[token], satisfierEntry{sid, pfx})
-			}
+	tokenSatisfiers := map[string][]satisfierEntry{}
+	stepTokenDeps := map[string][]string{}
+
+	if g.SatisfiersByToken == nil {
+		return stepTokenDeps
+	}
+
+	// Index: token → satisfier steps within each composition group.
+	for _, step := range p.Execution.Steps {
+		node := g.Nodes[step.Node]
+		if node == nil {
+			continue
 		}
-		// For each step that requires a token, find same-prefix satisfiers.
-		for _, step := range p.Execution.Steps {
-			node := g.Nodes[step.Node]
-			if node == nil {
-				continue
-			}
-			sid := step.StepID()
-			pfx := stepPrefix(sid)
-			for _, token := range node.Requires {
-				for _, sat := range tokenSatisfiers[token] {
-					if sat.prefix == pfx && sat.stepID != sid {
-						stepTokenDeps[sid] = append(stepTokenDeps[sid], sat.stepID)
-					}
+		sid := step.StepID()
+		pfx := stepPrefix(sid)
+		for _, token := range node.Satisfies {
+			tokenSatisfiers[token] = append(tokenSatisfiers[token], satisfierEntry{sid, pfx})
+		}
+	}
+	// For each step that requires a token, find same-prefix satisfiers.
+	for _, step := range p.Execution.Steps {
+		node := g.Nodes[step.Node]
+		if node == nil {
+			continue
+		}
+		sid := step.StepID()
+		pfx := stepPrefix(sid)
+		for _, token := range node.Requires {
+			for _, sat := range tokenSatisfiers[token] {
+				if sat.prefix == pfx && sat.stepID != sid {
+					stepTokenDeps[sid] = append(stepTokenDeps[sid], sat.stepID)
 				}
 			}
 		}
 	}
+	return stepTokenDeps
+}
 
-	// addStepDeps resolves a dependency reference to actual step IDs and adds
-	// them to required. If dep is a node name, it maps to the step IDs using
-	// that node (e.g., "addSeatOffer" → ["inc0_addSeatOffer"]). If dep is
-	// already a step ID not found in nodeToStepIDs, it's added directly.
-	//
-	// When a node name maps to multiple step IDs across composition groups,
-	// prefer steps in the same group as the caller to avoid cross-boundary
-	// dependencies. Fall back to all matches only when no same-group match
-	// exists (which handles intentional cross-boundary refs like addon steps
-	// referencing the base workflow's commitReservation).
-	addStepDeps := func(required map[string]bool, dep, selfStepID string) {
-		if sids, ok := nodeToStepIDs[dep]; ok {
-			selfPfx := stepPrefix(selfStepID)
-			var sameGroup []string
-			for _, sid := range sids {
-				if sid != selfStepID && stepPrefix(sid) == selfPfx {
-					sameGroup = append(sameGroup, sid)
-				}
+// depResolver resolves dependency references to actual step IDs, preferring
+// same-group matches for composed plans.
+type depResolver struct {
+	nodeToStepIDs map[string][]string
+	stepIndex     map[string]bool
+}
+
+// resolve adds the resolved dependency step IDs to the required set. If dep is
+// a node name, it maps to step IDs using that node. If dep is already a step
+// ID, it's added directly. Prefers same-group matches to avoid cross-boundary
+// dependencies.
+func (dr *depResolver) resolve(required map[string]bool, dep, selfStepID string) {
+	if sids, ok := dr.nodeToStepIDs[dep]; ok {
+		selfPfx := stepPrefix(selfStepID)
+		var sameGroup []string
+		for _, sid := range sids {
+			if sid != selfStepID && stepPrefix(sid) == selfPfx {
+				sameGroup = append(sameGroup, sid)
 			}
-			if len(sameGroup) > 0 {
-				for _, sid := range sameGroup {
-					required[sid] = true
-				}
-				return
-			}
-			// No same-group match: use all (cross-boundary ref).
-			for _, sid := range sids {
-				if sid != selfStepID {
-					required[sid] = true
-				}
+		}
+		if len(sameGroup) > 0 {
+			for _, sid := range sameGroup {
+				required[sid] = true
 			}
 			return
 		}
-		// dep is already a step ID (not a node name).
-		if stepIndex[dep] && dep != selfStepID {
-			required[dep] = true
+		// No same-group match: use all (cross-boundary ref).
+		for _, sid := range sids {
+			if sid != selfStepID {
+				required[sid] = true
+			}
+		}
+		return
+	}
+	// dep is already a step ID (not a node name).
+	if dr.stepIndex[dep] && dep != selfStepID {
+		required[dep] = true
+	}
+}
+
+// collectStepDeps collects all dependencies for a single step from from-refs,
+// selections, graph defaults, token deps, and existing dependsOn.
+func collectStepDeps(step plan.Step, g *graph.Graph, resolver *depResolver, tokenDeps map[string][]string) []string {
+	stepID := step.StepID()
+	required := map[string]bool{}
+
+	// 1. Dependencies from actual from references in values.
+	for _, sv := range step.Values {
+		if sv.From != "" {
+			resolver.resolve(required, splitNodeName(sv.From), stepID)
 		}
 	}
 
-	for i, step := range p.Execution.Steps {
-		stepID := step.StepID()
-		required := map[string]bool{}
-
-		// 1. Dependencies from actual from references in values.
-		for _, sv := range step.Values {
-			if sv.From != "" {
-				addStepDeps(required, splitNodeName(sv.From), stepID)
-			}
+	// 2. Dependencies from actual from references in named selections.
+	for _, sel := range step.Selections {
+		if sel.From != "" {
+			resolver.resolve(required, splitNodeName(sel.From), stepID)
 		}
-
-		// 2. Dependencies from actual from references in named selections.
-		for _, sel := range step.Selections {
-			if sel.From != "" {
-				addStepDeps(required, splitNodeName(sel.From), stepID)
-			}
-		}
-
-		// 2b. Dependencies from graph-level default from references.
-		// If a step input has no plan value but the graph input has a default
-		// with a from reference, that creates an implicit dependency.
-		node := g.Nodes[step.Node]
-		if node != nil {
-			for _, inp := range node.Inputs {
-				if _, hasPlanValue := step.Values[inp.Name]; hasPlanValue {
-					continue
-				}
-				if inp.Default != nil && inp.Default.From != "" {
-					addStepDeps(required, splitNodeName(inp.Default.From), stepID)
-				}
-			}
-		}
-
-		// 3. Requires/satisfies token deps (ordering constraints, scoped to composition group).
-		for _, depStepID := range stepTokenDeps[stepID] {
-			required[depStepID] = true
-		}
-
-		// 4. Existing valid dependsOn entries (resolved via addStepDeps
-		// so bare node names get mapped to prefixed step IDs).
-		for _, dep := range step.DependsOn {
-			addStepDeps(required, dep, stepID)
-		}
-
-		// Build sorted list.
-		deps := make([]string, 0, len(required))
-		for dep := range required {
-			deps = append(deps, dep)
-		}
-		sortStrings(deps)
-
-		p.Execution.Steps[i].DependsOn = deps
 	}
+
+	// 2b. Dependencies from graph-level default from references.
+	node := g.Nodes[step.Node]
+	if node != nil {
+		for _, inp := range node.Inputs {
+			if _, hasPlanValue := step.Values[inp.Name]; hasPlanValue {
+				continue
+			}
+			if inp.Default != nil && inp.Default.From != "" {
+				resolver.resolve(required, splitNodeName(inp.Default.From), stepID)
+			}
+		}
+	}
+
+	// 3. Requires/satisfies token deps (ordering constraints, scoped to composition group).
+	for _, depStepID := range tokenDeps[stepID] {
+		required[depStepID] = true
+	}
+
+	// 4. Existing valid dependsOn entries (resolved via resolver
+	// so bare node names get mapped to prefixed step IDs).
+	for _, dep := range step.DependsOn {
+		resolver.resolve(required, dep, stepID)
+	}
+
+	// Build sorted list.
+	deps := make([]string, 0, len(required))
+	for dep := range required {
+		deps = append(deps, dep)
+	}
+	sortStrings(deps)
+	return deps
 }
 
 // fixSelectionConfigs ensures named selections have a strategy set.
@@ -436,108 +450,110 @@ func MergeLLMValues(skeleton, llmPlan *plan.Plan, unfed map[string]bool) {
 		if !ok {
 			continue
 		}
+		mergeStepFromLLM(skelStep, llmStep, unfed)
+	}
+}
 
-		// Accept description from LLM.
-		if llmStep.Description != "" {
-			skelStep.Description = llmStep.Description
-		}
+// mergeStepFromLLM merges LLM-provided creative content into a single skeleton
+// step. The skeleton's structural fields are authoritative; the LLM only
+// adds/overrides values, descriptions, assertions, selection strategy
+// refinements, and retry config. unfed gates which new inputs are accepted.
+func mergeStepFromLLM(skelStep *plan.Step, llmStep *plan.Step, unfed map[string]bool) {
+	// Accept description from LLM.
+	if llmStep.Description != "" {
+		skelStep.Description = llmStep.Description
+	}
 
-		// Accept assertions from LLM.
-		if llmStep.Assertions != nil {
-			skelStep.Assertions = llmStep.Assertions
-		}
+	// Accept assertions from LLM.
+	if llmStep.Assertions != nil {
+		skelStep.Assertions = llmStep.Assertions
+	}
 
-		// Accept retry config from LLM.
-		if llmStep.Retry != nil {
-			skelStep.Retry = llmStep.Retry
-		}
+	// Accept retry config from LLM.
+	if llmStep.Retry != nil {
+		skelStep.Retry = llmStep.Retry
+	}
 
-		// Merge named selection strategy overrides from LLM.
-		if len(skelStep.Selections) > 0 && len(llmStep.Selections) > 0 {
-			for selName, llmSel := range llmStep.Selections {
-				skelSel, exists := skelStep.Selections[selName]
-				if !exists {
-					continue // ignore selections the skeleton doesn't have
-				}
-				// Accept strategy/filter/sortField/prompt overrides
-				if llmSel.Strategy != "" {
-					skelSel.Strategy = llmSel.Strategy
-				}
-				if llmSel.Filter != "" {
-					skelSel.Filter = llmSel.Filter
-				}
-				if llmSel.SortField != "" {
-					skelSel.SortField = llmSel.SortField
-				}
-				if llmSel.Prompt != "" {
-					skelSel.Prompt = llmSel.Prompt
-				}
-				if llmSel.Index != 0 {
-					skelSel.Index = llmSel.Index
-				}
-				skelStep.Selections[selName] = skelSel
+	// Merge named selection strategy overrides from LLM.
+	if len(skelStep.Selections) > 0 && len(llmStep.Selections) > 0 {
+		for selName, llmSel := range llmStep.Selections {
+			skelSel, exists := skelStep.Selections[selName]
+			if !exists {
+				continue // ignore selections the skeleton doesn't have
 			}
+			if llmSel.Strategy != "" {
+				skelSel.Strategy = llmSel.Strategy
+			}
+			if llmSel.Filter != "" {
+				skelSel.Filter = llmSel.Filter
+			}
+			if llmSel.SortField != "" {
+				skelSel.SortField = llmSel.SortField
+			}
+			if llmSel.Prompt != "" {
+				skelSel.Prompt = llmSel.Prompt
+			}
+			if llmSel.Index != 0 {
+				skelSel.Index = llmSel.Index
+			}
+			skelStep.Selections[selName] = skelSel
 		}
+	}
 
-		// Merge values.
-		if llmStep.Values == nil {
+	// Merge values.
+	if llmStep.Values == nil {
+		return
+	}
+	if skelStep.Values == nil {
+		skelStep.Values = map[string]plan.StepValue{}
+	}
+
+	for inputName, llmVal := range llmStep.Values {
+		skelVal, exists := skelStep.Values[inputName]
+
+		if !exists {
+			// Only accept new literals for inputs that genuinely need values.
+			key := skelStep.StepID() + "." + inputName
+			if llmVal.Default != nil && (unfed == nil || unfed[key]) {
+				skelStep.Values[inputName] = plan.StepValue{
+					Default: llmVal.Default,
+				}
+			}
 			continue
 		}
-		if skelStep.Values == nil {
-			skelStep.Values = map[string]plan.StepValue{}
-		}
 
-		for inputName, llmVal := range llmStep.Values {
-			skelVal, exists := skelStep.Values[inputName]
-
-			if !exists {
-				// Only accept new literals for inputs that genuinely need values.
-				// Reject hallucinated literals for inputs that will be auto-wired
-				// from graph edges at runtime.
-				key := skelStep.StepID() + "." + inputName
-				if llmVal.Default != nil && (unfed == nil || unfed[key]) {
-					skelStep.Values[inputName] = plan.StepValue{
-						Default: llmVal.Default,
-					}
+		// Skeleton has an entry. Merge based on what skeleton has.
+		if skelVal.FromSelection != "" {
+			// Named selection: skeleton is authoritative. Skip.
+			continue
+		} else if skelVal.From != "" && skelVal.Select != nil {
+			// Select edge: accept strategy/filter/sortField/index/prompt overrides.
+			if llmVal.Select != nil {
+				if llmVal.Select.Strategy != "" {
+					skelVal.Select.Strategy = llmVal.Select.Strategy
 				}
-				continue
+				if llmVal.Select.Filter != "" {
+					skelVal.Select.Filter = llmVal.Select.Filter
+				}
+				if llmVal.Select.SortField != "" {
+					skelVal.Select.SortField = llmVal.Select.SortField
+				}
+				if llmVal.Select.Index != 0 {
+					skelVal.Select.Index = llmVal.Select.Index
+				}
+				if llmVal.Select.Prompt != "" {
+					skelVal.Select.Prompt = llmVal.Select.Prompt
+				}
 			}
-
-			// Skeleton has an entry. Merge based on what skeleton has.
-			if skelVal.FromSelection != "" {
-				// Named selection: skeleton is authoritative for fromSelection.
-				// LLM can't change the structural ref. Skip.
-				continue
-			} else if skelVal.From != "" && skelVal.Select != nil {
-				// Select edge: accept strategy/filter/sortField/index/prompt overrides.
-				if llmVal.Select != nil {
-					if llmVal.Select.Strategy != "" {
-						skelVal.Select.Strategy = llmVal.Select.Strategy
-					}
-					if llmVal.Select.Filter != "" {
-						skelVal.Select.Filter = llmVal.Select.Filter
-					}
-					if llmVal.Select.SortField != "" {
-						skelVal.Select.SortField = llmVal.Select.SortField
-					}
-					if llmVal.Select.Index != 0 {
-						skelVal.Select.Index = llmVal.Select.Index
-					}
-					if llmVal.Select.Prompt != "" {
-						skelVal.Select.Prompt = llmVal.Select.Prompt
-					}
-				}
-				skelStep.Values[inputName] = skelVal
-			} else if skelVal.From != "" {
-				// Scalar from ref: skeleton is authoritative, ignore LLM changes.
-				// But if LLM tries to add Select to a scalar edge, ignore it.
-			} else {
-				// Graph default or empty: accept LLM literal override.
-				if llmVal.Default != nil {
-					skelVal.Default = llmVal.Default
-				}
-				skelStep.Values[inputName] = skelVal
+			skelStep.Values[inputName] = skelVal
+		} else if skelVal.From != "" {
+			// Scalar from ref: skeleton is authoritative.
+		} else {
+			// Graph default or empty: accept LLM literal override.
+			if llmVal.Default != nil {
+				skelVal.Default = llmVal.Default
 			}
+			skelStep.Values[inputName] = skelVal
 		}
 	}
 }

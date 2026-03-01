@@ -133,19 +133,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		}
 	}
 
-	if trace != nil {
-		if sr.RetriedFrom != nil {
-			// The first attempt was retried. Capture the original as SelectionCall
-			// and the retry as SelectionRetryCall.
-			orig := sr.RetriedFrom
-			trace.SelectionCall = toLLMCallTrace(orig.System, orig.User, 0.1, orig.Response, time.Since(selStart), nil)
-			retryTrace := toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), nil)
-			trace.SelectionRetryCall = &retryTrace
-		} else {
-			trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), nil)
-		}
-		trace.WorkflowSelection = ws
-	}
+	recordSelectionTrace(trace, sr, ws, time.Since(selStart))
 
 	// --- Build and Fill Plan ---
 	skeleton, targeted, err := buildAndFillPlan(ctx, req, ws, trace, now)
@@ -223,22 +211,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		return traceErr(fmt.Errorf("intent: validating generated plan: %w", err))
 	}
 
-	if trace != nil {
-		trace.FinalPlan = skeleton
-		trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
-		// Capture recipe YAML for trace viewer.
-		if ws != nil && lastTargeted != nil {
-			r := &plan.Recipe{
-				Kind:      "recipe",
-				Metadata:  skeleton.Metadata,
-				Selection: WorkflowSelectionToRecipeSelection(ws),
-				Overrides: TargetedResponseToRecipeOverrides(lastTargeted),
-			}
-			if data, err := plan.MarshalRecipe(r); err == nil {
-				trace.RecipeYAML = string(data)
-			}
-		}
-	}
+	finalizeTrace(trace, skeleton, ws, lastTargeted, pipelineStart)
 
 	return &InterpretResult{
 		Plan:              skeleton,
@@ -260,49 +233,15 @@ func buildAndFillPlan(
 	trace *PlanTrace,
 	now time.Time,
 ) (*plan.Plan, *TargetedResponse, error) {
-	// --- Load/Compose Workflow Template ---
-	if ws.Workflow == "" {
-		return nil, nil, fmt.Errorf("intent: no workflow selected; available workflows: %s", listWorkflowNames(req.Graph))
-	}
-
-	wf, found := findWorkflowByName(req.Graph, ws.Workflow)
-	if !found || wf.Template == "" {
-		return nil, nil, fmt.Errorf("intent: unknown or template-less workflow %q; available: %s", ws.Workflow, listWorkflowNames(req.Graph))
-	}
-
-	var tpl *plan.Plan
-	var templatePath string
-
-	hasSlots := len(wf.Slots) > 0
-	hasAddons := len(ws.Addons) > 0
-
-	if hasSlots {
-		// Workflow has slots — compose with slot choices (and optionally addons).
-		composed, composeErr := ComposeWithSlotsAndAddons(wf, ws.Choices, ws.Addons, req.Graph, req.GraphDir)
-		if composeErr != nil {
-			return nil, nil, fmt.Errorf("intent: composing slots for %q: %w", ws.Workflow, composeErr)
-		}
-		tpl = composed
-		templatePath = wf.Template
-	} else if hasAddons {
-		composed, composeErr := ComposeWithAddons(wf, ws.Addons, req.Graph, req.GraphDir)
-		if composeErr != nil {
-			return nil, nil, fmt.Errorf("intent: composing addons for %q: %w", ws.Workflow, composeErr)
-		}
-		tpl = composed
-		templatePath = wf.Template
-	} else {
-		loaded, loadErr := LoadWorkflowTemplate(wf.Template, req.GraphDir, req.Graph)
-		if loadErr != nil {
-			return nil, nil, fmt.Errorf("intent: loading template for %q: %w", ws.Workflow, loadErr)
-		}
-		tpl = loaded
-		templatePath = wf.Template
+	tpl, err := loadComposedTemplate(ws, req.Graph, req.GraphDir)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	if trace != nil {
+		wf, _ := findWorkflowByName(req.Graph, ws.Workflow)
 		trace.WorkflowName = ws.Workflow
-		trace.TemplatePath = templatePath
+		trace.TemplatePath = wf.Template
 	}
 
 	skeleton := tpl
@@ -369,38 +308,11 @@ func buildAndFillPlan(
 		return skeleton, targeted, nil
 	}
 
-	// Validate the LLM response before applying it to the skeleton.
+	// Validate the LLM response and retry once if needed.
 	issues := validateTargetedResponse(targeted, unfedSet, inputContexts, selectionContexts)
 	if len(issues) > 0 {
-		// Retry once with specific error feedback.
-		retryMsgs := formatValidationIssues(issues)
-		retrySystem, retryUser := buildTargetedRetryPrompt(
-			inputContexts, selectionContexts, req.Prompt, ws, now, retryMsgs, nil,
-		)
-
-		retryStart := time.Now()
-		retryResp, retryErr := req.Client.Complete(ctx, &llm.Request{
-			Messages: []llm.Message{
-				{Role: llm.RoleSystem, Content: retrySystem},
-				{Role: llm.RoleUser, Content: retryUser},
-			},
-			Temperature: 0.2,
-		})
-		if retryErr == nil {
-			if retried, parseErr := parseTargetedResponse(retryResp.Content); parseErr == nil {
-				retryIssues := validateTargetedResponse(retried, unfedSet, inputContexts, selectionContexts)
-				if len(retryIssues) == 0 {
-					// Retry succeeded — use the retried response.
-					targeted = retried
-					if trace != nil {
-						ct := toLLMCallTrace(retrySystem, retryUser, 0.2, retryResp, time.Since(retryStart), nil)
-						trace.RetryCall = &ct
-						trace.TargetedResponse = targeted
-					}
-				}
-				// If retry still has issues, fall through with original response
-				// and let plan.Validate catch structural problems.
-			}
+		if retried := retryTargetedCall(ctx, req.Client, targeted, issues, inputContexts, selectionContexts, unfedSet, req.Prompt, ws, now, trace); retried != nil {
+			targeted = retried
 		}
 	}
 
@@ -414,6 +326,58 @@ func buildAndFillPlan(
 	PostProcess(skeleton, req.Graph, ws, req.Prompt)
 
 	return skeleton, targeted, nil
+}
+
+// retryTargetedCall retries the targeted LLM call once after validation issues.
+// Returns the retried response if successful, or nil to keep the original.
+func retryTargetedCall(
+	ctx context.Context,
+	client llm.Client,
+	original *TargetedResponse,
+	issues []TargetedValidationIssue,
+	inputContexts []InputContext,
+	selectionContexts []SelectionContext,
+	unfedSet map[string]bool,
+	prompt string,
+	ws *WorkflowSelection,
+	now time.Time,
+	trace *PlanTrace,
+) *TargetedResponse {
+	retryMsgs := formatValidationIssues(issues)
+	retrySystem, retryUser := buildTargetedRetryPrompt(
+		inputContexts, selectionContexts, prompt, ws, now, retryMsgs, nil,
+	)
+
+	retryStart := time.Now()
+	retryResp, retryErr := client.Complete(ctx, &llm.Request{
+		Messages: []llm.Message{
+			{Role: llm.RoleSystem, Content: retrySystem},
+			{Role: llm.RoleUser, Content: retryUser},
+		},
+		Temperature: 0.2,
+	})
+	if retryErr != nil {
+		return nil
+	}
+
+	retried, parseErr := parseTargetedResponse(retryResp.Content)
+	if parseErr != nil {
+		return nil
+	}
+
+	retryIssues := validateTargetedResponse(retried, unfedSet, inputContexts, selectionContexts)
+	if len(retryIssues) > 0 {
+		// Retry still has issues — fall through with original response.
+		return nil
+	}
+
+	// Retry succeeded.
+	if trace != nil {
+		ct := toLLMCallTrace(retrySystem, retryUser, 0.2, retryResp, time.Since(retryStart), nil)
+		trace.RetryCall = &ct
+		trace.TargetedResponse = retried
+	}
+	return retried
 }
 
 // retryPlanGeneration attempts a single retry of plan generation (call 2)
@@ -430,24 +394,7 @@ func retryPlanGeneration(
 	trace *PlanTrace,
 	pipelineStart time.Time,
 ) *InterpretResult {
-	// Make a copy of the skeleton so we don't mutate the original for trace purposes.
-	retrySkeleton := copyPlanShallow(skeleton)
-
-	// Deep-copy the steps slice so mutations don't affect the original.
-	retrySteps := make([]plan.Step, len(skeleton.Execution.Steps))
-	copy(retrySteps, skeleton.Execution.Steps)
-	retrySkeleton.Execution.Steps = retrySteps
-
-	// Deep-copy value maps within steps.
-	for i, step := range retrySkeleton.Execution.Steps {
-		if step.Values != nil {
-			newValues := make(map[string]plan.StepValue, len(step.Values))
-			for k, v := range step.Values {
-				newValues[k] = v
-			}
-			retrySkeleton.Execution.Steps[i].Values = newValues
-		}
-	}
+	retrySkeleton := deepCopySkeleton(skeleton)
 
 	blanked, hints := blankBrokenFromSelections(retrySkeleton, req.Graph)
 	if len(blanked) == 0 {
@@ -507,27 +454,87 @@ func retryPlanGeneration(
 		return nil
 	}
 
-	if trace != nil {
-		trace.FinalPlan = retrySkeleton
-		trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
-		// Capture recipe YAML for trace viewer.
-		if ws != nil && targeted != nil {
-			r := &plan.Recipe{
-				Kind:      "recipe",
-				Metadata:  retrySkeleton.Metadata,
-				Selection: WorkflowSelectionToRecipeSelection(ws),
-				Overrides: TargetedResponseToRecipeOverrides(targeted),
-			}
-			if data, err := plan.MarshalRecipe(r); err == nil {
-				trace.RecipeYAML = string(data)
-			}
-		}
-	}
+	finalizeTrace(trace, retrySkeleton, ws, targeted, pipelineStart)
 
 	return &InterpretResult{
 		Plan:             retrySkeleton,
 		TargetedResponse: targeted,
 		Trace:            trace,
+	}
+}
+
+// loadComposedTemplate loads and composes a workflow template based on the
+// workflow selection. It handles slots, addons, and plain templates.
+func loadComposedTemplate(ws *WorkflowSelection, g *graph.Graph, graphDir string) (*plan.Plan, error) {
+	if ws.Workflow == "" {
+		return nil, fmt.Errorf("intent: no workflow selected; available workflows: %s", listWorkflowNames(g))
+	}
+
+	wf, found := findWorkflowByName(g, ws.Workflow)
+	if !found || wf.Template == "" {
+		return nil, fmt.Errorf("intent: unknown or template-less workflow %q; available: %s", ws.Workflow, listWorkflowNames(g))
+	}
+
+	hasSlots := len(wf.Slots) > 0
+	hasAddons := len(ws.Addons) > 0
+
+	if hasSlots {
+		composed, err := ComposeWithSlotsAndAddons(wf, ws.Choices, ws.Addons, g, graphDir)
+		if err != nil {
+			return nil, fmt.Errorf("intent: composing slots for %q: %w", ws.Workflow, err)
+		}
+		return composed, nil
+	}
+	if hasAddons {
+		composed, err := ComposeWithAddons(wf, ws.Addons, g, graphDir)
+		if err != nil {
+			return nil, fmt.Errorf("intent: composing addons for %q: %w", ws.Workflow, err)
+		}
+		return composed, nil
+	}
+
+	loaded, err := LoadWorkflowTemplate(wf.Template, graphDir, g)
+	if err != nil {
+		return nil, fmt.Errorf("intent: loading template for %q: %w", ws.Workflow, err)
+	}
+	return loaded, nil
+}
+
+// recordSelectionTrace captures the workflow selection LLM call(s) on the trace.
+// No-op when trace is nil.
+func recordSelectionTrace(trace *PlanTrace, sr *selectionResult, ws *WorkflowSelection, elapsed time.Duration) {
+	if trace == nil {
+		return
+	}
+	if sr.RetriedFrom != nil {
+		orig := sr.RetriedFrom
+		trace.SelectionCall = toLLMCallTrace(orig.System, orig.User, 0.1, orig.Response, elapsed, nil)
+		retryTrace := toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, elapsed, nil)
+		trace.SelectionRetryCall = &retryTrace
+	} else {
+		trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, elapsed, nil)
+	}
+	trace.WorkflowSelection = ws
+}
+
+// finalizeTrace populates the final plan, duration, and recipe YAML on the trace.
+// No-op when trace is nil.
+func finalizeTrace(trace *PlanTrace, p *plan.Plan, ws *WorkflowSelection, targeted *TargetedResponse, pipelineStart time.Time) {
+	if trace == nil {
+		return
+	}
+	trace.FinalPlan = p
+	trace.TotalDurationMs = time.Since(pipelineStart).Milliseconds()
+	if ws != nil && targeted != nil {
+		r := &plan.Recipe{
+			Kind:      "recipe",
+			Metadata:  p.Metadata,
+			Selection: WorkflowSelectionToRecipeSelection(ws),
+			Overrides: TargetedResponseToRecipeOverrides(targeted),
+		}
+		if data, err := plan.MarshalRecipe(r); err == nil {
+			trace.RecipeYAML = string(data)
+		}
 	}
 }
 
@@ -537,6 +544,28 @@ func retryPlanGeneration(
 func copyPlanShallow(p *plan.Plan) *plan.Plan {
 	cp := *p
 	return &cp
+}
+
+// deepCopySkeleton creates a deep enough copy of a Plan for retry purposes.
+// It copies the steps slice and each step's value map so mutations during
+// retry don't affect the original skeleton.
+func deepCopySkeleton(p *plan.Plan) *plan.Plan {
+	cp := copyPlanShallow(p)
+
+	retrySteps := make([]plan.Step, len(p.Execution.Steps))
+	copy(retrySteps, p.Execution.Steps)
+	cp.Execution.Steps = retrySteps
+
+	for i, step := range cp.Execution.Steps {
+		if step.Values != nil {
+			newValues := make(map[string]plan.StepValue, len(step.Values))
+			for k, v := range step.Values {
+				newValues[k] = v
+			}
+			cp.Execution.Steps[i].Values = newValues
+		}
+	}
+	return cp
 }
 
 // selectWorkflow performs the first LLM call to select a workflow.

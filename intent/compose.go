@@ -32,81 +32,8 @@ func ComposeWorkflowTemplate(base graph.Workflow, addons []graph.Workflow, graph
 		return parent, nil
 	}
 
-	// Sort addons by priority (stable sort preserves original order for equal priorities).
-	// Copy slice to avoid mutating the caller's slice.
-	sorted := make([]graph.Workflow, len(addons))
-	copy(sorted, addons)
-	sort.SliceStable(sorted, func(i, j int) bool {
-		return sorted[i].Priority < sorted[j].Priority
-	})
-	addons = sorted
-
-	// Track last step per after-node for auto-chaining. When multiple addons
-	// share the same insertion point, subsequent addons chain after the last
-	// step of the previous addon to ensure sequential execution.
-	lastStepByAfter := make(map[string]string)
-
-	// Process each addon in order.
-	for i, addon := range addons {
-		prefix := fmt.Sprintf("inc%d_", i)
-
-		if addon.Template == "" {
-			return nil, fmt.Errorf("compose: addon workflow %q has no template", addon.Name)
-		}
-
-		// Find the insertion point. Try each After value; use first match.
-		// If a previous addon used the same after node, chain after that
-		// addon's last step instead.
-		var afterStep string
-		var matchedAfter string
-		for _, afterNode := range addon.After {
-			if lastStep, ok := lastStepByAfter[afterNode]; ok {
-				afterStep = lastStep
-				matchedAfter = afterNode
-				break
-			}
-			if step := findStepByNode(parent, afterNode); step != "" {
-				afterStep = step
-				matchedAfter = afterNode
-				break
-			}
-		}
-		if afterStep == "" {
-			return nil, fmt.Errorf("compose: addon %q: none of after nodes %v found in base plan steps", addon.Name, []string(addon.After))
-		}
-
-		sub, err := LoadWorkflowTemplate(addon.Template, graphDir, g)
-		if err != nil {
-			return nil, fmt.Errorf("compose: loading addon template %q: %w", addon.Name, err)
-		}
-
-		// Build output map from all parent steps.
-		outputMap := buildOutputMap(parent, g)
-
-		// Prefix sub-workflow step IDs and rewrite internal references.
-		prefixStepRefs(sub, prefix)
-
-		// Resolve $after. wire references to the actual step ID.
-		resolvedWire := resolveAfterWire(addon.Wire, afterStep)
-
-		// Auto-wire AUTOWIRE values in sub-workflow steps using addon's Wire.
-		autoWirePlaceholders(sub, outputMap, resolvedWire, g)
-
-		// Add insertion-point dependency to sub-workflow root steps.
-		addInsertionDeps(sub, afterStep)
-
-		// Ensure all from-referenced parent steps are in dependsOn.
-		fixFromDependencies(sub)
-
-		// Splice sub-workflow steps into parent after insertion point.
-		spliceSteps(parent, sub, afterStep)
-
-		// Merge cleanup (dedup by node name).
-		mergeCleanup(parent, sub)
-
-		// Record the last step of this addon for auto-chaining.
-		lastAddonStep := sub.Execution.Steps[len(sub.Execution.Steps)-1].StepID()
-		lastStepByAfter[matchedAfter] = lastAddonStep
+	if err := composeAddonList(parent, addons, graphDir, g); err != nil {
+		return nil, err
 	}
 
 	return parent, nil
@@ -665,7 +592,18 @@ func composeAddonsOnPlan(parent *plan.Plan, base graph.Workflow, addons []graph.
 		return parent, nil
 	}
 
-	// Sort addons by priority.
+	if err := composeAddonList(parent, addons, graphDir, g); err != nil {
+		return nil, err
+	}
+
+	return parent, nil
+}
+
+// composeAddonList is the shared implementation for addon composition. It sorts
+// addons by priority, then processes each addon: loading its template, prefixing
+// step IDs, auto-wiring, and splicing into the parent plan.
+func composeAddonList(parent *plan.Plan, addons []graph.Workflow, graphDir string, g *graph.Graph) error {
+	// Sort addons by priority (stable sort preserves original order for equal priorities).
 	sorted := make([]graph.Workflow, len(addons))
 	copy(sorted, addons)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -673,15 +611,17 @@ func composeAddonsOnPlan(parent *plan.Plan, base graph.Workflow, addons []graph.
 	})
 	addons = sorted
 
+	// Track last step per after-node for auto-chaining.
 	lastStepByAfter := make(map[string]string)
 
 	for i, addon := range addons {
 		prefix := fmt.Sprintf("inc%d_", i)
 
 		if addon.Template == "" {
-			return nil, fmt.Errorf("compose: addon workflow %q has no template", addon.Name)
+			return fmt.Errorf("compose: addon workflow %q has no template", addon.Name)
 		}
 
+		// Find the insertion point.
 		var afterStep string
 		var matchedAfter string
 		for _, afterNode := range addon.After {
@@ -697,12 +637,12 @@ func composeAddonsOnPlan(parent *plan.Plan, base graph.Workflow, addons []graph.
 			}
 		}
 		if afterStep == "" {
-			return nil, fmt.Errorf("compose: addon %q: none of after nodes %v found in base plan steps", addon.Name, []string(addon.After))
+			return fmt.Errorf("compose: addon %q: none of after nodes %v found in base plan steps", addon.Name, []string(addon.After))
 		}
 
 		sub, err := LoadWorkflowTemplate(addon.Template, graphDir, g)
 		if err != nil {
-			return nil, fmt.Errorf("compose: loading addon template %q: %w", addon.Name, err)
+			return fmt.Errorf("compose: loading addon template %q: %w", addon.Name, err)
 		}
 
 		outputMap := buildOutputMap(parent, g)
@@ -718,7 +658,7 @@ func composeAddonsOnPlan(parent *plan.Plan, base graph.Workflow, addons []graph.
 		lastStepByAfter[matchedAfter] = lastAddonStep
 	}
 
-	return parent, nil
+	return nil
 }
 
 // applyInjectValues sets default values on steps whose graph node has a matching

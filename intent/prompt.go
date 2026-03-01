@@ -123,132 +123,14 @@ Rules:
 
 	var ub strings.Builder
 
-	// Separate layer-handled inputs first, then classify the rest.
-	// Priority: layer-handled > auto-wired > pool > configurable > required.
-	// An input that is both configurable and pool-backed should land in
-	// the pool section so the LLM gets the "omit unless user specifies"
-	// guard-rail. Similarly, auto-wired inputs keep their wiring even
-	// when configurable.
-	var requiredInputs, poolInputs, autoWiredInputs, configurableInputs, layerHandledInputs []InputContext
-	for _, ic := range inputContexts {
-		if ic.LayerHandled {
-			layerHandledInputs = append(layerHandledInputs, ic)
-		} else if ic.FromResolved != "" {
-			autoWiredInputs = append(autoWiredInputs, ic)
-		} else if ic.IsPoolInput {
-			poolInputs = append(poolInputs, ic)
-		} else if ic.IsConfigurable {
-			configurableInputs = append(configurableInputs, ic)
-		} else {
-			requiredInputs = append(requiredInputs, ic)
-		}
-	}
-
-	// Per-input context — required inputs.
-	if len(requiredInputs) > 0 {
-		ub.WriteString("## Inputs That Need Values\n\n")
-		var lastNode string
-		for _, ic := range requiredInputs {
-			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
-			writeInputContext(&ub, ic)
-		}
-	}
-
-	// Pool inputs — DO NOT provide values unless the user specifies.
-	if len(poolInputs) > 0 {
-		ub.WriteString("## Pool Inputs — DO NOT provide values unless the user specifies\n\n")
-		ub.WriteString("These inputs have curated value pools that automatically pick random values at runtime.\n")
-		ub.WriteString("DO NOT include these in your \"values\" response unless the user's prompt EXPLICITLY mentions a specific value for that input.\n")
-		ub.WriteString("- User specifies a concrete value (name, code, ID, date) → provide it\n")
-		ub.WriteString("- User's prompt is silent about an input → OMIT it, the pool handles it\n")
-		ub.WriteString("- User says \"next week\" for a date field → provide the date expression\n")
-		ub.WriteString("- User gives no date preference → OMIT date inputs entirely\n")
-		ub.WriteString("When in doubt, OMIT. The pool defaults are designed for exactly this case.\n\n")
-		var lastNode string
-		for _, ic := range poolInputs {
-			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
-			icCopy := ic
-			icCopy.PoolValues = nil // Don't show concrete pool values — format/description suffices
-			writeInputContext(&ub, icCopy)
-		}
-	}
-
-	// Auto-wired inputs — fromResolved, overridable when user intent conflicts.
-	if len(autoWiredInputs) > 0 {
-		ub.WriteString("## Auto-Wired Inputs — override only when user intent conflicts\n\n")
-		ub.WriteString("These inputs are automatically derived from sibling inputs at runtime.\n")
-		ub.WriteString("Do NOT provide values for these UNLESS the user's intent explicitly requires\n")
-		ub.WriteString("a different value than what the wiring would produce.\n\n")
-		var lastNode string
-		for _, ic := range autoWiredInputs {
-			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
-			writeInputContext(&ub, ic)
-		}
-	}
-
-	// Configurable inputs — separate section.
-	if len(configurableInputs) > 0 {
-		ub.WriteString("## Optional Configuration\n\n")
-		var lastNode string
-		for _, ic := range configurableInputs {
-			lastNode = writeNodeGroupHeader(&ub, ic, lastNode)
-			writeInputContext(&ub, ic)
-		}
-	}
-
-	// Selection context.
-	if len(selectionContexts) > 0 {
-		ub.WriteString("## Selections (override if user intent suggests)\n\n")
-		for _, sc := range selectionContexts {
-			kind := "named"
-			if !sc.IsNamed {
-				kind = "inline"
-			}
-			fmt.Fprintf(&ub, "### %s.%s (%s, current: %s)\n", sc.StepID, sc.SelectionName, kind, sc.CurrentStrategy)
-			fmt.Fprintf(&ub, "Source: %s\n", sc.Source)
-			if len(sc.ElementFields) > 0 {
-				fmt.Fprintf(&ub, "Available fields (ONLY these can be used in filters): %s\n", strings.Join(sc.ElementFields, ", "))
-			}
-			if len(sc.FeedsInto) > 0 {
-				fmt.Fprintf(&ub, "Feeds into: %s\n", strings.Join(sc.FeedsInto, ", "))
-			}
-			ub.WriteString("\n")
-		}
-	}
-
-	// Selected Configuration (from Call 1).
-	if ws != nil && (ws.Workflow != "" || ws.Description != "") {
-		ub.WriteString("## Selected Configuration\n\n")
-		if ws.Description != "" {
-			fmt.Fprintf(&ub, "Workflow: %s (%s)\n", ws.Workflow, ws.Description)
-		} else {
-			fmt.Fprintf(&ub, "Workflow: %s\n", ws.Workflow)
-		}
-		if len(ws.Choices) > 0 {
-			var choiceParts []string
-			for slot, option := range ws.Choices {
-				choiceParts = append(choiceParts, fmt.Sprintf("%s → %s", slot, option))
-			}
-			fmt.Fprintf(&ub, "Choices: %s\n", strings.Join(choiceParts, ", "))
-		}
-		if len(ws.Addons) > 0 {
-			fmt.Fprintf(&ub, "Addons: %s\n", strings.Join(ws.Addons, ", "))
-		}
-		if len(ws.Layers) > 0 {
-			fmt.Fprintf(&ub, "Layers: %s\n", strings.Join(ws.Layers, ", "))
-		}
-		ub.WriteString("\n")
-	}
-
-	// Layer-handled inputs — listed separately so the LLM knows to skip them.
-	if len(layerHandledInputs) > 0 {
-		ub.WriteString("## Layer-Handled Inputs — skip unless user intent conflicts\n\n")
-		ub.WriteString("These inputs have runtime overrides from data layers. Omit them unless the user explicitly requests different values.\n\n")
-		for _, ic := range layerHandledInputs {
-			fmt.Fprintf(&ub, "- %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
-		}
-		ub.WriteString("\n")
-	}
+	classified := classifyInputs(inputContexts)
+	writeRequiredInputsSection(&ub, classified.Required)
+	writePoolInputsSection(&ub, classified.Pool)
+	writeAutoWiredSection(&ub, classified.AutoWired)
+	writeConfigurableSection(&ub, classified.Configurable)
+	writeSelectionContextSection(&ub, selectionContexts)
+	writeWorkflowConfigSection(&ub, ws)
+	writeLayerHandledSection(&ub, classified.LayerHandled)
 
 	// User's prompt.
 	ub.WriteString("## User's Prompt\n\n")
@@ -307,6 +189,165 @@ func writeInputContext(ub *strings.Builder, ic InputContext) {
 		} else {
 			ub.WriteString("Date field — use {{today + N days}}\n")
 		}
+	}
+	ub.WriteString("\n")
+}
+
+// classifiedInputs groups InputContexts by their category for prompt generation.
+type classifiedInputs struct {
+	Required     []InputContext
+	Pool         []InputContext
+	AutoWired    []InputContext
+	Configurable []InputContext
+	LayerHandled []InputContext
+}
+
+// classifyInputs separates inputs into categories for the targeted prompt.
+// Priority: layer-handled > auto-wired > pool > configurable > required.
+// An input that is both configurable and pool-backed lands in pool so the
+// LLM gets the "omit unless user specifies" guard-rail.
+func classifyInputs(contexts []InputContext) classifiedInputs {
+	var c classifiedInputs
+	for _, ic := range contexts {
+		switch {
+		case ic.LayerHandled:
+			c.LayerHandled = append(c.LayerHandled, ic)
+		case ic.FromResolved != "":
+			c.AutoWired = append(c.AutoWired, ic)
+		case ic.IsPoolInput:
+			c.Pool = append(c.Pool, ic)
+		case ic.IsConfigurable:
+			c.Configurable = append(c.Configurable, ic)
+		default:
+			c.Required = append(c.Required, ic)
+		}
+	}
+	return c
+}
+
+// writeRequiredInputsSection writes the "Inputs That Need Values" prompt section.
+func writeRequiredInputsSection(ub *strings.Builder, inputs []InputContext) {
+	if len(inputs) == 0 {
+		return
+	}
+	ub.WriteString("## Inputs That Need Values\n\n")
+	var lastNode string
+	for _, ic := range inputs {
+		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
+		writeInputContext(ub, ic)
+	}
+}
+
+// writePoolInputsSection writes the pool inputs prompt section with guard-rails.
+func writePoolInputsSection(ub *strings.Builder, inputs []InputContext) {
+	if len(inputs) == 0 {
+		return
+	}
+	ub.WriteString("## Pool Inputs — DO NOT provide values unless the user specifies\n\n")
+	ub.WriteString("These inputs have curated value pools that automatically pick random values at runtime.\n")
+	ub.WriteString("DO NOT include these in your \"values\" response unless the user's prompt EXPLICITLY mentions a specific value for that input.\n")
+	ub.WriteString("- User specifies a concrete value (name, code, ID, date) → provide it\n")
+	ub.WriteString("- User's prompt is silent about an input → OMIT it, the pool handles it\n")
+	ub.WriteString("- User says \"next week\" for a date field → provide the date expression\n")
+	ub.WriteString("- User gives no date preference → OMIT date inputs entirely\n")
+	ub.WriteString("When in doubt, OMIT. The pool defaults are designed for exactly this case.\n\n")
+	var lastNode string
+	for _, ic := range inputs {
+		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
+		icCopy := ic
+		icCopy.PoolValues = nil // Don't show concrete pool values — format/description suffices
+		writeInputContext(ub, icCopy)
+	}
+}
+
+// writeAutoWiredSection writes the auto-wired inputs prompt section.
+func writeAutoWiredSection(ub *strings.Builder, inputs []InputContext) {
+	if len(inputs) == 0 {
+		return
+	}
+	ub.WriteString("## Auto-Wired Inputs — override only when user intent conflicts\n\n")
+	ub.WriteString("These inputs are automatically derived from sibling inputs at runtime.\n")
+	ub.WriteString("Do NOT provide values for these UNLESS the user's intent explicitly requires\n")
+	ub.WriteString("a different value than what the wiring would produce.\n\n")
+	var lastNode string
+	for _, ic := range inputs {
+		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
+		writeInputContext(ub, ic)
+	}
+}
+
+// writeConfigurableSection writes the optional configuration prompt section.
+func writeConfigurableSection(ub *strings.Builder, inputs []InputContext) {
+	if len(inputs) == 0 {
+		return
+	}
+	ub.WriteString("## Optional Configuration\n\n")
+	var lastNode string
+	for _, ic := range inputs {
+		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
+		writeInputContext(ub, ic)
+	}
+}
+
+// writeSelectionContextSection writes the selection overrides prompt section.
+func writeSelectionContextSection(ub *strings.Builder, selectionContexts []SelectionContext) {
+	if len(selectionContexts) == 0 {
+		return
+	}
+	ub.WriteString("## Selections (override if user intent suggests)\n\n")
+	for _, sc := range selectionContexts {
+		kind := "named"
+		if !sc.IsNamed {
+			kind = "inline"
+		}
+		fmt.Fprintf(ub, "### %s.%s (%s, current: %s)\n", sc.StepID, sc.SelectionName, kind, sc.CurrentStrategy)
+		fmt.Fprintf(ub, "Source: %s\n", sc.Source)
+		if len(sc.ElementFields) > 0 {
+			fmt.Fprintf(ub, "Available fields (ONLY these can be used in filters): %s\n", strings.Join(sc.ElementFields, ", "))
+		}
+		if len(sc.FeedsInto) > 0 {
+			fmt.Fprintf(ub, "Feeds into: %s\n", strings.Join(sc.FeedsInto, ", "))
+		}
+		ub.WriteString("\n")
+	}
+}
+
+// writeWorkflowConfigSection writes the selected configuration prompt section.
+func writeWorkflowConfigSection(ub *strings.Builder, ws *WorkflowSelection) {
+	if ws == nil || (ws.Workflow == "" && ws.Description == "") {
+		return
+	}
+	ub.WriteString("## Selected Configuration\n\n")
+	if ws.Description != "" {
+		fmt.Fprintf(ub, "Workflow: %s (%s)\n", ws.Workflow, ws.Description)
+	} else {
+		fmt.Fprintf(ub, "Workflow: %s\n", ws.Workflow)
+	}
+	if len(ws.Choices) > 0 {
+		var choiceParts []string
+		for slot, option := range ws.Choices {
+			choiceParts = append(choiceParts, fmt.Sprintf("%s → %s", slot, option))
+		}
+		fmt.Fprintf(ub, "Choices: %s\n", strings.Join(choiceParts, ", "))
+	}
+	if len(ws.Addons) > 0 {
+		fmt.Fprintf(ub, "Addons: %s\n", strings.Join(ws.Addons, ", "))
+	}
+	if len(ws.Layers) > 0 {
+		fmt.Fprintf(ub, "Layers: %s\n", strings.Join(ws.Layers, ", "))
+	}
+	ub.WriteString("\n")
+}
+
+// writeLayerHandledSection writes the layer-handled inputs prompt section.
+func writeLayerHandledSection(ub *strings.Builder, inputs []InputContext) {
+	if len(inputs) == 0 {
+		return
+	}
+	ub.WriteString("## Layer-Handled Inputs — skip unless user intent conflicts\n\n")
+	ub.WriteString("These inputs have runtime overrides from data layers. Omit them unless the user explicitly requests different values.\n\n")
+	for _, ic := range inputs {
+		fmt.Fprintf(ub, "- %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
 	}
 	ub.WriteString("\n")
 }
