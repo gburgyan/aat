@@ -155,10 +155,11 @@ type DisplayOutput struct {
 
 // RequestDetail captures the outbound HTTP request.
 type RequestDetail struct {
-	Method  string          `json:"method"`
-	URL     string          `json:"url"`
-	Headers []HeaderEntry   `json:"headers,omitempty"`
-	Body    json.RawMessage `json:"body,omitempty"`
+	Method      string          `json:"method"`
+	URL         string          `json:"url"`
+	OriginalURL string          `json:"originalUrl,omitempty"`
+	Headers     []HeaderEntry   `json:"headers,omitempty"`
+	Body        json.RawMessage `json:"body,omitempty"`
 }
 
 // ResponseDetail captures the HTTP response.

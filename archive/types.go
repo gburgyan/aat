@@ -100,10 +100,11 @@ type OASSchemaError struct {
 
 // RequestRecord captures the outbound HTTP request.
 type RequestRecord struct {
-	Method  string            `json:"method"`
-	URL     string            `json:"url"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Body    json.RawMessage   `json:"body,omitempty"`
+	Method      string            `json:"method"`
+	URL         string            `json:"url"`
+	OriginalURL string            `json:"originalUrl,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"`
+	Body        json.RawMessage   `json:"body,omitempty"`
 }
 
 // ResponseRecord captures the HTTP response.

@@ -1065,10 +1065,11 @@ func toRequestDetail(r *archive.RequestRecord) *RequestDetail {
 		return nil
 	}
 	return &RequestDetail{
-		Method:  r.Method,
-		URL:     r.URL,
-		Headers: toHeaderEntries(r.Headers),
-		Body:    r.Body,
+		Method:      r.Method,
+		URL:         r.URL,
+		OriginalURL: r.OriginalURL,
+		Headers:     toHeaderEntries(r.Headers),
+		Body:        r.Body,
 	}
 }
 

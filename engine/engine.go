@@ -350,21 +350,24 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 
 	// Resolve executor/config/rewrite for this node
 	exec, cfg, rewrite := e.router.Resolve(node.Name)
+	actualBaseURL := exec.BaseURL
 
 	// Build request
 	req, err := adp.BuildRequest(inputs, cfg)
 	if err != nil {
 		return StepResult{
-			StepID:    sid,
-			Node:      step.Node,
-			Inputs:    inputs,
-			Error:     fmt.Errorf("building request: %w", err),
-			StartTime: start,
-			Duration:  time.Since(start),
+			StepID:        sid,
+			Node:          step.Node,
+			Inputs:        inputs,
+			Error:         fmt.Errorf("building request: %w", err),
+			StartTime:     start,
+			Duration:      time.Since(start),
+			ActualBaseURL: actualBaseURL,
 		}
 	}
 
 	// Apply path rewriting if configured for this node
+	originalPath := req.Path
 	if rewrite != nil {
 		req.Path = adapter.RewritePath(req.Path, rewrite)
 	}
@@ -372,28 +375,37 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	// Execute
 	resp, err := exec.Execute(ctx, req)
 	if err != nil {
-		return StepResult{
-			StepID:    sid,
-			Node:      step.Node,
-			Inputs:    inputs,
-			Request:   req,
-			Error:     fmt.Errorf("executing request: %w", err),
-			StartTime: start,
-			Duration:  time.Since(start),
+		sr := StepResult{
+			StepID:        sid,
+			Node:          step.Node,
+			Inputs:        inputs,
+			Request:       req,
+			Error:         fmt.Errorf("executing request: %w", err),
+			StartTime:     start,
+			Duration:      time.Since(start),
+			ActualBaseURL: actualBaseURL,
 		}
+		if rewrite != nil {
+			sr.OriginalPath = originalPath
+		}
+		return sr
 	}
 
 	result := StepResult{
-		StepID:      sid,
-		Node:        step.Node,
-		Inputs:      inputs,
-		Selections:  selections,
-		Resolutions: resolutions,
-		Request:     req,
-		Response:    resp,
-		StatusCode:  resp.StatusCode,
-		StartTime:   start,
-		Duration:    time.Since(start),
+		StepID:        sid,
+		Node:          step.Node,
+		Inputs:        inputs,
+		Selections:    selections,
+		Resolutions:   resolutions,
+		Request:       req,
+		Response:      resp,
+		StatusCode:    resp.StatusCode,
+		StartTime:     start,
+		Duration:      time.Since(start),
+		ActualBaseURL: actualBaseURL,
+	}
+	if rewrite != nil {
+		result.OriginalPath = originalPath
 	}
 
 	// Extract outputs (only on success)

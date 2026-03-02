@@ -239,7 +239,15 @@
         <div class="http-method-url">
           <span class="http-method">{step.request.method}</span>
           <span class="http-url">{step.request.url}</span>
+          {#if step.request.originalUrl}
+            <span class="override-badge">OVERRIDE</span>
+          {/if}
         </div>
+        {#if step.request.originalUrl}
+          <div class="override-original">
+            Original: {step.request.originalUrl}
+          </div>
+        {/if}
         {#if step.request.headers && step.request.headers.length > 0}
           <details open={readPref('reqHeadersOpen', true)} ontoggle={(e: Event) => savePref('reqHeadersOpen', e)}>
             <summary class="section-heading collapsible-heading">Headers ({step.request.headers.length})</summary>

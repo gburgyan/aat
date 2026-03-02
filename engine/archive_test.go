@@ -757,6 +757,147 @@ func TestToArchive_NoDisplayOutputs(t *testing.T) {
 	assert.NotContains(t, string(data), "displayOutputs")
 }
 
+func TestToArchive_OverrideURLTracking(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "searchAir",
+				Request: &adapter.Request{
+					Method: "POST",
+					Path:   "/v2/search",
+				},
+				Response: &adapter.Response{
+					StatusCode: 200,
+				},
+				ActualBaseURL: "https://override.example.com",
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-override"}
+	a := ToArchive(result, meta, "https://api.example.com", nil)
+
+	require.NotNil(t, a.Steps[0].Request)
+	assert.Equal(t, "https://override.example.com/v2/search", a.Steps[0].Request.URL)
+	assert.Equal(t, "https://api.example.com/v2/search", a.Steps[0].Request.OriginalURL)
+}
+
+func TestToArchive_NoOverride(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "searchAir",
+				Request: &adapter.Request{
+					Method: "POST",
+					Path:   "/v2/search",
+				},
+				Response: &adapter.Response{
+					StatusCode: 200,
+				},
+				ActualBaseURL: "https://api.example.com",
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-no-override"}
+	a := ToArchive(result, meta, "https://api.example.com", nil)
+
+	require.NotNil(t, a.Steps[0].Request)
+	assert.Equal(t, "https://api.example.com/v2/search", a.Steps[0].Request.URL)
+	assert.Empty(t, a.Steps[0].Request.OriginalURL)
+
+	// Verify omitempty
+	data, err := json.Marshal(a.Steps[0].Request)
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "originalUrl")
+}
+
+func TestToArchive_PathRewriteOnly(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "searchAir",
+				Request: &adapter.Request{
+					Method: "POST",
+					Path:   "/v3/search", // rewritten path
+				},
+				Response: &adapter.Response{
+					StatusCode: 200,
+				},
+				ActualBaseURL: "https://api.example.com",
+				OriginalPath:  "/v2/search",
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-rewrite"}
+	a := ToArchive(result, meta, "https://api.example.com", nil)
+
+	require.NotNil(t, a.Steps[0].Request)
+	assert.Equal(t, "https://api.example.com/v3/search", a.Steps[0].Request.URL)
+	assert.Equal(t, "https://api.example.com/v2/search", a.Steps[0].Request.OriginalURL)
+}
+
+func TestToArchive_OverridePlusPathRewrite(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "searchAir",
+				Request: &adapter.Request{
+					Method: "POST",
+					Path:   "/v3/search", // rewritten path
+				},
+				Response: &adapter.Response{
+					StatusCode: 200,
+				},
+				ActualBaseURL: "https://override.example.com",
+				OriginalPath:  "/v2/search",
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-both"}
+	a := ToArchive(result, meta, "https://api.example.com", nil)
+
+	require.NotNil(t, a.Steps[0].Request)
+	// URL shows what was actually hit
+	assert.Equal(t, "https://override.example.com/v3/search", a.Steps[0].Request.URL)
+	// OriginalURL shows what would have been hit without override/rewrite
+	assert.Equal(t, "https://api.example.com/v2/search", a.Steps[0].Request.OriginalURL)
+}
+
+func TestToArchive_EmptyActualBaseURL(t *testing.T) {
+	// Backwards compatibility: old code paths that don't set ActualBaseURL
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		Steps: []StepResult{
+			{
+				Node: "searchAir",
+				Request: &adapter.Request{
+					Method: "POST",
+					Path:   "/v2/search",
+				},
+				Response: &adapter.Response{
+					StatusCode: 200,
+				},
+				// ActualBaseURL intentionally empty
+			},
+		},
+	}
+
+	meta := archive.ArchiveMetadata{Version: "1", RunID: "run-compat"}
+	a := ToArchive(result, meta, "https://api.example.com", nil)
+
+	require.NotNil(t, a.Steps[0].Request)
+	// Falls back to defaultBaseURL
+	assert.Equal(t, "https://api.example.com/v2/search", a.Steps[0].Request.URL)
+	assert.Empty(t, a.Steps[0].Request.OriginalURL)
+}
+
 func TestToArchive_NilSecretsNoRedaction(t *testing.T) {
 	result := &RunResult{
 		Outcome: OutcomePassed,

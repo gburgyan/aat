@@ -144,6 +144,7 @@ export interface DisplayOutput {
 export interface RequestDetail {
   method: string;
   url: string;
+  originalUrl?: string;
   headers?: HeaderEntry[];
   body?: unknown;
 }

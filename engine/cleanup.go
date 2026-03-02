@@ -111,39 +111,51 @@ func executeCleanupEntry(
 
 	// Resolve executor/config/rewrite for the cleanup node
 	exec, cfg, rewrite := router.Resolve(entry.NodeName)
+	actualBaseURL := exec.BaseURL
 
 	req, err := adp.BuildRequest(inputs, cfg)
 	if err != nil {
 		return StepResult{
-			Node:     entry.NodeName,
-			Inputs:   inputs,
-			Error:    fmt.Errorf("cleanup build request: %w", err),
-			Duration: time.Since(start),
+			Node:          entry.NodeName,
+			Inputs:        inputs,
+			Error:         fmt.Errorf("cleanup build request: %w", err),
+			Duration:      time.Since(start),
+			ActualBaseURL: actualBaseURL,
 		}
 	}
 
+	originalPath := req.Path
 	if rewrite != nil {
 		req.Path = adapter.RewritePath(req.Path, rewrite)
 	}
 
 	resp, err := exec.Execute(ctx, req)
 	if err != nil {
-		return StepResult{
-			Node:     entry.NodeName,
-			Inputs:   inputs,
-			Request:  req,
-			Error:    fmt.Errorf("cleanup execute: %w", err),
-			Duration: time.Since(start),
+		sr := StepResult{
+			Node:          entry.NodeName,
+			Inputs:        inputs,
+			Request:       req,
+			Error:         fmt.Errorf("cleanup execute: %w", err),
+			Duration:      time.Since(start),
+			ActualBaseURL: actualBaseURL,
 		}
+		if rewrite != nil {
+			sr.OriginalPath = originalPath
+		}
+		return sr
 	}
 
 	result := StepResult{
-		Node:       entry.NodeName,
-		Inputs:     inputs,
-		Request:    req,
-		Response:   resp,
-		StatusCode: resp.StatusCode,
-		Duration:   time.Since(start),
+		Node:          entry.NodeName,
+		Inputs:        inputs,
+		Request:       req,
+		Response:      resp,
+		StatusCode:    resp.StatusCode,
+		Duration:      time.Since(start),
+		ActualBaseURL: actualBaseURL,
+	}
+	if rewrite != nil {
+		result.OriginalPath = originalPath
 	}
 
 	// Extract outputs (best-effort for cleanup)

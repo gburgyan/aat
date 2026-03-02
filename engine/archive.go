@@ -54,7 +54,7 @@ func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) ar
 	}
 
 	if s.Request != nil {
-		rec.Request = convertRequest(s.Request, baseURL)
+		rec.Request = convertRequest(s.Request, s.ActualBaseURL, baseURL, s.OriginalPath)
 	}
 	if s.Response != nil {
 		rec.Response = convertResponse(s.Response)
@@ -104,13 +104,32 @@ func convertStepResult(s StepResult, baseURL string, secrets map[string]bool) ar
 	return rec
 }
 
-func convertRequest(req *adapter.Request, baseURL string) *archive.RequestRecord {
-	return &archive.RequestRecord{
+func convertRequest(req *adapter.Request, actualBaseURL, defaultBaseURL, originalPath string) *archive.RequestRecord {
+	// Use the actual executor base URL if available, fall back to default
+	effectiveBase := actualBaseURL
+	if effectiveBase == "" {
+		effectiveBase = defaultBaseURL
+	}
+	actualURL := effectiveBase + req.Path
+
+	rec := &archive.RequestRecord{
 		Method:  req.Method,
-		URL:     baseURL + req.Path,
+		URL:     actualURL,
 		Headers: archive.RedactHeaders(req.Headers),
 		Body:    toRawMessage(req.Body),
 	}
+
+	// Compute what the URL would have been without the override/rewrite
+	origPath := req.Path
+	if originalPath != "" {
+		origPath = originalPath
+	}
+	originalURL := defaultBaseURL + origPath
+	if originalURL != actualURL {
+		rec.OriginalURL = originalURL
+	}
+
+	return rec
 }
 
 func convertResponse(resp *adapter.Response) *archive.ResponseRecord {

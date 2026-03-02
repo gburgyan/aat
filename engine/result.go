@@ -65,6 +65,8 @@ type StepResult struct {
 	DisplayOutputs    []DisplayOutput            // outputs tagged with display labels
 	ExpectFailure     *ExpectFailureResult       // non-nil for negative assertion steps
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
+	ActualBaseURL     string                     // executor's BaseURL used for this step (set when Request is non-nil)
+	OriginalPath      string                     // request path before rewriting (empty if no rewrite occurred)
 }
 
 // DisplayOutput captures an output value tagged for display to the user.

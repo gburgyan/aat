@@ -74,6 +74,9 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 	if s.Request != nil && s.Response != nil {
 		fmt.Fprintf(&b, "**%s %s** → %d (%s)\n\n",
 			s.Request.Method, s.Request.URL, s.Response.Status, dur)
+		if s.Request.OriginalURL != "" {
+			fmt.Fprintf(&b, "*Override active — original: %s*\n\n", s.Request.OriginalURL)
+		}
 	} else if s.Error != "" {
 		fmt.Fprintf(&b, "**ERROR** (%s): %s\n\n", dur, s.Error)
 	} else {
