@@ -82,9 +82,9 @@ type SelectionContext struct {
 }
 
 // buildInputContexts walks unfed inputs in the skeleton and resolves domain
-// type/pool/concepts per input. layerOverrides (keyed by "nodeName.inputName")
-// marks inputs that have runtime overrides from data layers.
-func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.KnowledgeBase, layerOverrides map[string]*graph.InputDefault) []InputContext {
+// type/pool/concepts per input. layerTouched (keyed by "nodeName.inputName")
+// marks inputs that are directly specified by at least one active layer.
+func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.KnowledgeBase, layerTouched map[string]bool) []InputContext {
 	var contexts []InputContext
 
 	for _, step := range skeleton.Execution.Steps {
@@ -106,7 +106,7 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 				IsConfigurable:   inp.Configurable,
 			}
 
-			enrichFromLayers(&ic, step, layerOverrides)
+			enrichFromLayers(&ic, step, layerTouched)
 			enrichFromTemplate(&ic, step)
 			enrichFromGraph(&ic, inp)
 			enrichFromDomainKB(&ic, inp, kb)
@@ -118,13 +118,12 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 	return contexts
 }
 
-// enrichFromLayers marks the input as layer-handled if a layer provides a value.
-func enrichFromLayers(ic *InputContext, step plan.Step, layerOverrides map[string]*graph.InputDefault) {
-	if layerOverrides == nil {
+// enrichFromLayers marks the input as layer-handled if a layer directly specifies it.
+func enrichFromLayers(ic *InputContext, step plan.Step, layerTouched map[string]bool) {
+	if layerTouched == nil {
 		return
 	}
-	layerKey := step.Node + "." + ic.InputName
-	if _, ok := layerOverrides[layerKey]; ok {
+	if layerTouched[step.Node+"."+ic.InputName] {
 		ic.LayerHandled = true
 	}
 }

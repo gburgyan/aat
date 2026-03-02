@@ -489,6 +489,201 @@ func TestApplyLayers_QualifiedIgnoresUnknownNode(t *testing.T) {
 	assert.Equal(t, "JFK", result["search.origin"].Value)
 }
 
+func TestLayerTouchedKeys_BareEntry(t *testing.T) {
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"searchFlights": {
+				Name: "searchFlights",
+				Inputs: []Input{
+					{Name: "origin", Default: &InputDefault{Pool: []any{"JFK", "LAX"}}},
+					{Name: "destination"},
+				},
+			},
+			"searchHotels": {
+				Name: "searchHotels",
+				Inputs: []Input{
+					{Name: "origin", Default: &InputDefault{Value: "NYC"}},
+				},
+			},
+		},
+	}
+
+	layers := map[string]*Layer{
+		"amex": {
+			Name:   "amex",
+			Inputs: map[string]*InputDefault{"cardNumber": {Value: "4111111111111111"}},
+		},
+	}
+
+	// cardNumber doesn't exist on any node, so result is empty.
+	touched := LayerTouchedKeys(g, []string{"amex"}, layers)
+	assert.Empty(t, touched)
+
+	// Now a layer that touches origin (bare entry matches both nodes).
+	layers2 := map[string]*Layer{
+		"european": {
+			Name:   "european",
+			Inputs: map[string]*InputDefault{"origin": {Pool: []any{"CDG", "FRA"}}},
+		},
+	}
+	touched2 := LayerTouchedKeys(g, []string{"european"}, layers2)
+	assert.True(t, touched2["searchFlights.origin"])
+	assert.True(t, touched2["searchHotels.origin"])
+	// destination not touched by this layer
+	assert.False(t, touched2["searchFlights.destination"])
+}
+
+func TestLayerTouchedKeys_QualifiedEntry(t *testing.T) {
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"nodeA": {
+				Name: "nodeA",
+				Inputs: []Input{
+					{Name: "origin", Default: &InputDefault{Value: "JFK"}},
+				},
+			},
+			"nodeB": {
+				Name: "nodeB",
+				Inputs: []Input{
+					{Name: "origin", Default: &InputDefault{Value: "LAX"}},
+				},
+			},
+		},
+	}
+
+	layers := map[string]*Layer{
+		"specific": {
+			Name:   "specific",
+			Inputs: map[string]*InputDefault{"nodeB.origin": {Value: "AMS"}},
+		},
+	}
+
+	touched := LayerTouchedKeys(g, []string{"specific"}, layers)
+	assert.False(t, touched["nodeA.origin"], "nodeA.origin should not be touched")
+	assert.True(t, touched["nodeB.origin"], "nodeB.origin should be touched")
+}
+
+func TestLayerTouchedKeys_MultipleLayers(t *testing.T) {
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"search": {
+				Name: "search",
+				Inputs: []Input{
+					{Name: "origin"},
+					{Name: "cardNumber"},
+				},
+			},
+		},
+	}
+
+	layers := map[string]*Layer{
+		"european": {
+			Name:   "european",
+			Inputs: map[string]*InputDefault{"origin": {Pool: []any{"CDG"}}},
+		},
+		"amex": {
+			Name:   "amex",
+			Inputs: map[string]*InputDefault{"cardNumber": {Value: "4111"}},
+		},
+	}
+
+	touched := LayerTouchedKeys(g, []string{"european", "amex"}, layers)
+	assert.True(t, touched["search.origin"])
+	assert.True(t, touched["search.cardNumber"])
+}
+
+func TestLayerTouchedKeys_UnknownLayerSkipped(t *testing.T) {
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"search": {
+				Name:   "search",
+				Inputs: []Input{{Name: "origin"}},
+			},
+		},
+	}
+
+	layers := map[string]*Layer{
+		"known": {
+			Name:   "known",
+			Inputs: map[string]*InputDefault{"origin": {Value: "CDG"}},
+		},
+	}
+
+	// "unknown" is not in layers map — should be silently skipped.
+	touched := LayerTouchedKeys(g, []string{"known", "unknown"}, layers)
+	assert.True(t, touched["search.origin"])
+	// no panic
+}
+
+func TestLayerTouchedKeys_NoLayers(t *testing.T) {
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"search": {
+				Name: "search",
+				Inputs: []Input{
+					{Name: "origin", Default: &InputDefault{Value: "JFK"}},
+				},
+			},
+		},
+	}
+
+	touched := LayerTouchedKeys(g, []string{}, map[string]*Layer{})
+	assert.Empty(t, touched)
+}
+
+func TestLayerTouchedKeys_GraphDefaultsNotIncluded(t *testing.T) {
+	// Critical: graph-level defaults must NOT appear in the touched set
+	// when no layer specifies them.
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"searchFlights2Leg": {
+				Name: "searchFlights2Leg",
+				Inputs: []Input{
+					{Name: "leg1Origin", Default: &InputDefault{Pool: []any{"DEN", "JFK"}}},
+					{Name: "leg1Destination", Default: &InputDefault{Pool: []any{"LAX", "SFO"}}},
+					{Name: "cardNumber"},
+				},
+			},
+		},
+	}
+
+	layers := map[string]*Layer{
+		"amex": {
+			Name:   "amex",
+			Inputs: map[string]*InputDefault{"cardNumber": {Value: "4111"}},
+		},
+	}
+
+	touched := LayerTouchedKeys(g, []string{"amex"}, layers)
+	// Only cardNumber is touched by the amex layer.
+	assert.True(t, touched["searchFlights2Leg.cardNumber"])
+	// leg1Origin and leg1Destination have graph defaults but are NOT touched by the layer.
+	assert.False(t, touched["searchFlights2Leg.leg1Origin"])
+	assert.False(t, touched["searchFlights2Leg.leg1Destination"])
+}
+
+func TestLayerTouchedKeys_QualifiedUnknownNode(t *testing.T) {
+	g := &Graph{
+		Nodes: map[string]*Node{
+			"search": {
+				Name:   "search",
+				Inputs: []Input{{Name: "origin"}},
+			},
+		},
+	}
+
+	layers := map[string]*Layer{
+		"test": {
+			Name:   "test",
+			Inputs: map[string]*InputDefault{"unknownNode.origin": {Value: "CDG"}},
+		},
+	}
+
+	// Qualified entry with unknown node should not add any key.
+	touched := LayerTouchedKeys(g, []string{"test"}, layers)
+	assert.Empty(t, touched)
+}
+
 // writeLayer is a test helper that writes a layer YAML file.
 func writeLayer(t *testing.T, dir, filename, name, inputsYAML string) {
 	t.Helper()

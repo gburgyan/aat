@@ -2076,12 +2076,12 @@ func TestBuildInputContexts_LayerHandled(t *testing.T) {
 		},
 	}
 
-	layerOverrides := map[string]*graph.InputDefault{
-		"search.origin":      {Pool: []any{"FCO", "CDG", "LHR"}},
-		"search.destination": {Pool: []any{"JFK", "EWR"}},
+	layerTouched := map[string]bool{
+		"search.origin":      true,
+		"search.destination": true,
 	}
 
-	contexts := buildInputContexts(p, g, nil, layerOverrides)
+	contexts := buildInputContexts(p, g, nil, layerTouched)
 	require.Len(t, contexts, 3)
 
 	// origin and destination should be layer-handled.

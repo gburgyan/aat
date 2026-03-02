@@ -263,11 +263,11 @@ func buildAndFillPlan(
 	}
 
 	// --- Call 2: Targeted Value Fill ---
-	var layerOverrides map[string]*graph.InputDefault
+	var layerTouched map[string]bool
 	if len(ws.Layers) > 0 && req.AvailableLayers != nil {
-		layerOverrides, _ = graph.ApplyLayers(req.Graph, ws.Layers, req.AvailableLayers)
+		layerTouched = graph.LayerTouchedKeys(req.Graph, ws.Layers, req.AvailableLayers)
 	}
-	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB, layerOverrides)
+	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB, layerTouched)
 	selectionContexts := buildSelectionContexts(skeleton, req.Graph)
 
 	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, ws, now)
@@ -402,11 +402,11 @@ func retryPlanGeneration(
 	}
 
 	// Rebuild contexts for the retry skeleton.
-	var layerOverrides map[string]*graph.InputDefault
+	var layerTouched map[string]bool
 	if len(ws.Layers) > 0 && req.AvailableLayers != nil {
-		layerOverrides, _ = graph.ApplyLayers(req.Graph, ws.Layers, req.AvailableLayers)
+		layerTouched = graph.LayerTouchedKeys(req.Graph, ws.Layers, req.AvailableLayers)
 	}
-	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB, layerOverrides)
+	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB, layerTouched)
 	selectionContexts := buildSelectionContexts(retrySkeleton, req.Graph)
 
 	now := time.Now()

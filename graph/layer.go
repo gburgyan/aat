@@ -152,6 +152,51 @@ func MergeInputDefault(base, overlay *InputDefault) *InputDefault {
 	return &result
 }
 
+// LayerTouchedKeys returns the set of "nodeName.inputName" keys that are
+// directly specified by at least one of the named layers (bare or qualified).
+// Unlike ApplyLayers, this does NOT seed from graph defaults — only inputs
+// that layers explicitly override are included.
+// Used by the intent pipeline to classify inputs as "layer-handled" for prompting.
+func LayerTouchedKeys(g *Graph, layerNames []string, available map[string]*Layer) map[string]bool {
+	touched := make(map[string]bool)
+	for _, layerName := range layerNames {
+		layer, ok := available[layerName]
+		if !ok || layer == nil || len(layer.Inputs) == 0 {
+			continue
+		}
+		for key := range layer.Inputs {
+			if strings.Contains(key, ".") {
+				// Qualified "node.input" entry — verify the node/input exist before adding.
+				parts := strings.SplitN(key, ".", 2)
+				if len(parts) != 2 {
+					continue
+				}
+				nodeName, inputName := parts[0], parts[1]
+				node, ok := g.Nodes[nodeName]
+				if !ok {
+					continue
+				}
+				for _, inp := range node.Inputs {
+					if inp.Name == inputName {
+						touched[key] = true
+						break
+					}
+				}
+			} else {
+				// Bare "input" entry — match all nodes with this input name.
+				for nodeName, node := range g.Nodes {
+					for _, inp := range node.Inputs {
+						if inp.Name == key {
+							touched[nodeName+"."+inp.Name] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return touched
+}
+
 // ApplyLayers computes the effective InputDefaults for every (node, input) pair
 // after stacking the named layers on top of the graph defaults. Layers are
 // applied in order — later layers override earlier ones.
