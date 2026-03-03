@@ -1500,3 +1500,186 @@ func TestEngine_Run_NoDisplayOutputs(t *testing.T) {
 	require.Len(t, result.Steps, 1)
 	assert.Nil(t, result.Steps[0].DisplayOutputs)
 }
+
+// TestEngine_Run_RawAssertionPassesOnRawBody verifies that a raw assertion
+// evaluates against the full HTTP response body, not the extracted outputs.
+func TestEngine_Run_RawAssertionPassesOnRawBody(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{
+					{Name: "id", Type: "string"},
+				},
+			},
+		},
+	}
+
+	// Raw body has extra fields (nested.count) that are NOT extracted as outputs.
+	rawBody := `{"id":"abc","nested":{"count":3}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(rawBody))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method: "GET", path: "/step1",
+		response: map[string]any{"id": "abc"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							{Type: "fieldEquals", Path: "nested.count", Value: float64(3), Raw: true},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.NotNil(t, result.Steps[0].Validation)
+	assert.True(t, result.Steps[0].Validation.Passed)
+	assert.Len(t, result.Steps[0].Validation.Results, 1)
+}
+
+// TestEngine_Run_NonRawAssertionFailsForRawOnlyField verifies that a non-raw
+// assertion cannot see fields that exist only in the raw body when extracted
+// outputs are available (confirming default behavior).
+func TestEngine_Run_NonRawAssertionFailsForRawOnlyField(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{
+					{Name: "id", Type: "string"},
+				},
+			},
+		},
+	}
+
+	rawBody := `{"id":"abc","nested":{"count":3}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(rawBody))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method: "GET", path: "/step1",
+		response: map[string]any{"id": "abc"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							// Without Raw: true, this evaluates against extracted outputs
+							// which only have {"id":"abc"} — nested.count is absent.
+							{Type: "fieldExists", Path: "nested.count"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	require.NotNil(t, result.Steps[0].Validation)
+	assert.False(t, result.Steps[0].Validation.Passed)
+}
+
+// TestEngine_Run_MixedRawAndNormalAssertions verifies that a step can have
+// both raw and normal assertions, each evaluating against the correct body.
+func TestEngine_Run_MixedRawAndNormalAssertions(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"step1": {
+				Name:    "step1",
+				Adapter: "test.step1",
+				Inputs:  []graph.Input{},
+				Outputs: []graph.Output{
+					{Name: "id", Type: "string"},
+				},
+			},
+		},
+	}
+
+	rawBody := `{"id":"abc","nested":{"count":3}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(rawBody))
+	}))
+	defer server.Close()
+
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.step1", &stubAdapter{
+		method: "GET", path: "/step1",
+		response: map[string]any{"id": "abc"},
+	}))
+
+	executor := adapter.NewHTTPExecutor(server.URL)
+	engine := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}))
+
+	p := &plan.Plan{
+		Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "step1",
+					Assertions: &plan.Assertions{
+						Mechanical: []plan.MechanicalAssertion{
+							// Normal: evaluates against extracted outputs {"id":"abc"}
+							{Type: "fieldExists", Path: "id"},
+							// Raw: evaluates against full response body
+							{Type: "fieldEquals", Path: "nested.count", Value: float64(3), Raw: true},
+							// Normal status check
+							{Type: "status", Expect: 200},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	result := engine.Run(context.Background(), p)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.NotNil(t, result.Steps[0].Validation)
+	assert.True(t, result.Steps[0].Validation.Passed)
+	// 2 normal + 1 raw = 3 total assertion results
+	assert.Len(t, result.Steps[0].Validation.Results, 3)
+}

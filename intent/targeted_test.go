@@ -1053,6 +1053,20 @@ func TestSanitizeAssertions_AllFilteredReturnsNil(t *testing.T) {
 	assert.Nil(t, result)
 }
 
+func TestSanitizeAssertions_RawFlagPreserved(t *testing.T) {
+	assertions := []TargetedAssertion{
+		{Type: "fieldEquals", Path: "$.nested.count", Value: float64(3), Raw: true},
+		{Type: "fieldExists", Path: "id"},
+	}
+
+	result := sanitizeAssertions(assertions)
+
+	require.Len(t, result, 2)
+	assert.True(t, result[0].Raw)
+	assert.Equal(t, "nested.count", result[0].Path) // $. stripped
+	assert.False(t, result[1].Raw)
+}
+
 func TestApplyTargetedResponse_AssertionsSanitized(t *testing.T) {
 	skeleton := &plan.Plan{
 		Execution: plan.Execution{

@@ -170,7 +170,7 @@ func TestCheckFieldEquals(t *testing.T) {
 			path:       "name",
 			value:      "Alice",
 			passed:     true,
-			msgContain: "equals expected",
+			msgContain: "equals",
 		},
 		{
 			name:       "number match",
@@ -178,7 +178,7 @@ func TestCheckFieldEquals(t *testing.T) {
 			path:       "price",
 			value:      99.99,
 			passed:     true,
-			msgContain: "equals expected",
+			msgContain: "equals",
 		},
 		{
 			name:       "bool match",
@@ -186,7 +186,7 @@ func TestCheckFieldEquals(t *testing.T) {
 			path:       "active",
 			value:      true,
 			passed:     true,
-			msgContain: "equals expected",
+			msgContain: "equals",
 		},
 		{
 			name:       "int vs float64 coercion",
@@ -194,7 +194,7 @@ func TestCheckFieldEquals(t *testing.T) {
 			path:       "count",
 			value:      int(42),
 			passed:     true,
-			msgContain: "equals expected",
+			msgContain: "equals",
 		},
 		{
 			name:       "wrong value",
@@ -218,7 +218,7 @@ func TestCheckFieldEquals(t *testing.T) {
 			path:       "price.amount",
 			value:      float64(100),
 			passed:     true,
-			msgContain: "equals expected",
+			msgContain: "equals",
 		},
 		{
 			name:       "dollar prefix",
@@ -226,7 +226,7 @@ func TestCheckFieldEquals(t *testing.T) {
 			path:       "$.name",
 			value:      "Alice",
 			passed:     true,
-			msgContain: "equals expected",
+			msgContain: "equals",
 		},
 	}
 

@@ -1099,6 +1099,7 @@ func toValidationDetail(v *archive.ValidationRecord) *ValidationDetail {
 				Message: r.Message,
 				Path:    r.Path,
 				Expr:    r.Expr,
+				Raw:     r.Raw,
 			}
 		}
 	}

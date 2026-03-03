@@ -175,6 +175,7 @@ type MechanicalAssertion struct {
 	Path   string `yaml:"path,omitempty" json:"path,omitempty"`
 	Value  any    `yaml:"value,omitempty" json:"value,omitempty"`
 	Expr   string `yaml:"expr,omitempty" json:"expr,omitempty"`
+	Raw    bool   `yaml:"raw,omitempty" json:"raw,omitempty"`
 }
 
 // ExpectFailure indicates that a step is expected to fail with specific status codes.

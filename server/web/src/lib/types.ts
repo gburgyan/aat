@@ -167,6 +167,7 @@ export interface AssertionDetail {
   message: string;
   path?: string;
   expr?: string;
+  raw?: boolean;
 }
 
 export interface SelectionDetail {

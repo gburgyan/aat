@@ -152,6 +152,7 @@ func convertValidation(v *validate.MechanicalResult) *archive.ValidationRecord {
 			Message: r.Message,
 			Path:    r.Path,
 			Expr:    r.Expr,
+			Raw:     r.Raw,
 		})
 	}
 	return rec

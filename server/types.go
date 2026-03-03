@@ -183,6 +183,7 @@ type AssertionDetail struct {
 	Message string `json:"message"`
 	Path    string `json:"path,omitempty"`
 	Expr    string `json:"expr,omitempty"`
+	Raw     bool   `json:"raw,omitempty"`
 }
 
 // SelectionDetail captures how an array selection was resolved.

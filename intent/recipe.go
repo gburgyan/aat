@@ -62,6 +62,14 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...
 	targeted := recipeOverridesToTargetedResponse(recipe.Overrides)
 	unfedSet := unfedInputSet(skeleton, g)
 
+	// Recipe overrides are explicit user intent — always allow them
+	// regardless of whether the input is considered "fed" by the graph.
+	// This differs from LLM responses where the unfedSet filter prevents
+	// the model from shadowing auto-wired edges.
+	for key := range targeted.Values {
+		unfedSet[key] = true
+	}
+
 	// 5. Apply targeted response.
 	applyTargetedResponse(skeleton, targeted, unfedSet)
 
@@ -157,6 +165,7 @@ func recipeOverridesToTargetedResponse(ro plan.RecipeOverrides) *TargetedRespons
 				Path:   a.Path,
 				Value:  a.Value,
 				Expr:   a.Expr,
+				Raw:    a.Raw,
 			})
 		}
 		tr.Assertions[k] = ta
@@ -216,6 +225,7 @@ func TargetedResponseToRecipeOverrides(tr *TargetedResponse) plan.RecipeOverride
 				Path:   a.Path,
 				Value:  a.Value,
 				Expr:   a.Expr,
+				Raw:    a.Raw,
 			})
 		}
 		ro.Assertions[k] = ra

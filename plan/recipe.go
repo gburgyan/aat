@@ -53,6 +53,7 @@ type RecipeAssertion struct {
 	Path   string `yaml:"path,omitempty"`
 	Value  any    `yaml:"value,omitempty"`
 	Expr   string `yaml:"expr,omitempty"`
+	Raw    bool   `yaml:"raw,omitempty"`
 }
 
 // ParseRecipe unmarshals YAML bytes into a Recipe with basic validation.

@@ -43,6 +43,7 @@ type TargetedAssertion struct {
 	Path   string `json:"path,omitempty"`
 	Value  any    `json:"value,omitempty"`
 	Expr   string `json:"expr,omitempty"`
+	Raw    bool   `json:"raw,omitempty"`
 }
 
 // InputContext provides rich per-input context for the LLM prompt.
@@ -536,6 +537,7 @@ func sanitizeAssertions(assertions []TargetedAssertion) []plan.MechanicalAsserti
 			Path:   a.Path,
 			Value:  a.Value,
 			Expr:   a.Expr,
+			Raw:    a.Raw,
 		})
 	}
 	return result

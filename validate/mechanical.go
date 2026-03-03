@@ -27,6 +27,7 @@ type MechanicalAssertion struct {
 	Path   string
 	Value  any
 	Expr   string
+	Raw    bool
 }
 
 // AssertionResult records the outcome of a single assertion.
@@ -37,6 +38,7 @@ type AssertionResult struct {
 	Message string
 	Path    string
 	Expr    string
+	Raw     bool
 }
 
 // MechanicalResult aggregates the outcomes of all mechanical assertions for a step.
@@ -75,6 +77,7 @@ func RunMechanical(statusCode int, body []byte, assertions []MechanicalAssertion
 			}
 		}
 
+		ar.Raw = a.Raw
 		result.Results = append(result.Results, ar)
 		if !ar.Passed {
 			result.Passed = false
@@ -164,7 +167,7 @@ func checkFieldEquals(body []byte, a MechanicalAssertion) AssertionResult {
 
 	if valuesEqual(r, a.Value) {
 		ar.Passed = true
-		ar.Message = fmt.Sprintf("field %q equals expected value", a.Path)
+		ar.Message = fmt.Sprintf("field %q equals %v", a.Path, a.Value)
 	} else {
 		ar.Passed = false
 		ar.Message = fmt.Sprintf("field %q: expected %v, got %v", a.Path, a.Value, r.Value())

@@ -44,7 +44,7 @@
         <td style="text-align: center; font-weight: 700; color: {r.skipped ? 'var(--color-text-muted)' : r.passed ? 'var(--color-success)' : 'var(--color-error)'};">
           {statusIcon(r)}
         </td>
-        <td><span class="badge badge-sm badge-muted">{r.type}</span></td>
+        <td><span class="badge badge-sm badge-muted">{r.type}</span>{#if r.raw}&nbsp;<span class="badge badge-sm badge-muted" style="opacity: 0.7;">raw</span>{/if}</td>
         <td>{r.message}</td>
         <td class="dt-mono dt-muted">{r.path ?? ''}</td>
         <td class="dt-mono dt-muted">{r.expr ?? ''}</td>

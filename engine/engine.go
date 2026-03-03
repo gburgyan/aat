@@ -443,21 +443,44 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	}
 
 	// Run mechanical assertions if configured.
-	// When extracted outputs are available, serialize them and use that as
-	// the assertion body so field paths match graph output names. Fall back
-	// to the raw response body when outputs aren't available (e.g., 4xx).
+	// Assertions with Raw=true evaluate against the raw HTTP response body.
+	// Normal assertions evaluate against serialized extracted outputs when
+	// available, falling back to the raw body (e.g., on 4xx responses).
 	if step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
-		assertionBody := resp.Body
-		if result.Outputs != nil {
-			if ob, err := json.Marshal(result.Outputs); err == nil {
-				assertionBody = ob
+		var rawAssertions, normalAssertions []plan.MechanicalAssertion
+		for _, a := range step.Assertions.Mechanical {
+			if a.Raw {
+				rawAssertions = append(rawAssertions, a)
+			} else {
+				normalAssertions = append(normalAssertions, a)
 			}
 		}
-		result.Validation = validate.RunMechanical(
-			resp.StatusCode, assertionBody,
-			convertAssertions(step.Assertions.Mechanical),
-			plan.EvalPredicate,
-		)
+
+		normalBody := resp.Body
+		if result.Outputs != nil {
+			if ob, err := json.Marshal(result.Outputs); err == nil {
+				normalBody = ob
+			}
+		}
+
+		merged := &validate.MechanicalResult{Passed: true}
+		if len(normalAssertions) > 0 {
+			nr := validate.RunMechanical(resp.StatusCode, normalBody,
+				convertAssertions(normalAssertions), plan.EvalPredicate)
+			merged.Results = append(merged.Results, nr.Results...)
+			if !nr.Passed {
+				merged.Passed = false
+			}
+		}
+		if len(rawAssertions) > 0 {
+			rr := validate.RunMechanical(resp.StatusCode, resp.Body,
+				convertAssertions(rawAssertions), plan.EvalPredicate)
+			merged.Results = append(merged.Results, rr.Results...)
+			if !rr.Passed {
+				merged.Passed = false
+			}
+		}
+		result.Validation = merged
 	}
 
 	// OAS schema validation
@@ -497,6 +520,7 @@ func convertAssertions(planAssertions []plan.MechanicalAssertion) []validate.Mec
 			Path:   pa.Path,
 			Value:  pa.Value,
 			Expr:   pa.Expr,
+			Raw:    pa.Raw,
 		}
 	}
 	return result

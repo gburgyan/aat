@@ -128,6 +128,7 @@ type AssertionRecord struct {
 	Message string `json:"message"`
 	Path    string `json:"path,omitempty"`
 	Expr    string `json:"expr,omitempty"`
+	Raw     bool   `json:"raw,omitempty"`
 }
 
 // SelectionRecord captures how an array selection was resolved.
