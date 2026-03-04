@@ -86,6 +86,27 @@ jobs:
   build:
     needs: frontend
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: ""
+          - goos: linux
+            goarch: arm64
+            suffix: ""
+          - goos: darwin
+            goarch: amd64
+            suffix: ""
+          - goos: darwin
+            goarch: arm64
+            suffix: ""
+          - goos: windows
+            goarch: amd64
+            suffix: ".exe"
+          - goos: windows
+            goarch: arm64
+            suffix: ".exe"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,16 +121,28 @@ jobs:
           name: frontend-dist
           path: server/web/dist/
 
-      - name: Build binary
+      - name: Build binary (${{ matrix.goos }}/${{ matrix.goarch }})
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
         run: |
           VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           go build -ldflags "\
+            -s -w \
             -X github.com/gburgyan/aat/internal/version.Version=${VERSION} \
             -X github.com/gburgyan/aat/internal/version.GitCommit=${COMMIT} \
             -X github.com/gburgyan/aat/internal/version.BuildDate=${DATE}" \
-            -o aat ./cmd/aat/
+            -o aat_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.suffix }} ./cmd/aat/
 
       - name: Smoke test
-        run: ./aat --version
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: ./aat_linux_amd64 --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aat-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: aat_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.suffix }}
+          retention-days: 7
