@@ -13,8 +13,18 @@ Thanks for your interest in contributing to Adaptive API Toolkit!
 
 1. Create a branch from `main`
 2. Make your changes
-3. Ensure `make test` passes
+3. Run `make check` (fmt + tests + lint — same as CI)
 4. Submit a pull request
+
+## What to expect from your PR
+
+**Small changes** (bug fixes, typo corrections, small enhancements) — if the code is clean and tests pass, there's a good chance it gets merged as-is.
+
+**Larger changes** — absolutely welcome, but set your expectations accordingly. I have opinions about how the project should grow, so I may take your idea, reshape the implementation to fit the project's direction, and credit you as a contributor. This isn't a rejection of your work — it means the idea was good enough to adopt. If you'd prefer to discuss an approach before investing significant effort, open an issue first.
+
+**AI-assisted contributions** are completely fine. If you used an LLM to help write the code, include the prompts you used in the PR description. This helps with review and is just good transparency.
+
+The goal here is to set honest expectations so nobody gets defensive. A PR that gets reworked before merging is still a valued contribution — the idea and initiative matter.
 
 ## Project structure
 
