@@ -164,6 +164,56 @@ func TestNewIntegrationServer_WithOAS_ToolNames(t *testing.T) {
 	assert.Contains(t, toolNames, "build_oas_example")
 }
 
+func TestNewRemoteIntegrationServer_ToolNames(t *testing.T) {
+	srv := NewRemoteIntegrationServer(buildPersonaTestContext())
+	tools := srv.mcp.ListTools()
+	toolNames := collectToolNames(tools)
+
+	// API-vocabulary tools should be present (same as Integration).
+	assert.Contains(t, toolNames, "list_api_operations")
+	assert.Contains(t, toolNames, "describe_operation")
+	assert.Contains(t, toolNames, "trace_dependency_chain")
+	assert.Contains(t, toolNames, "search_api")
+	assert.Contains(t, toolNames, "inspect_request_template")
+	assert.Contains(t, toolNames, "get_data_flow")
+	assert.Contains(t, toolNames, "get_response_shape")
+	assert.Contains(t, toolNames, "explain_field")
+	assert.Contains(t, toolNames, "list_integration_flows")
+	assert.Contains(t, toolNames, "get_integration_flow")
+
+	// get_sample_response should NOT be present (leaks raw response bodies).
+	assert.NotContains(t, toolNames, "get_sample_response")
+
+	// Test-only tools should NOT be present.
+	assert.NotContains(t, toolNames, "list_nodes")
+	assert.NotContains(t, toolNames, "generate_plan")
+	assert.NotContains(t, toolNames, "execute_plan")
+	assert.NotContains(t, toolNames, "list_archives")
+}
+
+func TestNewRemoteIntegrationServer_ToolCount(t *testing.T) {
+	srv := NewRemoteIntegrationServer(buildPersonaTestContext())
+	tools := srv.mcp.ListTools()
+	// Integration has 17 tools (no OAS); remote drops get_sample_response = 16
+	assert.Equal(t, 16, len(tools), "remote integration server (no OAS) should have 16 tools, got %d: %v",
+		len(tools), collectToolNames(tools))
+}
+
+func TestNewRemoteIntegrationServer_WithOAS_ToolCount(t *testing.T) {
+	ctx := buildPersonaTestContext()
+	ctx.OASSpecs = map[string]*v3high.Document{"test.yaml": {}}
+	srv := NewRemoteIntegrationServer(ctx)
+	tools := srv.mcp.ListTools()
+	// 16 base + 7 OAS = 23 tools
+	assert.Equal(t, 23, len(tools), "remote integration server (with OAS) should have 23 tools, got %d: %v",
+		len(tools), collectToolNames(tools))
+}
+
+func TestNewRemoteIntegrationServer_Persona(t *testing.T) {
+	srv := NewRemoteIntegrationServer(buildPersonaTestContext())
+	assert.Equal(t, PersonaRemoteIntegration, srv.persona)
+}
+
 func TestNewTestServer_ToolNames(t *testing.T) {
 	srv := NewTestServer(buildPersonaTestContext())
 	tools := srv.mcp.ListTools()

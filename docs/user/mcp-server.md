@@ -1,8 +1,10 @@
 # MCP Server
 
-AAT exposes a Model Context Protocol (MCP) server that integrates your API project into IDE-based AI tools like Claude Code, Cursor, and VS Code Copilot. The server provides tools, resources, and prompts that let AI assistants browse your API graph, author plans, run tests, and debug failures — all through the stdio transport.
+AAT exposes a Model Context Protocol (MCP) server that integrates your API project into IDE-based AI tools like Claude Code, Cursor, and VS Code Copilot. The server provides tools, resources, and prompts that let AI assistants browse your API graph, author plans, run tests, and debug failures — over stdio or HTTP.
 
 ## Quick Start
+
+### Stdio (local IDE)
 
 ```
 aat mcp serve
@@ -15,6 +17,20 @@ aat mcp serve --manifest path/to/aat-project.yaml
 ```
 
 Use `--manifest` to specify a project explicitly when auto-discovery doesn't apply.
+
+### HTTP (remote)
+
+```
+aat mcp serve --http
+```
+
+Serves the MCP server over Streamable HTTP on port 8080. This lets developers point their IDE's MCP client at a URL without installing AAT locally.
+
+```
+aat mcp serve --http --port 9090 --http-base-path /api/mcp
+```
+
+HTTP mode automatically uses the `api` persona (read-only Integration tools) and excludes tools that expose raw response bodies. The server shuts down gracefully on SIGINT/SIGTERM.
 
 ## Personas
 
@@ -44,6 +60,9 @@ aat mcp serve --persona test    # test lifecycle tools (~26 tools)
 |------|------|---------|-------------|
 | `--manifest` | path | auto-discovered | Explicit path to `aat-project.yaml` |
 | `--persona` | string | *(all)* | Server persona: `api`, `test`, or omit for all tools |
+| `--http` | bool | false | Serve over Streamable HTTP instead of stdio |
+| `--port` | int | 8080 | HTTP listen port (used with `--http`) |
+| `--http-base-path` | string | `/mcp` | HTTP endpoint path (used with `--http`) |
 
 ## IDE Configuration
 
@@ -97,6 +116,57 @@ Add an MCP server entry in your IDE settings. The configuration varies by IDE, b
 ```
 
 Consult your IDE's MCP documentation for the exact settings location.
+
+### Remote HTTP Server
+
+When AAT is running with `--http`, configure your IDE to connect via URL instead of spawning a process:
+
+```json
+{
+  "mcpServers": {
+    "aat-remote": {
+      "url": "http://your-server:8080/mcp"
+    }
+  }
+}
+```
+
+This is useful for shared team servers or when AAT is running on a different machine from the IDE.
+
+## HTTP Mode
+
+HTTP mode serves the MCP protocol over Streamable HTTP, enabling remote access without local AAT installation.
+
+### Behavior
+
+- **Persona**: HTTP mode always uses the Integration (`api`) persona. The `--persona` flag is ignored (with a warning if a non-api value was passed).
+- **Stateless**: Each request is independent — no session state is maintained. All Integration tools are pure reads, so no session tracking is needed.
+- **Excluded tools**: `get_sample_response` is excluded from HTTP mode because it exposes raw API response bodies from run archives.
+- **Shutdown**: The server shuts down gracefully on SIGINT/SIGTERM, draining in-flight requests with a 5-second timeout.
+
+### Authentication
+
+HTTP mode does not enforce authentication by default. For production deployments behind a reverse proxy, use the proxy's auth layer.
+
+AAT ships a `BearerAuth` middleware in the `mcp` package that validates `Authorization: Bearer <token>` headers. It's not wired into the CLI by default but is ready for programmatic use:
+
+```go
+handler := server.NewStreamableHTTPServer(mcpServer, opts...)
+protected := mcp.AuthMiddleware([]string{"your-api-key"})(handler)
+http.ListenAndServe(":8080", protected)
+```
+
+A `--api-key` CLI flag may be added in a future release.
+
+### Deployment
+
+For production use, run AAT behind a reverse proxy (nginx, Caddy) that handles TLS termination and authentication:
+
+```
+aat mcp serve --http --port 8080
+```
+
+The proxy forwards to `http://localhost:8080/mcp`. AAT does not handle TLS directly in HTTP mode.
 
 ## Tools — API Persona
 
@@ -382,4 +452,4 @@ See [Project Setup](project-setup.md) for how to configure the manifest.
 
 ---
 
-*Source: `cmd/aat/mcp_cmd.go`, `mcp/server.go`, `mcp/context.go`, `mcp/resources.go`, `mcp/prompts.go`, `mcp/prompts_workflow.go`, `mcp/tools_*.go`.*
+*Source: `cmd/aat/mcp_cmd.go`, `mcp/server.go`, `mcp/middleware.go`, `mcp/context.go`, `mcp/resources.go`, `mcp/prompts.go`, `mcp/prompts_workflow.go`, `mcp/tools_*.go`.*

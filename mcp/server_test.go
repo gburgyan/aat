@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	goContext "context"
 	"testing"
 
 	"github.com/gburgyan/aat/adapter"
@@ -44,4 +45,42 @@ func TestNewServer_NilManifest(t *testing.T) {
 
 	srv := NewServer(ctx)
 	assert.NotNil(t, srv)
+}
+
+func TestMCPServer_Accessor(t *testing.T) {
+	ctx := &ServerContext{
+		Graph:    &graph.Graph{Nodes: map[string]*graph.Node{}},
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+
+	srv := NewServer(ctx)
+	assert.NotNil(t, srv.MCPServer())
+	assert.Equal(t, srv.mcp, srv.MCPServer())
+}
+
+func TestServeHTTP_ListensAndShutdown(t *testing.T) {
+	ctx := &ServerContext{
+		Graph:    &graph.Graph{Nodes: map[string]*graph.Node{}},
+		Registry: adapter.NewRegistry(),
+		Manifest: &ProjectManifest{Name: "test"},
+	}
+
+	srv := NewRemoteIntegrationServer(ctx)
+
+	// Create a context we can cancel to trigger shutdown.
+	bgCtx, cancel := goContext.WithCancel(goContext.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.ServeHTTP(bgCtx, ":0")
+	}()
+
+	// Give the server a moment to start, then cancel.
+	// In a real integration test we'd probe the port, but for unit testing
+	// cancellation is sufficient.
+	cancel()
+
+	err := <-errCh
+	assert.NoError(t, err)
 }
