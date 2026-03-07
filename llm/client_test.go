@@ -170,6 +170,56 @@ func TestOpenAI_NoAPIKey(t *testing.T) {
 	assert.Equal(t, "ok", resp.Content)
 }
 
+func TestOpenAI_ReasoningEffort(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openAIRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		require.NotNil(t, req.ReasoningEffort)
+		assert.Equal(t, "high", *req.ReasoningEffort)
+
+		_ = json.NewEncoder(w).Encode(openAIResponse{
+			Choices: []openAIChoice{{
+				Message:      openAIMessage{Role: "assistant", Content: "ok"},
+				FinishReason: "stop",
+			}},
+			Model: "o1",
+		})
+	}))
+	defer server.Close()
+
+	client := &OpenAIClient{Endpoint: server.URL, APIKey: "k", Model: "o1"}
+	resp, err := client.Complete(context.Background(), &Request{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+		Thinking: &ThinkingConfig{ReasoningEffort: "high"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "ok", resp.Content)
+}
+
+func TestOpenAI_NilThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req openAIRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+		assert.Nil(t, req.ReasoningEffort)
+
+		_ = json.NewEncoder(w).Encode(openAIResponse{
+			Choices: []openAIChoice{{
+				Message:      openAIMessage{Role: "assistant", Content: "ok"},
+				FinishReason: "stop",
+			}},
+			Model: "gpt-4",
+		})
+	}))
+	defer server.Close()
+
+	client := &OpenAIClient{Endpoint: server.URL, APIKey: "k", Model: "gpt-4"}
+	_, err := client.Complete(context.Background(), &Request{
+		Messages: []Message{{Role: RoleUser, Content: "Hi"}},
+	})
+	require.NoError(t, err)
+}
+
 // --- Anthropic tests ---
 
 func TestAnthropic_SuccessfulCompletion(t *testing.T) {
@@ -177,7 +227,7 @@ func TestAnthropic_SuccessfulCompletion(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/v1/messages", r.URL.Path)
 		assert.Equal(t, "test-key", r.Header.Get("x-api-key"))
-		assert.Equal(t, "2023-06-01", r.Header.Get("anthropic-version"))
+		assert.Equal(t, "2025-04-15", r.Header.Get("anthropic-version"))
 
 		var req anthropicRequest
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
@@ -380,6 +430,69 @@ func TestNewClient_ExplicitProvider(t *testing.T) {
 	require.NoError(t, err)
 	_, ok := client.(*AnthropicClient)
 	assert.True(t, ok)
+}
+
+func TestAnthropic_ExtendedThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req anthropicRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+
+		// Thinking should be set.
+		require.NotNil(t, req.Thinking)
+		assert.Equal(t, "enabled", req.Thinking.Type)
+		assert.Equal(t, 10000, req.Thinking.BudgetTokens)
+
+		// Temperature must NOT be sent when thinking is enabled.
+		assert.Nil(t, req.Temperature)
+
+		// Return response with thinking content block.
+		_ = json.NewEncoder(w).Encode(anthropicResponse{
+			Content: []anthropicContent{
+				{Type: "thinking", Text: "Let me think about this..."},
+				{Type: "text", Text: "Hello!"},
+			},
+			Model:      "claude-sonnet-4-20250514",
+			StopReason: "end_turn",
+			Usage:      anthropicUsage{InputTokens: 15, OutputTokens: 30},
+		})
+	}))
+	defer server.Close()
+
+	client := &AnthropicClient{Endpoint: server.URL, APIKey: "k", Model: "claude-sonnet-4-20250514"}
+	resp, err := client.Complete(context.Background(), &Request{
+		Messages:    []Message{{Role: RoleUser, Content: "Hi"}},
+		Temperature: 0.5, // should be ignored when thinking is enabled
+		Thinking:    &ThinkingConfig{BudgetTokens: 10000},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Hello!", resp.Content)
+	assert.Equal(t, "Let me think about this...", resp.Thinking)
+}
+
+func TestAnthropic_TemperatureWithoutThinking(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req anthropicRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
+
+		assert.Nil(t, req.Thinking)
+		require.NotNil(t, req.Temperature)
+		assert.InDelta(t, 0.7, *req.Temperature, 0.001)
+
+		_ = json.NewEncoder(w).Encode(anthropicResponse{
+			Content:    []anthropicContent{{Type: "text", Text: "ok"}},
+			Model:      "claude-sonnet-4-20250514",
+			StopReason: "end_turn",
+		})
+	}))
+	defer server.Close()
+
+	client := &AnthropicClient{Endpoint: server.URL, APIKey: "k", Model: "claude-sonnet-4-20250514"}
+	_, err := client.Complete(context.Background(), &Request{
+		Messages:    []Message{{Role: RoleUser, Content: "Hi"}},
+		Temperature: 0.7,
+	})
+	require.NoError(t, err)
 }
 
 func TestNewClient_DefaultEndpoints(t *testing.T) {

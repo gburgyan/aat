@@ -113,7 +113,10 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	sr, err := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt, req.Graph, req.AvailableLayers, req.Layers, now)
 	if err != nil {
 		if trace != nil && sr != nil {
-			trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, time.Since(selStart), err)
+			trace.SelectionCall = toLLMCallTrace(&llm.Request{
+				Messages:    []llm.Message{{Role: llm.RoleSystem, Content: sr.System}, {Role: llm.RoleUser, Content: sr.User}},
+				Temperature: 0.1,
+			}, sr.Response, time.Since(selStart), err)
 		}
 		return traceErr(fmt.Errorf("intent: workflow selection: %w", err))
 	}
@@ -169,7 +172,10 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		}
 
 		if trace != nil {
-			reselTrace := toLLMCallTrace(reselSR.System, reselSR.User, 0.1, reselSR.Response, time.Since(reselStart), nil)
+			reselTrace := toLLMCallTrace(&llm.Request{
+				Messages:    []llm.Message{{Role: llm.RoleSystem, Content: reselSR.System}, {Role: llm.RoleUser, Content: reselSR.User}},
+				Temperature: 0.1,
+			}, reselSR.Response, time.Since(reselStart), nil)
 			trace.ReselectionCall = &reselTrace
 			trace.WorkflowSelection = reselSR.Selection
 		}
@@ -277,22 +283,23 @@ func buildAndFillPlan(
 	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, ws, now, promptOpts...)
 
 	planCallStart := time.Now()
-	planResp, err := req.Client.Complete(ctx, &llm.Request{
+	planReq := &llm.Request{
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: system},
 			{Role: llm.RoleUser, Content: user},
 		},
 		Temperature: 0.2,
-	})
+	}
+	planResp, err := req.Client.Complete(ctx, planReq)
 	if err != nil {
 		if trace != nil {
-			trace.PlanCall = toLLMCallTrace(system, user, 0.2, nil, time.Since(planCallStart), err)
+			trace.PlanCall = toLLMCallTrace(planReq, nil, time.Since(planCallStart), err)
 		}
 		return nil, nil, fmt.Errorf("intent: plan generation LLM call: %w", err)
 	}
 
 	if trace != nil {
-		trace.PlanCall = toLLMCallTrace(system, user, 0.2, planResp, time.Since(planCallStart), nil)
+		trace.PlanCall = toLLMCallTrace(planReq, planResp, time.Since(planCallStart), nil)
 	}
 
 	// --- Parse, Validate Response, and Apply ---
@@ -368,13 +375,14 @@ func retryTargetedCall(
 	)
 
 	retryStart := time.Now()
-	retryResp, retryErr := client.Complete(ctx, &llm.Request{
+	retryReq := &llm.Request{
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: retrySystem},
 			{Role: llm.RoleUser, Content: retryUser},
 		},
 		Temperature: 0.2,
-	})
+	}
+	retryResp, retryErr := client.Complete(ctx, retryReq)
 	if retryErr != nil {
 		return nil
 	}
@@ -392,7 +400,7 @@ func retryTargetedCall(
 
 	// Retry succeeded.
 	if trace != nil {
-		ct := toLLMCallTrace(retrySystem, retryUser, 0.2, retryResp, time.Since(retryStart), nil)
+		ct := toLLMCallTrace(retryReq, retryResp, time.Since(retryStart), nil)
 		trace.RetryCall = &ct
 		trace.TargetedResponse = retried
 	}
@@ -437,23 +445,24 @@ func retryPlanGeneration(
 	)
 
 	retryCallStart := time.Now()
-	planResp, err := req.Client.Complete(ctx, &llm.Request{
+	retryPlanReq := &llm.Request{
 		Messages: []llm.Message{
 			{Role: llm.RoleSystem, Content: system},
 			{Role: llm.RoleUser, Content: user},
 		},
 		Temperature: 0.2,
-	})
+	}
+	planResp, err := req.Client.Complete(ctx, retryPlanReq)
 	if err != nil {
 		if trace != nil {
-			ct := toLLMCallTrace(system, user, 0.2, nil, time.Since(retryCallStart), err)
+			ct := toLLMCallTrace(retryPlanReq, nil, time.Since(retryCallStart), err)
 			trace.RetryCall = &ct
 		}
 		return nil
 	}
 
 	if trace != nil {
-		ct := toLLMCallTrace(system, user, 0.2, planResp, time.Since(retryCallStart), nil)
+		ct := toLLMCallTrace(retryPlanReq, planResp, time.Since(retryCallStart), nil)
 		trace.RetryCall = &ct
 	}
 
@@ -517,11 +526,20 @@ func recordSelectionTrace(trace *PlanTrace, sr *selectionResult, ws *WorkflowSel
 	}
 	if sr.RetriedFrom != nil {
 		orig := sr.RetriedFrom
-		trace.SelectionCall = toLLMCallTrace(orig.System, orig.User, 0.1, orig.Response, elapsed, nil)
-		retryTrace := toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, elapsed, nil)
+		trace.SelectionCall = toLLMCallTrace(&llm.Request{
+			Messages:    []llm.Message{{Role: llm.RoleSystem, Content: orig.System}, {Role: llm.RoleUser, Content: orig.User}},
+			Temperature: 0.1,
+		}, orig.Response, elapsed, nil)
+		retryTrace := toLLMCallTrace(&llm.Request{
+			Messages:    []llm.Message{{Role: llm.RoleSystem, Content: sr.System}, {Role: llm.RoleUser, Content: sr.User}},
+			Temperature: 0.1,
+		}, sr.Response, elapsed, nil)
 		trace.SelectionRetryCall = &retryTrace
 	} else {
-		trace.SelectionCall = toLLMCallTrace(sr.System, sr.User, 0.1, sr.Response, elapsed, nil)
+		trace.SelectionCall = toLLMCallTrace(&llm.Request{
+			Messages:    []llm.Message{{Role: llm.RoleSystem, Content: sr.System}, {Role: llm.RoleUser, Content: sr.User}},
+			Temperature: 0.1,
+		}, sr.Response, elapsed, nil)
 	}
 	trace.WorkflowSelection = ws
 }

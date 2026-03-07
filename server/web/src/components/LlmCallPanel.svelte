@@ -28,11 +28,29 @@
     try {
       await navigator.clipboard.writeText(text);
       copyStates[key] = 'Copied!';
-      setTimeout(() => (copyStates[key] = 'Copy'), 1500);
+      setTimeout(() => (copyStates[key] = ''), 1500);
     } catch {
       copyStates[key] = 'Failed';
-      setTimeout(() => (copyStates[key] = 'Copy'), 1500);
+      setTimeout(() => (copyStates[key] = ''), 1500);
     }
+  }
+
+  function copyConversation() {
+    const conversation: Record<string, unknown> = {
+      model: call.model,
+      temperature: call.temperature,
+    };
+    if (call.maxTokens) conversation.maxTokens = call.maxTokens;
+    if (call.thinkingBudget) conversation.thinkingBudget = call.thinkingBudget;
+    if (call.reasoningEffort) conversation.reasoningEffort = call.reasoningEffort;
+
+    const messages = [
+      ...(call.messages || []).map(m => ({ role: m.role, content: m.content })),
+      ...(call.response ? [{ role: 'assistant', content: call.response }] : []),
+    ];
+    conversation.messages = messages;
+
+    copyText('conversation', JSON.stringify(conversation, null, 2));
   }
 </script>
 
@@ -41,6 +59,10 @@
     <div class="step-detail-meta-item">
       <span class="meta-label">Model</span>
       <span class="meta-value dt-mono">{call.model}</span>
+    </div>
+    <div class="step-detail-meta-item">
+      <span class="meta-label">Temperature</span>
+      <span class="meta-value dt-mono">{call.temperature}</span>
     </div>
     <div class="step-detail-meta-item">
       <span class="meta-label">Duration</span>
@@ -60,6 +82,24 @@
         <span class="meta-value">{call.finishReason}</span>
       </div>
     {/if}
+    {#if call.thinkingBudget}
+      <div class="step-detail-meta-item">
+        <span class="meta-label">Thinking Budget</span>
+        <span class="meta-value dt-mono">{call.thinkingBudget.toLocaleString()}</span>
+      </div>
+    {/if}
+    {#if call.reasoningEffort}
+      <div class="step-detail-meta-item">
+        <span class="meta-label">Reasoning Effort</span>
+        <span class="meta-value">{call.reasoningEffort}</span>
+      </div>
+    {/if}
+  </div>
+
+  <div class="llm-conversation-actions">
+    <button class="llm-conversation-copy-btn" onclick={copyConversation}>
+      {copyStates['conversation'] || 'Copy Conversation'}
+    </button>
   </div>
 
   {#if call.error}
@@ -79,6 +119,14 @@
         </div>
       </div>
     {/each}
+  {/if}
+
+  {#if call.thinkingContent}
+    <h4 class="section-heading">Thinking</h4>
+    <div class="llm-pre-wrapper">
+      <button class="llm-copy-btn" onclick={() => copyText('thinking', call.thinkingContent!)}>{copyStates['thinking'] || 'Copy'}</button>
+      <pre class="llm-response-pre">{call.thinkingContent}</pre>
+    </div>
   {/if}
 
   {#if call.response}

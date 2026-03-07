@@ -17,6 +17,12 @@ type Message struct {
 	Content string
 }
 
+// ThinkingConfig controls extended thinking / reasoning.
+type ThinkingConfig struct {
+	BudgetTokens    int    // Anthropic: thinking budget_tokens
+	ReasoningEffort string // OpenAI: "low", "medium", "high"
+}
+
 // Request describes an LLM completion request.
 type Request struct {
 	Messages    []Message
@@ -24,11 +30,13 @@ type Request struct {
 	MaxTokens   int
 	Temperature float64
 	Stop        []string
+	Thinking    *ThinkingConfig // nil = no thinking
 }
 
 // Response holds the result of an LLM completion.
 type Response struct {
 	Content      string
+	Thinking     string // thinking/reasoning content if returned
 	Model        string
 	InputTokens  int
 	OutputTokens int

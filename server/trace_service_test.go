@@ -404,12 +404,17 @@ func TestTraceLLMCallToDetail_Full(t *testing.T) {
 			{Role: "system", Content: "sys prompt"},
 			{Role: "user", Content: "user prompt"},
 		},
-		RawResponse:  "response text",
-		Model:        "gpt-4",
-		InputTokens:  100,
-		OutputTokens: 25,
-		DurationMs:   500,
-		FinishReason: "stop",
+		Temperature:     0.2,
+		MaxTokens:       4096,
+		ThinkingBudget:  10000,
+		ReasoningEffort: "high",
+		ThinkingContent: "Let me think...",
+		RawResponse:     "response text",
+		Model:           "gpt-4",
+		InputTokens:     100,
+		OutputTokens:    25,
+		DurationMs:      500,
+		FinishReason:    "stop",
 	}
 
 	detail := traceLLMCallToDetail(call)
@@ -420,6 +425,11 @@ func TestTraceLLMCallToDetail_Full(t *testing.T) {
 	assert.Equal(t, 25, detail.OutputTokens)
 	assert.Equal(t, int64(500), detail.DurationMs)
 	assert.Equal(t, "stop", detail.FinishReason)
+	assert.InDelta(t, 0.2, detail.Temperature, 0.001)
+	assert.Equal(t, 4096, detail.MaxTokens)
+	assert.Equal(t, 10000, detail.ThinkingBudget)
+	assert.Equal(t, "high", detail.ReasoningEffort)
+	assert.Equal(t, "Let me think...", detail.ThinkingContent)
 	require.Len(t, detail.Messages, 2)
 	assert.Equal(t, "system", detail.Messages[0].Role)
 	assert.Equal(t, "sys prompt", detail.Messages[0].Content)

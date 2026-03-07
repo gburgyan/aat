@@ -967,6 +967,27 @@ details[open] > .collapsible-heading::before {
   background: var(--color-bg);
 }
 
+.llm-conversation-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.llm-conversation-copy-btn {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.llm-conversation-copy-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+}
+
 /* --- Error Panel --- */
 .error-section {
   margin-bottom: 1.25rem;

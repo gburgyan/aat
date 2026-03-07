@@ -20,11 +20,18 @@ type AnthropicClient struct {
 // Anthropic wire types
 
 type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-	Stop      []string           `json:"stop_sequences,omitempty"`
+	Model       string             `json:"model"`
+	MaxTokens   int                `json:"max_tokens"`
+	System      string             `json:"system,omitempty"`
+	Messages    []anthropicMessage `json:"messages"`
+	Stop        []string           `json:"stop_sequences,omitempty"`
+	Temperature *float64           `json:"temperature,omitempty"`
+	Thinking    *anthropicThinking `json:"thinking,omitempty"`
+}
+
+type anthropicThinking struct {
+	Type         string `json:"type"`
+	BudgetTokens int    `json:"budget_tokens"`
 }
 
 type anthropicMessage struct {
@@ -92,6 +99,18 @@ func (c *AnthropicClient) Complete(ctx context.Context, req *Request) (*Response
 		Stop:      req.Stop,
 	}
 
+	// Wire thinking or temperature (mutually exclusive per Anthropic API).
+	if req.Thinking != nil && req.Thinking.BudgetTokens > 0 {
+		aReq.Thinking = &anthropicThinking{
+			Type:         "enabled",
+			BudgetTokens: req.Thinking.BudgetTokens,
+		}
+		// Temperature must not be sent when thinking is enabled.
+	} else if req.Temperature > 0 {
+		t := req.Temperature
+		aReq.Temperature = &t
+	}
+
 	body, err := json.Marshal(aReq)
 	if err != nil {
 		return nil, fmt.Errorf("llm: marshaling request: %w", err)
@@ -104,7 +123,7 @@ func (c *AnthropicClient) Complete(ctx context.Context, req *Request) (*Response
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.APIKey)
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
+	httpReq.Header.Set("anthropic-version", "2025-04-15")
 
 	client := c.HTTPClient
 	if client == nil {
@@ -136,15 +155,22 @@ func (c *AnthropicClient) Complete(ctx context.Context, req *Request) (*Response
 	}
 
 	var content string
+	var thinking string
 	for _, c := range aResp.Content {
-		if c.Type == "text" {
+		switch c.Type {
+		case "text":
 			content = c.Text
-			break
+		case "thinking":
+			if thinking != "" {
+				thinking += "\n"
+			}
+			thinking += c.Text
 		}
 	}
 
 	return &Response{
 		Content:      content,
+		Thinking:     thinking,
 		Model:        aResp.Model,
 		InputTokens:  aResp.Usage.InputTokens,
 		OutputTokens: aResp.Usage.OutputTokens,

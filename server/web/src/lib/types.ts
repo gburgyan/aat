@@ -202,6 +202,11 @@ export interface ResolutionDetail {
 export interface LLMCallDetail {
   messages: LLMMessageDetail[];
   model: string;
+  temperature: number;
+  maxTokens?: number;
+  thinkingBudget?: number;
+  reasoningEffort?: string;
+  thinkingContent?: string;
   response: string;
   inputTokens: number;
   outputTokens: number;

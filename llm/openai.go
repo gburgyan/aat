@@ -22,11 +22,12 @@ type OpenAIClient struct {
 // openAI request/response wire types
 
 type openAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openAIMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	Stop        []string        `json:"stop,omitempty"`
+	Model           string          `json:"model"`
+	Messages        []openAIMessage `json:"messages"`
+	MaxTokens       int             `json:"max_tokens,omitempty"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	Stop            []string        `json:"stop,omitempty"`
+	ReasoningEffort *string         `json:"reasoning_effort,omitempty"`
 }
 
 type openAIMessage struct {
@@ -82,6 +83,10 @@ func (c *OpenAIClient) Complete(ctx context.Context, req *Request) (*Response, e
 	if req.Temperature > 0 {
 		t := req.Temperature
 		oReq.Temperature = &t
+	}
+	if req.Thinking != nil && req.Thinking.ReasoningEffort != "" {
+		e := req.Thinking.ReasoningEffort
+		oReq.ReasoningEffort = &e
 	}
 
 	body, err := json.Marshal(oReq)

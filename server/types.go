@@ -219,14 +219,19 @@ type ResolutionDetail struct {
 
 // LLMCallDetail captures details of a single LLM API call.
 type LLMCallDetail struct {
-	Messages     []LLMMessageDetail `json:"messages"`
-	Model        string             `json:"model"`
-	Response     string             `json:"response"`
-	InputTokens  int                `json:"inputTokens"`
-	OutputTokens int                `json:"outputTokens"`
-	DurationMs   int64              `json:"durationMs"`
-	FinishReason string             `json:"finishReason,omitempty"`
-	Error        string             `json:"error,omitempty"`
+	Messages        []LLMMessageDetail `json:"messages"`
+	Model           string             `json:"model"`
+	Temperature     float64            `json:"temperature"`
+	MaxTokens       int                `json:"maxTokens,omitempty"`
+	ThinkingBudget  int                `json:"thinkingBudget,omitempty"`
+	ReasoningEffort string             `json:"reasoningEffort,omitempty"`
+	ThinkingContent string             `json:"thinkingContent,omitempty"`
+	Response        string             `json:"response"`
+	InputTokens     int                `json:"inputTokens"`
+	OutputTokens    int                `json:"outputTokens"`
+	DurationMs      int64              `json:"durationMs"`
+	FinishReason    string             `json:"finishReason,omitempty"`
+	Error           string             `json:"error,omitempty"`
 }
 
 // LLMMessageDetail captures a single prompt message sent to the LLM.

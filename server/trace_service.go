@@ -164,14 +164,19 @@ func traceLLMCallToDetail(c *intent.LLMCallTrace) *LLMCallDetail {
 		}
 	}
 	return &LLMCallDetail{
-		Messages:     msgs,
-		Model:        c.Model,
-		Response:     c.RawResponse,
-		InputTokens:  c.InputTokens,
-		OutputTokens: c.OutputTokens,
-		DurationMs:   c.DurationMs,
-		FinishReason: c.FinishReason,
-		Error:        c.Error,
+		Messages:        msgs,
+		Model:           c.Model,
+		Temperature:     c.Temperature,
+		MaxTokens:       c.MaxTokens,
+		ThinkingBudget:  c.ThinkingBudget,
+		ReasoningEffort: c.ReasoningEffort,
+		ThinkingContent: c.ThinkingContent,
+		Response:        c.RawResponse,
+		InputTokens:     c.InputTokens,
+		OutputTokens:    c.OutputTokens,
+		DurationMs:      c.DurationMs,
+		FinishReason:    c.FinishReason,
+		Error:           c.Error,
 	}
 }
 

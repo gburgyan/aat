@@ -48,15 +48,19 @@ type PlanTrace struct {
 
 // LLMCallTrace captures a single LLM request/response pair.
 type LLMCallTrace struct {
-	Messages     []MessageTrace `json:"messages,omitempty"`
-	Temperature  float64        `json:"temperature"`
-	RawResponse  string         `json:"rawResponse,omitempty"`
-	Model        string         `json:"model,omitempty"`
-	InputTokens  int            `json:"inputTokens,omitempty"`
-	OutputTokens int            `json:"outputTokens,omitempty"`
-	FinishReason string         `json:"finishReason,omitempty"`
-	DurationMs   int64          `json:"durationMs"`
-	Error        string         `json:"error,omitempty"`
+	Messages        []MessageTrace `json:"messages,omitempty"`
+	Temperature     float64        `json:"temperature"`
+	MaxTokens       int            `json:"maxTokens,omitempty"`
+	ThinkingBudget  int            `json:"thinkingBudget,omitempty"`
+	ReasoningEffort string         `json:"reasoningEffort,omitempty"`
+	ThinkingContent string         `json:"thinkingContent,omitempty"`
+	RawResponse     string         `json:"rawResponse,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	InputTokens     int            `json:"inputTokens,omitempty"`
+	OutputTokens    int            `json:"outputTokens,omitempty"`
+	FinishReason    string         `json:"finishReason,omitempty"`
+	DurationMs      int64          `json:"durationMs"`
+	Error           string         `json:"error,omitempty"`
 }
 
 // MessageTrace captures a single message in an LLM conversation.
@@ -102,21 +106,29 @@ func generateTraceID() string {
 	return fmt.Sprintf("trace-%s-%08x", now.Format("20060102-150405"), suffix)
 }
 
-// toLLMCallTrace builds an LLMCallTrace from the messages, response, and timing.
-func toLLMCallTrace(system, user string, temp float64, resp *llm.Response, dur time.Duration, callErr error) LLMCallTrace {
+// toLLMCallTrace builds an LLMCallTrace from the request, response, and timing.
+func toLLMCallTrace(req *llm.Request, resp *llm.Response, dur time.Duration, callErr error) LLMCallTrace {
 	ct := LLMCallTrace{
-		Messages: []MessageTrace{
-			{Role: "system", Content: system},
-			{Role: "user", Content: user},
-		},
-		Temperature: temp,
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
 		DurationMs:  dur.Milliseconds(),
+	}
+	for _, m := range req.Messages {
+		ct.Messages = append(ct.Messages, MessageTrace{
+			Role:    string(m.Role),
+			Content: m.Content,
+		})
+	}
+	if req.Thinking != nil {
+		ct.ThinkingBudget = req.Thinking.BudgetTokens
+		ct.ReasoningEffort = req.Thinking.ReasoningEffort
 	}
 	if callErr != nil {
 		ct.Error = callErr.Error()
 	}
 	if resp != nil {
 		ct.RawResponse = resp.Content
+		ct.ThinkingContent = resp.Thinking
 		ct.Model = resp.Model
 		ct.InputTokens = resp.InputTokens
 		ct.OutputTokens = resp.OutputTokens
