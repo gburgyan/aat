@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"time"
@@ -10,6 +11,20 @@ import (
 	"github.com/gburgyan/aat/internal/version"
 	"github.com/mark3labs/mcp-go/server"
 )
+
+// ServerOption configures optional behavior on the AAT MCP Server.
+type ServerOption func(*serverConfig)
+
+type serverConfig struct {
+	logger *slog.Logger
+}
+
+// WithLogger enables structured JSON logging of tool calls and MCP errors.
+func WithLogger(l *slog.Logger) ServerOption {
+	return func(c *serverConfig) {
+		c.logger = l
+	}
+}
 
 // ServerPersona selects which tools, resources, and prompts to register.
 type ServerPersona string
@@ -31,34 +46,40 @@ type Server struct {
 	mcp     *server.MCPServer
 	ctx     *ServerContext
 	persona ServerPersona
+	logger  *slog.Logger
 }
 
 // NewServer creates an MCP server backed by the given project context.
 // Registers all tools, resources, and prompts for backward compatibility.
-func NewServer(ctx *ServerContext) *Server {
-	return newServer(ctx, PersonaAll)
+func NewServer(ctx *ServerContext, opts ...ServerOption) *Server {
+	return newServer(ctx, PersonaAll, opts...)
 }
 
 // NewIntegrationServer creates an MCP server with API knowledge tools
 // for integration developers.
-func NewIntegrationServer(ctx *ServerContext) *Server {
-	return newServer(ctx, PersonaIntegration)
+func NewIntegrationServer(ctx *ServerContext, opts ...ServerOption) *Server {
+	return newServer(ctx, PersonaIntegration, opts...)
 }
 
 // NewRemoteIntegrationServer creates an MCP server with API knowledge tools
 // for remote HTTP serving. Same as Integration but excludes get_sample_response
 // (which leaks raw archive response bodies).
-func NewRemoteIntegrationServer(ctx *ServerContext) *Server {
-	return newServer(ctx, PersonaRemoteIntegration)
+func NewRemoteIntegrationServer(ctx *ServerContext, opts ...ServerOption) *Server {
+	return newServer(ctx, PersonaRemoteIntegration, opts...)
 }
 
 // NewTestServer creates an MCP server with test lifecycle tools
 // for test developers.
-func NewTestServer(ctx *ServerContext) *Server {
-	return newServer(ctx, PersonaTest)
+func NewTestServer(ctx *ServerContext, opts ...ServerOption) *Server {
+	return newServer(ctx, PersonaTest, opts...)
 }
 
-func newServer(ctx *ServerContext, persona ServerPersona) *Server {
+func newServer(ctx *ServerContext, persona ServerPersona, opts ...ServerOption) *Server {
+	var cfg serverConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+
 	name := "aat"
 	if ctx.Manifest != nil && ctx.Manifest.Name != "" {
 		name = "aat:" + ctx.Manifest.Name
@@ -67,12 +88,18 @@ func newServer(ctx *ServerContext, persona ServerPersona) *Server {
 		name += ":" + string(persona)
 	}
 
-	mcpServer := server.NewMCPServer(name, version.Version)
+	var mcpOpts []server.ServerOption
+	if cfg.logger != nil {
+		mcpOpts = append(mcpOpts, server.WithHooks(NewLoggingHooks(cfg.logger)))
+	}
+
+	mcpServer := server.NewMCPServer(name, version.Version, mcpOpts...)
 
 	s := &Server{
 		mcp:     mcpServer,
 		ctx:     ctx,
 		persona: persona,
+		logger:  cfg.logger,
 	}
 
 	switch persona {
@@ -168,7 +195,17 @@ func (s *Server) Serve() error {
 // context is cancelled. Uses the StreamableHTTPServer as an http.Handler on a
 // managed http.Server for graceful shutdown support.
 func (s *Server) ServeHTTP(ctx context.Context, addr string, opts ...server.StreamableHTTPOption) error {
-	handler := server.NewStreamableHTTPServer(s.mcp, opts...)
+	if s.logger != nil {
+		opts = append(opts, server.WithLogger(slogMCPLogger{s.logger}))
+	}
+	mcpHandler := server.NewStreamableHTTPServer(s.mcp, opts...)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok\n"))
+	})
+	mux.Handle("/", mcpHandler)
 
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -176,8 +213,10 @@ func (s *Server) ServeHTTP(ctx context.Context, addr string, opts ...server.Stre
 	}
 
 	srv := &http.Server{
-		Handler:           handler,
+		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	errCh := make(chan error, 1)

@@ -63,6 +63,7 @@ aat mcp serve --persona test    # test lifecycle tools (~26 tools)
 | `--http` | bool | false | Serve over Streamable HTTP instead of stdio |
 | `--port` | int | 8080 | HTTP listen port (used with `--http`) |
 | `--http-base-path` | string | `/mcp` | HTTP endpoint path (used with `--http`) |
+| `--log` | bool | false | Enable structured JSON logging of tool calls to stderr |
 
 ## IDE Configuration
 
@@ -157,6 +158,25 @@ http.ListenAndServe(":8080", protected)
 ```
 
 A `--api-key` CLI flag may be added in a future release.
+
+### Logging
+
+Enable structured JSON logging with `--log` to get visibility into tool usage:
+
+```
+aat mcp serve --http --log
+```
+
+When enabled, one JSON line is written to stderr per tool call at INFO level, and MCP-level errors (tool not found, parse failures) are logged at ERROR level:
+
+```json
+{"time":"2026-03-07T14:22:01Z","level":"INFO","msg":"tool_call","tool":"list_nodes","duration_ms":12,"is_error":false}
+{"time":"2026-03-07T14:22:02Z","level":"ERROR","msg":"mcp_error","method":"tools/call","error":"tool not found: foo"}
+```
+
+Logging uses Go's `log/slog` with a JSON handler writing to stderr. In stdio mode, stderr is safe — stdout is reserved for the MCP protocol. In HTTP mode, the logger also captures HTTP transport-level events from mcp-go.
+
+The `--log` flag is opt-in with zero overhead when disabled (no hooks are registered).
 
 ### Deployment
 

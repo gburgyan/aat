@@ -254,8 +254,8 @@ aat validate workflow [--graph FILE] [--strict]
 aat web [--port 9119] [--open] [--dev] [--manifest FILE]
 aat web view [ref] [--port 9119]        # open a specific run in the browser
 
-# MCP server (stdio transport, for IDE-based AI tools)
-aat mcp serve [--manifest FILE]
+# MCP server (stdio or HTTP transport, for IDE-based AI tools)
+aat mcp serve [--manifest FILE] [--persona PERSONA] [--http] [--port PORT] [--log]
 
 # Plan management
 aat plan list [--manifest FILE]

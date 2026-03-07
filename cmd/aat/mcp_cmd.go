@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -32,6 +33,7 @@ var mcpServeCmd = &cobra.Command{
 		httpFlag, _ := cmd.Flags().GetBool("http")
 		portFlag, _ := cmd.Flags().GetInt("port")
 		basePathFlag, _ := cmd.Flags().GetString("http-base-path")
+		logFlag, _ := cmd.Flags().GetBool("log")
 
 		// Validate persona flag
 		var persona mcp.ServerPersona
@@ -89,17 +91,24 @@ var mcpServeCmd = &cobra.Command{
 		fmt.Fprintf(os.Stderr, "aat mcp: loaded project %q (%d nodes, persona: %s)\n",
 			manifest.Name, len(ctx.Graph.Nodes), personaLabel)
 
+		// Build server options
+		var serverOpts []mcp.ServerOption
+		if logFlag {
+			logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+			serverOpts = append(serverOpts, mcp.WithLogger(logger))
+		}
+
 		// Create server
 		var srv *mcp.Server
 		switch persona {
 		case mcp.PersonaIntegration:
-			srv = mcp.NewIntegrationServer(ctx)
+			srv = mcp.NewIntegrationServer(ctx, serverOpts...)
 		case mcp.PersonaRemoteIntegration:
-			srv = mcp.NewRemoteIntegrationServer(ctx)
+			srv = mcp.NewRemoteIntegrationServer(ctx, serverOpts...)
 		case mcp.PersonaTest:
-			srv = mcp.NewTestServer(ctx)
+			srv = mcp.NewTestServer(ctx, serverOpts...)
 		default:
-			srv = mcp.NewServer(ctx)
+			srv = mcp.NewServer(ctx, serverOpts...)
 		}
 
 		if httpFlag {
@@ -141,4 +150,5 @@ func init() {
 	mcpServeCmd.Flags().Bool("http", false, "serve over Streamable HTTP instead of stdio")
 	mcpServeCmd.Flags().Int("port", 8080, "HTTP listen port (used with --http)")
 	mcpServeCmd.Flags().String("http-base-path", "/mcp", "HTTP endpoint path (used with --http)")
+	mcpServeCmd.Flags().Bool("log", false, "enable structured JSON logging of tool calls to stderr")
 }
