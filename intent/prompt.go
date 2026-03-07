@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/gburgyan/aat/graph"
 )
 
 // buildWorkflowSelectionPrompt constructs the messages for the first LLM call
@@ -41,6 +43,37 @@ Rules:
 	return system, user
 }
 
+// targetedPromptConfig holds options for buildTargetedPlanPrompt.
+type targetedPromptConfig struct {
+	suppressWrongPlan bool
+	graph             *graph.Graph
+	availableLayers   map[string]*graph.Layer
+}
+
+// targetedPromptOption is a functional option for buildTargetedPlanPrompt.
+type targetedPromptOption func(*targetedPromptConfig)
+
+// withSuppressWrongPlan omits the "Wrong Workflow" section from the system prompt.
+func withSuppressWrongPlan() targetedPromptOption {
+	return func(c *targetedPromptConfig) {
+		c.suppressWrongPlan = true
+	}
+}
+
+// withGraph provides the graph for enriching the Selected Configuration section.
+func withGraph(g *graph.Graph) targetedPromptOption {
+	return func(c *targetedPromptConfig) {
+		c.graph = g
+	}
+}
+
+// withAvailableLayers provides layers for enriching the Selected Configuration section.
+func withAvailableLayers(layers map[string]*graph.Layer) targetedPromptOption {
+	return func(c *targetedPromptConfig) {
+		c.availableLayers = layers
+	}
+}
+
 // buildTargetedPlanPrompt constructs the messages for the targeted phase 2 LLM call.
 // Instead of sending the full skeleton YAML and asking for a complete YAML response,
 // it provides per-input context and asks for a flat JSON response with only the
@@ -56,10 +89,16 @@ func buildTargetedPlanPrompt(
 	userPrompt string,
 	ws *WorkflowSelection,
 	now time.Time,
+	opts ...targetedPromptOption,
 ) (system, user string) {
+	var cfg targetedPromptConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 	dateStr := now.Format("2006-01-02")
 
-	system = `You are an API testing value generator. A workflow has been composed and all data flow is pre-wired. Your ONLY job is to pick concrete values for unfed inputs. Some inputs are handled by data layers — skip them unless the user's intent conflicts.
+	var sb strings.Builder
+	sb.WriteString(`You are an API testing value generator. A workflow has been composed and all data flow is pre-wired. Your ONLY job is to pick concrete values for unfed inputs. Some inputs are handled by data layers — skip them unless the user's intent conflicts.
 
 Respond with a JSON object (no markdown fencing, just raw JSON):
 {
@@ -69,7 +108,9 @@ Respond with a JSON object (no markdown fencing, just raw JSON):
 }
 Omit empty categories.
 
-Today's date is ` + dateStr + `. The user's prompt takes priority for dates (e.g., "tomorrow" → {{today + 1 day}}). Expression syntax: {{today + 30 days}}.
+Today's date is `)
+	sb.WriteString(dateStr)
+	sb.WriteString(`. The user's prompt takes priority for dates (e.g., "tomorrow" → {{today + 1 day}}). Expression syntax: {{today + 30 days}}.
 
 ## Values
 
@@ -111,7 +152,10 @@ DO NOT re-filter on values already constrained by search inputs — redundant an
 Do NOT add assertions unless the user explicitly says "verify that..." or "assert that...".
 Valid types: status, fieldExists, fieldEquals, predicate.
 Use bare field names (no jsonpath $ prefix).
+`)
 
+	if !cfg.suppressWrongPlan {
+		sb.WriteString(`
 ## Wrong Workflow
 
 If the composed workflow clearly doesn't match the user's intent (e.g., a fundamental mismatch between what the user asked for and what this workflow does), respond with ONLY:
@@ -119,7 +163,13 @@ If the composed workflow clearly doesn't match the user's intent (e.g., a fundam
 Rules:
 - Only signal this for fundamental domain mismatches (completely wrong workflow type)
 - Do NOT signal wrongPlan because current/default values don't match — replacing those values is YOUR job
-- A workflow with example values can be adapted to different scenarios — just set the values accordingly`
+- A workflow with example values can be adapted to different scenarios — just set the values accordingly
+- Pool values and layer data shown below are REFERENCE SAMPLES, not structural constraints — a pool showing airport codes does NOT mean the workflow only supports those airports; the user can specify ANY valid value
+- Data layers restrict the random pool, not the workflow capability — if the user specifies a value, override the layer
+`)
+	}
+
+	system = sb.String()
 
 	var ub strings.Builder
 
@@ -129,7 +179,7 @@ Rules:
 	writeAutoWiredSection(&ub, classified.AutoWired)
 	writeConfigurableSection(&ub, classified.Configurable)
 	writeSelectionContextSection(&ub, selectionContexts)
-	writeWorkflowConfigSection(&ub, ws)
+	writeWorkflowConfigSection(&ub, ws, cfg.graph, cfg.availableLayers)
 	writeLayerHandledSection(&ub, classified.LayerHandled)
 
 	// User's prompt.
@@ -250,13 +300,12 @@ func writePoolInputsSection(ub *strings.Builder, inputs []InputContext) {
 	ub.WriteString("- User's prompt is silent about an input → OMIT it, the pool handles it\n")
 	ub.WriteString("- User says \"next week\" for a date field → provide the date expression\n")
 	ub.WriteString("- User gives no date preference → OMIT date inputs entirely\n")
+	ub.WriteString("- Pool values are shown as REFERENCE for mapping user intent to valid values — do NOT pick random values from them\n")
 	ub.WriteString("When in doubt, OMIT. The pool defaults are designed for exactly this case.\n\n")
 	var lastNode string
 	for _, ic := range inputs {
 		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
-		icCopy := ic
-		icCopy.PoolValues = nil // Don't show concrete pool values — format/description suffices
-		writeInputContext(ub, icCopy)
+		writeInputContext(ub, ic)
 	}
 }
 
@@ -313,7 +362,9 @@ func writeSelectionContextSection(ub *strings.Builder, selectionContexts []Selec
 }
 
 // writeWorkflowConfigSection writes the selected configuration prompt section.
-func writeWorkflowConfigSection(ub *strings.Builder, ws *WorkflowSelection) {
+// When g is provided, it enriches choices, addons, and layers with descriptions
+// from the graph and available layers.
+func writeWorkflowConfigSection(ub *strings.Builder, ws *WorkflowSelection, g *graph.Graph, availableLayers map[string]*graph.Layer) {
 	if ws == nil || (ws.Workflow == "" && ws.Description == "") {
 		return
 	}
@@ -324,19 +375,98 @@ func writeWorkflowConfigSection(ub *strings.Builder, ws *WorkflowSelection) {
 		fmt.Fprintf(ub, "Workflow: %s\n", ws.Workflow)
 	}
 	if len(ws.Choices) > 0 {
-		var choiceParts []string
+		ub.WriteString("Choices:\n")
 		for slot, option := range ws.Choices {
-			choiceParts = append(choiceParts, fmt.Sprintf("%s → %s", slot, option))
+			slotDesc := lookupSlotDescription(g, ws.Workflow, slot)
+			optDesc := lookupOptionDescription(g, option)
+			switch {
+			case slotDesc != "" && optDesc != "":
+				fmt.Fprintf(ub, "- %s (%s) → %s: %s\n", slot, slotDesc, option, optDesc)
+			case slotDesc != "":
+				fmt.Fprintf(ub, "- %s (%s) → %s\n", slot, slotDesc, option)
+			case optDesc != "":
+				fmt.Fprintf(ub, "- %s → %s: %s\n", slot, option, optDesc)
+			default:
+				fmt.Fprintf(ub, "- %s → %s\n", slot, option)
+			}
 		}
-		fmt.Fprintf(ub, "Choices: %s\n", strings.Join(choiceParts, ", "))
 	}
 	if len(ws.Addons) > 0 {
-		fmt.Fprintf(ub, "Addons: %s\n", strings.Join(ws.Addons, ", "))
+		ub.WriteString("Addons:\n")
+		for _, addon := range ws.Addons {
+			desc := lookupWorkflowDescription(g, addon)
+			if desc != "" {
+				fmt.Fprintf(ub, "- %s: %s\n", addon, desc)
+			} else {
+				fmt.Fprintf(ub, "- %s\n", addon)
+			}
+		}
 	}
 	if len(ws.Layers) > 0 {
-		fmt.Fprintf(ub, "Layers: %s\n", strings.Join(ws.Layers, ", "))
+		ub.WriteString("Layers:\n")
+		for _, layer := range ws.Layers {
+			desc := lookupLayerDescription(availableLayers, layer)
+			if desc != "" {
+				fmt.Fprintf(ub, "- %s: %s\n", layer, desc)
+			} else {
+				fmt.Fprintf(ub, "- %s\n", layer)
+			}
+		}
 	}
 	ub.WriteString("\n")
+}
+
+// lookupSlotDescription finds the description for a slot definition in the base workflow.
+func lookupSlotDescription(g *graph.Graph, workflowName, slotName string) string {
+	if g == nil {
+		return ""
+	}
+	wf, found := findWorkflowByName(g, workflowName)
+	if !found {
+		return ""
+	}
+	for _, sd := range wf.Slots {
+		if sd.Name == slotName {
+			return sd.Description
+		}
+	}
+	return ""
+}
+
+// lookupOptionDescription finds the description for a slot option workflow.
+func lookupOptionDescription(g *graph.Graph, optionName string) string {
+	if g == nil {
+		return ""
+	}
+	wf, found := findWorkflowByName(g, optionName)
+	if !found {
+		return ""
+	}
+	return wf.Description
+}
+
+// lookupWorkflowDescription finds the description for a workflow (addon or base).
+func lookupWorkflowDescription(g *graph.Graph, name string) string {
+	if g == nil {
+		return ""
+	}
+	wf, found := findWorkflowByName(g, name)
+	if !found {
+		return ""
+	}
+	return wf.Description
+}
+
+// lookupLayerDescription finds the description for a layer.
+func lookupLayerDescription(availableLayers map[string]*graph.Layer, name string) string {
+	if availableLayers == nil {
+		return ""
+	}
+	l, ok := availableLayers[name]
+	if !ok || l == nil {
+		return ""
+	}
+	return l.Description
 }
 
 // writeLayerHandledSection writes the layer-handled inputs prompt section.
@@ -345,11 +475,15 @@ func writeLayerHandledSection(ub *strings.Builder, inputs []InputContext) {
 		return
 	}
 	ub.WriteString("## Layer-Handled Inputs — skip unless user intent conflicts\n\n")
-	ub.WriteString("These inputs have runtime overrides from data layers. Omit them unless the user explicitly requests different values.\n\n")
+	ub.WriteString("These inputs have runtime overrides from data layers.\n")
+	ub.WriteString("DO NOT include these unless the user's prompt EXPLICITLY mentions a specific value.\n")
+	ub.WriteString("- Pool values are shown as REFERENCE for mapping user intent to valid values — do NOT pick random values\n")
+	ub.WriteString("- User is silent about an input → OMIT it, the layer handles it\n\n")
+	var lastNode string
 	for _, ic := range inputs {
-		fmt.Fprintf(ub, "- %s.%s (%s)\n", ic.StepID, ic.InputName, ic.InputType)
+		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
+		writeInputContext(ub, ic)
 	}
-	ub.WriteString("\n")
 }
 
 // buildTargetedRetryPrompt constructs prompts for retrying the targeted plan
@@ -362,8 +496,9 @@ func buildTargetedRetryPrompt(
 	now time.Time,
 	validationErrors []string,
 	hints []string,
+	opts ...targetedPromptOption,
 ) (system, user string) {
-	system, user = buildTargetedPlanPrompt(inputContexts, selectionContexts, userPrompt, ws, now)
+	system, user = buildTargetedPlanPrompt(inputContexts, selectionContexts, userPrompt, ws, now, opts...)
 
 	// Append validation error context to the system prompt.
 	var sb strings.Builder

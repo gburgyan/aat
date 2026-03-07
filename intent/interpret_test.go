@@ -1115,3 +1115,72 @@ func TestInterpret_WrongPlan_WithoutSuggestion(t *testing.T) {
 	assert.Len(t, client.calls, 4)
 	assert.Equal(t, "Hotel Booking", result.WorkflowSelection.Workflow)
 }
+
+func TestInterpret_WrongPlan_SecondCall2_SuppressesWrongPlan(t *testing.T) {
+	g, graphDir := buildTwoWorkflowTestGraph(t)
+
+	// Call 2 after reselection also returns wrongPlan — should be suppressed
+	// and values should still be applied.
+	client := &stubClient{
+		responses: []string{
+			`{"workflow": "Flight Booking", "description": "Book a flight"}`,
+			`{"wrongPlan": {"reason": "Wrong workflow"}}`,
+			`{"workflow": "Hotel Booking", "description": "Book a hotel"}`,
+			`{"wrongPlan": {"reason": "Still thinks wrong"}, "values": {"findHotel.city": "Rome"}}`,
+		},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "book a hotel in Rome",
+		Graph:    g,
+		Client:   client,
+		GraphDir: graphDir,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+
+	// 4th call system prompt should NOT contain Wrong Workflow section.
+	call4System := client.calls[3].Messages[0].Content
+	assert.NotContains(t, call4System, "## Wrong Workflow")
+
+	// Values should be applied despite wrongPlan signal in response.
+	foundCity := false
+	for _, step := range result.Plan.Execution.Steps {
+		if step.Node == "findHotel" {
+			if v, ok := step.Values["city"]; ok && v.Default == "Rome" {
+				foundCity = true
+			}
+		}
+	}
+	assert.True(t, foundCity, "expected city=Rome to be applied from suppressed wrongPlan response")
+}
+
+func TestInterpret_WrongPlan_MaxOneRetry_SuppressedPrompt(t *testing.T) {
+	g, graphDir := buildTwoWorkflowTestGraph(t)
+
+	// Both Call 2 responses return wrongPlan — second should be suppressed.
+	client := &stubClient{
+		responses: []string{
+			`{"workflow": "Flight Booking", "description": "Book a flight"}`,
+			`{"wrongPlan": {"reason": "Wrong workflow"}}`,
+			`{"workflow": "Hotel Booking", "description": "Book a hotel"}`,
+			`{"wrongPlan": {"reason": "Still wrong"}}`,
+		},
+	}
+
+	result, err := Interpret(context.Background(), InterpretRequest{
+		Prompt:   "do something exotic",
+		Graph:    g,
+		Client:   client,
+		GraphDir: graphDir,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result.Plan)
+	assert.Len(t, client.calls, 4)
+
+	// The 4th call's system prompt should NOT contain "## Wrong Workflow".
+	call4System := client.calls[3].Messages[0].Content
+	assert.NotContains(t, call4System, "## Wrong Workflow")
+}

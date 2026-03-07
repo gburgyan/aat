@@ -85,7 +85,7 @@ type SelectionContext struct {
 // buildInputContexts walks unfed inputs in the skeleton and resolves domain
 // type/pool/concepts per input. layerTouched (keyed by "nodeName.inputName")
 // marks inputs that are directly specified by at least one active layer.
-func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.KnowledgeBase, layerTouched map[string]bool) []InputContext {
+func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.KnowledgeBase, layerTouched map[string]bool, layerDefaults map[string]*graph.InputDefault) []InputContext {
 	var contexts []InputContext
 
 	for _, step := range skeleton.Execution.Steps {
@@ -108,6 +108,7 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 			}
 
 			enrichFromLayers(&ic, step, layerTouched)
+			enrichFromLayerDefaults(&ic, step, layerDefaults)
 			enrichFromTemplate(&ic, step)
 			enrichFromGraph(&ic, inp)
 			enrichFromDomainKB(&ic, inp, kb)
@@ -117,6 +118,30 @@ func buildInputContexts(skeleton *plan.Plan, g *graph.Graph, kb *domain.Knowledg
 	}
 
 	return contexts
+}
+
+// enrichFromLayerDefaults populates pool values from layer defaults for
+// layer-handled inputs, so the LLM can map user intent to valid values.
+func enrichFromLayerDefaults(ic *InputContext, step plan.Step, layerDefaults map[string]*graph.InputDefault) {
+	if layerDefaults == nil {
+		return
+	}
+	key := step.Node + "." + ic.InputName
+	def, ok := layerDefaults[key]
+	if !ok || def == nil {
+		return
+	}
+	if len(def.Pool) > 0 && len(ic.PoolValues) == 0 {
+		var poolStrs []string
+		for _, v := range def.Pool {
+			poolStrs = append(poolStrs, fmt.Sprintf("%v", v))
+		}
+		if len(poolStrs) > 8 {
+			poolStrs = poolStrs[:8]
+		}
+		ic.PoolValues = poolStrs
+		ic.HasTemplatePool = true
+	}
 }
 
 // enrichFromLayers marks the input as layer-handled if a layer directly specifies it.

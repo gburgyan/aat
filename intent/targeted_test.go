@@ -36,7 +36,7 @@ func TestBuildInputContexts_BasicTypes(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	require.Len(t, contexts, 3)
 	assert.Equal(t, "search", contexts[0].StepID)
@@ -76,7 +76,7 @@ func TestBuildInputContexts_SkipFedInputs(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	// Only "origin" should be unfed
 	require.Len(t, contexts, 1)
@@ -112,7 +112,7 @@ func TestBuildInputContexts_LiteralDefaultsOverrideable(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	// All three inputs have literal defaults — they should be included as overrideable.
 	require.Len(t, contexts, 3)
@@ -166,7 +166,7 @@ func TestBuildInputContexts_DomainKBEnrichment(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, kb, nil)
+	contexts := buildInputContexts(p, g, kb, nil, nil)
 
 	require.Len(t, contexts, 1)
 	assert.Equal(t, "IATA 3-letter airport code", contexts[0].DomainType)
@@ -194,7 +194,7 @@ func TestBuildInputContexts_NilKB(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	require.Len(t, contexts, 1)
 	assert.Empty(t, contexts[0].DomainType)
@@ -225,7 +225,7 @@ func TestBuildInputContexts_NoConstraintMatching(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	require.Len(t, contexts, 2)
 	assert.Equal(t, "origin", contexts[0].InputName)
@@ -259,7 +259,7 @@ func TestBuildInputContexts_GraphConstraints(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	require.Len(t, contexts, 1)
 	assert.Contains(t, contexts[0].GraphConstr, "Number of passengers")
@@ -292,7 +292,7 @@ func TestBuildInputContexts_Multiplicity(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	// Both steps should have "name" as unfed
 	require.Len(t, contexts, 2)
@@ -331,7 +331,7 @@ func TestBuildInputContexts_PooledInput(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	// Both inputs should appear: origin (pooled) and destination (unfed)
 	require.Len(t, contexts, 2)
@@ -378,8 +378,8 @@ func TestBuildTargetedPlanPrompt_PoolDisplay(t *testing.T) {
 
 	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", nil, time.Now())
 
-	// Pool-section inputs should NOT show concrete pool values.
-	assert.NotContains(t, user, "Pool (random at runtime): DEN, SFO, ORD")
+	// Pool-section inputs should now show concrete pool values as reference.
+	assert.Contains(t, user, "Pool (random at runtime): DEN, SFO, ORD")
 	// Required-section inputs with domain samples should still show "Sample values".
 	assert.Contains(t, user, "Sample values: LHR, CDG")
 }
@@ -451,7 +451,7 @@ func TestBuildInputContexts_ConfigurableGraphDefault(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(skeleton, g, nil, nil)
+	contexts := buildInputContexts(skeleton, g, nil, nil, nil)
 
 	// origin (required unfed with literal default) + passengers + carrier (both configurable)
 	require.Len(t, contexts, 3)
@@ -1725,7 +1725,7 @@ func TestBuildInputContexts_IsPoolInput(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	require.Len(t, contexts, 3)
 
@@ -1781,7 +1781,7 @@ func TestBuildInputContexts_FromResolvedInContexts(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	// Both inputs should appear: destination (fromResolved) and origin (unfed).
 	require.Len(t, contexts, 2)
@@ -1937,7 +1937,7 @@ func TestBuildInputContexts_InputDescription(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 
 	require.Len(t, contexts, 2)
 	assert.Equal(t, "Departure airport/city code (3-letter IATA)", contexts[0].InputDescription)
@@ -2007,7 +2007,7 @@ func TestBuildTargetedPlanPrompt_NodeGroupHeaders_NoDesc(t *testing.T) {
 
 // --- Pool values hidden tests ---
 
-func TestBuildTargetedPlanPrompt_PoolValuesHidden(t *testing.T) {
+func TestBuildTargetedPlanPrompt_PoolValuesShown(t *testing.T) {
 	inputContexts := []InputContext{
 		{
 			StepID: "search", InputName: "origin", InputType: "string",
@@ -2020,13 +2020,15 @@ func TestBuildTargetedPlanPrompt_PoolValuesHidden(t *testing.T) {
 
 	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", nil, time.Now())
 
-	// Pool values should NOT appear in the pool section.
-	assert.NotContains(t, user, "DEN")
-	assert.NotContains(t, user, "Pool (random at runtime)")
+	// Pool values should now appear as reference for user intent mapping.
+	assert.Contains(t, user, "Pool (random at runtime): DEN, ORD, ATL, DFW, IAH")
 
-	// But Purpose and Validation should still appear.
+	// Purpose and Validation should still appear.
 	assert.Contains(t, user, "Purpose: Departure airport code")
 	assert.Contains(t, user, "Validation: IATA airport/city code (pattern: ^[A-Z]{3}$)")
+
+	// Guard-rail about not picking random values should appear.
+	assert.Contains(t, user, "do NOT pick random values")
 }
 
 // --- Pool date hint conditioning ---
@@ -2095,7 +2097,7 @@ func TestBuildInputContexts_LayerHandled(t *testing.T) {
 		"search.destination": true,
 	}
 
-	contexts := buildInputContexts(p, g, nil, layerTouched)
+	contexts := buildInputContexts(p, g, nil, layerTouched, nil)
 	require.Len(t, contexts, 3)
 
 	// origin and destination should be layer-handled.
@@ -2140,32 +2142,92 @@ func TestBuildInputContexts_NilLayerOverrides(t *testing.T) {
 		},
 	}
 
-	contexts := buildInputContexts(p, g, nil, nil)
+	contexts := buildInputContexts(p, g, nil, nil, nil)
 	require.Len(t, contexts, 1)
 	assert.False(t, contexts[0].LayerHandled)
 }
 
+func TestBuildInputContexts_LayerHandledWithPoolValues(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search flights", Adapter: "a",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{}},
+			},
+		},
+	}
+
+	layerTouched := map[string]bool{
+		"search.origin":      true,
+		"search.destination": true,
+	}
+	layerDefaults := map[string]*graph.InputDefault{
+		"search.origin": {
+			Pool: []any{"ORD", "MDW", "RFD"},
+		},
+		"search.destination": {
+			Pool: []any{"CDG", "LHR", "FRA"},
+		},
+	}
+
+	contexts := buildInputContexts(p, g, nil, layerTouched, layerDefaults)
+	require.Len(t, contexts, 2)
+
+	var originCtx, destCtx *InputContext
+	for i, ic := range contexts {
+		switch ic.InputName {
+		case "origin":
+			originCtx = &contexts[i]
+		case "destination":
+			destCtx = &contexts[i]
+		}
+	}
+
+	require.NotNil(t, originCtx)
+	assert.True(t, originCtx.LayerHandled)
+	assert.True(t, originCtx.HasTemplatePool)
+	assert.Equal(t, []string{"ORD", "MDW", "RFD"}, originCtx.PoolValues)
+
+	require.NotNil(t, destCtx)
+	assert.True(t, destCtx.LayerHandled)
+	assert.True(t, destCtx.HasTemplatePool)
+	assert.Equal(t, []string{"CDG", "LHR", "FRA"}, destCtx.PoolValues)
+}
+
 func TestBuildTargetedPlanPrompt_LayerHandledSection(t *testing.T) {
 	inputContexts := []InputContext{
-		{StepID: "search", InputName: "origin", InputType: "string", LayerHandled: true},
+		{StepID: "search", InputName: "origin", InputType: "string", LayerHandled: true,
+			PoolValues: []string{"ORD", "MDW"}, HasTemplatePool: true},
 		{StepID: "search", InputName: "destination", InputType: "string", LayerHandled: true},
 		{StepID: "search", InputName: "departureDate", InputType: "date", IsDate: true},
 	}
 
 	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", nil, time.Now())
 
-	// Layer-handled inputs should appear in their own section.
+	// Layer-handled inputs should appear in their own section with full context blocks.
 	assert.Contains(t, user, "## Layer-Handled Inputs")
-	assert.Contains(t, user, "search.origin (string)")
-	assert.Contains(t, user, "search.destination (string)")
+	assert.Contains(t, user, "### search.origin (string)")
+	assert.Contains(t, user, "### search.destination (string)")
+	assert.Contains(t, user, "Pool (random at runtime): ORD, MDW")
+
+	// Guard-rails should be present.
+	assert.Contains(t, user, "DO NOT include these unless the user's prompt EXPLICITLY mentions")
+	assert.Contains(t, user, "do NOT pick random values")
 
 	// departureDate should appear in "Inputs That Need Values".
 	assert.Contains(t, user, "## Inputs That Need Values")
 	assert.Contains(t, user, "### search.departureDate (date)")
-
-	// Layer-handled inputs should NOT appear in the main sections.
-	assert.NotContains(t, user, "### search.origin")
-	assert.NotContains(t, user, "### search.destination")
 }
 
 func TestBuildTargetedPlanPrompt_LayerHandledExcludedFromRequired(t *testing.T) {
@@ -2178,6 +2240,8 @@ func TestBuildTargetedPlanPrompt_LayerHandledExcludedFromRequired(t *testing.T) 
 	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", nil, time.Now())
 
 	assert.Contains(t, user, "## Layer-Handled Inputs")
+	assert.Contains(t, user, "### search.origin (string)")
+	assert.Contains(t, user, "### search.destination (string)")
 	assert.NotContains(t, user, "## Inputs That Need Values")
 }
 
@@ -2194,8 +2258,9 @@ func TestBuildTargetedPlanPrompt_SelectedConfiguration(t *testing.T) {
 
 	assert.Contains(t, user, "## Selected Configuration")
 	assert.Contains(t, user, "Workflow: Booking (book a round trip in business class)")
-	assert.Contains(t, user, "Addons: Seat Selection")
-	assert.Contains(t, user, "Layers: european, premium")
+	assert.Contains(t, user, "- Seat Selection")
+	assert.Contains(t, user, "- european")
+	assert.Contains(t, user, "- premium")
 }
 
 func TestBuildTargetedPlanPrompt_SelectedConfigurationMinimal(t *testing.T) {
@@ -2223,4 +2288,101 @@ func TestBuildTargetedPlanPrompt_NilWorkflowSelection(t *testing.T) {
 func TestBuildTargetedPlanPrompt_SystemPromptLayerMention(t *testing.T) {
 	system, _ := buildTargetedPlanPrompt(nil, nil, "test", nil, time.Now())
 	assert.Contains(t, system, "data layers")
+}
+
+func TestBuildTargetedPlanPrompt_WrongPlanPoolGuardrails(t *testing.T) {
+	system, _ := buildTargetedPlanPrompt(nil, nil, "test", nil, time.Now())
+
+	// New guard-rail text about pool values not being structural constraints.
+	assert.Contains(t, system, "Pool values and layer data shown below are REFERENCE SAMPLES")
+	assert.Contains(t, system, "Data layers restrict the random pool, not the workflow capability")
+}
+
+func TestBuildTargetedPlanPrompt_WrongPlanPresentByDefault(t *testing.T) {
+	system, _ := buildTargetedPlanPrompt(nil, nil, "test", nil, time.Now())
+
+	assert.Contains(t, system, "## Wrong Workflow")
+	assert.Contains(t, system, "wrongPlan")
+}
+
+func TestBuildTargetedPlanPrompt_SuppressWrongPlan(t *testing.T) {
+	system, _ := buildTargetedPlanPrompt(nil, nil, "test", nil, time.Now(), withSuppressWrongPlan())
+
+	assert.NotContains(t, system, "## Wrong Workflow")
+	assert.NotContains(t, system, "wrongPlan")
+}
+
+func TestBuildTargetedPlanPrompt_SelectedConfigurationWithDescriptions(t *testing.T) {
+	g := &graph.Graph{
+		Workflows: []graph.Workflow{
+			{Name: "Booking", Description: "Book a round trip", Template: "t.yaml", Slots: []graph.SlotDef{
+				{Name: "trip-search", Description: "How to search for and price flights", Options: []string{"Round-Trip"}, Default: "Round-Trip"},
+			}},
+			{Name: "Round-Trip", Kind: "slot", Description: "Two-leg roundtrip search", Template: "rt.yaml"},
+			{Name: "Seat Selection", Kind: "addon", Description: "Add seat assignment", Template: "seat.yaml", After: graph.AfterSpec{"book"}},
+		},
+	}
+	layers := map[string]*graph.Layer{
+		"european": {Name: "european", Description: "European routes with CDG/LHR/FRA airports"},
+	}
+	ws := &WorkflowSelection{
+		Workflow:    "Booking",
+		Description: "book a round trip",
+		Choices:     map[string]string{"trip-search": "Round-Trip"},
+		Addons:      []string{"Seat Selection"},
+		Layers:      []string{"european"},
+	}
+
+	_, user := buildTargetedPlanPrompt(nil, nil, "book a flight", ws, time.Now(),
+		withGraph(g), withAvailableLayers(layers))
+
+	// Choice should have both slot description and option description.
+	assert.Contains(t, user, "trip-search (How to search for and price flights) → Round-Trip: Two-leg roundtrip search")
+	// Addon should have its description.
+	assert.Contains(t, user, "Seat Selection: Add seat assignment")
+	// Layer should have its description.
+	assert.Contains(t, user, "european: European routes with CDG/LHR/FRA airports")
+}
+
+func TestBuildTargetedPlanPrompt_SelectedConfigurationNoGraph(t *testing.T) {
+	// Without graph/layers, descriptions are omitted (bare names).
+	ws := &WorkflowSelection{
+		Workflow:    "Booking",
+		Description: "book a flight",
+		Choices:     map[string]string{"trip-search": "Round-Trip"},
+		Addons:      []string{"Seat Selection"},
+		Layers:      []string{"european"},
+	}
+
+	_, user := buildTargetedPlanPrompt(nil, nil, "book a flight", ws, time.Now())
+
+	assert.Contains(t, user, "- trip-search → Round-Trip\n")
+	assert.Contains(t, user, "- Seat Selection\n")
+	assert.Contains(t, user, "- european\n")
+	// No descriptions appended.
+	assert.NotContains(t, user, "Round-Trip:")
+	assert.NotContains(t, user, "Seat Selection:")
+	assert.NotContains(t, user, "european:")
+}
+
+func TestBuildTargetedPlanPrompt_SelectedConfigurationSlotDescriptionMissing(t *testing.T) {
+	// Base workflow has no SlotDef for the chosen slot — should fall back to option-only format.
+	g := &graph.Graph{
+		Workflows: []graph.Workflow{
+			{Name: "Booking", Description: "Book a round trip", Template: "t.yaml"},
+			{Name: "Round-Trip", Kind: "slot", Description: "Two-leg roundtrip search", Template: "rt.yaml"},
+		},
+	}
+	ws := &WorkflowSelection{
+		Workflow:    "Booking",
+		Description: "book a round trip",
+		Choices:     map[string]string{"trip-search": "Round-Trip"},
+	}
+
+	_, user := buildTargetedPlanPrompt(nil, nil, "book a flight", ws, time.Now(),
+		withGraph(g))
+
+	// Option description present, no slot description parenthetical.
+	assert.Contains(t, user, "- trip-search → Round-Trip: Two-leg roundtrip search")
+	assert.NotContains(t, user, "trip-search (")
 }

@@ -136,7 +136,8 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	recordSelectionTrace(trace, sr, ws, time.Since(selStart))
 
 	// --- Build and Fill Plan ---
-	skeleton, targeted, err := buildAndFillPlan(ctx, req, ws, trace, now)
+	baseOpts := []targetedPromptOption{withGraph(req.Graph), withAvailableLayers(req.AvailableLayers)}
+	skeleton, targeted, err := buildAndFillPlan(ctx, req, ws, trace, now, baseOpts...)
 	if err != nil {
 		return traceErr(err)
 	}
@@ -176,12 +177,12 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		ws = reselSR.Selection
 
 		var targeted2 *TargetedResponse
-		skeleton, targeted2, err = buildAndFillPlan(ctx, req, ws, trace, now)
+		retryOpts := append(baseOpts, withSuppressWrongPlan())
+		skeleton, targeted2, err = buildAndFillPlan(ctx, req, ws, trace, now, retryOpts...)
 		if err != nil {
 			return traceErr(err)
 		}
 		lastTargeted = targeted2
-		// Don't check wrongPlan on the second attempt — proceed with whatever we got.
 	}
 
 	// --- Validate ---
@@ -232,6 +233,7 @@ func buildAndFillPlan(
 	ws *WorkflowSelection,
 	trace *PlanTrace,
 	now time.Time,
+	promptOpts ...targetedPromptOption,
 ) (*plan.Plan, *TargetedResponse, error) {
 	tpl, err := loadComposedTemplate(ws, req.Graph, req.GraphDir)
 	if err != nil {
@@ -264,13 +266,15 @@ func buildAndFillPlan(
 
 	// --- Call 2: Targeted Value Fill ---
 	var layerTouched map[string]bool
+	var layerDefaults map[string]*graph.InputDefault
 	if len(ws.Layers) > 0 && req.AvailableLayers != nil {
 		layerTouched = graph.LayerTouchedKeys(req.Graph, ws.Layers, req.AvailableLayers)
+		layerDefaults, _ = graph.ApplyLayers(req.Graph, ws.Layers, req.AvailableLayers)
 	}
-	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB, layerTouched)
+	inputContexts := buildInputContexts(skeleton, req.Graph, req.KB, layerTouched, layerDefaults)
 	selectionContexts := buildSelectionContexts(skeleton, req.Graph)
 
-	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, ws, now)
+	system, user := buildTargetedPlanPrompt(inputContexts, selectionContexts, req.Prompt, ws, now, promptOpts...)
 
 	planCallStart := time.Now()
 	planResp, err := req.Client.Complete(ctx, &llm.Request{
@@ -301,17 +305,31 @@ func buildAndFillPlan(
 		trace.TargetedResponse = targeted
 	}
 
-	// If the LLM signaled wrong-plan, skip value application but still run
-	// PostProcess for structural fixes (cleanup, deps).
-	if targeted.WrongPlan != nil {
+	// Check if wrongPlan should be suppressed.
+	var suppressWrongPlan bool
+	for _, o := range promptOpts {
+		var probe targetedPromptConfig
+		o(&probe)
+		if probe.suppressWrongPlan {
+			suppressWrongPlan = true
+		}
+	}
+
+	// If the LLM signaled wrong-plan and it's not suppressed, skip value
+	// application but still run PostProcess for structural fixes.
+	if targeted.WrongPlan != nil && !suppressWrongPlan {
 		PostProcess(skeleton, req.Graph, ws, req.Prompt)
 		return skeleton, targeted, nil
+	}
+	// Clear stale wrongPlan signal when suppressed — proceed to value application.
+	if targeted.WrongPlan != nil {
+		targeted.WrongPlan = nil
 	}
 
 	// Validate the LLM response and retry once if needed.
 	issues := validateTargetedResponse(targeted, unfedSet, inputContexts, selectionContexts)
 	if len(issues) > 0 {
-		if retried := retryTargetedCall(ctx, req.Client, targeted, issues, inputContexts, selectionContexts, unfedSet, req.Prompt, ws, now, trace); retried != nil {
+		if retried := retryTargetedCall(ctx, req.Client, targeted, issues, inputContexts, selectionContexts, unfedSet, req.Prompt, ws, now, trace, promptOpts...); retried != nil {
 			targeted = retried
 		}
 	}
@@ -342,10 +360,11 @@ func retryTargetedCall(
 	ws *WorkflowSelection,
 	now time.Time,
 	trace *PlanTrace,
+	promptOpts ...targetedPromptOption,
 ) *TargetedResponse {
 	retryMsgs := formatValidationIssues(issues)
 	retrySystem, retryUser := buildTargetedRetryPrompt(
-		inputContexts, selectionContexts, prompt, ws, now, retryMsgs, nil,
+		inputContexts, selectionContexts, prompt, ws, now, retryMsgs, nil, promptOpts...,
 	)
 
 	retryStart := time.Now()
@@ -403,10 +422,12 @@ func retryPlanGeneration(
 
 	// Rebuild contexts for the retry skeleton.
 	var layerTouched map[string]bool
+	var layerDefaults map[string]*graph.InputDefault
 	if len(ws.Layers) > 0 && req.AvailableLayers != nil {
 		layerTouched = graph.LayerTouchedKeys(req.Graph, ws.Layers, req.AvailableLayers)
+		layerDefaults, _ = graph.ApplyLayers(req.Graph, ws.Layers, req.AvailableLayers)
 	}
-	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB, layerTouched)
+	inputContexts := buildInputContexts(retrySkeleton, req.Graph, req.KB, layerTouched, layerDefaults)
 	selectionContexts := buildSelectionContexts(retrySkeleton, req.Graph)
 
 	now := time.Now()
