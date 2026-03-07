@@ -78,7 +78,7 @@ func TestServeHTTP_HealthEndpoint(t *testing.T) {
 	ln, err := net.Listen("tcp", ":0")
 	require.NoError(t, err)
 	port := ln.Addr().(*net.TCPAddr).Port
-	ln.Close()
+	_ = ln.Close()
 
 	bgCtx, cancel := goContext.WithCancel(goContext.Background())
 	defer cancel()
@@ -100,7 +100,7 @@ func TestServeHTTP_HealthEndpoint(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	require.NoError(t, err, "server did not become ready")
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)

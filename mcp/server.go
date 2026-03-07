@@ -203,7 +203,7 @@ func (s *Server) ServeHTTP(ctx context.Context, addr string, opts ...server.Stre
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok\n"))
+		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.Handle("/", mcpHandler)
 
