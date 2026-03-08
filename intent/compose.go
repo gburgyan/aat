@@ -602,7 +602,7 @@ func applyInjectValues(p *plan.Plan, inject map[string]any, g *graph.Graph) {
 			}
 			// Skip if the step already has an explicit value.
 			if sv, exists := step.Values[inputName]; exists {
-				if sv.Default != nil || sv.From != "" || sv.FromSelection != "" || sv.Select != nil {
+				if sv.Default != nil || sv.From != "" || sv.FromSelection != "" || sv.Select != nil || sv.FromResolved != "" || sv.Locked {
 					continue
 				}
 			}

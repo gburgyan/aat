@@ -187,6 +187,11 @@ func enrichFromTemplate(ic *InputContext, step plan.Step) {
 
 // enrichFromGraph populates defaults, pools, date type, and constraints from the graph input.
 func enrichFromGraph(ic *InputContext, inp graph.Input) {
+	// Graph-level fromResolved auto-wiring (only if template didn't set one).
+	if ic.FromResolved == "" && inp.Default != nil && inp.Default.FromResolved != "" {
+		ic.FromResolved = inp.Default.FromResolved
+	}
+
 	// Graph-level default value.
 	if ic.CurrentDefault == "" && inp.Default != nil && inp.Default.EffectiveValue() != nil {
 		ic.CurrentDefault = fmt.Sprintf("%v", inp.Default.EffectiveValue())

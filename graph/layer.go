@@ -13,9 +13,10 @@ import (
 // of graph-level defaults. Layers are stacked in order (later overrides earlier)
 // and sit between graph defaults and plan values in the priority chain.
 type Layer struct {
-	Name        string                   `yaml:"name"`
-	Description string                   `yaml:"description,omitempty"`
-	Inputs      map[string]*InputDefault `yaml:"inputs"`
+	Name          string                   `yaml:"name"`
+	Description   string                   `yaml:"description,omitempty"`
+	SelectionHint string                   `yaml:"selectionHint,omitempty"` // guidance for LLM layer selection
+	Inputs        map[string]*InputDefault `yaml:"inputs"`
 }
 
 // ParseLayer unmarshals YAML bytes into a Layer with basic validation.

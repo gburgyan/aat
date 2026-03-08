@@ -83,6 +83,45 @@ func TestBuildInputContexts_SkipFedInputs(t *testing.T) {
 	assert.Equal(t, "origin", contexts[0].InputName)
 }
 
+func TestBuildInputContexts_SkipLockedInputs(t *testing.T) {
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search flights", Adapter: "a",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+					{Name: "leg2Origin", Type: "string"},
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"leg2Origin": {FromResolved: "leg1Destination", Locked: true},
+					},
+				},
+			},
+		},
+	}
+
+	contexts := buildInputContexts(p, g, nil, nil, nil)
+
+	// leg2Origin is locked — should not appear
+	names := make([]string, len(contexts))
+	for i, c := range contexts {
+		names[i] = c.InputName
+	}
+	assert.NotContains(t, names, "leg2Origin", "locked input should be excluded")
+	assert.Contains(t, names, "origin")
+	assert.Contains(t, names, "destination")
+}
+
 func TestBuildInputContexts_LiteralDefaultsOverrideable(t *testing.T) {
 	g := &graph.Graph{
 		Nodes: map[string]*graph.Node{
@@ -394,7 +433,7 @@ func TestBuildTargetedPlanPrompt_PoolSeparateSection(t *testing.T) {
 	_, user := buildTargetedPlanPrompt(inputContexts, nil, "book a flight", nil, time.Now())
 
 	// Pool inputs should be under their own section, not "Inputs That Need Values".
-	assert.Contains(t, user, "## Pool Inputs — DO NOT provide values unless the user specifies")
+	assert.Contains(t, user, "## Pool Inputs — auto-selected at runtime")
 	assert.Contains(t, user, "## Inputs That Need Values")
 	assert.Contains(t, user, "## Optional Configuration")
 
@@ -404,7 +443,7 @@ func TestBuildTargetedPlanPrompt_PoolSeparateSection(t *testing.T) {
 
 	// Verify section ordering: required inputs come before pool inputs
 	requiredIdx := strings.Index(user, "## Inputs That Need Values")
-	poolIdx := strings.Index(user, "## Pool Inputs — DO NOT")
+	poolIdx := strings.Index(user, "## Pool Inputs — auto-selected")
 	configIdx := strings.Index(user, "## Optional Configuration")
 	assert.Less(t, requiredIdx, poolIdx)
 	assert.Less(t, poolIdx, configIdx)
@@ -1803,6 +1842,97 @@ func TestBuildInputContexts_FromResolvedInContexts(t *testing.T) {
 	assert.Empty(t, originCtx.FromResolved)
 }
 
+func TestBuildInputContexts_GraphLevelFromResolved(t *testing.T) {
+	// When a graph input has a fromResolved default (e.g., leg2Origin defaults
+	// to leg1Destination), the InputContext.FromResolved field should be
+	// populated even when the step template doesn't explicitly set it.
+	// This ensures the input is classified as "Auto-Wired" in the prompt,
+	// so the LLM doesn't redundantly provide a value.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search", Description: "Search flights", Adapter: "a",
+				Inputs: []graph.Input{
+					{Name: "leg1Origin", Type: "string", Configurable: true},
+					{Name: "leg1Destination", Type: "string", Configurable: true},
+					{
+						Name: "leg2Origin", Type: "string", Configurable: true,
+						Optional: true,
+						Default:  &graph.InputDefault{FromResolved: "leg1Destination"},
+					},
+					{
+						Name: "leg2Destination", Type: "string", Configurable: true,
+						Optional: true,
+						Default: &graph.InputDefault{
+							Pool: []any{"SFO", "LAX"},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						// Only leg2Destination has step-level fromResolved;
+						// leg2Origin relies on graph-level default.
+						"leg2Destination": {FromResolved: "leg1Origin"},
+					},
+				},
+			},
+		},
+	}
+
+	contexts := buildInputContexts(p, g, nil, nil, nil)
+
+	ctxMap := map[string]*InputContext{}
+	for i, ic := range contexts {
+		ctxMap[ic.InputName] = &contexts[i]
+	}
+
+	// leg2Destination: step-level fromResolved
+	require.NotNil(t, ctxMap["leg2Destination"])
+	assert.Equal(t, "leg1Origin", ctxMap["leg2Destination"].FromResolved)
+
+	// leg2Origin: graph-level fromResolved should be picked up
+	require.NotNil(t, ctxMap["leg2Origin"])
+	assert.Equal(t, "leg1Destination", ctxMap["leg2Origin"].FromResolved,
+		"graph-level fromResolved should populate InputContext.FromResolved")
+
+}
+
+func TestClassifyInputs_AutoWiredBeatsLayerHandled(t *testing.T) {
+	// When an input has both FromResolved (auto-wired) and LayerHandled,
+	// it should be classified as AutoWired. The structural wiring (e.g.,
+	// round-trip return to origin) takes priority over layer-provided pools
+	// (e.g., international city pool) to avoid confusing the LLM.
+	contexts := []InputContext{
+		{StepID: "s1", InputName: "leg1Origin", LayerHandled: true},
+		{StepID: "s1", InputName: "leg2Destination", FromResolved: "leg1Origin", LayerHandled: true},
+		{StepID: "s1", InputName: "leg2Origin", FromResolved: "leg1Destination"},
+		{StepID: "s1", InputName: "cabinPreference", IsConfigurable: true},
+	}
+
+	c := classifyInputs(contexts)
+
+	// leg2Destination: has both FromResolved and LayerHandled → AutoWired wins
+	require.Len(t, c.AutoWired, 2)
+	assert.Equal(t, "leg2Destination", c.AutoWired[0].InputName)
+	assert.Equal(t, "leg2Origin", c.AutoWired[1].InputName)
+
+	// leg1Origin: layer-handled only
+	require.Len(t, c.LayerHandled, 1)
+	assert.Equal(t, "leg1Origin", c.LayerHandled[0].InputName)
+
+	// cabinPreference: configurable
+	require.Len(t, c.Configurable, 1)
+	assert.Equal(t, "cabinPreference", c.Configurable[0].InputName)
+}
+
 // --- fromResolved override tests ---
 
 func TestApplyTargetedResponse_ClearsFromResolved(t *testing.T) {
@@ -1861,6 +1991,50 @@ func TestApplyTargetedResponse_FromResolvedPreservedWhenNotOverridden(t *testing
 	assert.Nil(t, sv.Default)
 }
 
+func TestApplyTargetedResponse_LockedInputsRejected(t *testing.T) {
+	// Locked inputs should not be overridden by the LLM, even if the LLM
+	// provides a value for them. Since locked inputs are excluded from unfedSet
+	// by isInputFed, the unfedSet check in applyTargetedResponse rejects them.
+	skeleton := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{Node: "search", Values: map[string]plan.StepValue{
+					"leg2Origin":      {FromResolved: "leg1Destination", Locked: true},
+					"leg2Destination": {FromResolved: "leg1Origin", Locked: true},
+					"origin":          {Default: "DEN"},
+				}},
+			},
+		},
+	}
+
+	resp := &TargetedResponse{
+		Values: map[string]any{
+			"search.leg2Origin":      "BNA", // should be rejected
+			"search.leg2Destination": "BNA", // should be rejected
+			"search.origin":          "ORD", // should be accepted
+		},
+		Selections: map[string]TargetedSelection{},
+		Assertions: map[string][]TargetedAssertion{},
+	}
+
+	// Only origin is unfed — locked inputs are excluded by isInputFed.
+	unfedSet := map[string]bool{"search.origin": true}
+
+	applyTargetedResponse(skeleton, resp, unfedSet)
+
+	// Locked inputs should be untouched.
+	assert.Equal(t, "leg1Destination", skeleton.Execution.Steps[0].Values["leg2Origin"].FromResolved)
+	assert.True(t, skeleton.Execution.Steps[0].Values["leg2Origin"].Locked)
+	assert.Nil(t, skeleton.Execution.Steps[0].Values["leg2Origin"].Default)
+
+	assert.Equal(t, "leg1Origin", skeleton.Execution.Steps[0].Values["leg2Destination"].FromResolved)
+	assert.True(t, skeleton.Execution.Steps[0].Values["leg2Destination"].Locked)
+	assert.Nil(t, skeleton.Execution.Steps[0].Values["leg2Destination"].Default)
+
+	// Non-locked input should be overridden.
+	assert.Equal(t, "ORD", skeleton.Execution.Steps[0].Values["origin"].Default)
+}
+
 func TestBuildTargetedPlanPrompt_AutoWiredSection(t *testing.T) {
 	inputContexts := []InputContext{
 		{StepID: "search1", InputName: "origin", InputType: "string"},
@@ -1872,7 +2046,7 @@ func TestBuildTargetedPlanPrompt_AutoWiredSection(t *testing.T) {
 
 	// Auto-wired section should appear.
 	assert.Contains(t, user, "## Auto-Wired Inputs")
-	assert.Contains(t, user, "override only when user intent conflicts")
+	assert.Contains(t, user, "derived at runtime")
 	assert.Contains(t, user, "automatically derived from sibling inputs")
 
 	// The auto-wired input should show its source.
@@ -2027,8 +2201,8 @@ func TestBuildTargetedPlanPrompt_PoolValuesShown(t *testing.T) {
 	assert.Contains(t, user, "Purpose: Departure airport code")
 	assert.Contains(t, user, "Validation: IATA airport/city code (pattern: ^[A-Z]{3}$)")
 
-	// Guard-rail about not picking random values should appear.
-	assert.Contains(t, user, "do NOT pick random values")
+	// Pool reference guidance should appear.
+	assert.Contains(t, user, "reference samples for mapping user intent")
 }
 
 // --- Pool date hint conditioning ---
@@ -2054,8 +2228,8 @@ func TestBuildTargetedPlanPrompt_SystemPromptPoolGuidance(t *testing.T) {
 	system, _ := buildTargetedPlanPrompt(nil, nil, "test", nil, time.Now())
 
 	// System prompt should contain pool-specific guidance.
-	assert.Contains(t, system, "Pool Inputs")
-	assert.Contains(t, system, "OMIT the key entirely unless the user explicitly specifies")
+	assert.Contains(t, system, "Pool inputs auto-select at runtime")
+	assert.Contains(t, system, "include a pool input only when the user specifies")
 }
 
 // --- User's Prompt section rename ---
@@ -2222,8 +2396,8 @@ func TestBuildTargetedPlanPrompt_LayerHandledSection(t *testing.T) {
 	assert.Contains(t, user, "Pool (random at runtime): ORD, MDW")
 
 	// Guard-rails should be present.
-	assert.Contains(t, user, "DO NOT include these unless the user's prompt EXPLICITLY mentions")
-	assert.Contains(t, user, "do NOT pick random values")
+	assert.Contains(t, user, "Include one only when the user's prompt specifies a concrete value")
+	assert.Contains(t, user, "reference samples for mapping user intent")
 
 	// departureDate should appear in "Inputs That Need Values".
 	assert.Contains(t, user, "## Inputs That Need Values")
@@ -2293,9 +2467,9 @@ func TestBuildTargetedPlanPrompt_SystemPromptLayerMention(t *testing.T) {
 func TestBuildTargetedPlanPrompt_WrongPlanPoolGuardrails(t *testing.T) {
 	system, _ := buildTargetedPlanPrompt(nil, nil, "test", nil, time.Now())
 
-	// New guard-rail text about pool values not being structural constraints.
-	assert.Contains(t, system, "Pool values and layer data shown below are REFERENCE SAMPLES")
-	assert.Contains(t, system, "Data layers restrict the random pool, not the workflow capability")
+	// Simplified wrong workflow section — adapting values is the LLM's normal job.
+	assert.Contains(t, system, "Adapting values, pools, and layer data to match user intent is your normal job")
+	assert.Contains(t, system, "fundamental domain mismatches")
 }
 
 func TestBuildTargetedPlanPrompt_WrongPlanPresentByDefault(t *testing.T) {

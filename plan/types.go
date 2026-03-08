@@ -120,6 +120,7 @@ type StepValue struct {
 	FromSelection string           `yaml:"fromSelection,omitempty" json:"fromSelection,omitempty"`
 	FromResolved  string           `yaml:"fromResolved,omitempty" json:"fromResolved,omitempty"`
 	FromInput     string           `yaml:"fromInput,omitempty" json:"fromInput,omitempty"`
+	Locked        bool             `yaml:"locked,omitempty" json:"locked,omitempty"`
 }
 
 // IsEmpty returns true when the StepValue carries no resolution information.

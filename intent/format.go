@@ -217,6 +217,7 @@ func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 	formatBaseWorkflows(&b, g)
 	formatAddonWorkflows(&b, g)
 	formatLayersSection(&b, layers)
+	formatExamplesSection(&b, g.Examples)
 
 	// Notes.
 	if g.Notes != "" {
@@ -232,7 +233,7 @@ func FormatWorkflowMenu(g *graph.Graph, layers map[string]*graph.Layer) string {
 func formatBaseWorkflows(b *strings.Builder, g *graph.Graph) {
 	var hasBase bool
 	for _, wf := range g.Workflows {
-		if wf.IsAddon() || wf.IsSlot() || wf.Template == "" {
+		if wf.IsAddon() || wf.IsSlot() || wf.Template == "" || wf.Deprecated {
 			continue
 		}
 		if !hasBase {
@@ -243,11 +244,16 @@ func formatBaseWorkflows(b *strings.Builder, g *graph.Graph) {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(b, "- **%s**: %s\n", wf.Name, desc)
+		if wf.SelectionHint != "" {
+			fmt.Fprintf(b, "- **%s**: %s [Hint: %s]\n", wf.Name, desc, wf.SelectionHint)
+		} else {
+			fmt.Fprintf(b, "- **%s**: %s\n", wf.Name, desc)
+		}
 
 		// Render slot choices if any.
 		if len(wf.Slots) > 0 {
 			b.WriteString("  Choices:\n")
+			var defaults []string
 			for _, sd := range wf.Slots {
 				sdDesc := sd.Description
 				if sdDesc == "" {
@@ -255,14 +261,14 @@ func formatBaseWorkflows(b *strings.Builder, g *graph.Graph) {
 				}
 				fmt.Fprintf(b, "    - %s: %s\n", sd.Name, sdDesc)
 				for _, optName := range sd.Options {
+					// Skip deprecated slot options.
+					optWf := findWorkflowInList(g.Workflows, optName)
+					if optWf != nil && optWf.Deprecated {
+						continue
+					}
 					optDesc := "(no description)"
-					for _, owf := range g.Workflows {
-						if strings.EqualFold(owf.Name, optName) {
-							if owf.Description != "" {
-								optDesc = owf.Description
-							}
-							break
-						}
+					if optWf != nil && optWf.Description != "" {
+						optDesc = optWf.Description
 					}
 					defaultMarker := ""
 					if sd.Default != "" && strings.EqualFold(sd.Default, optName) {
@@ -270,6 +276,12 @@ func formatBaseWorkflows(b *strings.Builder, g *graph.Graph) {
 					}
 					fmt.Fprintf(b, "      - %s: %s%s\n", optName, optDesc, defaultMarker)
 				}
+				if sd.Default != "" {
+					defaults = append(defaults, fmt.Sprintf("%s=%s", sd.Name, sd.Default))
+				}
+			}
+			if len(defaults) > 0 {
+				fmt.Fprintf(b, "  Defaults: %s\n", strings.Join(defaults, ", "))
 			}
 		}
 	}
@@ -278,11 +290,21 @@ func formatBaseWorkflows(b *strings.Builder, g *graph.Graph) {
 	}
 }
 
+// findWorkflowInList finds a workflow by name (case-insensitive) in a slice.
+func findWorkflowInList(workflows []graph.Workflow, name string) *graph.Workflow {
+	for i := range workflows {
+		if strings.EqualFold(workflows[i].Name, name) {
+			return &workflows[i]
+		}
+	}
+	return nil
+}
+
 // formatAddonWorkflows writes the addon workflow section.
 func formatAddonWorkflows(b *strings.Builder, g *graph.Graph) {
 	var hasAddon bool
 	for _, wf := range g.Workflows {
-		if !wf.IsAddon() || wf.Template == "" {
+		if !wf.IsAddon() || wf.Template == "" || wf.Deprecated {
 			continue
 		}
 		if !hasAddon {
@@ -293,7 +315,11 @@ func formatAddonWorkflows(b *strings.Builder, g *graph.Graph) {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(b, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After.String(), desc)
+		if wf.SelectionHint != "" {
+			fmt.Fprintf(b, "- **%s** (splices after: %s): %s [Hint: %s]\n", wf.Name, wf.After.String(), desc, wf.SelectionHint)
+		} else {
+			fmt.Fprintf(b, "- **%s** (splices after: %s): %s\n", wf.Name, wf.After.String(), desc)
+		}
 	}
 	if hasAddon {
 		b.WriteString("\n")
@@ -321,9 +347,24 @@ func formatLayersSection(b *strings.Builder, layers map[string]*graph.Layer) {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(b, "- **%s**: %s\n", name, desc)
+		if layer.SelectionHint != "" {
+			fmt.Fprintf(b, "- **%s**: %s [Hint: %s]\n", name, desc, layer.SelectionHint)
+		} else {
+			fmt.Fprintf(b, "- **%s**: %s\n", name, desc)
+		}
 	}
 	b.WriteString("\n")
+}
+
+// formatExamplesSection writes few-shot examples if any are defined on the graph.
+func formatExamplesSection(b *strings.Builder, examples []graph.WorkflowExample) {
+	if len(examples) == 0 {
+		return
+	}
+	b.WriteString("## Examples\n\n")
+	for _, ex := range examples {
+		fmt.Fprintf(b, "Input: %s\nOutput: %s\n\n", ex.Input, ex.Output)
+	}
 }
 
 // formatInputDefault renders a graph InputDefault as a compact annotation

@@ -110,7 +110,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 	// --- Call 1: Workflow Selection ---
 	workflowMenu := FormatWorkflowMenu(req.Graph, req.AvailableLayers)
 	selStart := time.Now()
-	sr, err := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt, req.Graph, req.AvailableLayers, req.Layers, now)
+	sr, err := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt, req.Graph, req.AvailableLayers, req.Layers)
 	if err != nil {
 		if trace != nil && sr != nil {
 			trace.SelectionCall = toLLMCallTrace(&llm.Request{
@@ -166,7 +166,7 @@ func Interpret(ctx context.Context, req InterpretRequest) (*InterpretResult, err
 		}
 
 		reselStart := time.Now()
-		reselSR, reselErr := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt+feedback, req.Graph, req.AvailableLayers, req.Layers, now)
+		reselSR, reselErr := selectWorkflow(ctx, req.Client, workflowMenu, req.Prompt+feedback, req.Graph, req.AvailableLayers, req.Layers)
 		if reselErr != nil {
 			return traceErr(fmt.Errorf("intent: reselection after wrong-plan: %w", reselErr))
 		}
@@ -599,8 +599,8 @@ func deepCopySkeleton(p *plan.Plan) *plan.Plan {
 // It validates the response and retries once if validation fails.
 // Returns a selectionResult with the parsed selection, raw JSON, LLM response
 // metadata, and prompt text.
-func selectWorkflow(ctx context.Context, client llm.Client, workflowMenu, prompt string, g *graph.Graph, availableLayers map[string]*graph.Layer, preSelectedLayers []string, now time.Time) (*selectionResult, error) {
-	system, user := buildWorkflowSelectionPrompt(workflowMenu, prompt, preSelectedLayers, now)
+func selectWorkflow(ctx context.Context, client llm.Client, workflowMenu, prompt string, g *graph.Graph, availableLayers map[string]*graph.Layer, preSelectedLayers []string) (*selectionResult, error) {
+	system, user := buildWorkflowSelectionPrompt(workflowMenu, prompt, preSelectedLayers)
 
 	resp, err := client.Complete(ctx, &llm.Request{
 		Messages: []llm.Message{
@@ -704,6 +704,10 @@ func validateWorkflowSelection(ws *WorkflowSelection, g *graph.Graph, availableL
 		errs = append(errs, fmt.Sprintf("workflow %q not found; available: %s", ws.Workflow, listWorkflowNames(g)))
 		return errs
 	}
+	if wf.Deprecated {
+		errs = append(errs, fmt.Sprintf("workflow %q is deprecated and cannot be selected", ws.Workflow))
+		return errs
+	}
 	if wf.Template == "" {
 		errs = append(errs, fmt.Sprintf("workflow %q has no template", ws.Workflow))
 	}
@@ -734,6 +738,13 @@ func validateWorkflowSelection(ws *WorkflowSelection, g *graph.Graph, availableL
 			}
 			if !validOption {
 				errs = append(errs, fmt.Sprintf("slot %q: %q is not a valid option; valid options: %s", slotName, optionName, strings.Join(sd.Options, ", ")))
+			}
+			// Check for deprecated slot option.
+			for _, owf := range g.Workflows {
+				if strings.EqualFold(owf.Name, optionName) && owf.Deprecated {
+					errs = append(errs, fmt.Sprintf("slot %q: option %q is deprecated", slotName, optionName))
+					break
+				}
 			}
 		}
 	}

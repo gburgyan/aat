@@ -459,6 +459,63 @@ execution:
 	assert.Empty(t, sv.FromSelection)
 }
 
+func TestStepValue_LockedUsesFullStruct(t *testing.T) {
+	// When Locked is true, MarshalYAML must NOT use the bare scalar shortcut.
+	original := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "test",
+					Values: map[string]StepValue{
+						"leg2Origin": {FromResolved: "leg1Destination", Locked: true},
+						"plain":      {Default: "DEN"},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(original)
+	require.NoError(t, err)
+
+	parsed, err := Parse(data)
+	require.NoError(t, err)
+
+	sv := parsed.Execution.Steps[0].Values["leg2Origin"]
+	assert.True(t, sv.Locked, "Locked should survive round-trip")
+	assert.Equal(t, "leg1Destination", sv.FromResolved)
+
+	// Plain value should still use bare scalar.
+	assert.Equal(t, "DEN", parsed.Execution.Steps[0].Values["plain"].Default)
+	assert.False(t, parsed.Execution.Steps[0].Values["plain"].Locked)
+}
+
+func TestStepValue_LockedDefaultRoundTrip(t *testing.T) {
+	// Locked + Default should serialize as full struct, not bare scalar.
+	original := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{
+					Node: "test",
+					Values: map[string]StepValue{
+						"config": {Default: "value", Locked: true},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Marshal(original)
+	require.NoError(t, err)
+
+	parsed, err := Parse(data)
+	require.NoError(t, err)
+
+	sv := parsed.Execution.Steps[0].Values["config"]
+	assert.True(t, sv.Locked)
+	assert.Equal(t, "value", sv.Default)
+}
+
 func TestStepValue_FromResolved_RoundTrip(t *testing.T) {
 	original := &Plan{
 		Execution: Execution{

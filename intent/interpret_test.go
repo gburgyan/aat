@@ -358,14 +358,13 @@ func TestInterpret_DateInPrompts(t *testing.T) {
 	require.NotNil(t, result)
 	require.Len(t, client.calls, 2)
 
-	// Today's date should appear in both LLM prompts
 	today := time.Now().Format("2006-01-02")
 
-	// First call (workflow selection): date in system message
-	assert.Contains(t, client.calls[0].Messages[0].Content, today,
-		"workflow selection system prompt should contain today's date")
+	// Workflow selection (call 1) should NOT contain the date — date logic is phase 2 only.
+	assert.NotContains(t, client.calls[0].Messages[0].Content, today,
+		"workflow selection should not contain date")
 
-	// Second call (targeted plan generation): date in system message
+	// Targeted plan generation (call 2) should contain today's date.
 	assert.Contains(t, client.calls[1].Messages[0].Content, today,
 		"targeted plan generation system prompt should contain today's date")
 }
@@ -863,6 +862,44 @@ func TestValidateWorkflowSelection_LayersSkippedWhenNilAvailable(t *testing.T) {
 	assert.Empty(t, errs)
 }
 
+func TestValidateWorkflowSelection_DeprecatedWorkflow(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Active", Template: "workflows/active.yaml"},
+			{Name: "Legacy", Template: "workflows/legacy.yaml", Deprecated: true},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	ws := &WorkflowSelection{Workflow: "Legacy"}
+	errs := validateWorkflowSelection(ws, g, nil)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "deprecated")
+}
+
+func TestValidateWorkflowSelection_DeprecatedSlotOption(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{
+				Name: "Booking", Template: "workflows/booking.yaml",
+				Slots: []graph.SlotDef{
+					{Name: "search", Options: []string{"Simple", "Broken"}, Default: "Simple"},
+				},
+			},
+			{Name: "Simple", Kind: "slot", Template: "workflows/simple.yaml"},
+			{Name: "Broken", Kind: "slot", Template: "workflows/broken.yaml", Deprecated: true},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	ws := &WorkflowSelection{Workflow: "Booking", Choices: map[string]string{"search": "Broken"}}
+	errs := validateWorkflowSelection(ws, g, nil)
+	require.Len(t, errs, 1)
+	assert.Contains(t, errs[0], "deprecated")
+}
+
 func TestSelectWorkflow_RetryOnInvalid(t *testing.T) {
 	g, _ := buildTemplateTestGraph(t)
 
@@ -874,7 +911,7 @@ func TestSelectWorkflow_RetryOnInvalid(t *testing.T) {
 		},
 	}
 
-	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, nil, nil, fixedNow())
+	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, nil, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Booking Flow", sr.Selection.Workflow)
@@ -895,7 +932,7 @@ func TestSelectWorkflow_NoRetryWhenValid(t *testing.T) {
 		},
 	}
 
-	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, nil, nil, fixedNow())
+	sr, err := selectWorkflow(context.Background(), client, "menu", "book an item", g, nil, nil)
 
 	require.NoError(t, err)
 	assert.Equal(t, "Booking Flow", sr.Selection.Workflow)

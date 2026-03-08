@@ -4,17 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func fixedNow() time.Time {
-	return time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-}
 
 // --- FindWorkflowTemplate ---
 
@@ -452,6 +447,39 @@ func TestIsInputFed_ConfigurableStructurallyWired(t *testing.T) {
 	assert.Empty(t, unfed)
 }
 
+// --- isInputFed: locked ---
+
+func TestIsInputFed_LockedIsTrue(t *testing.T) {
+	// Locked inputs are always fed — they should never appear in the unfed list.
+	g := &graph.Graph{
+		Nodes: map[string]*graph.Node{
+			"search": {
+				Name: "search",
+				Inputs: []graph.Input{
+					{Name: "origin", Type: "string"},
+					{Name: "destination", Type: "string"},
+				},
+			},
+		},
+	}
+	p := &plan.Plan{
+		Execution: plan.Execution{
+			Steps: []plan.Step{
+				{
+					Node: "search",
+					Values: map[string]plan.StepValue{
+						"origin":      {FromResolved: "leg1Destination", Locked: true},
+						"destination": {FromResolved: "leg1Origin", Locked: true},
+					},
+				},
+			},
+		},
+	}
+
+	unfed := UnfedInputsFromTemplate(p, g)
+	assert.Empty(t, unfed, "locked inputs should not appear as unfed")
+}
+
 // --- isInputFed: fromResolved ---
 
 func TestIsInputFed_FromResolvedIsUnfed(t *testing.T) {
@@ -758,7 +786,7 @@ func TestBuildWorkflowSelectionPrompt_CompactMenu(t *testing.T) {
 	// Menu is now in the user prompt, not the system prompt.
 	menu := "## Workflows\n\n- **Booking**: Full booking flow\n\n## Addons\n\n- **Ancillary** (splices after: addTraveler): Add ancillary services\n"
 
-	system, user := buildWorkflowSelectionPrompt(menu, "book a flight", nil, fixedNow())
+	system, user := buildWorkflowSelectionPrompt(menu, "book a flight", nil)
 
 	// System prompt has format instructions, not workflow details.
 	assert.Contains(t, system, "workflow")
@@ -776,9 +804,38 @@ func TestBuildWorkflowSelectionPrompt_CompactMenu(t *testing.T) {
 	assert.Contains(t, user, "book a flight")
 }
 
-func TestBuildWorkflowSelectionPrompt_NoConstraints(t *testing.T) {
-	// System prompt should NOT contain constraint classification instructions.
-	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil, fixedNow())
+func TestBuildWorkflowSelectionPrompt_StructuredSections(t *testing.T) {
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil)
+
+	// 1a: System prompt has clearly delimited sections.
+	assert.Contains(t, system, "## Output Format")
+	assert.Contains(t, system, "## Decision Procedure")
+	assert.Contains(t, system, "## Rules")
+
+	// 1b: Explicit classification framing.
+	assert.Contains(t, system, "workflow classifier")
+	assert.Contains(t, system, "classify the user's testing intent")
+
+	// 1c: Stronger JSON enforcement.
+	assert.Contains(t, system, "Return ONLY valid JSON")
+	assert.Contains(t, system, "Do not include markdown fencing")
+
+	// 1d: Decision procedure steps.
+	assert.Contains(t, system, "1. Identify the user's testing goal")
+	assert.Contains(t, system, "6. Return the JSON result")
+
+	// 1e: Tighter addon rule (positive framing).
+	assert.Contains(t, system, "Include addons only when the user explicitly requests")
+	assert.Contains(t, system, "Omit \"addons\" if no addons apply")
+
+	// 1f: No date generation rule.
+	assert.NotContains(t, system, "Today's date")
+	assert.NotContains(t, system, "7 days in the future")
+
+	// 1g: Description format specified.
+	assert.Contains(t, system, "1-2 sentence summary of the test scenario")
+
+	// Should NOT contain constraint classification instructions.
 	assert.NotContains(t, system, "Hard constraints")
 	assert.NotContains(t, system, "Soft constraints")
 	assert.NotContains(t, system, "Free parameters")
@@ -786,7 +843,7 @@ func TestBuildWorkflowSelectionPrompt_NoConstraints(t *testing.T) {
 }
 
 func TestBuildWorkflowSelectionPrompt_WithPreSelectedLayers(t *testing.T) {
-	system, _ := buildWorkflowSelectionPrompt("menu", "test", []string{"european", "amex"}, fixedNow())
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", []string{"european", "amex"})
 
 	assert.Contains(t, system, "ALREADY selected")
 	assert.Contains(t, system, "european, amex")
@@ -794,12 +851,12 @@ func TestBuildWorkflowSelectionPrompt_WithPreSelectedLayers(t *testing.T) {
 }
 
 func TestBuildWorkflowSelectionPrompt_NoPreSelectedLayers(t *testing.T) {
-	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil, fixedNow())
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil)
 	assert.NotContains(t, system, "ALREADY selected")
 }
 
 func TestBuildWorkflowSelectionPrompt_LayersInJSON(t *testing.T) {
-	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil, fixedNow())
+	system, _ := buildWorkflowSelectionPrompt("menu", "test", nil)
 	// The JSON template should include the "layers" field.
 	assert.Contains(t, system, `"layers"`)
 }

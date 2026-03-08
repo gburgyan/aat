@@ -59,7 +59,7 @@ func (a *Assertions) UnmarshalYAML(value *yaml.Node) error {
 // MarshalYAML implements custom YAML marshalling for StepValue.
 // When only Default is set, marshal as a bare scalar instead of a mapping.
 func (sv StepValue) MarshalYAML() (interface{}, error) {
-	if sv.From == "" && sv.Select == nil && sv.Constraint == "" &&
+	if !sv.Locked && sv.From == "" && sv.Select == nil && sv.Constraint == "" &&
 		len(sv.Pool) == 0 && sv.PoolStrategy == nil &&
 		sv.FromSelection == "" && sv.FromResolved == "" && sv.FromInput == "" && sv.Default != nil {
 		return sv.Default, nil

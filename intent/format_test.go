@@ -463,3 +463,232 @@ func TestFormatWorkflowMenu_LayersBeforeNotes(t *testing.T) {
 	notesIdx := strings.Index(result, "## Notes")
 	assert.Greater(t, notesIdx, layersIdx)
 }
+
+// --- SelectionHint tests ---
+
+func TestFormatWorkflowMenu_WorkflowSelectionHint(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Booking", Template: "workflows/booking.yaml", Description: "Book a flight", SelectionHint: "Use for new bookings"},
+			{Name: "Search", Template: "workflows/search.yaml", Description: "Search flights"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.Contains(t, result, "**Booking**: Book a flight [Hint: Use for new bookings]")
+	assert.Contains(t, result, "**Search**: Search flights")
+	assert.NotContains(t, result, "Search flights [Hint:")
+}
+
+func TestFormatWorkflowMenu_AddonSelectionHint(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "workflows/main.yaml", Description: "Main flow"},
+			{Name: "Seat", Kind: "addon", Template: "workflows/seat.yaml", After: graph.AfterSpec{"book"}, Description: "Add seats", SelectionHint: "Use when user requests seats"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.Contains(t, result, "**Seat** (splices after: book): Add seats [Hint: Use when user requests seats]")
+}
+
+func TestFormatWorkflowMenu_LayerSelectionHint(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*graph.Node{},
+	}
+	layers := map[string]*graph.Layer{
+		"premium":  {Name: "premium", Description: "Premium cabin classes", SelectionHint: "Use when user requests Business or First class"},
+		"domestic": {Name: "domestic", Description: "Domestic routes"},
+	}
+
+	result := FormatWorkflowMenu(g, layers)
+	assert.Contains(t, result, "**premium**: Premium cabin classes [Hint: Use when user requests Business or First class]")
+	assert.Contains(t, result, "**domestic**: Domestic routes")
+	assert.NotContains(t, result, "Domestic routes [Hint:")
+}
+
+// --- Deprecated workflow tests ---
+
+func TestFormatWorkflowMenu_DeprecatedWorkflowExcluded(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Good Flow", Template: "workflows/good.yaml", Description: "Active workflow"},
+			{Name: "Old Flow", Template: "workflows/old.yaml", Description: "Legacy workflow", Deprecated: true},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.Contains(t, result, "**Good Flow**: Active workflow")
+	assert.NotContains(t, result, "Old Flow")
+}
+
+func TestFormatWorkflowMenu_DeprecatedAddonExcluded(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Main", Template: "workflows/main.yaml", Description: "Main flow"},
+			{Name: "Good Addon", Kind: "addon", Template: "workflows/good.yaml", After: graph.AfterSpec{"a"}, Description: "Active addon"},
+			{Name: "Old Addon", Kind: "addon", Template: "workflows/old.yaml", After: graph.AfterSpec{"a"}, Description: "Legacy addon", Deprecated: true},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.Contains(t, result, "**Good Addon**")
+	assert.NotContains(t, result, "Old Addon")
+}
+
+func TestFormatWorkflowMenu_DeprecatedSlotOptionExcluded(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{
+				Name:        "Booking",
+				Template:    "workflows/booking.yaml",
+				Description: "Book a flight",
+				Slots: []graph.SlotDef{
+					{Name: "search", Options: []string{"Simple", "Advanced"}, Default: "Simple"},
+				},
+			},
+			{Name: "Simple", Kind: "slot", Description: "Simple search", Template: "workflows/simple.yaml"},
+			{Name: "Advanced", Kind: "slot", Description: "Advanced search", Template: "workflows/advanced.yaml", Deprecated: true},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.Contains(t, result, "Simple: Simple search")
+	assert.NotContains(t, result, "Advanced")
+}
+
+// --- Defaults summary tests ---
+
+func TestFormatWorkflowMenu_DefaultsSummary(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{
+				Name:        "Booking",
+				Template:    "workflows/booking.yaml",
+				Description: "Book a flight",
+				Slots: []graph.SlotDef{
+					{Name: "trip-search", Options: []string{"One-Way", "Round-Trip"}, Default: "One-Way"},
+					{Name: "payment", Options: []string{"Cash", "Card"}, Default: "Cash"},
+				},
+			},
+			{Name: "One-Way", Kind: "slot", Description: "One-way flight", Template: "workflows/oneway.yaml"},
+			{Name: "Round-Trip", Kind: "slot", Description: "Round-trip flight", Template: "workflows/roundtrip.yaml"},
+			{Name: "Cash", Kind: "slot", Description: "Cash payment", Template: "workflows/cash.yaml"},
+			{Name: "Card", Kind: "slot", Description: "Card payment", Template: "workflows/card.yaml"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.Contains(t, result, "Defaults: trip-search=One-Way, payment=Cash")
+}
+
+// --- Examples tests ---
+
+func TestFormatWorkflowMenu_WithExamples(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{Name: "Booking", Template: "workflows/booking.yaml", Description: "Book a flight"},
+		},
+		Examples: []graph.WorkflowExample{
+			{
+				Input:  "book a one way flight from nyc to lax",
+				Output: `{"workflow": "Booking", "description": "Book a one-way domestic flight."}`,
+			},
+			{
+				Input:  "exchange a booking to a different flight",
+				Output: `{"workflow": "Exchange", "description": "Exchange an existing booking."}`,
+			},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+
+	assert.Contains(t, result, "## Examples")
+	assert.Contains(t, result, "Input: book a one way flight from nyc to lax")
+	assert.Contains(t, result, `Output: {"workflow": "Booking"`)
+	assert.Contains(t, result, "Input: exchange a booking to a different flight")
+	assert.Contains(t, result, `Output: {"workflow": "Exchange"`)
+}
+
+func TestFormatWorkflowMenu_NoExamples(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes:   map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.NotContains(t, result, "## Examples")
+}
+
+func TestFormatWorkflowMenu_ExamplesBeforeNotes(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Notes:   "Important notes.",
+		Examples: []graph.WorkflowExample{
+			{Input: "test", Output: `{"workflow": "Test"}`},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+
+	examplesIdx := strings.Index(result, "## Examples")
+	notesIdx := strings.Index(result, "## Notes")
+	assert.Greater(t, notesIdx, examplesIdx, "Examples should come before Notes")
+}
+
+func TestFormatWorkflowMenu_ExamplesAfterLayers(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Examples: []graph.WorkflowExample{
+			{Input: "test", Output: `{"workflow": "Test"}`},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+	layers := map[string]*graph.Layer{
+		"premium": {Name: "premium", Description: "Premium cabin"},
+	}
+
+	result := FormatWorkflowMenu(g, layers)
+
+	layersIdx := strings.Index(result, "## Layers")
+	examplesIdx := strings.Index(result, "## Examples")
+	assert.Greater(t, examplesIdx, layersIdx, "Examples should come after Layers")
+}
+
+func TestFormatWorkflowMenu_NoDefaultsSummaryWhenNoDefaults(t *testing.T) {
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Workflows: []graph.Workflow{
+			{
+				Name:        "Booking",
+				Template:    "workflows/booking.yaml",
+				Description: "Book a flight",
+				Slots: []graph.SlotDef{
+					{Name: "search", Options: []string{"A", "B"}},
+				},
+			},
+			{Name: "A", Kind: "slot", Template: "workflows/a.yaml"},
+			{Name: "B", Kind: "slot", Template: "workflows/b.yaml"},
+		},
+		Nodes: map[string]*graph.Node{},
+	}
+
+	result := FormatWorkflowMenu(g, nil)
+	assert.NotContains(t, result, "Defaults:")
+}

@@ -116,6 +116,9 @@ func unfedInputSet(p *plan.Plan, g *graph.Graph) map[string]bool {
 // auto-wiring (e.g., "fly out of Nashville on BOTH legs").
 func isInputFed(step plan.Step, inp graph.Input) bool {
 	if sv, exists := step.Values[inp.Name]; exists {
+		if sv.Locked {
+			return true
+		}
 		if sv.From != "" || sv.FromSelection != "" || sv.Select != nil {
 			return true
 		}

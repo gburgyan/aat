@@ -13,32 +13,46 @@ import (
 // the user's intent. The system prompt contains format instructions and rules.
 // preSelectedLayers are layers already selected via CLI flags — the LLM should
 // not re-select them but may add others.
-func buildWorkflowSelectionPrompt(workflowMenu, userPrompt string, preSelectedLayers []string, now time.Time) (system, user string) {
-	dateStr := now.Format("2006-01-02")
+func buildWorkflowSelectionPrompt(workflowMenu, userPrompt string, preSelectedLayers []string) (system, user string) {
+	var sb strings.Builder
 
-	system = `You are an API testing assistant. Given available workflows and a user's testing intent, select the appropriate workflow.
+	// Task framing.
+	sb.WriteString(`You are an API testing workflow classifier. Your task is to classify the user's testing intent and select exactly one workflow configuration.
 
-Respond with a JSON object (no markdown fencing, just raw JSON):
+## Output Format
+
+Return ONLY valid JSON. Do not include markdown fencing, explanations, commentary, or additional fields.
 {
   "workflow": "Exact Workflow Name",
-  "description": "brief description of what will be tested",
+  "description": "1-2 sentence summary of the test scenario",
   "choices": {"slotName": "Option Name"},
   "addons": ["Addon Name 1"],
   "layers": ["layer-name"]
 }
 
-Rules:
+## Decision Procedure
+
+1. Identify the user's testing goal
+2. Select the best matching workflow
+3. Fill choice slots (or use defaults)
+4. Include addons only if the user explicitly requests matching capabilities
+5. Apply layers based on route, payment, cabin, or date clues
+6. Return the JSON result
+
+## Rules
+
 - Select the workflow whose description best matches the user's intent
 - Use the EXACT workflow name from the available list
 - The "choices" object maps slot names to their chosen option for workflows with choice points. Use the EXACT option name from the slot's options list. Omit "choices" if the workflow has no slots, or to use all defaults.
-- The "addons" array lists addon workflows to compose into the main workflow. Include addons when the user mentions capabilities matching an addon's description. Omit "addons" if no addons are needed.
-- The "layers" array lists data layers to apply. Select when the user's intent aligns with a layer's description. Use EXACT layer names. Omit "layers" if no layers are needed.
-- Today's date is ` + dateStr + `. When generating dates, default to at least 7 days in the future or past depending on context. The user's prompt takes priority (e.g., "tomorrow" → {{today + 1 day}}).`
+- Include addons only when the user explicitly requests capabilities matching an addon's description (e.g., "add seat", "add baggage", "modify traveler"). Omit "addons" if no addons apply.
+- The "layers" array lists data layers to apply. Select when the user's intent aligns with a layer's description. Use EXACT layer names. Omit "layers" if none apply.`)
 
 	if len(preSelectedLayers) > 0 {
-		system += "\n- The following layers are ALREADY selected (do not re-select, but you may add others): " + strings.Join(preSelectedLayers, ", ")
+		sb.WriteString("\n- The following layers are ALREADY selected (do not re-select, but you may add others): ")
+		sb.WriteString(strings.Join(preSelectedLayers, ", "))
 	}
 
+	system = sb.String()
 	user = fmt.Sprintf("## Available Workflows\n\n%s\n## User Intent\n\n%s", workflowMenu, userPrompt)
 	return system, user
 }
@@ -98,58 +112,56 @@ func buildTargetedPlanPrompt(
 	dateStr := now.Format("2006-01-02")
 
 	var sb strings.Builder
-	sb.WriteString(`You are an API testing value generator. A workflow has been composed and all data flow is pre-wired. Your ONLY job is to pick concrete values for unfed inputs. Some inputs are handled by data layers — skip them unless the user's intent conflicts.
+	sb.WriteString(`You are an API testing value generator. A workflow has been composed and all data flow is pre-wired. Your job is to pick concrete values for unfed inputs. Some inputs are handled by data layers — skip them unless the user's intent conflicts.
 
-Respond with a JSON object (no markdown fencing, just raw JSON):
+Return a JSON object (no markdown fencing):
 {
   "values": {"stepID.inputName": "value"},
   "selections": {"stepID.selectionName": {"strategy": "match", "filter": "expr"}},
   "assertions": {"stepID": [{"type": "status", "expect": 200}]}
 }
-Omit empty categories.
+Include a category only if it contains entries.
+
+Example — user says "search New York, cheapest nonstop":
+{
+  "values": {"search.origin": "NYC", "search.date": "{{today + 7 days}}"},
+  "selections": {"search.results": {"strategy": "min", "sortField": "price", "filter": "stops == 0"}}
+}
 
 Today's date is `)
 	sb.WriteString(dateStr)
-	sb.WriteString(`. The user's prompt takes priority for dates (e.g., "tomorrow" → {{today + 1 day}}). Expression syntax: {{today + 30 days}}.
+	sb.WriteString(`. Date precedence: user prompt → template current value → default 7+ days in the future. Expression syntax: {{today + N days}}.
 
 ## Values
 
-For inputs in the "Inputs That Need Values" section, provide a LITERAL value (string, number, or date expression).
-For inputs in the "Pool Inputs" section, OMIT the key entirely unless the user explicitly specifies a value — pool inputs auto-select at runtime.
-- Pick from the sample values when provided
-- Hard constraints MUST be met; soft constraints SHOULD be met
-- For required date fields (in "Inputs That Need Values"), default to at least 7 days in the future or past depending on context
+Provide a LITERAL value (string, number, or date expression) for each input in "Inputs That Need Values."
+Pool inputs auto-select at runtime — include a pool input only when the user specifies a concrete value.
+- Pick from sample values when provided; prefer simple, deterministic values
+- Hard constraints must be met; soft constraints should be met
+- Keep the "Current value:" unless the user's intent requires a change
+- Values must be plain scalars — no object or reference syntax (no "from", "fromSelection", or "select")
 - For date fields, use {{today + N days}} syntax
-- If "Current value:" is shown, keep it unless the user's intent requires a different value
-- DO NOT use "from", "fromSelection", "select", or any reference/object syntax — only plain scalars
 
 ## Optional Configuration
 
-Some inputs have sensible defaults but can be overridden based on user intent.
-- Set a value ONLY if the user explicitly or implicitly requested it
-- Omit the key entirely to use the default
-- When in doubt, omit — the default is designed for the general case
+These inputs have sensible defaults. Set a value only when the user explicitly or implicitly requests it; omit to use the default.
 
 ## Selections — optional overrides
 
-Only add selection overrides when the user's intent explicitly calls for it:
+Leave selections unchanged unless the user's intent requires an override:
 - "cheapest" → strategy: min, sortField: price
 - "no stops" → filter: "stops == 0"
 - "by vendor X" → filter: "vendor == 'X'"
 
-If the user doesn't mention preferences for how results should be selected, do NOT add any selection overrides. The template defaults are correct.
-
 Valid strategies: first, last, random, index, min, max, match
-  - match: requires a "filter" using ONLY the listed element fields
+  - match: requires a "filter" using only the listed element fields
   - min/max: requires a "sortField" from element fields
   - index: requires an "index" number
+Filters may only reference fields in the element fields list. Search inputs already constrain results; selection filters are for additional preferences.
 
-DO NOT filter on fields not in the element fields list.
-DO NOT re-filter on values already constrained by search inputs — redundant and brittle.
+## Assertions
 
-## Assertions — only when explicitly requested
-
-Do NOT add assertions unless the user explicitly says "verify that..." or "assert that...".
+Add assertions only when the user says "verify that..." or "assert that...".
 Valid types: status, fieldExists, fieldEquals, predicate.
 Use bare field names (no jsonpath $ prefix).
 `)
@@ -158,14 +170,9 @@ Use bare field names (no jsonpath $ prefix).
 		sb.WriteString(`
 ## Wrong Workflow
 
-If the composed workflow clearly doesn't match the user's intent (e.g., a fundamental mismatch between what the user asked for and what this workflow does), respond with ONLY:
+If the composed workflow fundamentally doesn't match the user's intent, respond with only:
 {"wrongPlan": {"reason": "explanation", "suggested": "Workflow Name"}}
-Rules:
-- Only signal this for fundamental domain mismatches (completely wrong workflow type)
-- Do NOT signal wrongPlan because current/default values don't match — replacing those values is YOUR job
-- A workflow with example values can be adapted to different scenarios — just set the values accordingly
-- Pool values and layer data shown below are REFERENCE SAMPLES, not structural constraints — a pool showing airport codes does NOT mean the workflow only supports those airports; the user can specify ANY valid value
-- Data layers restrict the random pool, not the workflow capability — if the user specifies a value, override the layer
+Signal wrongPlan only for fundamental domain mismatches (e.g., user wants hotels but this is a flights workflow). Adapting values, pools, and layer data to match user intent is your normal job — that is not a workflow mismatch.
 `)
 	}
 
@@ -253,17 +260,20 @@ type classifiedInputs struct {
 }
 
 // classifyInputs separates inputs into categories for the targeted prompt.
-// Priority: layer-handled > auto-wired > pool > configurable > required.
+// Priority: auto-wired > layer-handled > pool > configurable > required.
+// Auto-wired inputs (fromResolved) represent structural intent that takes
+// priority over layer pools — e.g., a round-trip return leg is wired back
+// to the origin regardless of what city pools the layer provides.
 // An input that is both configurable and pool-backed lands in pool so the
 // LLM gets the "omit unless user specifies" guard-rail.
 func classifyInputs(contexts []InputContext) classifiedInputs {
 	var c classifiedInputs
 	for _, ic := range contexts {
 		switch {
-		case ic.LayerHandled:
-			c.LayerHandled = append(c.LayerHandled, ic)
 		case ic.FromResolved != "":
 			c.AutoWired = append(c.AutoWired, ic)
+		case ic.LayerHandled:
+			c.LayerHandled = append(c.LayerHandled, ic)
 		case ic.IsPoolInput:
 			c.Pool = append(c.Pool, ic)
 		case ic.IsConfigurable:
@@ -293,15 +303,11 @@ func writePoolInputsSection(ub *strings.Builder, inputs []InputContext) {
 	if len(inputs) == 0 {
 		return
 	}
-	ub.WriteString("## Pool Inputs — DO NOT provide values unless the user specifies\n\n")
-	ub.WriteString("These inputs have curated value pools that automatically pick random values at runtime.\n")
-	ub.WriteString("DO NOT include these in your \"values\" response unless the user's prompt EXPLICITLY mentions a specific value for that input.\n")
-	ub.WriteString("- User specifies a concrete value (name, code, ID, date) → provide it\n")
-	ub.WriteString("- User's prompt is silent about an input → OMIT it, the pool handles it\n")
-	ub.WriteString("- User says \"next week\" for a date field → provide the date expression\n")
-	ub.WriteString("- User gives no date preference → OMIT date inputs entirely\n")
-	ub.WriteString("- Pool values are shown as REFERENCE for mapping user intent to valid values — do NOT pick random values from them\n")
-	ub.WriteString("When in doubt, OMIT. The pool defaults are designed for exactly this case.\n\n")
+	ub.WriteString("## Pool Inputs — auto-selected at runtime\n\n")
+	ub.WriteString("These inputs have curated value pools that pick random values at runtime.\n")
+	ub.WriteString("Include a pool input only when the user's prompt specifies a concrete value for it.\n")
+	ub.WriteString("Precedence: user specifies a value → provide it; user is silent → omit (pool handles it).\n")
+	ub.WriteString("Pool values below are reference samples for mapping user intent to valid values.\n\n")
 	var lastNode string
 	for _, ic := range inputs {
 		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
@@ -314,10 +320,9 @@ func writeAutoWiredSection(ub *strings.Builder, inputs []InputContext) {
 	if len(inputs) == 0 {
 		return
 	}
-	ub.WriteString("## Auto-Wired Inputs — override only when user intent conflicts\n\n")
+	ub.WriteString("## Auto-Wired Inputs — derived at runtime\n\n")
 	ub.WriteString("These inputs are automatically derived from sibling inputs at runtime.\n")
-	ub.WriteString("Do NOT provide values for these UNLESS the user's intent explicitly requires\n")
-	ub.WriteString("a different value than what the wiring would produce.\n\n")
+	ub.WriteString("Include one only when the user's intent requires a value different from what auto-wiring produces.\n\n")
 	var lastNode string
 	for _, ic := range inputs {
 		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
@@ -474,11 +479,10 @@ func writeLayerHandledSection(ub *strings.Builder, inputs []InputContext) {
 	if len(inputs) == 0 {
 		return
 	}
-	ub.WriteString("## Layer-Handled Inputs — skip unless user intent conflicts\n\n")
+	ub.WriteString("## Layer-Handled Inputs — managed by data layers\n\n")
 	ub.WriteString("These inputs have runtime overrides from data layers.\n")
-	ub.WriteString("DO NOT include these unless the user's prompt EXPLICITLY mentions a specific value.\n")
-	ub.WriteString("- Pool values are shown as REFERENCE for mapping user intent to valid values — do NOT pick random values\n")
-	ub.WriteString("- User is silent about an input → OMIT it, the layer handles it\n\n")
+	ub.WriteString("Include one only when the user's prompt specifies a concrete value for it.\n")
+	ub.WriteString("Pool values below are reference samples for mapping user intent to valid values.\n\n")
 	var lastNode string
 	for _, ic := range inputs {
 		lastNode = writeNodeGroupHeader(ub, ic, lastNode)
