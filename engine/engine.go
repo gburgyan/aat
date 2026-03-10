@@ -39,6 +39,10 @@ type Engine struct {
 	// graph-level defaults during plan instantiation.
 	layeredDefaults map[string]*graph.InputDefault
 
+	// envValues holds project-level values from env.yaml, available via {{env.KEY}}.
+	// OS environment variables take priority over these values.
+	envValues map[string]string
+
 	// OAS runtime validation
 	oasCache  *oas.SpecCache // nil = disabled
 	graphOAS  string         // graph-level default OAS path
@@ -73,6 +77,13 @@ func (e *Engine) WithProgress(obs ProgressObserver) *Engine {
 // WithLayers sets data-layer overrides for graph input defaults.
 func (e *Engine) WithLayers(ld map[string]*graph.InputDefault) *Engine {
 	e.layeredDefaults = ld
+	return e
+}
+
+// WithEnvValues sets project-level env values (from env.yaml) that are available
+// via {{env.KEY}} expressions. OS environment variables take priority.
+func (e *Engine) WithEnvValues(values map[string]string) *Engine {
+	e.envValues = values
 	return e
 }
 
@@ -499,9 +510,18 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 // Always returns a non-nil context so that expression evaluation and constraint
 // checking are active.
 func (e *Engine) buildResolveContext(node *graph.Node) *ResolveContext {
+	envLookup := os.Getenv
+	if len(e.envValues) > 0 {
+		envLookup = func(key string) string {
+			if v := os.Getenv(key); v != "" {
+				return v
+			}
+			return e.envValues[key]
+		}
+	}
 	return &ResolveContext{
 		Now:       time.Now(),
-		EnvLookup: os.Getenv,
+		EnvLookup: envLookup,
 		KB:        e.KB,
 		Node:      node,
 		Plan:      e.plan,

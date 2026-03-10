@@ -120,6 +120,7 @@ type Environment struct {
 	Settings   RuntimeSettings   `yaml:"settings"`
 	Notes      string            `yaml:"notes,omitempty"`
 	Overrides  []HostOverride    `yaml:"overrides,omitempty"` // per-node routing overrides
+	Values     map[string]string `yaml:"values,omitempty"`    // project-level values available via {{env.KEY}}
 }
 
 // BuildOverrideConfigs authenticates and resolves each HostOverride into a

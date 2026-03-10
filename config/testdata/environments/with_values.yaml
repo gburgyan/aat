@@ -1,0 +1,7 @@
+environment: with-values
+apiBaseUrl: https://api.example.com
+auth:
+  type: none
+values:
+  pcc: XB7
+  region: US

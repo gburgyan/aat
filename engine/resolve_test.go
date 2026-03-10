@@ -1233,6 +1233,44 @@ func TestResolveInputsWithContext_EnvExpression(t *testing.T) {
 	assert.Equal(t, "secret-123", inputs["apiKey"])
 }
 
+func TestResolveInputsWithContext_EnvValuesLookup(t *testing.T) {
+	// Simulates the wrapped lookup that Engine.buildResolveContext creates
+	// when env.yaml defines values. {{env.pcc}} should resolve to the env value.
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"target": {
+				Name: "target",
+				Inputs: []graph.Input{
+					{Name: "pcc", Type: "string"},
+				},
+			},
+		},
+	}
+
+	state := NewRunState()
+	step := plan.Step{
+		Node: "target",
+		Values: map[string]plan.StepValue{
+			"pcc": {Default: "{{env.pcc}}"},
+		},
+	}
+
+	envValues := map[string]string{"pcc": "XB7"}
+	rctx := &ResolveContext{
+		Now: fixedNow(),
+		EnvLookup: func(key string) string {
+			if v, ok := envValues[key]; ok {
+				return v
+			}
+			return ""
+		},
+	}
+	inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["target"], g, state, rctx)
+	require.NoError(t, err)
+	assert.Equal(t, "XB7", inputs["pcc"])
+}
+
 func TestResolveInputsWithContext_NoDefaultOnlyPool(t *testing.T) {
 	// StepValue with no Default but a Pool
 	g := &graph.Graph{

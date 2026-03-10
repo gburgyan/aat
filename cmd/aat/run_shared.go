@@ -916,7 +916,8 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	eng := engine.NewEngine(rctx.Graph, rctx.Registry, router).
 		WithDomain(rctx.KB).
 		WithProgress(observer).
-		WithLayers(layeredDefaults)
+		WithLayers(layeredDefaults).
+		WithEnvValues(rctx.Env.Values)
 
 	if rctx.OASCache != nil {
 		eng.WithOASSpecs(rctx.OASCache, rctx.Graph.OAS, rctx.OASValidateMode == "strict")

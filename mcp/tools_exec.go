@@ -147,7 +147,8 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 
 	// Build and run engine
 	eng := engine.NewEngine(s.ctx.Graph, s.ctx.Registry, router).
-		WithDomain(s.ctx.KB)
+		WithDomain(s.ctx.KB).
+		WithEnvValues(s.ctx.Environment.Values)
 
 	result := eng.Run(ctx, p)
 

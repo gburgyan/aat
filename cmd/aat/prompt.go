@@ -429,7 +429,8 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	eng := engine.NewEngine(g, registry, router).
 		WithDomain(kb).
 		WithProgress(observer).
-		WithLayers(layeredDefaults)
+		WithLayers(layeredDefaults).
+		WithEnvValues(env.Values)
 
 	// OAS runtime validation
 	oasMode := resolveOASMode(args.OASValidateMode, env.Settings.OASValidation)

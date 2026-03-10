@@ -1126,3 +1126,22 @@ func TestBuildOverrideConfigsWithProvider_Empty(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, resolved)
 }
+
+// --- Values tests ---
+
+func TestLoadEnvironment_WithValues(t *testing.T) {
+	env, err := LoadEnvironment("testdata/environments/with_values.yaml")
+	require.NoError(t, err)
+
+	assert.Equal(t, "with-values", env.Name)
+	require.NotNil(t, env.Values)
+	assert.Equal(t, "XB7", env.Values["pcc"])
+	assert.Equal(t, "US", env.Values["region"])
+	assert.Len(t, env.Values, 2)
+}
+
+func TestLoadEnvironment_WithoutValues_NilValues(t *testing.T) {
+	env, err := LoadEnvironment("testdata/environments/minimal.yaml")
+	require.NoError(t, err)
+	assert.Nil(t, env.Values)
+}
