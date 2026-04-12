@@ -80,7 +80,13 @@ func BuildServerContext(manifest *ProjectManifest) (*ServerContext, error) {
 
 	// Load environment (optional)
 	if manifest.EnvPath != "" {
-		env, err := config.LoadEnvironment(manifest.EnvPath)
+		var env *config.Environment
+		var err error
+		if manifest.DefaultEnvironment != "" {
+			env, err = config.LoadNamedEnvironment(manifest.EnvPath, manifest.DefaultEnvironment)
+		} else {
+			env, err = config.LoadEnvironment(manifest.EnvPath)
+		}
 		if err != nil {
 			return nil, fmt.Errorf("loading environment: %w", err)
 		}

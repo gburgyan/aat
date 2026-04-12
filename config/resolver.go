@@ -20,6 +20,7 @@ type ProjectPaths struct {
 	TracesDir      string
 	VisualizersDir string
 	ManifestPath   string // path to aat-project.yaml if found
+	DefaultEnvName string // default environment name from manifest
 
 	ExplicitManifest string // --manifest flag value; takes priority over auto-discovery
 }
@@ -142,6 +143,9 @@ func applyManifest(result *ProjectPaths, pathOrDir string) {
 	}
 	if m.VisualizersDir != "" {
 		result.VisualizersDir = m.VisualizersDir
+	}
+	if m.DefaultEnvironment != "" {
+		result.DefaultEnvName = m.DefaultEnvironment
 	}
 }
 

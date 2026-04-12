@@ -93,10 +93,12 @@ var promptCmd = &cobra.Command{
 		}
 
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
+		envName := resolveEnvName(cmd)
 
 		pa := &promptArgs{
 			Prompt:            promptText,
 			EnvPath:           resolved.EnvPath,
+			EnvName:           resolveEnvNameWithDefault(envName, resolved.DefaultEnvName),
 			GraphPath:         resolved.GraphPath,
 			TemplatesPath:     resolved.TemplatesPath,
 			DomainPath:        resolved.DomainPath,
@@ -119,6 +121,7 @@ var promptCmd = &cobra.Command{
 func init() {
 	promptCmd.Flags().String("manifest", "", "path to aat-project.yaml or project directory")
 	promptCmd.Flags().String("env", "", "path to environment YAML file")
+	promptCmd.Flags().String("env-name", "", "environment name (for multi-environment files)")
 	promptCmd.Flags().String("graph", "", "path to graph YAML file")
 	promptCmd.Flags().String("templates", "", "path to templates directory")
 	promptCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
@@ -137,6 +140,7 @@ func init() {
 type promptArgs struct {
 	Prompt            string
 	EnvPath           string
+	EnvName           string // environment name for multi-env files
 	GraphPath         string
 	TemplatesPath     string
 	DomainPath        string
@@ -170,7 +174,13 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 
 	// 1. Load environment
 	fmt.Printf("aat: loading environment...\n")
-	env, err := config.LoadEnvironment(args.EnvPath)
+	var env *config.Environment
+	var err error
+	if args.EnvName != "" {
+		env, err = config.LoadNamedEnvironment(args.EnvPath, args.EnvName)
+	} else {
+		env, err = config.LoadEnvironment(args.EnvPath)
+	}
 	if err != nil {
 		return fmt.Errorf("loading environment: %w", err)
 	}

@@ -66,12 +66,14 @@ With an absolute path, treats it as a standalone plan directory.`,
 		seed, _ := cmd.Flags().GetInt64("seed")
 		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
+		envName := resolveEnvName(cmd)
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
 		ba := &batchArgs{
 			runArgs: runArgs{
 				EnvPath:         resolved.EnvPath,
+				EnvName:         resolveEnvNameWithDefault(envName, resolved.DefaultEnvName),
 				GraphPath:       resolved.GraphPath,
 				TemplatesPath:   resolved.TemplatesPath,
 				OutputDir:       outputDir,

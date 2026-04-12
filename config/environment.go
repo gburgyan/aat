@@ -301,6 +301,28 @@ func CollectAuthSecrets(auth *AuthConfig) map[string]bool {
 	return secrets
 }
 
+// EnvironmentPartial is a sparse environment definition used in multi-environment
+// files. Pointer fields distinguish "not set" from "set to zero value" during merge.
+type EnvironmentPartial struct {
+	APIBaseURL string            `yaml:"apiBaseUrl,omitempty"`
+	Auth       *AuthConfig       `yaml:"auth,omitempty"`
+	Headers    map[string]string `yaml:"headers,omitempty"`
+	LLM        *LLMConfig        `yaml:"llm,omitempty"`
+	Settings   *RuntimeSettings  `yaml:"settings,omitempty"`
+	Notes      string            `yaml:"notes,omitempty"`
+	Overrides  []HostOverride    `yaml:"overrides,omitempty"`
+	Values     map[string]string `yaml:"values,omitempty"`
+	Vars       map[string]string `yaml:"vars,omitempty"`
+	Extends    string            `yaml:"extends,omitempty"`
+}
+
+// MultiEnvironmentFile is the top-level structure for multi-environment YAML files.
+type MultiEnvironmentFile struct {
+	Include      []string                      `yaml:"include,omitempty"` // paths to merge (relative to this file)
+	Shared       EnvironmentPartial            `yaml:"shared"`
+	Environments map[string]EnvironmentPartial `yaml:"environments"`
+}
+
 // APIConfig is a flat output structure for bridging to adapter.EnvironmentConfig.
 type APIConfig struct {
 	BaseURL string

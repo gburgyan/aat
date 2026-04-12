@@ -145,7 +145,15 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		Detail: detail,
 	})
 
-	// 2. Parse graph
+	// 2. Validate environment file
+	if m.EnvPath != "" {
+		envSection := validateEnvironmentFile(m.EnvPath, m.DefaultEnvironment)
+		if envSection != nil {
+			sections = append(sections, *envSection)
+		}
+	}
+
+	// 3. Parse graph
 	g, err := graph.ParseFile(m.GraphPath)
 	if err != nil {
 		sections = append(sections, sectionResult{
@@ -481,5 +489,82 @@ func printSections(out io.Writer, sections []sectionResult) {
 				}
 			}
 		}
+	}
+}
+
+// validateEnvironmentFile validates the environment file. For multi-env files,
+// it attempts to load each non-abstract environment to verify extends chains,
+// variable substitution, and structural validity. Returns nil if validation passes
+// or a sectionResult describing the outcome.
+func validateEnvironmentFile(envPath, defaultEnv string) *sectionResult {
+	isMulti, err := config.IsMultiEnvFile(envPath)
+	if err != nil {
+		return &sectionResult{
+			Name:   "Environment",
+			Status: "FAILED",
+			Errors: []string{fmt.Sprintf("reading environment file: %s", err)},
+		}
+	}
+
+	if !isMulti {
+		// Legacy single-env file — validate it loads
+		_, err := config.LoadEnvironment(envPath)
+		if err != nil {
+			return &sectionResult{
+				Name:   "Environment",
+				Status: "FAILED",
+				Errors: []string{err.Error()},
+			}
+		}
+		return &sectionResult{
+			Name:   "Environment",
+			Status: "OK",
+			Detail: "(single environment)",
+		}
+	}
+
+	// Multi-env file — validate all non-abstract environments
+	names, err := config.ListEnvironments(envPath)
+	if err != nil {
+		return &sectionResult{
+			Name:   "Environment",
+			Status: "FAILED",
+			Errors: []string{fmt.Sprintf("listing environments: %s", err)},
+		}
+	}
+
+	var envErrors []string
+	for _, name := range names {
+		if _, err := config.LoadNamedEnvironment(envPath, name); err != nil {
+			envErrors = append(envErrors, fmt.Sprintf("%s: %s", name, err))
+		}
+	}
+
+	// Validate defaultEnvironment if set
+	if defaultEnv != "" {
+		found := false
+		for _, name := range names {
+			if name == defaultEnv {
+				found = true
+				break
+			}
+		}
+		if !found {
+			envErrors = append(envErrors, fmt.Sprintf("defaultEnvironment %q is not a selectable environment", defaultEnv))
+		}
+	}
+
+	if len(envErrors) > 0 {
+		return &sectionResult{
+			Name:   "Environment",
+			Status: "FAILED",
+			Errors: envErrors,
+		}
+	}
+
+	return &sectionResult{
+		Name:   "Environment",
+		Status: "OK",
+		Detail: fmt.Sprintf("(%d environments: %s)", len(names), strings.Join(names, ", ")),
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/internal/version"
 	"github.com/gburgyan/aat/plan"
+	"github.com/spf13/cobra"
 )
 
 // RetryNotifier is an optional interface that progress observers can implement
@@ -31,6 +32,7 @@ type RetryNotifier interface {
 type runArgs struct {
 	PlanPath          string
 	EnvPath           string
+	EnvName           string // environment name for multi-env files
 	GraphPath         string
 	TemplatesPath     string
 	OutputDir         string
@@ -540,6 +542,25 @@ func resolveOutputDir(flagChanged bool, flagValue, manifestDir string) string {
 	return "_output/runs"
 }
 
+// resolveEnvName extracts the --env-name flag value, falling back to the AAT_ENV_NAME
+// environment variable if the flag was not explicitly set.
+func resolveEnvName(cmd *cobra.Command) string {
+	if cmd.Flags().Changed("env-name") {
+		v, _ := cmd.Flags().GetString("env-name")
+		return v
+	}
+	return os.Getenv("AAT_ENV_NAME")
+}
+
+// resolveEnvNameWithDefault returns envName if non-empty, otherwise falls back to
+// the manifest's defaultEnvironment.
+func resolveEnvNameWithDefault(envName, manifestDefault string) string {
+	if envName != "" {
+		return envName
+	}
+	return manifestDefault
+}
+
 // buildProjectOverrides constructs config.ProjectPaths from explicitly-set cobra flags.
 func buildProjectOverrides(changed func(string) bool, getString func(string) string) config.ProjectPaths {
 	overrides := config.ProjectPaths{}
@@ -620,7 +641,13 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 
 	// 1. Load environment
 	logf("aat: loading environment...\n")
-	env, err := config.LoadEnvironment(args.EnvPath)
+	var env *config.Environment
+	var err error
+	if args.EnvName != "" {
+		env, err = config.LoadNamedEnvironment(args.EnvPath, args.EnvName)
+	} else {
+		env, err = config.LoadEnvironment(args.EnvPath)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("loading environment: %w", err)
 	}

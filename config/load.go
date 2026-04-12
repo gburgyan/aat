@@ -10,25 +10,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LoadEnvironment reads a YAML environment file, applies defaults, and validates it.
-func LoadEnvironment(path string) (*Environment, error) {
+// readFile reads a file and returns its contents.
+func readFile(path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading environment file: %w", err)
 	}
+	return data, nil
+}
 
-	var env Environment
-	if err := yaml.Unmarshal(data, &env); err != nil {
-		return nil, fmt.Errorf("parsing environment YAML: %w", err)
-	}
-
-	applyDefaults(&env)
-
-	if err := ValidateEnvironment(&env); err != nil {
+// LoadEnvironment reads a YAML environment file, applies defaults, and validates it.
+// For multi-environment files, use LoadNamedEnvironment instead.
+func LoadEnvironment(path string) (*Environment, error) {
+	data, err := readFile(path)
+	if err != nil {
 		return nil, err
 	}
 
-	return &env, nil
+	// Detect multi-env format and reject with helpful message
+	if isMultiEnv(data) {
+		names, _ := listEnvNamesFromData(data)
+		return nil, fmt.Errorf("env file defines multiple environments (%s); specify one with --env-name or set defaultEnvironment in aat-project.yaml",
+			strings.Join(names, ", "))
+	}
+
+	return loadLegacyEnv(data)
 }
 
 // LoadEnvironmentFromDir loads a named environment from a directory (e.g., "<name>.yaml").

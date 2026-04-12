@@ -77,6 +77,12 @@ var mcpServeCmd = &cobra.Command{
 			return fmt.Errorf("loading manifest: %w", err)
 		}
 
+		// Override default environment from flag or env var
+		envName := resolveEnvName(cmd)
+		if envName != "" {
+			manifest.DefaultEnvironment = envName
+		}
+
 		// Build server context
 		ctx, err := mcp.BuildServerContext(manifest)
 		if err != nil {
@@ -151,4 +157,5 @@ func init() {
 	mcpServeCmd.Flags().Int("port", 8080, "HTTP listen port (used with --http)")
 	mcpServeCmd.Flags().String("http-base-path", "/mcp", "HTTP endpoint path (used with --http)")
 	mcpServeCmd.Flags().Bool("log", false, "enable structured JSON logging of tool calls to stderr")
+	mcpServeCmd.Flags().String("env-name", "", "environment name (for multi-environment files)")
 }

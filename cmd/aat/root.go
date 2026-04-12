@@ -35,6 +35,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(promptCmd)
 	rootCmd.AddCommand(planCmd)
+	rootCmd.AddCommand(envCmd)
 	rootCmd.AddCommand(generateCmd)
 	rootCmd.AddCommand(docsCmd)
 	rootCmd.AddCommand(mcpCmd)

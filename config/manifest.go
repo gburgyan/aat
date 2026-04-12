@@ -36,21 +36,22 @@ func (s *StringOrList) UnmarshalYAML(unmarshal func(interface{}) error) error {
 // ProjectManifest describes where a project's artifacts live.
 // Paths are resolved relative to the manifest file's directory.
 type ProjectManifest struct {
-	Name           string       `yaml:"name"`
-	Description    string       `yaml:"description,omitempty"`
-	Tags           []string     `yaml:"tags,omitempty"`
-	GraphPath      string       `yaml:"graph"`
-	TemplatesPath  string       `yaml:"templates"`
-	DomainPath     string       `yaml:"domain,omitempty"`
-	DocsDir        string       `yaml:"docs,omitempty"`
-	WorkflowsDir   string       `yaml:"workflows,omitempty"`
-	LayersDir      string       `yaml:"layers,omitempty"`
-	PlanDirs       StringOrList `yaml:"plans,omitempty"`
-	OASPaths       StringOrList `yaml:"oas,omitempty"`
-	ArchiveDir     string       `yaml:"archives,omitempty"`
-	TracesDir      string       `yaml:"traces,omitempty"`
-	VisualizersDir string       `yaml:"visualizers,omitempty"`
-	EnvPath        string       `yaml:"environment,omitempty"`
+	Name               string       `yaml:"name"`
+	Description        string       `yaml:"description,omitempty"`
+	Tags               []string     `yaml:"tags,omitempty"`
+	GraphPath          string       `yaml:"graph"`
+	TemplatesPath      string       `yaml:"templates"`
+	DomainPath         string       `yaml:"domain,omitempty"`
+	DocsDir            string       `yaml:"docs,omitempty"`
+	WorkflowsDir       string       `yaml:"workflows,omitempty"`
+	LayersDir          string       `yaml:"layers,omitempty"`
+	PlanDirs           StringOrList `yaml:"plans,omitempty"`
+	OASPaths           StringOrList `yaml:"oas,omitempty"`
+	ArchiveDir         string       `yaml:"archives,omitempty"`
+	TracesDir          string       `yaml:"traces,omitempty"`
+	VisualizersDir     string       `yaml:"visualizers,omitempty"`
+	EnvPath            string       `yaml:"environment,omitempty"`
+	DefaultEnvironment string       `yaml:"defaultEnvironment,omitempty"` // default env name for multi-env files
 }
 
 // LoadManifest reads and parses an aat-project.yaml file. Paths in the manifest

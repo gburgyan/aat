@@ -16,6 +16,7 @@ func init() {
 	// Shared flags inherited by all run subcommands
 	runCmd.PersistentFlags().String("manifest", "", "path to aat-project.yaml or project directory")
 	runCmd.PersistentFlags().String("env", "", "path to environment YAML file")
+	runCmd.PersistentFlags().String("env-name", "", "environment name (for multi-environment files)")
 	runCmd.PersistentFlags().String("graph", "", "path to graph YAML file")
 	runCmd.PersistentFlags().String("templates", "", "path to templates directory")
 	runCmd.PersistentFlags().String("output", "_output/runs", "directory for archive output")

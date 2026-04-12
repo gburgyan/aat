@@ -36,6 +36,7 @@ var runPlanCmd = &cobra.Command{
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
 		envOverlay, _ := cmd.Flags().GetString("env-overlay")
+		envName := resolveEnvName(cmd)
 		retries, _ := cmd.Flags().GetInt("retries")
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
 		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
@@ -46,6 +47,7 @@ var runPlanCmd = &cobra.Command{
 		ra := &runArgs{
 			PlanPath:        planPath,
 			EnvPath:         resolved.EnvPath,
+			EnvName:         resolveEnvNameWithDefault(envName, resolved.DefaultEnvName),
 			GraphPath:       resolved.GraphPath,
 			TemplatesPath:   resolved.TemplatesPath,
 			OutputDir:       outputDir,
