@@ -83,7 +83,7 @@ func EvalExpr(raw any, ctx ExprContext) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			b.WriteString(fmt.Sprintf("%v", val))
+			fmt.Fprintf(&b, "%v", val)
 		} else {
 			b.WriteString(seg.text)
 		}

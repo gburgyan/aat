@@ -286,13 +286,13 @@ func (s *Server) handleDebugFailingTest(_ context.Context, req mcp.GetPromptRequ
 			if step.Response != nil {
 				status = step.Response.Status
 			}
-			ctxBuf.WriteString(fmt.Sprintf("- **%s**: status %d", step.Node, status))
+			fmt.Fprintf(&ctxBuf, "- **%s**: status %d", step.Node, status)
 			if len(step.Outputs) > 0 {
 				keys := make([]string, 0, len(step.Outputs))
 				for k := range step.Outputs {
 					keys = append(keys, k)
 				}
-				ctxBuf.WriteString(fmt.Sprintf(" (outputs: %s)", strings.Join(keys, ", ")))
+				fmt.Fprintf(&ctxBuf, " (outputs: %s)", strings.Join(keys, ", "))
 			}
 			ctxBuf.WriteString("\n")
 			hasSuccessful = true
