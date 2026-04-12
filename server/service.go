@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -16,7 +15,8 @@ import (
 )
 
 // autoGenPrefixRe matches auto-generated run/batch directory prefixes.
-var autoGenPrefixRe = regexp.MustCompile(`^(run|batch)-`)
+// Delegate to archive.AutoGenPrefixRe for the canonical definition.
+var autoGenPrefixRe = archive.AutoGenPrefixRe
 
 // ArchiveService provides read access to run archives for the web API.
 type ArchiveService interface {
