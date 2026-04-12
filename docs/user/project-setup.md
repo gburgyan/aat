@@ -83,6 +83,7 @@ Everything else is optional. When omitted, commands that need those paths will e
 | Traces | `traces` | string | Path to the planning trace directory |
 | Visualizers | `visualizers` | string | Path to the visualizer plugins directory |
 | Environment | `environment` | string | Path to the default environment YAML file |
+| Default Environment | `defaultEnvironment` | string | Default environment name for multi-env files |
 
 The `plans` field accepts either a single path or a list of paths:
 
@@ -105,7 +106,7 @@ AAT automatically finds your manifest by walking up from the current working dir
 /home/user/projects/ecommerce/         # aat-project.yaml found here
 ```
 
-Commands that use auto-discovery: `aat run`, `aat prompt`, `aat validate`, `aat web`, `aat mcp serve`, `aat plan list`, and `aat docs generate`.
+Commands that use auto-discovery: `aat run`, `aat prompt`, `aat validate`, `aat web`, `aat mcp serve`, `aat plan list`, `aat env list`, and `aat docs generate`.
 
 To override auto-discovery, pass the `--manifest` flag:
 
@@ -176,27 +177,33 @@ aat validate graph --graph experimental-graph.yaml
 
 ## Multiple Environments
 
-A single project often targets multiple environments (development, staging, production). Keep one manifest and switch environments with the `--env` flag:
+A single project often targets multiple environments (development, staging, production). The recommended approach is to define all environments in a single multi-environment file:
 
 ```
 my-ecommerce-api/
-  aat-project.yaml          # environment: env-dev.yaml (default)
-  env-dev.yaml
-  env-staging.yaml
-  env-prod.yaml
+  aat-project.yaml          # environment: env.yaml, defaultEnvironment: dev
+  env.yaml                  # shared config + all environment definitions
+  env.secrets.yaml          # auth credentials (gitignored)
   graph.yaml
   templates/
 ```
 
 ```bash
-# Uses the manifest's default environment
+# Uses the manifest's defaultEnvironment
 aat run batch
 
-# Overrides to staging
-aat run batch --env env-staging.yaml
+# Selects a specific environment
+aat run batch --env-name staging
+
+# List all available environments
+aat env list
 ```
 
-See [Environments](environments.md) for environment file configuration.
+Set `defaultEnvironment` in the manifest to avoid passing `--env-name` every time. The `AAT_ENV_NAME` environment variable also works, which is useful for CI/CD.
+
+You can also use the `include` directive in env.yaml to split secrets into a separate, gitignored file. See [Environments: File Splitting](environments.md#file-splitting-with-include) for details.
+
+See [Environments](environments.md) for the full environment file reference.
 
 ## Bootstrapping from OpenAPI
 
@@ -223,6 +230,7 @@ graph: graph.yaml                  # required — path to API graph
 templates: templates/              # required — path to templates directory
 domain: domain.yaml                # optional — domain knowledge file
 environment: env.yaml              # optional — default environment file
+defaultEnvironment: dev            # optional — default env name (multi-env files)
 workflows: workflows/              # optional — workflow templates directory
 layers: layers/                    # optional — graph layers directory
 plans: plans/                      # optional — plan directory (string or list)

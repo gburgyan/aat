@@ -94,11 +94,16 @@ workflows: workflows/
 plans: plans/
 archives: runs/
 environment: env.yaml
+defaultEnvironment: pp
 ```
 
-Key type: `config.ProjectManifest`. Fields: `Name` (required), `GraphPath` (required), `TemplatesPath` (required), `DomainPath`, `WorkflowsDir`, `PlanDirs`, `ArchiveDir`, `TracesDir`, `EnvPath`.
+Key type: `config.ProjectManifest`. Fields: `Name` (required), `GraphPath` (required), `TemplatesPath` (required), `DomainPath`, `WorkflowsDir`, `PlanDirs`, `ArchiveDir`, `TracesDir`, `EnvPath`, `DefaultEnvironment`.
 
-Used by: `aat validate`, `aat web`, `aat mcp serve`, `aat plan list`, and as defaults for `aat run`/`aat prompt` when explicit flags are omitted.
+Used by: `aat validate`, `aat web`, `aat mcp serve`, `aat plan list`, `aat env list`, and as defaults for `aat run`/`aat prompt` when explicit flags are omitted.
+
+### Multi-Environment Files
+
+The environment file supports two formats: **single-environment** (legacy, one `apiBaseUrl` per file) and **multi-environment** (multiple named environments with shared config, inheritance via `extends`, variable substitution via `vars`, and file splitting via `include`). Format is auto-detected by presence of the `environments` top-level key. Select an environment with `--env-name` flag, `AAT_ENV_NAME` env var, or `defaultEnvironment` in the manifest. Key types: `config.MultiEnvironmentFile`, `config.EnvironmentPartial`. Key functions: `config.LoadNamedEnvironment(path, envName)`, `config.ListEnvironments(path)`.
 
 ## Plans vs Workflows
 
@@ -157,13 +162,16 @@ make build
 # With manifest auto-discovery (from travelport/ directory):
 cd travelport/
 ./aat prompt "book a flight from rome to new york"
+./aat prompt --env-name qag "book a flight from rome to new york"
 ./aat run plan workflows/roundtrip-booking.yaml
 ./aat run batch
 ./aat run batch booking/
+./aat env list
 
 # Or with explicit paths (from repo root):
 ./aat prompt \
   --env travelport/env.yaml \
+  --env-name pp \
   --graph travelport/graph.yaml \
   --templates travelport/templates/ \
   --domain travelport/domain.yaml \
@@ -178,6 +186,7 @@ cd travelport/
 
 # Shared run flags (apply to both plan and batch):
 #   --output DIR       archive output directory (default: runs/)
+#   --env-name NAME    environment name (for multi-environment files)
 #   --json             machine-readable JSON summary to stdout
 #   --quiet            suppress progress, show final line only
 #   --override NODE=URL  route a node to a different URL (repeatable)
@@ -188,7 +197,8 @@ cd travelport/
 
 **Travelport config files:**
 - `travelport/aat-project.yaml` — project manifest (auto-discovery root)
-- `travelport/env.yaml` — environment config (auth, LLM endpoint)
+- `travelport/env.yaml` — multi-environment config (6 envs: pp, pn, qag, qab, int, local)
+- `travelport/env.secrets.yaml` — auth credentials (gitignored)
 - `travelport/graph.yaml` — API graph (59 nodes)
 - `travelport/templates/` — 56 request templates
 - `travelport/domain.yaml` — domain knowledge (concepts, types, value pools)
@@ -259,6 +269,9 @@ aat mcp serve [--manifest FILE] [--persona PERSONA] [--http] [--port PORT] [--lo
 
 # Plan management
 aat plan list [--manifest FILE]
+
+# Environment management
+aat env list [--manifest FILE] [--env FILE]
 
 # Scaffold from OpenAPI spec
 aat generate --oas FILE [--output-graph graph.yaml] [--output-templates templates/]

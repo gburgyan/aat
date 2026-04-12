@@ -75,6 +75,7 @@ These flags apply to both `run plan` and `run batch`.
 |------|------|---------|-------------|
 | `--manifest` | path | auto-discovered | Explicit path to `aat-project.yaml` |
 | `--env` | path | from manifest | Environment config file |
+| `--env-name` | string | from manifest | Environment name (for multi-environment files) |
 | `--graph` | path | from manifest | API graph file |
 | `--templates` | path | from manifest | Templates directory |
 | `--domain` | path | from manifest | Domain knowledge file |

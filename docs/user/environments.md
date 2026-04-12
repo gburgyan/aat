@@ -4,11 +4,15 @@ The environment file configures how AAT connects to your API at runtime — base
 
 ## Overview
 
-AAT separates **what to test** (graph, plans, templates) from **where to test** (environment). The environment file holds connection details for a specific target: API endpoints, credentials, static headers, and runtime settings. Switching between development, staging, and production is a matter of pointing to a different environment file via `--env` or the [project manifest](project-setup.md).
+AAT separates **what to test** (graph, plans, templates) from **where to test** (environment). The environment file holds connection details for a specific target: API endpoints, credentials, static headers, and runtime settings. Switching between development, staging, and production is a matter of selecting a different environment via `--env-name` or the [project manifest](project-setup.md).
 
-## File Structure
+AAT supports two environment file formats:
+- **Single-environment** (legacy) — one environment per file, selected with `--env`
+- **Multi-environment** — multiple environments in one file, selected with `--env-name`
 
-An environment file is a YAML document with a top-level `environment` name and `apiBaseUrl`:
+## Single-Environment Format
+
+The simplest format is a YAML document with a top-level `environment` name and `apiBaseUrl`:
 
 ```yaml
 environment: dev
@@ -35,6 +39,202 @@ auth:
 headers:
   Accept: application/json
   X-Client-Version: "2.1"
+```
+
+## Multi-Environment Format
+
+When your project targets multiple environments (dev, staging, production, etc.), use the multi-environment format to define them all in one file. This eliminates duplication of shared config like headers, LLM settings, and runtime defaults.
+
+```yaml
+shared:
+  headers:
+    Accept: application/json
+  llm:
+    endpoint: https://api.openai.com/v1
+    apiKey:
+      source: env
+      var: OPENAI_API_KEY
+    model: gpt-4
+  settings:
+    maxRunDuration: 5m
+
+environments:
+  dev:
+    apiBaseUrl: https://api.dev.example.com
+    auth:
+      type: none
+
+  staging:
+    apiBaseUrl: https://api.staging.example.com
+    auth:
+      type: apikey
+      headerName: X-API-Key
+      credentials:
+        key:
+          source: env
+          var: STAGING_API_KEY
+
+  prod:
+    apiBaseUrl: https://api.example.com
+    auth:
+      type: oauth2
+      tokenUrl: https://auth.example.com/oauth/token
+      credentials:
+        username:
+          source: env
+          var: PROD_USERNAME
+        password:
+          source: env
+          var: PROD_PASSWORD
+        clientId:
+          source: env
+          var: PROD_CLIENT_ID
+        clientSecret:
+          source: env
+          var: PROD_CLIENT_SECRET
+```
+
+Select an environment with `--env-name`:
+
+```bash
+aat run plan checkout.yaml --env-name staging
+```
+
+AAT detects the format automatically: if the YAML has an `environments` key, it's multi-environment; if it has `apiBaseUrl` at the top level, it's single-environment.
+
+### Shared Config
+
+The `shared` section provides defaults that merge into every environment. Per-environment fields override shared fields:
+
+- **`headers`**, **`values`**, **`vars`** — map merge (environment keys win, shared keys preserved)
+- **`auth`**, **`llm`** — full replace (if the environment specifies auth, it replaces shared auth entirely)
+- **`settings`** — field-level merge (environment can override individual settings fields)
+
+### Inheritance with `extends`
+
+Environments can inherit from other environments using `extends`. This eliminates duplication when multiple environments share the same structure:
+
+```yaml
+environments:
+  _direct:
+    auth:
+      type: none
+    overrides:
+      - match: "search*"
+        baseUrl: https://search-${env_tag}.internal.example.com
+      - match: "price*"
+        baseUrl: https://price-${env_tag}.internal.example.com
+
+  dev:
+    extends: _direct
+    vars:
+      env_tag: dev
+
+  staging:
+    extends: _direct
+    vars:
+      env_tag: staging
+    auth:
+      type: bearer
+      credentials:
+        token:
+          source: env
+          var: STAGING_TOKEN
+```
+
+When extending, the child environment's fields are merged on top of the resolved parent using the same rules as shared config. Child overrides are prepended before parent overrides (child has higher match priority).
+
+Inheritance chains are supported (`a` extends `b` extends `c`). Circular inheritance is detected and rejected.
+
+### Abstract Environments
+
+Environment names starting with `_` (underscore) are abstract — they serve as templates for inheritance but cannot be selected directly with `--env-name`. This is useful for defining override patterns that are shared across similar environments.
+
+### Variable Substitution
+
+The `vars` map enables parameterized environments. `${var_name}` placeholders in any string field are replaced from the merged vars after inheritance and shared config resolution:
+
+```yaml
+environments:
+  _base:
+    overrides:
+      - match: "api*"
+        baseUrl: https://${service}.${region}.example.com
+
+  us-east:
+    extends: _base
+    vars:
+      service: api
+      region: us-east-1
+```
+
+Unresolved `${...}` placeholders after substitution are a validation error.
+
+### File Splitting with `include`
+
+The `include` directive lets you split a multi-environment file into parts — for example, keeping secrets separate from committable structure:
+
+```yaml
+# env.yaml (committed to git)
+include:
+  - env.secrets.yaml
+
+shared:
+  headers:
+    Accept: application/json
+
+environments:
+  dev:
+    apiBaseUrl: https://api.dev.example.com
+  prod:
+    apiBaseUrl: https://api.example.com
+```
+
+```yaml
+# env.secrets.yaml (gitignored)
+environments:
+  dev:
+    auth:
+      type: none
+  prod:
+    auth:
+      type: oauth2
+      tokenUrl: https://auth.example.com/oauth/token
+      credentials:
+        username:
+          source: env
+          var: PROD_USERNAME
+        password:
+          source: env
+          var: PROD_PASSWORD
+        clientId:
+          source: env
+          var: PROD_CLIENT_ID
+        clientSecret:
+          source: env
+          var: PROD_CLIENT_SECRET
+```
+
+Include files use the same format (`shared` + `environments` sections) and are merged into the base file. Paths are resolved relative to the base file's directory. Multiple includes are processed in order. Recursive includes (an include file with its own `include`) are not allowed.
+
+### Environment Name Resolution
+
+When using a multi-environment file, the environment name is resolved from:
+
+1. **`--env-name` flag** (highest priority)
+2. **`AAT_ENV_NAME` environment variable**
+3. **`defaultEnvironment` in the project manifest**
+4. Error listing available environments
+
+### Listing Environments
+
+Use `aat env list` to see available environments:
+
+```bash
+$ aat env list
+  dev          https://api.dev.example.com
+  prod         https://api.example.com
+  staging      https://api.staging.example.com
 ```
 
 ## Authentication
@@ -298,8 +498,9 @@ Overlays are useful for:
 
 ## Validation
 
-`aat validate` checks environment files for structural correctness:
+`aat validate` checks environment files for structural correctness.
 
+**Single-environment files:**
 - `environment` name is required
 - `apiBaseUrl` is required
 - Auth type must be one of: `oauth2`, `apikey`, `bearer`, `none`
@@ -309,12 +510,22 @@ Overlays are useful for:
 - Override entries must have a `match` pattern
 - `archiveFormat` must be `json` or `json.gz`
 
+**Multi-environment files** — all the above, plus:
+- All `extends` targets must exist
+- No circular inheritance chains
+- All `${var}` references must resolve after merging
+- Abstract environments (underscore prefix) cannot be the `defaultEnvironment`
+- Each non-abstract environment must produce a valid configuration after resolution
+- `apiBaseUrl` is not required (environments may route entirely through overrides)
+
 See [Validation](validation.md) for the full reference covering all validation subcommands.
 
 ## Schema Reference
 
+### Single-Environment Format
+
 ```yaml
-# env.yaml — complete annotated example
+# env.yaml — single-environment annotated example
 
 environment: staging                      # required — environment name
 apiBaseUrl: https://api.staging.example.com  # required — default base URL
@@ -377,8 +588,72 @@ overrides:                                # optional — per-node routing overri
     pathRewrite:                          #   optional URL path rewriting
       strip: /api/v2                      #     prefix to remove
       prefix: /v1                         #     prefix to add
+
+values:                                   # optional — key-value pairs for {{env.KEY}}
+  region: us-east
+```
+
+### Multi-Environment Format
+
+```yaml
+# env.yaml — multi-environment annotated example
+
+include:                                  # optional — additional files to merge
+  - env.secrets.yaml                      #   resolved relative to this file
+
+shared:                                   # optional — defaults merged into every environment
+  headers:
+    Accept: application/json
+  llm:
+    endpoint: https://api.openai.com/v1
+    apiKey:
+      source: env
+      var: OPENAI_API_KEY
+    model: gpt-4
+  settings:
+    maxRunDuration: 5m
+    defaultRetries: 2
+  values:
+    region: us-east
+
+environments:
+  dev:                                    # selectable with --env-name dev
+    apiBaseUrl: https://api.dev.example.com
+    auth:
+      type: none
+
+  _base-direct:                           # abstract (underscore) — not directly selectable
+    auth:
+      type: none
+    overrides:
+      - match: "search*"
+        baseUrl: https://search-${env_tag}.internal.example.com
+
+  staging:
+    extends: _base-direct                 # inherits overrides and auth from _base-direct
+    vars:                                 # ${env_tag} replaced in inherited strings
+      env_tag: staging
+
+  prod:
+    apiBaseUrl: https://api.example.com
+    auth:
+      type: oauth2
+      tokenUrl: https://auth.example.com/oauth/token
+      credentials:
+        username:
+          source: env
+          var: PROD_USERNAME
+        password:
+          source: env
+          var: PROD_PASSWORD
+        clientId:
+          source: env
+          var: PROD_CLIENT_ID
+        clientSecret:
+          source: env
+          var: PROD_CLIENT_SECRET
 ```
 
 ---
 
-*Source: `config/environment.go`, `config/auth.go`, `config/auth_provider.go`, `config/load.go`.*
+*Source: `config/environment.go`, `config/multi_env.go`, `config/auth.go`, `config/auth_provider.go`, `config/load.go`.*
