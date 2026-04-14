@@ -22,6 +22,8 @@ aat run plan smoke-test
 
 The file is already in AAT's `.gitignore`, so it won't be committed.
 
+> **Tip:** The overlay file also supports top-level `auth` and `headers` fields that apply to all API calls. See the examples below.
+
 ## Common Scenarios
 
 ### Route one node to localhost
@@ -85,6 +87,49 @@ overrides:
       type: none
 ```
 
+### Use different credentials for the whole run
+
+When the environment you're testing against requires different auth than the base `env.yaml`, add a top-level `auth` block. This replaces the environment auth for **all** API calls, not just matched overrides:
+
+```yaml
+auth:
+  type: oauth2
+  tokenUrl: https://auth.staging.example.com/token
+  credentials:
+    username:
+      source: env
+      var: STAGING_USERNAME
+    password:
+      source: env
+      var: STAGING_PASSWORD
+    clientId:
+      source: env
+      var: STAGING_CLIENT_ID
+    clientSecret:
+      source: env
+      var: STAGING_CLIENT_SECRET
+
+overrides:
+  - match: myService
+    baseUrl: http://localhost:3000
+```
+
+### Add transaction-level headers
+
+Headers at the top level are merged into every request, useful for access-group tokens or other cross-cutting headers:
+
+```yaml
+headers:
+  X-Access-Group: my-group-id
+  X-Debug: "true"
+
+overrides:
+  - match: myService
+    baseUrl: http://localhost:3000
+```
+
+Top-level `auth`, `headers`, and `overrides` can all be combined in a single file. See [Environments: Overlay Files](environments.md#overlay-files) for the full reference.
+
 ## How It Works
 
 ### Discovery
@@ -103,6 +148,13 @@ Overrides are applied in this order, with later entries taking precedence:
 2. `.aat-overrides.yaml` (auto-discovered, personal)
 3. `--env-overlay` flag (explicit overlay file)
 4. `--override` flag (CLI one-off)
+
+Transaction-level auth follows a separate chain (later entries replace earlier ones):
+
+1. `env.yaml` `auth:` — base environment credentials
+2. `.aat-overrides.yaml` `auth:` — auto-discovered overlay
+3. `--env-overlay` file `auth:` — explicit overlay
+4. Plan-level `auth:` — per-plan override
 
 ### Logging
 

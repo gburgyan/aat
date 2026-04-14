@@ -27,6 +27,7 @@ func init() {
 	runCmd.PersistentFlags().StringSlice("layer", nil, "data layer to apply (repeatable, e.g. --layer european --layer amex)")
 	runCmd.PersistentFlags().Bool("no-auto-overrides", false, "disable auto-discovery of .aat-overrides.yaml")
 	runCmd.PersistentFlags().String("oas-validate", "", "OAS validation mode: auto (default), warn, strict, off")
+	runCmd.PersistentFlags().Bool("verbose-auth", false, "log auth request/response details to stderr for debugging")
 
 	runCmd.AddCommand(runPlanCmd)
 }

@@ -41,6 +41,7 @@ var runPlanCmd = &cobra.Command{
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")
 		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
+		verboseAuth, _ := cmd.Flags().GetBool("verbose-auth")
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -61,6 +62,7 @@ var runPlanCmd = &cobra.Command{
 			LayersDir:       resolved.LayersDir,
 			NoAutoOverrides: noAutoOverrides,
 			OASValidateMode: oasValidate,
+			VerboseAuth:     verboseAuth,
 		}
 
 		code := executeRun(ra)
@@ -94,7 +96,12 @@ func executeRun(ra *runArgs) int {
 		out = io.Discard
 	}
 
-	res := runCommand(context.Background(), ra, out, ti)
+	ctx := context.Background()
+	if ra.VerboseAuth {
+		ctx = config.WithAuthVerbose(ctx, os.Stderr)
+	}
+
+	res := runCommand(ctx, ra, out, ti)
 
 	// JSON output
 	if ra.JSON {

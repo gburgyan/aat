@@ -191,14 +191,37 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 		return fmt.Errorf("environment %q has no LLM configuration (llm.endpoint is required for prompt command)", env.Name)
 	}
 
-	// 3. Authenticate (via cached provider)
-	authProvider := config.NewAuthProvider(env.Auth)
+	// 3. Pre-load overlay file to discover transaction-level auth before authenticating.
+	var autoOverlay *config.OverlayFile
+	if args.AutoOverridesPath != "" {
+		autoOverlay, err = config.LoadOverlayFile(args.AutoOverridesPath)
+		if err != nil {
+			return fmt.Errorf("loading auto-overrides %s: %w", args.AutoOverridesPath, err)
+		}
+	}
+
+	// 4. Determine effective auth for initial authentication.
+	initialAuth := env.Auth
+	if autoOverlay != nil && autoOverlay.Auth != nil {
+		initialAuth = *autoOverlay.Auth
+		fmt.Printf("aat: using overlay auth from %s (%s)\n", args.AutoOverridesPath, initialAuth.Type)
+	}
+
+	// 5. Authenticate with effective auth
+	authProvider := config.NewAuthProvider(initialAuth)
 	token, err := authProvider.Authenticate(ctx)
 	if err != nil {
 		return fmt.Errorf("authenticating: %w", err)
 	}
-	apiConfig := env.BuildAPIConfigFromToken(token, env.Auth, nil)
-	fmt.Printf("aat: authenticated via %s\n", env.Auth.Type)
+	apiConfig := env.BuildAPIConfigFromToken(token, initialAuth, nil)
+	fmt.Printf("aat: authenticated via %s\n", initialAuth.Type)
+
+	// 5b. Merge overlay-level headers into apiConfig (applied to all requests).
+	if autoOverlay != nil && len(autoOverlay.Headers) > 0 {
+		for k, v := range autoOverlay.Headers {
+			apiConfig.Headers[k] = v
+		}
+	}
 
 	// 4. Load graph
 	g, err := graph.ParseFile(args.GraphPath)
@@ -320,19 +343,22 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 	if result.WorkflowSelection != nil && len(result.WorkflowSelection.Layers) > 0 {
 		effectiveLayers = result.WorkflowSelection.Layers
 	}
-	return executePlan(ctx, p, g, args, effectiveLayers, availableLayers, apiConfig, env, kb, llmClient, authProvider)
+	return executePlan(ctx, p, g, args, effectiveLayers, availableLayers, apiConfig, env, kb, llmClient, authProvider, autoOverlay)
 }
 
 // executePlan loads templates, creates the engine, runs the plan, and writes an archive.
 // effectiveLayers is the merged set of layer names (CLI + LLM-selected).
 // availableLayers is the full set of loaded layers (may be nil).
-func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, effectiveLayers []string, availableLayers map[string]*graph.Layer, apiConfig *config.APIConfig, env *config.Environment, kb *domain.KnowledgeBase, llmClient llm.Client, authProvider *config.AuthProvider) error {
+// autoOverlay is the pre-loaded auto-overrides file (may be nil).
+func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *promptArgs, effectiveLayers []string, availableLayers map[string]*graph.Layer, apiConfig *config.APIConfig, env *config.Environment, kb *domain.KnowledgeBase, llmClient llm.Client, authProvider *config.AuthProvider, autoOverlay *config.OverlayFile) error {
 	// If the plan has its own auth (e.g., user manually edited after --save), re-authenticate
+	effectiveProvider := authProvider
 	planOverridesAuth := p.Auth != nil
 	if planOverridesAuth {
 		effectiveAuth := *p.Auth
 		fmt.Printf("aat: plan has its own auth (%s), re-authenticating...\n", effectiveAuth.Type)
-		token, err := config.Authenticate(ctx, effectiveAuth)
+		effectiveProvider = config.NewAuthProvider(effectiveAuth)
+		token, err := effectiveProvider.Authenticate(ctx)
 		if err != nil {
 			return fmt.Errorf("authenticating with plan auth: %w", err)
 		}
@@ -343,13 +369,7 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		if err != nil {
 			return fmt.Errorf("authenticating: %w", err)
 		}
-		apiConfig = env.BuildAPIConfigFromToken(token, env.Auth, p.Headers)
-	}
-
-	// Determine effective auth for override inheritance
-	effectiveAuth := env.Auth
-	if planOverridesAuth {
-		effectiveAuth = *p.Auth
+		apiConfig = env.BuildAPIConfigFromToken(token, authProvider.Config(), p.Headers)
 	}
 
 	// Load templates
@@ -369,15 +389,9 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	}
 	router := engine.NewExecutorRouter(executor, envConfig)
 
-	// Apply env-file overrides (inherit plan auth if present)
+	// Apply env-file overrides (inherit effective auth via provider)
 	if len(env.Overrides) > 0 {
-		var resolvedOverrides []config.ResolvedOverride
-		var overrideErr error
-		if planOverridesAuth {
-			resolvedOverrides, overrideErr = env.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
-		} else {
-			resolvedOverrides, overrideErr = env.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, authProvider)
-		}
+		resolvedOverrides, overrideErr := env.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, effectiveProvider)
 		if overrideErr != nil {
 			return fmt.Errorf("building overrides: %w", overrideErr)
 		}
@@ -386,23 +400,14 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		}
 	}
 
-	// Apply auto-discovered .aat-overrides.yaml
-	if args.AutoOverridesPath != "" {
-		autoOverrides, autoErr := config.LoadOverlayFile(args.AutoOverridesPath)
-		if autoErr != nil {
-			return fmt.Errorf("loading auto-overrides %s: %w", args.AutoOverridesPath, autoErr)
-		}
+	// Apply auto-discovered .aat-overrides.yaml per-node overrides
+	if autoOverlay != nil && len(autoOverlay.Overrides) > 0 {
 		autoOverrideEnv := &config.Environment{
 			APIBaseURL: env.APIBaseURL,
-			Auth:       effectiveAuth,
-			Overrides:  autoOverrides,
+			Auth:       effectiveProvider.Config(),
+			Overrides:  autoOverlay.Overrides,
 		}
-		var resolvedOverrides []config.ResolvedOverride
-		if planOverridesAuth {
-			resolvedOverrides, autoErr = autoOverrideEnv.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
-		} else {
-			resolvedOverrides, autoErr = autoOverrideEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, authProvider)
-		}
+		resolvedOverrides, autoErr := autoOverrideEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, effectiveProvider)
 		if autoErr != nil {
 			return fmt.Errorf("building auto-overrides: %w", autoErr)
 		}

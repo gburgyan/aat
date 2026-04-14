@@ -85,6 +85,7 @@ These flags apply to both `run plan` and `run batch`.
 | `--retries` | int | `0` | Max plan-level retries on failure |
 | `--layer` | string | — | Data layer to apply (repeatable) |
 | `--no-auto-overrides` | bool | `false` | Disable auto-discovery of `.aat-overrides.yaml` |
+| `--verbose-auth` | bool | `false` | Log auth request/response details to stderr for debugging |
 | `--json` | bool | `false` | Machine-readable JSON summary to stdout |
 | `--quiet` | bool | `false` | Suppress progress, show final line only |
 
@@ -227,6 +228,33 @@ The batch directory contains a `batch.json` with aggregate results and a subdire
 Archives capture the full execution trace: per-step request/response pairs (method, URL, headers, body), HTTP status codes, timing, extracted outputs, value resolution decisions, selection decisions, assertion results, and error classifications. Sensitive headers (`Authorization`, API keys) are automatically redacted.
 
 Archives are safe to store as CI artifacts or share with teammates. See [Web UI and Archives](web-ui.md) for browsing and debugging with the archive viewer.
+
+## Debugging Authentication
+
+The `--verbose-auth` flag prints the full authentication exchange to stderr, so you can see exactly what AAT sends and receives when obtaining tokens.
+
+```
+$ aat run plan smoke-test --verbose-auth
+[auth] authenticating with type=oauth2
+[auth] POST https://auth.example.com/oauth/token
+[auth]   client_id = IeWY...
+[auth]   client_secret = IzlP...
+[auth]   grant_type = password
+[auth]   password = RVfN...
+[auth]   username = testuser
+[auth] response status: 200
+[auth] response body: {"access_token":"eyJhb...","token_type":"Bearer","expires_in":86400}
+[auth] token type=Bearer expires_in=86400 access_token=eyJhbGci...
+```
+
+Key details:
+
+- **Output goes to stderr** — it won't interfere with `--json` output on stdout.
+- **Passwords and client secrets are truncated** to the first 4 characters for readability (you already have access to the full values in your config).
+- **All auth types are covered** — OAuth2 shows the full token exchange; API key and bearer show the resolved credential values.
+- **Works with overlay auth** — if an overlay file overrides auth, the verbose output reflects the effective auth being used.
+
+This flag is available on both `run plan` and `run batch`.
 
 ## Building AAT
 

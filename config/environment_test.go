@@ -357,6 +357,109 @@ func TestAuthenticate_OAuth2MissingAccessToken(t *testing.T) {
 	assert.Contains(t, err.Error(), "missing access_token")
 }
 
+func TestAuthenticate_OAuth2CustomGrantType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "http://auth0.com/oauth/grant-type/password-realm", r.FormValue("grant_type"))
+		assert.Equal(t, "testuser", r.FormValue("username"))
+		assert.Equal(t, "testpass", r.FormValue("password"))
+		assert.Equal(t, "test-client-id", r.FormValue("client_id"))
+		assert.Equal(t, "test-client-secret", r.FormValue("client_secret"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(OAuthToken{
+			AccessToken: "custom-grant-token",
+			TokenType:   "Bearer",
+			ExpiresIn:   3600,
+		})
+	}))
+	defer server.Close()
+
+	auth := AuthConfig{
+		Type:      "oauth2",
+		TokenURL:  server.URL,
+		GrantType: "http://auth0.com/oauth/grant-type/password-realm",
+		Credentials: map[string]SecretRef{
+			"username":     {Source: "literal", Value: "testuser"},
+			"password":     {Source: "literal", Value: "testpass"},
+			"clientId":     {Source: "literal", Value: "test-client-id"},
+			"clientSecret": {Source: "literal", Value: "test-client-secret"},
+		},
+	}
+
+	token, err := Authenticate(context.Background(), auth)
+	require.NoError(t, err)
+	assert.Equal(t, "custom-grant-token", token.AccessToken)
+}
+
+func TestAuthenticate_OAuth2ExtraParams(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "http://auth0.com/oauth/grant-type/password-realm", r.FormValue("grant_type"))
+		assert.Equal(t, "my-realm", r.FormValue("realm"))
+		assert.Equal(t, "custom-audience", r.FormValue("audience"))
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(OAuthToken{
+			AccessToken: "extra-params-token",
+			TokenType:   "Bearer",
+			ExpiresIn:   3600,
+		})
+	}))
+	defer server.Close()
+
+	auth := AuthConfig{
+		Type:      "oauth2",
+		TokenURL:  server.URL,
+		GrantType: "http://auth0.com/oauth/grant-type/password-realm",
+		ExtraParams: map[string]string{
+			"realm":    "my-realm",
+			"audience": "custom-audience",
+		},
+		Credentials: map[string]SecretRef{
+			"username":     {Source: "literal", Value: "u"},
+			"password":     {Source: "literal", Value: "p"},
+			"clientId":     {Source: "literal", Value: "c"},
+			"clientSecret": {Source: "literal", Value: "s"},
+		},
+	}
+
+	token, err := Authenticate(context.Background(), auth)
+	require.NoError(t, err)
+	assert.Equal(t, "extra-params-token", token.AccessToken)
+}
+
+func TestAuthenticate_OAuth2DefaultGrantType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		assert.Equal(t, "password", r.FormValue("grant_type"), "default grant_type should be 'password'")
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(OAuthToken{
+			AccessToken: "default-grant-token",
+			TokenType:   "Bearer",
+			ExpiresIn:   3600,
+		})
+	}))
+	defer server.Close()
+
+	auth := AuthConfig{
+		Type:     "oauth2",
+		TokenURL: server.URL,
+		// GrantType intentionally omitted — should default to "password"
+		Credentials: map[string]SecretRef{
+			"username":     {Source: "literal", Value: "u"},
+			"password":     {Source: "literal", Value: "p"},
+			"clientId":     {Source: "literal", Value: "c"},
+			"clientSecret": {Source: "literal", Value: "s"},
+		},
+	}
+
+	token, err := Authenticate(context.Background(), auth)
+	require.NoError(t, err)
+	assert.Equal(t, "default-grant-token", token.AccessToken)
+}
+
 func TestAuthenticate_BearerPassthrough(t *testing.T) {
 	auth := AuthConfig{
 		Type: "bearer",
@@ -777,11 +880,12 @@ overrides:
 	tmpFile := t.TempDir() + "/overlay.yaml"
 	require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
 
-	overrides, err := LoadOverlayFile(tmpFile)
+	overlay, err := LoadOverlayFile(tmpFile)
 	require.NoError(t, err)
-	require.Len(t, overrides, 1)
-	assert.Equal(t, "searchFlights", overrides[0].Match)
-	assert.Equal(t, "http://localhost:8080", overrides[0].BaseURL)
+	assert.Nil(t, overlay.Auth)
+	require.Len(t, overlay.Overrides, 1)
+	assert.Equal(t, "searchFlights", overlay.Overrides[0].Match)
+	assert.Equal(t, "http://localhost:8080", overlay.Overrides[0].BaseURL)
 }
 
 func TestLoadOverlayFile_EmptyMatch(t *testing.T) {
@@ -795,6 +899,66 @@ overrides:
 	_, err := LoadOverlayFile(tmpFile)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "match is required")
+}
+
+func TestLoadOverlayFile_TopLevelAuth(t *testing.T) {
+	yaml := `
+auth:
+  type: bearer
+  credentials:
+    token:
+      source: literal
+      value: my-secret-token
+overrides:
+  - match: myNode
+    baseUrl: http://localhost:9090
+`
+	tmpFile := t.TempDir() + "/overlay.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
+
+	overlay, err := LoadOverlayFile(tmpFile)
+	require.NoError(t, err)
+	require.NotNil(t, overlay.Auth)
+	assert.Equal(t, "bearer", overlay.Auth.Type)
+	assert.Equal(t, "literal", overlay.Auth.Credentials["token"].Source)
+	assert.Equal(t, "my-secret-token", overlay.Auth.Credentials["token"].Value)
+	require.Len(t, overlay.Overrides, 1)
+	assert.Equal(t, "myNode", overlay.Overrides[0].Match)
+}
+
+func TestLoadOverlayFile_TopLevelAuthOnly(t *testing.T) {
+	yaml := `
+auth:
+  type: bearer
+  credentials:
+    token:
+      source: literal
+      value: my-secret-token
+`
+	tmpFile := t.TempDir() + "/overlay.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
+
+	overlay, err := LoadOverlayFile(tmpFile)
+	require.NoError(t, err)
+	require.NotNil(t, overlay.Auth)
+	assert.Equal(t, "bearer", overlay.Auth.Type)
+	assert.Empty(t, overlay.Overrides)
+}
+
+func TestLoadOverlayFile_InvalidTopLevelAuth(t *testing.T) {
+	yaml := `
+auth:
+  type: oauth2
+overrides:
+  - match: myNode
+    baseUrl: http://localhost:9090
+`
+	tmpFile := t.TempDir() + "/overlay.yaml"
+	require.NoError(t, os.WriteFile(tmpFile, []byte(yaml), 0644))
+
+	_, err := LoadOverlayFile(tmpFile)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "overlay auth validation failed")
 }
 
 func TestMergeOverrides(t *testing.T) {

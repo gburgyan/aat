@@ -69,6 +69,8 @@ type AuthConfig struct {
 	Type        string               `yaml:"type"`                  // oauth2, apikey, bearer, none
 	TokenURL    string               `yaml:"tokenUrl,omitempty"`    // token endpoint for oauth2
 	HeaderName  string               `yaml:"headerName,omitempty"`  // custom header name for apikey
+	GrantType   string               `yaml:"grantType,omitempty"`   // oauth2 grant_type (default: "password")
+	ExtraParams map[string]string    `yaml:"extraParams,omitempty"` // extra form params for oauth2 token request
 	Credentials map[string]SecretRef `yaml:"credentials,omitempty"` // named credential fields
 }
 

@@ -266,6 +266,37 @@ auth:
 
 Required credentials: `username`, `password`, `clientId`, `clientSecret`. All four must be present for OAuth2.
 
+#### Custom Grant Type
+
+By default AAT sends `grant_type=password`. Some OAuth2 providers (e.g., Auth0) require a different grant type and additional parameters. Use `grantType` and `extraParams` to customize the token request:
+
+```yaml
+auth:
+  type: oauth2
+  tokenUrl: https://auth.example.com/oauth/token
+  grantType: "http://auth0.com/oauth/grant-type/password-realm"
+  extraParams:
+    realm: my-realm
+  credentials:
+    username:
+      source: env
+      var: API_USERNAME
+    password:
+      source: env
+      var: API_PASSWORD
+    clientId:
+      source: env
+      var: API_CLIENT_ID
+    clientSecret:
+      source: env
+      var: API_CLIENT_SECRET
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `grantType` | `password` | OAuth2 `grant_type` form parameter |
+| `extraParams` | _(empty)_ | Additional key-value pairs appended to the token request form |
+
 ### API Key
 
 A static key sent as a custom header. The `headerName` field controls which header carries the key:
@@ -324,7 +355,8 @@ Header merge order (later values override earlier ones for the same key):
 1. **Environment headers** — this `headers` section
 2. **Template headers** — per-template `request.headers` (see [Templates](templates.md))
 3. **Plan-level headers** — per-step header overrides (see [Plans](plans.md))
-4. **Auth headers** — authentication headers (final precedence)
+4. **Auth headers** — authentication headers
+5. **Overlay headers** — headers from `.aat-overrides.yaml` or `--env-overlay` (final precedence)
 
 ## Secrets
 
@@ -478,7 +510,11 @@ See the Overlay Files section below.
 
 ## Overlay Files
 
-An overlay file is a sparse YAML document containing only `overrides`. It merges with (appends to) the base environment's overrides:
+An overlay file is a sparse YAML document that merges with the base environment. It can contain per-node `overrides` (same format as the environment `overrides:` section) and optional **transaction-level** `auth` and `headers` that apply to every API call in the run.
+
+### Per-Node Overrides
+
+The `overrides:` section works the same as in an environment file — each entry matches node names by glob and can override `baseUrl`, `auth`, `headers`, and `pathRewrite` for matched nodes only:
 
 ```yaml
 # local-routing.yaml
@@ -491,10 +527,99 @@ overrides:
 
 When both the base environment and an overlay define overrides for the same match pattern, the overlay's entry appears later in the list and takes precedence (last match wins).
 
+### Transaction-Level Auth
+
+A top-level `auth` field in an overlay replaces the environment's auth for the **entire run** — all nodes, not just those matching an override pattern. This is useful when the target environment requires different credentials than the base environment:
+
+```yaml
+# overlay with transaction-level auth
+auth:
+  type: oauth2
+  tokenUrl: https://auth.staging.example.com/token
+  credentials:
+    username:
+      source: env
+      var: STAGING_USERNAME
+    password:
+      source: env
+      var: STAGING_PASSWORD
+    clientId:
+      source: env
+      var: STAGING_CLIENT_ID
+    clientSecret:
+      source: env
+      var: STAGING_CLIENT_SECRET
+
+overrides:
+  - match: "payment*"
+    baseUrl: https://localhost:8081
+```
+
+In this example, all nodes authenticate with the staging OAuth2 credentials, but payment nodes are routed to localhost. The auth configuration supports the same types and fields as an environment's `auth` section (`oauth2`, `apikey`, `bearer`, `none`).
+
+Auth priority (lowest to highest):
+
+1. `env.yaml` `auth:` — base environment credentials
+2. `.aat-overrides.yaml` `auth:` — auto-discovered overlay
+3. `--env-overlay` file `auth:` — explicit overlay
+4. Plan-level `auth:` — per-plan override
+
+### Transaction-Level Headers
+
+A top-level `headers` map in an overlay is merged into every request. These headers take precedence over environment-level headers and auth headers, making them useful for injecting access-group tokens, correlation IDs, or other cross-cutting headers:
+
+```yaml
+# overlay with transaction-level headers
+headers:
+  XAUTH_TRAVELPORT_ACCESSGROUP: CD87751C-AD46-4EDB-9F53-7B0DE72D751E
+  X-Correlation-Id: local-dev-session
+
+overrides:
+  - match: placeOnQueue
+    baseUrl: http://localhost:8080
+```
+
+### Combining Auth, Headers, and Overrides
+
+All three sections can appear in a single overlay file:
+
+```yaml
+auth:
+  type: oauth2
+  tokenUrl: https://auth.example.com/token
+  grantType: "http://auth0.com/oauth/grant-type/password-realm"
+  extraParams:
+    realm: my-realm
+  credentials:
+    username:
+      source: env
+      var: MY_USERNAME
+    password:
+      source: env
+      var: MY_PASSWORD
+    clientId:
+      source: env
+      var: MY_CLIENT_ID
+    clientSecret:
+      source: env
+      var: MY_CLIENT_SECRET
+
+headers:
+  X-Access-Group: my-access-group-id
+
+overrides:
+  - match: myService
+    baseUrl: http://localhost:3000
+    pathRewrite:
+      strip: /api/v2
+      prefix: /v1
+```
+
 Overlays are useful for:
 - Routing specific services to local instances during development
 - Switching a subset of nodes to a sandbox environment
-- Adding temporary auth overrides for testing
+- Replacing auth credentials for an entire test run
+- Injecting transaction-level headers across all API calls
 
 ## Validation
 
@@ -534,6 +659,9 @@ auth:                                     # authentication configuration
   type: oauth2                            #   oauth2 | apikey | bearer | none
   tokenUrl: https://auth.example.com/token  #   token endpoint (oauth2 only)
   headerName: X-API-Key                   #   custom header name (apikey only)
+  grantType: password                     #   oauth2 grant_type (default: "password")
+  extraParams:                            #   extra form params for oauth2 token request
+    realm: my-realm                       #     example: Auth0 realm
   credentials:                            #   named credential fields
     username:                             #     oauth2: username, password, clientId, clientSecret
       source: env                         #     source: env (recommended) or literal

@@ -48,6 +48,7 @@ type runArgs struct {
 	NoAutoOverrides   bool       // disable .aat-overrides.yaml auto-discovery
 	AutoOverridesPath string     // resolved path to auto-discovered overrides file
 	OASValidateMode   string     // "auto", "warn", "strict", "off"
+	VerboseAuth       bool       // log auth request/response details to stderr
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -821,28 +822,71 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		return &runResult{setupErr: true, err: fmt.Errorf("plan validation: %w", err)}
 	}
 
-	// 3. Determine effective auth: plan auth overrides env auth
+	// 3. Pre-load overlay files to discover transaction-level auth before authenticating.
+	// Priority: env auth < auto-overrides auth < env-overlay auth < plan auth.
+	var autoOverlay *config.OverlayFile
+	if rctx.AutoOverridesPath != "" {
+		autoOverlay, err = config.LoadOverlayFile(rctx.AutoOverridesPath)
+		if err != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("loading auto-overrides %s: %w", rctx.AutoOverridesPath, err)}
+		}
+	}
+	var envOverlayFile *config.OverlayFile
+	if rctx.EnvOverlay != "" {
+		envOverlayFile, err = config.LoadOverlayFile(rctx.EnvOverlay)
+		if err != nil {
+			return &runResult{setupErr: true, err: fmt.Errorf("loading overlay: %w", err)}
+		}
+	}
+
+	// 4. Determine effective auth: overlay auth promotes to transaction level.
 	effectiveAuth := rctx.Env.Auth
+	overlayOverridesAuth := false
+	if autoOverlay != nil && autoOverlay.Auth != nil {
+		effectiveAuth = *autoOverlay.Auth
+		overlayOverridesAuth = true
+		logf("aat: using overlay auth from %s (%s)\n", rctx.AutoOverridesPath, effectiveAuth.Type)
+	}
+	if envOverlayFile != nil && envOverlayFile.Auth != nil {
+		effectiveAuth = *envOverlayFile.Auth
+		overlayOverridesAuth = true
+		logf("aat: using overlay auth from %s (%s)\n", rctx.EnvOverlay, effectiveAuth.Type)
+	}
 	planOverridesAuth := p.Auth != nil
 	if planOverridesAuth {
 		effectiveAuth = *p.Auth
 		logf("aat: using plan-level auth (%s)\n", effectiveAuth.Type)
 	}
 
-	// 4. Authenticate — use cached provider for default auth, direct call for plan auth
-	var token *config.OAuthToken
-	if planOverridesAuth {
-		token, err = config.Authenticate(ctx, effectiveAuth)
-	} else {
-		token, err = rctx.AuthProvider.Authenticate(ctx)
+	// 5. Authenticate — use cached provider only when using unmodified env auth.
+	// When overlay/plan overrides auth, create a fresh AuthProvider so the token
+	// is cached for reuse by per-node override resolution (avoids duplicate auth calls).
+	effectiveProvider := rctx.AuthProvider
+	if planOverridesAuth || overlayOverridesAuth {
+		effectiveProvider = config.NewAuthProvider(effectiveAuth)
 	}
+	token, err := effectiveProvider.Authenticate(ctx)
 	if err != nil {
 		return &runResult{setupErr: true, err: fmt.Errorf("authenticating: %w", err)}
 	}
 	apiConfig := rctx.Env.BuildAPIConfigFromToken(token, effectiveAuth, p.Headers)
 	logf("aat: authenticated via %s\n", effectiveAuth.Type)
 
-	// 5. Create executor, environment config, and router
+	// 5b. Merge overlay-level headers into apiConfig (applied to all requests).
+	// Priority: env headers < plan headers < overlay headers (auto then env-overlay).
+	// Auth headers set during BuildAPIConfigFromToken are preserved.
+	if autoOverlay != nil && len(autoOverlay.Headers) > 0 {
+		for k, v := range autoOverlay.Headers {
+			apiConfig.Headers[k] = v
+		}
+	}
+	if envOverlayFile != nil && len(envOverlayFile.Headers) > 0 {
+		for k, v := range envOverlayFile.Headers {
+			apiConfig.Headers[k] = v
+		}
+	}
+
+	// 6. Create executor, environment config, and router
 	executor := adapter.NewHTTPExecutor(apiConfig.BaseURL)
 	envConfig := &adapter.EnvironmentConfig{
 		BaseURL: apiConfig.BaseURL,
@@ -851,14 +895,9 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	}
 	router := engine.NewExecutorRouter(executor, envConfig)
 
-	// 5a. Apply env-file overrides
+	// 6a. Apply env-file overrides
 	if len(rctx.Env.Overrides) > 0 {
-		var resolvedOverrides []config.ResolvedOverride
-		if planOverridesAuth {
-			resolvedOverrides, err = rctx.Env.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
-		} else {
-			resolvedOverrides, err = rctx.Env.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, rctx.AuthProvider)
-		}
+		resolvedOverrides, err := rctx.Env.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, effectiveProvider)
 		if err != nil {
 			return &runResult{setupErr: true, err: fmt.Errorf("building overrides: %w", err)}
 		}
@@ -867,23 +906,14 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		}
 	}
 
-	// 5a.5. Apply auto-discovered .aat-overrides.yaml
-	if rctx.AutoOverridesPath != "" {
-		autoOverrides, err := config.LoadOverlayFile(rctx.AutoOverridesPath)
-		if err != nil {
-			return &runResult{setupErr: true, err: fmt.Errorf("loading auto-overrides %s: %w", rctx.AutoOverridesPath, err)}
-		}
+	// 6b. Apply auto-discovered .aat-overrides.yaml per-node overrides
+	if autoOverlay != nil && len(autoOverlay.Overrides) > 0 {
 		autoOverrideEnv := &config.Environment{
 			APIBaseURL: rctx.Env.APIBaseURL,
 			Auth:       effectiveAuth,
-			Overrides:  autoOverrides,
+			Overrides:  autoOverlay.Overrides,
 		}
-		var resolvedOverrides []config.ResolvedOverride
-		if planOverridesAuth {
-			resolvedOverrides, err = autoOverrideEnv.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
-		} else {
-			resolvedOverrides, err = autoOverrideEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, rctx.AuthProvider)
-		}
+		resolvedOverrides, err := autoOverrideEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, effectiveProvider)
 		if err != nil {
 			return &runResult{setupErr: true, err: fmt.Errorf("building auto-overrides: %w", err)}
 		}
@@ -892,23 +922,14 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		}
 	}
 
-	// 5b. Apply overlay file overrides
-	if rctx.EnvOverlay != "" {
-		overlayOverrides, err := config.LoadOverlayFile(rctx.EnvOverlay)
-		if err != nil {
-			return &runResult{setupErr: true, err: fmt.Errorf("loading overlay: %w", err)}
-		}
+	// 6c. Apply --env-overlay file per-node overrides
+	if envOverlayFile != nil && len(envOverlayFile.Overrides) > 0 {
 		overlayEnv := &config.Environment{
 			APIBaseURL: rctx.Env.APIBaseURL,
 			Auth:       effectiveAuth,
-			Overrides:  overlayOverrides,
+			Overrides:  envOverlayFile.Overrides,
 		}
-		var resolvedOverrides []config.ResolvedOverride
-		if planOverridesAuth {
-			resolvedOverrides, err = overlayEnv.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
-		} else {
-			resolvedOverrides, err = overlayEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, rctx.AuthProvider)
-		}
+		resolvedOverrides, err := overlayEnv.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, effectiveProvider)
 		if err != nil {
 			return &runResult{setupErr: true, err: fmt.Errorf("building overlay overrides: %w", err)}
 		}
@@ -917,7 +938,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		}
 	}
 
-	// 5c. Apply CLI --override flags
+	// 6d. Apply CLI --override flags
 	for _, flag := range rctx.Overrides {
 		name, url, err := parseOverrideFlag(flag)
 		if err != nil {
@@ -939,7 +960,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		}
 	}
 
-	// 6. Create engine and run
+	// 7. Create engine and run
 	eng := engine.NewEngine(rctx.Graph, rctx.Registry, router).
 		WithDomain(rctx.KB).
 		WithProgress(observer).
@@ -959,13 +980,23 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		printRunSummary(result, io.Discard, TerminalInfo{})
 	}
 
-	// 7. Write archive
+	// 8. Write archive
 	secrets := make(map[string]bool)
 	for k, v := range rctx.Secrets {
 		secrets[k] = v
 	}
 	if p.Auth != nil {
 		for k, v := range config.CollectAuthSecrets(p.Auth) {
+			secrets[k] = v
+		}
+	}
+	if autoOverlay != nil && autoOverlay.Auth != nil {
+		for k, v := range config.CollectAuthSecrets(autoOverlay.Auth) {
+			secrets[k] = v
+		}
+	}
+	if envOverlayFile != nil && envOverlayFile.Auth != nil {
+		for k, v := range config.CollectAuthSecrets(envOverlayFile.Auth) {
 			secrets[k] = v
 		}
 	}

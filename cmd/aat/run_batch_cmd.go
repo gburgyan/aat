@@ -66,6 +66,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		seed, _ := cmd.Flags().GetInt64("seed")
 		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
+		verboseAuth, _ := cmd.Flags().GetBool("verbose-auth")
 		envName := resolveEnvName(cmd)
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
@@ -88,6 +89,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 				LayerGroups:     layerGroups,
 				NoAutoOverrides: noAutoOverrides,
 				OASValidateMode: oasValidate,
+				VerboseAuth:     verboseAuth,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,
@@ -187,7 +189,12 @@ func executeBatch(ba *batchArgs) int {
 		out = io.Discard
 	}
 
-	res := batchCommand(context.Background(), ba, out)
+	ctx := context.Background()
+	if ba.VerboseAuth {
+		ctx = config.WithAuthVerbose(ctx, os.Stderr)
+	}
+
+	res := batchCommand(ctx, ba, out)
 
 	if ba.JSON {
 		if res.summary != nil {

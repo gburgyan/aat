@@ -43,13 +43,20 @@ func LoadEnvironmentFromDir(dir, name string) (*Environment, error) {
 	return LoadEnvironment(path)
 }
 
-// OverlayFile is a sparse YAML structure containing only overrides.
+// OverlayFile is a sparse YAML structure containing overrides and optional
+// transaction-level auth and headers. When Auth is set, it replaces the
+// environment auth for the entire run (all nodes), not just matched overrides.
+// When Headers is set, those headers are merged into every request.
 type OverlayFile struct {
-	Overrides []HostOverride `yaml:"overrides"`
+	Auth      *AuthConfig       `yaml:"auth,omitempty"`
+	Headers   map[string]string `yaml:"headers,omitempty"`
+	Overrides []HostOverride    `yaml:"overrides"`
 }
 
-// LoadOverlayFile reads a YAML overlay file and returns its overrides.
-func LoadOverlayFile(path string) ([]HostOverride, error) {
+// LoadOverlayFile reads a YAML overlay file and returns the parsed overlay.
+// The caller should check overlay.Auth for transaction-level auth and
+// overlay.Overrides for per-node overrides.
+func LoadOverlayFile(path string) (*OverlayFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading overlay file: %w", err)
@@ -66,7 +73,13 @@ func LoadOverlayFile(path string) ([]HostOverride, error) {
 		}
 	}
 
-	return overlay.Overrides, nil
+	if overlay.Auth != nil {
+		if errs := ValidateAuth(overlay.Auth); len(errs) > 0 {
+			return nil, fmt.Errorf("overlay auth validation failed:\n- %s", strings.Join(errs, "\n- "))
+		}
+	}
+
+	return &overlay, nil
 }
 
 // MergeOverrides appends overlay overrides to base overrides.
