@@ -87,3 +87,62 @@ func TestFindAutoOverrides_ReturnsNearest(t *testing.T) {
 	found := FindAutoOverrides()
 	assert.Equal(t, childOverride, found)
 }
+
+func TestFindAutoOverrides_NoDotFile(t *testing.T) {
+	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	overridePath := filepath.Join(dir, AutoOverridesFileNoDot)
+	require.NoError(t, os.WriteFile(overridePath, []byte("overrides:\n  - match: test\n    baseUrl: http://localhost:8080\n"), 0644))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	require.NoError(t, os.Chdir(dir))
+
+	found := FindAutoOverrides()
+	assert.Equal(t, overridePath, found)
+}
+
+func TestFindAutoOverrides_DotFileWinsOverNoDot(t *testing.T) {
+	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	dotPath := filepath.Join(dir, AutoOverridesFile)
+	noDotPath := filepath.Join(dir, AutoOverridesFileNoDot)
+	require.NoError(t, os.WriteFile(dotPath, []byte("overrides:\n  - match: dot\n    baseUrl: http://dot:8080\n"), 0644))
+	require.NoError(t, os.WriteFile(noDotPath, []byte("overrides:\n  - match: nodot\n    baseUrl: http://nodot:8080\n"), 0644))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	require.NoError(t, os.Chdir(dir))
+
+	found := FindAutoOverrides()
+	assert.Equal(t, dotPath, found, "dotfile should take precedence")
+}
+
+func TestFindAutoOverrides_NoDotInParent(t *testing.T) {
+	dir := t.TempDir()
+	dir, err := filepath.EvalSymlinks(dir)
+	require.NoError(t, err)
+
+	overridePath := filepath.Join(dir, AutoOverridesFileNoDot)
+	require.NoError(t, os.WriteFile(overridePath, []byte("overrides:\n  - match: test\n    baseUrl: http://localhost:8080\n"), 0644))
+
+	subDir := filepath.Join(dir, "sub", "deep")
+	require.NoError(t, os.MkdirAll(subDir, 0755))
+
+	origDir, err := os.Getwd()
+	require.NoError(t, err)
+	defer func() { _ = os.Chdir(origDir) }()
+
+	require.NoError(t, os.Chdir(subDir))
+
+	found := FindAutoOverrides()
+	assert.Equal(t, overridePath, found)
+}

@@ -36,7 +36,7 @@ func TestRunCommand_MissingEnv(t *testing.T) {
 		TemplatesPath: "x",
 	}, io.Discard, TerminalInfo{})
 	require.Error(t, res.err)
-	assert.Contains(t, res.err.Error(), "--env is required")
+	assert.Contains(t, res.err.Error(), "--env-config is required")
 }
 
 func TestRunCommand_MissingGraph(t *testing.T) {

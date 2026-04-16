@@ -543,11 +543,11 @@ func resolveOutputDir(flagChanged bool, flagValue, manifestDir string) string {
 	return "_output/runs"
 }
 
-// resolveEnvName extracts the --env-name flag value, falling back to the AAT_ENV_NAME
+// resolveEnvName extracts the --env flag value, falling back to the AAT_ENV_NAME
 // environment variable if the flag was not explicitly set.
 func resolveEnvName(cmd *cobra.Command) string {
-	if cmd.Flags().Changed("env-name") {
-		v, _ := cmd.Flags().GetString("env-name")
+	if cmd.Flags().Changed("env") {
+		v, _ := cmd.Flags().GetString("env")
 		return v
 	}
 	return os.Getenv("AAT_ENV_NAME")
@@ -571,8 +571,8 @@ func buildProjectOverrides(changed func(string) bool, getString func(string) str
 	if changed("graph") {
 		overrides.GraphPath = getString("graph")
 	}
-	if changed("env") {
-		overrides.EnvPath = getString("env")
+	if changed("env-config") {
+		overrides.EnvPath = getString("env-config")
 	}
 	if changed("templates") {
 		overrides.TemplatesPath = getString("templates")
@@ -631,7 +631,7 @@ type runContext struct {
 // and creates an LLM client. This is the expensive setup that should happen once.
 func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any)) (*runContext, error) {
 	if args.EnvPath == "" {
-		return nil, fmt.Errorf("--env is required")
+		return nil, fmt.Errorf("--env-config is required")
 	}
 	if args.GraphPath == "" {
 		return nil, fmt.Errorf("--graph is required")

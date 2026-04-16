@@ -30,7 +30,7 @@ func TestPromptCommand_MissingEnv(t *testing.T) {
 		TemplatesPath: "x",
 	}, strings.NewReader(""))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "--env is required")
+	assert.Contains(t, err.Error(), "--env-config is required")
 }
 
 func TestPromptCommand_MissingGraph(t *testing.T) {

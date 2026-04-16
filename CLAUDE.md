@@ -103,7 +103,7 @@ Used by: `aat validate`, `aat web`, `aat mcp serve`, `aat plan list`, `aat env l
 
 ### Multi-Environment Files
 
-The environment file supports two formats: **single-environment** (legacy, one `apiBaseUrl` per file) and **multi-environment** (multiple named environments with shared config, inheritance via `extends`, variable substitution via `vars`, and file splitting via `include`). Format is auto-detected by presence of the `environments` top-level key. Select an environment with `--env-name` flag, `AAT_ENV_NAME` env var, or `defaultEnvironment` in the manifest. Key types: `config.MultiEnvironmentFile`, `config.EnvironmentPartial`. Key functions: `config.LoadNamedEnvironment(path, envName)`, `config.ListEnvironments(path)`.
+The environment file supports two formats: **single-environment** (legacy, one `apiBaseUrl` per file) and **multi-environment** (multiple named environments with shared config, inheritance via `extends`, variable substitution via `vars`, and file splitting via `include`). Format is auto-detected by presence of the `environments` top-level key. Select an environment with `--env` flag, `AAT_ENV_NAME` env var, or `defaultEnvironment` in the manifest. Key types: `config.MultiEnvironmentFile`, `config.EnvironmentPartial`. Key functions: `config.LoadNamedEnvironment(path, envName)`, `config.ListEnvironments(path)`.
 
 ## Plans vs Workflows
 
@@ -162,7 +162,7 @@ make build
 # With manifest auto-discovery (from travelport/ directory):
 cd travelport/
 ./aat prompt "book a flight from rome to new york"
-./aat prompt --env-name qag "book a flight from rome to new york"
+./aat prompt --env qag "book a flight from rome to new york"
 ./aat run plan workflows/roundtrip-booking.yaml
 ./aat run batch
 ./aat run batch booking/
@@ -170,8 +170,8 @@ cd travelport/
 
 # Or with explicit paths (from repo root):
 ./aat prompt \
-  --env travelport/env.yaml \
-  --env-name pp \
+  --env-config travelport/env.yaml \
+  --env pp \
   --graph travelport/graph.yaml \
   --templates travelport/templates/ \
   --domain travelport/domain.yaml \
@@ -186,12 +186,12 @@ cd travelport/
 
 # Shared run flags (apply to both plan and batch):
 #   --output DIR       archive output directory (default: runs/)
-#   --env-name NAME    environment name (for multi-environment files)
+#   --env NAME         environment name (for multi-environment files)
 #   --json             machine-readable JSON summary to stdout
 #   --quiet            suppress progress, show final line only
 #   --override NODE=URL  route a node to a different URL (repeatable)
-#   --env-overlay FILE   path to overlay YAML with additional overrides
-#   --no-auto-overrides  disable auto-discovery of .aat-overrides.yaml
+#   --overlay FILE       path to overlay YAML with additional overrides
+#   --no-auto-overrides  disable auto-discovery of aat-overrides.yaml
 #   --retries N        max plan-level retries on failure (0 = no retries)
 ```
 
@@ -271,7 +271,7 @@ aat mcp serve [--manifest FILE] [--persona PERSONA] [--http] [--port PORT] [--lo
 aat plan list [--manifest FILE]
 
 # Environment management
-aat env list [--manifest FILE] [--env FILE]
+aat env list [--manifest FILE] [--env-config FILE]
 
 # Scaffold from OpenAPI spec
 aat generate --oas FILE [--output-graph graph.yaml] [--output-templates templates/]

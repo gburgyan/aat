@@ -25,8 +25,8 @@ var envListCmd = &cobra.Command{
 		if cmd.Flags().Changed("manifest") {
 			overrides.ExplicitManifest, _ = cmd.Flags().GetString("manifest")
 		}
-		if cmd.Flags().Changed("env") {
-			overrides.EnvPath, _ = cmd.Flags().GetString("env")
+		if cmd.Flags().Changed("env-config") {
+			overrides.EnvPath, _ = cmd.Flags().GetString("env-config")
 		}
 
 		resolved, err := config.ResolveProjectPaths(overrides)
@@ -42,12 +42,12 @@ func init() {
 	envCmd.AddCommand(envListCmd)
 
 	envListCmd.Flags().String("manifest", "", "path to aat-project.yaml or project directory")
-	envListCmd.Flags().String("env", "", "path to environment YAML file")
+	envListCmd.Flags().String("env-config", "", "path to environment YAML file")
 }
 
 func envListCommand(envPath string, out io.Writer) error {
 	if envPath == "" {
-		return fmt.Errorf("environment file path is required (--env flag or aat-project.yaml)")
+		return fmt.Errorf("environment file path is required (--env-config flag or aat-project.yaml)")
 	}
 
 	isMulti, err := config.IsMultiEnvFile(envPath)

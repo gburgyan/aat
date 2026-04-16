@@ -55,7 +55,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		jsonFlag, _ := cmd.Flags().GetBool("json")
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
-		envOverlay, _ := cmd.Flags().GetString("env-overlay")
+		envOverlay, _ := cmd.Flags().GetString("overlay")
 		parallel, _ := cmd.Flags().GetInt("parallel")
 		retries, _ := cmd.Flags().GetInt("retries")
 		layerFlags, _ := cmd.Flags().GetStringSlice("layer")

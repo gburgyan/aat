@@ -8,9 +8,14 @@ import (
 // AutoOverridesFile is the filename for auto-discovered local override dotfiles.
 const AutoOverridesFile = ".aat-overrides.yaml"
 
-// FindAutoOverrides searches for a .aat-overrides.yaml file starting from the
-// current working directory and walking up to parent directories. Returns the
-// path to the first file found, or an empty string if none is found.
+// AutoOverridesFileNoDot is the non-dotfile variant also accepted by auto-discovery.
+const AutoOverridesFileNoDot = "aat-overrides.yaml"
+
+// FindAutoOverrides searches for an overrides file starting from the current
+// working directory and walking up to parent directories. In each directory it
+// checks for .aat-overrides.yaml first, then aat-overrides.yaml (dotfile wins
+// if both exist). Returns the path to the first file found, or an empty string
+// if none is found.
 // Unlike FindManifest, absence is the normal case — no error on not-found.
 func FindAutoOverrides() string {
 	dir, err := os.Getwd()
@@ -19,9 +24,11 @@ func FindAutoOverrides() string {
 	}
 
 	for {
-		candidate := filepath.Join(dir, AutoOverridesFile)
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		for _, name := range []string{AutoOverridesFile, AutoOverridesFileNoDot} {
+			candidate := filepath.Join(dir, name)
+			if _, err := os.Stat(candidate); err == nil {
+				return candidate
+			}
 		}
 
 		parent := filepath.Dir(dir)

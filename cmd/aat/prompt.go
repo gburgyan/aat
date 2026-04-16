@@ -38,8 +38,8 @@ var promptCmd = &cobra.Command{
 		if cmd.Flags().Changed("graph") {
 			overrides.GraphPath, _ = cmd.Flags().GetString("graph")
 		}
-		if cmd.Flags().Changed("env") {
-			overrides.EnvPath, _ = cmd.Flags().GetString("env")
+		if cmd.Flags().Changed("env-config") {
+			overrides.EnvPath, _ = cmd.Flags().GetString("env-config")
 		}
 		if cmd.Flags().Changed("templates") {
 			overrides.TemplatesPath, _ = cmd.Flags().GetString("templates")
@@ -120,8 +120,8 @@ var promptCmd = &cobra.Command{
 
 func init() {
 	promptCmd.Flags().String("manifest", "", "path to aat-project.yaml or project directory")
-	promptCmd.Flags().String("env", "", "path to environment YAML file")
-	promptCmd.Flags().String("env-name", "", "environment name (for multi-environment files)")
+	promptCmd.Flags().String("env-config", "", "path to environment YAML file")
+	promptCmd.Flags().String("env", "", "environment name (for multi-environment files)")
 	promptCmd.Flags().String("graph", "", "path to graph YAML file")
 	promptCmd.Flags().String("templates", "", "path to templates directory")
 	promptCmd.Flags().String("domain", "", "path to domain knowledge YAML file")
@@ -163,7 +163,7 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 		return fmt.Errorf("prompt text is required (first positional argument)")
 	}
 	if args.EnvPath == "" {
-		return fmt.Errorf("--env is required")
+		return fmt.Errorf("--env-config is required")
 	}
 	if args.GraphPath == "" {
 		return fmt.Errorf("--graph is required")
