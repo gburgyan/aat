@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
@@ -96,12 +98,17 @@ func executeRun(ra *runArgs) int {
 		out = io.Discard
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	if ra.VerboseAuth {
 		ctx = config.WithAuthVerbose(ctx, os.Stderr)
 	}
 
 	res := runCommand(ctx, ra, out, ti)
+
+	if res.outcome == engine.OutcomeAborted {
+		fmt.Fprintln(os.Stderr, "aat: interrupted, writing partial results...")
+	}
 
 	// JSON output
 	if ra.JSON {
@@ -135,6 +142,8 @@ func executeRun(ra *runArgs) int {
 			_, _ = fmt.Fprintf(os.Stdout, "%s: %s%s\n", colorOutcome("FAILED", color), res.summary.Error, attemptSuffix)
 		case "error":
 			_, _ = fmt.Fprintf(os.Stdout, "%s: %s%s\n", colorOutcome("ERROR", color), res.summary.Error, attemptSuffix)
+		case "aborted":
+			_, _ = fmt.Fprintf(os.Stdout, "%s (%d/%d steps)%s\n", colorOutcome("ABORTED", color), res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps, attemptSuffix)
 		}
 		if res.archivePath != "" {
 			_, _ = fmt.Fprintf(os.Stdout, "Archive: %s\n", res.archivePath)

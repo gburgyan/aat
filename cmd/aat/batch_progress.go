@@ -135,6 +135,8 @@ func (o *BatchStreamObserver) OnRunComplete(result *engine.RunResult) {
 		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%s)%s ──\n", name, colorOutcome("FAILED", color), formatDuration(dur), counter)
 	case engine.OutcomeError:
 		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%s)%s ──\n", name, colorOutcome("ERROR", color), formatDuration(dur), counter)
+	case engine.OutcomeAborted:
+		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%s)%s ──\n", name, colorOutcome("ABORTED", color), formatDuration(dur), counter)
 	}
 }
 

@@ -147,9 +147,13 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	for i, step := range sorted {
 		select {
 		case <-ctx.Done():
-			cleanupResults := e.executeCleanupWithNotifications(ctx, cleanupStack, state)
+			// Use a detached context for cleanup so cleanup steps can complete
+			// even though the parent context is cancelled.
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cleanupCancel()
+			cleanupResults := e.executeCleanupWithNotifications(cleanupCtx, cleanupStack, state)
 			return &RunResult{
-				Outcome:          OutcomeError,
+				Outcome:          OutcomeAborted,
 				Steps:            stepResults,
 				CleanupResults:   cleanupResults,
 				Error:            fmt.Errorf("execution cancelled: %w", ctx.Err()),

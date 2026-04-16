@@ -19,6 +19,8 @@ const (
 	OutcomeFailed
 	// OutcomeError means execution was aborted due to an infrastructure error.
 	OutcomeError
+	// OutcomeAborted means execution was interrupted by the user (e.g. Ctrl+C).
+	OutcomeAborted
 )
 
 func (o Outcome) String() string {
@@ -29,6 +31,8 @@ func (o Outcome) String() string {
 		return "failed"
 	case OutcomeError:
 		return "error"
+	case OutcomeAborted:
+		return "aborted"
 	default:
 		return "unknown"
 	}

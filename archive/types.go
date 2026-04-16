@@ -230,11 +230,12 @@ type BatchRunEntry struct {
 
 // BatchResult captures the aggregate outcome of a batch.
 type BatchResult struct {
-	Outcome         string `json:"outcome"` // passed, failed, error
+	Outcome         string `json:"outcome"` // passed, failed, error, aborted
 	TotalRuns       int    `json:"totalRuns"`
 	PassedRuns      int    `json:"passedRuns"`
 	FailedRuns      int    `json:"failedRuns"`
 	ErrorRuns       int    `json:"errorRuns"`
+	AbortedRuns     int    `json:"abortedRuns,omitempty"`
 	SkippedRuns     int    `json:"skippedRuns,omitempty"`
 	TotalDurationMs int64  `json:"totalDurationMs"`
 }

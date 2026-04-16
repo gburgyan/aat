@@ -54,6 +54,8 @@ func colorOutcome(outcome string, enabled bool) string {
 		return colorBold + colorGreen + outcome + colorReset
 	case "FAILED", "ERROR":
 		return colorBold + colorRed + outcome + colorReset
+	case "ABORTED":
+		return colorBold + colorYellow + outcome + colorReset
 	case "SKIPPED":
 		return colorCyan + outcome + colorReset
 	default:

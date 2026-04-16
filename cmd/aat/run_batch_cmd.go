@@ -7,10 +7,12 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/gburgyan/aat/archive"
@@ -163,6 +165,7 @@ type BatchStats struct {
 	PassedPlans  int   `json:"passed_plans"`
 	FailedPlans  int   `json:"failed_plans"`
 	ErrorPlans   int   `json:"error_plans"`
+	AbortedPlans int   `json:"aborted_plans,omitempty"`
 	SkippedPlans int   `json:"skipped_plans,omitempty"`
 	DurationMs   int64 `json:"duration_ms"`
 }
@@ -189,12 +192,17 @@ func executeBatch(ba *batchArgs) int {
 		out = io.Discard
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 	if ba.VerboseAuth {
 		ctx = config.WithAuthVerbose(ctx, os.Stderr)
 	}
 
 	res := batchCommand(ctx, ba, out)
+
+	if res.summary != nil && res.summary.Outcome == "aborted" {
+		fmt.Fprintln(os.Stderr, "aat: interrupted, writing partial results...")
+	}
 
 	if ba.JSON {
 		if res.summary != nil {
@@ -229,6 +237,8 @@ func executeBatch(ba *batchArgs) int {
 				_, _ = fmt.Fprintf(os.Stdout, "%s: %s: %s%s\n", name, colorOutcome("FAILED", color), r.Error, attemptSuffix)
 			case "error":
 				_, _ = fmt.Fprintf(os.Stdout, "%s: %s: %s%s\n", name, colorOutcome("ERROR", color), r.Error, attemptSuffix)
+			case "aborted":
+				_, _ = fmt.Fprintf(os.Stdout, "%s: %s%s\n", name, colorOutcome("ABORTED", color), attemptSuffix)
 			case "skipped":
 				_, _ = fmt.Fprintf(os.Stdout, "%s: %s (duplicate of %s)\n", name, colorOutcome("SKIPPED", color), r.DuplicateOf)
 			}
@@ -240,6 +250,9 @@ func executeBatch(ba *batchArgs) int {
 		}
 		if res.summary.Summary.ErrorPlans > 0 {
 			_, _ = fmt.Fprintf(os.Stdout, ", %d %s", res.summary.Summary.ErrorPlans, colorOutcome("ERROR", color))
+		}
+		if res.summary.Summary.AbortedPlans > 0 {
+			_, _ = fmt.Fprintf(os.Stdout, ", %d %s", res.summary.Summary.AbortedPlans, colorOutcome("ABORTED", color))
 		}
 		if res.summary.Summary.SkippedPlans > 0 {
 			_, _ = fmt.Fprintf(os.Stdout, ", %d %s", res.summary.Summary.SkippedPlans, colorOutcome("SKIPPED", color))
@@ -265,6 +278,9 @@ func batchExitCode(res *batchResult) int {
 	}
 	if res.summary == nil {
 		return exitCodeInfra
+	}
+	if res.summary.Summary.AbortedPlans > 0 {
+		return 130
 	}
 	if res.summary.Summary.ErrorPlans > 0 {
 		return exitCodeInfra
@@ -479,6 +495,8 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			stats.PassedPlans++
 		case "failed":
 			stats.FailedPlans++
+		case "aborted":
+			stats.AbortedPlans++
 		case "skipped":
 			stats.SkippedPlans++
 		default:
@@ -487,7 +505,9 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	}
 
 	aggregateOutcome := "passed"
-	if stats.ErrorPlans > 0 {
+	if stats.AbortedPlans > 0 {
+		aggregateOutcome = "aborted"
+	} else if stats.ErrorPlans > 0 {
 		aggregateOutcome = "error"
 	} else if stats.FailedPlans > 0 {
 		aggregateOutcome = "failed"
@@ -511,6 +531,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			PassedRuns:      stats.PassedPlans,
 			FailedRuns:      stats.FailedPlans,
 			ErrorRuns:       stats.ErrorPlans,
+			AbortedRuns:     stats.AbortedPlans,
 			SkippedRuns:     stats.SkippedPlans,
 			TotalDurationMs: stats.DurationMs,
 		},
@@ -528,6 +549,9 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	}
 	if stats.ErrorPlans > 0 {
 		logf(", %d ERROR", stats.ErrorPlans)
+	}
+	if stats.AbortedPlans > 0 {
+		logf(", %d ABORTED", stats.AbortedPlans)
 	}
 	if stats.SkippedPlans > 0 {
 		logf(", %d SKIPPED", stats.SkippedPlans)
@@ -774,6 +798,8 @@ func formatBatchResultLine(displayName string, br BatchRunResult, color bool) st
 		return fmt.Sprintf("  %s  %s (%d steps, %s)", displayName, colorOutcome("FAILED", color), br.StepCount, dur)
 	case "error":
 		return fmt.Sprintf("  %s  %s: %s", displayName, colorOutcome("ERROR", color), br.Error)
+	case "aborted":
+		return fmt.Sprintf("  %s  %s (%d steps, %s)", displayName, colorOutcome("ABORTED", color), br.StepCount, dur)
 	case "skipped":
 		return fmt.Sprintf("  %s  %s (duplicate of %s)", displayName, colorOutcome("SKIPPED", color), br.DuplicateOf)
 	default:

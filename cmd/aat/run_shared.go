@@ -121,6 +121,8 @@ func exitCode(res *runResult) int {
 		return 1
 	case engine.OutcomeError:
 		return exitCodeInfra
+	case engine.OutcomeAborted:
+		return 130
 	default:
 		return 0
 	}
@@ -301,6 +303,8 @@ func printRunSummary(result *engine.RunResult, out io.Writer, ti TerminalInfo) {
 		_, _ = fmt.Fprintf(out, "%s: %s\n", colorOutcome("FAILED", color), outcomeMessage(result))
 	case engine.OutcomeError:
 		_, _ = fmt.Fprintf(out, "%s: %s\n", colorOutcome("ERROR", color), outcomeMessage(result))
+	case engine.OutcomeAborted:
+		_, _ = fmt.Fprintf(out, "%s (%d/%d steps, %s)\n", colorOutcome("ABORTED", color), len(result.Steps), total, totalDuration(result))
 	}
 	if oasWarnings > 0 {
 		_, _ = fmt.Fprintf(out, "OAS: %s\n", colorize(fmt.Sprintf("%d warning(s)", oasWarnings), colorYellow, color))
@@ -465,7 +469,7 @@ func loadAndRunPlanWithRetries(ctx context.Context, rctx *runContext, planPath, 
 		select {
 		case <-ctx.Done():
 			return &runResult{
-				outcome:  engine.OutcomeError,
+				outcome:  engine.OutcomeAborted,
 				err:      fmt.Errorf("execution cancelled: %w", ctx.Err()),
 				attempts: attempt - 1,
 			}
@@ -481,7 +485,7 @@ func loadAndRunPlanWithRetries(ctx context.Context, rctx *runContext, planPath, 
 			select {
 			case <-ctx.Done():
 				return &runResult{
-					outcome:  engine.OutcomeError,
+					outcome:  engine.OutcomeAborted,
 					err:      fmt.Errorf("execution cancelled during retry delay: %w", ctx.Err()),
 					attempts: attempt - 1,
 				}

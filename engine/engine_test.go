@@ -1172,7 +1172,7 @@ func TestEngine_Run_CancelledContext(t *testing.T) {
 
 	result := eng.Run(ctx, p)
 
-	assert.Equal(t, OutcomeError, result.Outcome)
+	assert.Equal(t, OutcomeAborted, result.Outcome)
 	require.Error(t, result.Error)
 	assert.ErrorIs(t, result.Error, context.Canceled)
 	assert.Contains(t, result.Error.Error(), "cancelled")
@@ -1249,10 +1249,10 @@ func TestEngine_Run_CleanupRunsDespiteCancellation(t *testing.T) {
 
 	result := eng.Run(ctx, p)
 
-	assert.Equal(t, OutcomeError, result.Outcome)
+	assert.Equal(t, OutcomeAborted, result.Outcome)
 	assert.ErrorIs(t, result.Error, context.Canceled)
 	// Cleanup stack was empty (no steps executed), so nothing to clean up in this case
-	// but the mechanism is verified: context.WithoutCancel is used in ExecuteAll
+	// but the mechanism is verified: cleanup uses a detached context
 }
 
 func TestEngine_Run_StepAliasing(t *testing.T) {

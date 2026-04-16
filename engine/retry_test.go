@@ -358,7 +358,7 @@ func TestRetry_CancelledContextReturnsImmediately(t *testing.T) {
 
 	result := eng.Run(ctx, p)
 
-	assert.Equal(t, OutcomeError, result.Outcome)
+	assert.Equal(t, OutcomeAborted, result.Outcome)
 	assert.ErrorIs(t, result.Error, context.Canceled)
 	// The main loop should catch cancellation before even executing the step
 	assert.Equal(t, int32(0), atomic.LoadInt32(&callCount))
