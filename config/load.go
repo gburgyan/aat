@@ -47,10 +47,13 @@ func LoadEnvironmentFromDir(dir, name string) (*Environment, error) {
 // transaction-level auth and headers. When Auth is set, it replaces the
 // environment auth for the entire run (all nodes), not just matched overrides.
 // When Headers is set, those headers are merged into every request.
+// When Environment is set, it selects the named environment for the run unless
+// the CLI --env flag or AAT_ENV_NAME env var explicitly chose one.
 type OverlayFile struct {
-	Auth      *AuthConfig       `yaml:"auth,omitempty"`
-	Headers   map[string]string `yaml:"headers,omitempty"`
-	Overrides []HostOverride    `yaml:"overrides"`
+	Environment string            `yaml:"environment,omitempty"`
+	Auth        *AuthConfig       `yaml:"auth,omitempty"`
+	Headers     map[string]string `yaml:"headers,omitempty"`
+	Overrides   []HostOverride    `yaml:"overrides"`
 }
 
 // LoadOverlayFile reads a YAML overlay file and returns the parsed overlay.

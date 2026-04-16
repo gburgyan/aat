@@ -95,6 +95,17 @@ var promptCmd = &cobra.Command{
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
 		envName := resolveEnvName(cmd)
 
+		if envName == "" {
+			overlayEnv, overlaySrc, err := resolveOverlayEnvName("", noAutoOverrides)
+			if err != nil {
+				return fmt.Errorf("resolving overlay environment: %w", err)
+			}
+			if overlayEnv != "" {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "aat: using environment %q from overlay %s\n", overlayEnv, overlaySrc)
+				envName = overlayEnv
+			}
+		}
+
 		pa := &promptArgs{
 			Prompt:            promptText,
 			EnvPath:           resolved.EnvPath,

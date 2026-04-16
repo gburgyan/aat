@@ -146,3 +146,75 @@ func TestFindAutoOverrides_NoDotInParent(t *testing.T) {
 	found := FindAutoOverrides()
 	assert.Equal(t, overridePath, found)
 }
+
+func TestPeekOverlayEnvironment_Present(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("environment: dev\noverrides:\n  - match: '*'\n    baseUrl: http://localhost:8080\n"), 0644))
+
+	env, err := PeekOverlayEnvironment(path)
+	require.NoError(t, err)
+	assert.Equal(t, "dev", env)
+}
+
+func TestPeekOverlayEnvironment_Absent(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("overrides:\n  - match: '*'\n    baseUrl: http://localhost:8080\n"), 0644))
+
+	env, err := PeekOverlayEnvironment(path)
+	require.NoError(t, err)
+	assert.Empty(t, env)
+}
+
+func TestPeekOverlayEnvironment_EmptyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(""), 0644))
+
+	env, err := PeekOverlayEnvironment(path)
+	require.NoError(t, err)
+	assert.Empty(t, env)
+}
+
+func TestPeekOverlayEnvironment_IgnoresOtherFields(t *testing.T) {
+	// PeekOverlayEnvironment should not run full validation — even an overlay
+	// with fields that would fail LoadOverlayFile (e.g. missing match) should
+	// still return the environment.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("environment: qa\noverrides:\n  - baseUrl: http://localhost\n"), 0644))
+
+	env, err := PeekOverlayEnvironment(path)
+	require.NoError(t, err)
+	assert.Equal(t, "qa", env)
+}
+
+func TestPeekOverlayEnvironment_MissingFile(t *testing.T) {
+	env, err := PeekOverlayEnvironment(filepath.Join(t.TempDir(), "nope.yaml"))
+	assert.Error(t, err)
+	assert.Empty(t, env)
+}
+
+func TestPeekOverlayEnvironment_MalformedYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("environment: [unclosed"), 0644))
+
+	_, err := PeekOverlayEnvironment(path)
+	assert.Error(t, err)
+}
+
+func TestLoadOverlayFile_WithEnvironment(t *testing.T) {
+	// Full load should round-trip the environment field alongside existing fields.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	require.NoError(t, os.WriteFile(path, []byte("environment: staging\nheaders:\n  X-Debug: local\noverrides:\n  - match: '*'\n    baseUrl: http://localhost:8080\n"), 0644))
+
+	overlay, err := LoadOverlayFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "staging", overlay.Environment)
+	assert.Equal(t, "local", overlay.Headers["X-Debug"])
+	require.Len(t, overlay.Overrides, 1)
+	assert.Equal(t, "*", overlay.Overrides[0].Match)
+}

@@ -566,6 +566,34 @@ func resolveEnvNameWithDefault(envName, manifestDefault string) string {
 	return manifestDefault
 }
 
+// resolveOverlayEnvName extracts an environment name from overlay files. Explicit
+// --overlay wins over auto-discovered .aat-overrides.yaml. Returns (envName,
+// sourcePath) for logging, or ("", "") when neither overlay sets the field or
+// auto-discovery is disabled and no explicit overlay is supplied.
+func resolveOverlayEnvName(explicitOverlayPath string, noAutoOverrides bool) (string, string, error) {
+	if explicitOverlayPath != "" {
+		env, err := config.PeekOverlayEnvironment(explicitOverlayPath)
+		if err != nil {
+			return "", "", err
+		}
+		if env != "" {
+			return env, explicitOverlayPath, nil
+		}
+	}
+	if !noAutoOverrides {
+		if p := config.FindAutoOverrides(); p != "" {
+			env, err := config.PeekOverlayEnvironment(p)
+			if err != nil {
+				return "", "", err
+			}
+			if env != "" {
+				return env, p, nil
+			}
+		}
+	}
+	return "", "", nil
+}
+
 // buildProjectOverrides constructs config.ProjectPaths from explicitly-set cobra flags.
 func buildProjectOverrides(changed func(string) bool, getString func(string) string) config.ProjectPaths {
 	overrides := config.ProjectPaths{}

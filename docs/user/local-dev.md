@@ -128,7 +128,20 @@ overrides:
     baseUrl: http://localhost:3000
 ```
 
-Top-level `auth`, `headers`, and `overrides` can all be combined in a single file. See [Environments: Overlay Files](environments.md#overlay-files) for the full reference.
+### Target a different backend when running locally
+
+If your local service talks to a different backend than the project default (e.g. the project defaults to `pp` pre-prod, but your locally-running service hits `dev` backend resources), name the backend in the overlay:
+
+```yaml
+environment: dev             # selects the dev env from env.yaml
+overrides:
+  - match: "*"
+    baseUrl: http://localhost:8080
+```
+
+Now `aat run plan ...` picks up the `dev` environment automatically whenever this overlay is active. Passing `--env pp` on the command line still wins, so the project default is never hidden from you.
+
+Top-level `environment`, `auth`, `headers`, and `overrides` can all be combined in a single file. See [Environments: Overlay Files](environments.md#overlay-files) for the full reference.
 
 ## How It Works
 

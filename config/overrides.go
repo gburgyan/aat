@@ -1,8 +1,11 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 // AutoOverridesFile is the filename for auto-discovered local override dotfiles.
@@ -37,4 +40,21 @@ func FindAutoOverrides() string {
 		}
 		dir = parent
 	}
+}
+
+// PeekOverlayEnvironment reads only the `environment` field from an overlay
+// file without running full validation. Returns "" if the field is absent.
+// Used to resolve env-name precedence before the environment is loaded.
+func PeekOverlayEnvironment(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("reading overlay file: %w", err)
+	}
+	var stub struct {
+		Environment string `yaml:"environment"`
+	}
+	if err := yaml.Unmarshal(data, &stub); err != nil {
+		return "", fmt.Errorf("parsing overlay YAML: %w", err)
+	}
+	return stub.Environment, nil
 }

@@ -45,6 +45,17 @@ var runPlanCmd = &cobra.Command{
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
 		verboseAuth, _ := cmd.Flags().GetBool("verbose-auth")
 
+		if envName == "" {
+			overlayEnv, overlaySrc, err := resolveOverlayEnvName(envOverlay, noAutoOverrides)
+			if err != nil {
+				return fmt.Errorf("resolving overlay environment: %w", err)
+			}
+			if overlayEnv != "" {
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "aat: using environment %q from overlay %s\n", overlayEnv, overlaySrc)
+				envName = overlayEnv
+			}
+		}
+
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
 		ra := &runArgs{

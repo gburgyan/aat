@@ -579,6 +579,28 @@ overrides:
     baseUrl: http://localhost:8080
 ```
 
+### Selecting the Environment
+
+A top-level `environment:` field in an overlay selects which named environment the run should target. This is primarily useful for local development: if your overlay routes traffic to a locally-running service, and that local service talks to a different backend than the project default, the overlay can name the backend so you don't have to pass `--env` every time:
+
+```yaml
+# .aat-overrides.yaml — local-dev overlay
+environment: dev             # backend the local service talks to
+overrides:
+  - match: "*"
+    baseUrl: http://localhost:8080
+```
+
+Environment-name priority (highest to lowest):
+
+1. `--env` CLI flag
+2. `AAT_ENV_NAME` environment variable
+3. `--overlay` file `environment:` — explicit overlay
+4. `.aat-overrides.yaml` `environment:` — auto-discovered overlay
+5. `defaultEnvironment` from the project manifest
+
+Explicit CLI choices always win, so the overlay's `environment:` behaves as a smart default — it kicks in when no env is specified, and is silently deferred when one is. Combine with `--no-auto-overrides` to skip auto-discovery entirely.
+
 ### Combining Auth, Headers, and Overrides
 
 All three sections can appear in a single overlay file:
