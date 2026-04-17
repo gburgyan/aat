@@ -51,9 +51,15 @@ type MechanicalResult struct {
 // It returns true/false or an error if the expression is invalid.
 type PredicateEvalFunc func(expr string, context map[string]any) (bool, error)
 
+// SchemaCheckFunc evaluates a schema assertion. Callers provide this to surface
+// OAS response validation (already computed elsewhere) as an assertion outcome.
+// Return a result with Skipped=true when schema context is unavailable.
+type SchemaCheckFunc func(a MechanicalAssertion) AssertionResult
+
 // RunMechanical evaluates all mechanical assertions against a response.
 // It returns an aggregate result indicating whether all assertions passed.
-func RunMechanical(statusCode int, body []byte, assertions []MechanicalAssertion, predicateEval PredicateEvalFunc) *MechanicalResult {
+// schemaCheck may be nil; when nil, schema assertions return Skipped.
+func RunMechanical(statusCode int, body []byte, assertions []MechanicalAssertion, predicateEval PredicateEvalFunc, schemaCheck SchemaCheckFunc) *MechanicalResult {
 	result := &MechanicalResult{Passed: true}
 
 	for _, a := range assertions {
@@ -62,7 +68,7 @@ func RunMechanical(statusCode int, body []byte, assertions []MechanicalAssertion
 		case AssertStatus:
 			ar = checkStatus(statusCode, a)
 		case AssertSchema:
-			ar = checkSchema(a)
+			ar = checkSchema(a, schemaCheck)
 		case AssertFieldExists:
 			ar = checkFieldExists(body, a)
 		case AssertFieldEquals:
@@ -114,15 +120,22 @@ func checkStatus(statusCode int, a MechanicalAssertion) AssertionResult {
 	return ar
 }
 
-// checkSchema is a stub for Stage 1 — always returns passed with a not-yet-implemented message.
-// Skipped is true so archive consumers can distinguish "passed" from "not evaluated".
-func checkSchema(a MechanicalAssertion) AssertionResult {
-	return AssertionResult{
-		Type:    AssertSchema,
-		Passed:  true,
-		Skipped: true,
-		Message: "schema validation not yet implemented",
+// checkSchema delegates to the caller-provided SchemaCheckFunc, which typically
+// surfaces OAS response validation results. When no callback is available, the
+// assertion is reported as Skipped so archive consumers can distinguish
+// "passed" from "not evaluated".
+func checkSchema(a MechanicalAssertion, schemaCheck SchemaCheckFunc) AssertionResult {
+	if schemaCheck == nil {
+		return AssertionResult{
+			Type:    AssertSchema,
+			Passed:  true,
+			Skipped: true,
+			Message: "schema validation unavailable (no OAS context)",
+		}
 	}
+	ar := schemaCheck(a)
+	ar.Type = AssertSchema
+	return ar
 }
 
 // checkFieldExists verifies that a field exists and is not null in the response body.

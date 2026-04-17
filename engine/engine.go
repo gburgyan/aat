@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
@@ -169,6 +170,13 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				Steps:            stepResults,
 				Error:            fmt.Errorf("node %q not found in graph", step.Node),
 				InstantiatedPlan: instantiatedPlan,
+			}
+		}
+
+		// Apply overlay expectFailure when the plan step doesn't declare one.
+		if step.ExpectFailure == nil {
+			if _, ef := e.router.ResolveValueOverride(step.Node); ef != nil {
+				step.ExpectFailure = ef
 			}
 		}
 
@@ -347,6 +355,12 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		}
 	}
 
+	// Overlay value overrides win over plan/graph-resolved values.
+	overlayValues, _ := e.router.ResolveValueOverride(node.Name)
+	for k, v := range overlayValues {
+		inputs[k] = v
+	}
+
 	// Store resolved inputs so later steps can reference them via fromInput
 	state.StoreInputs(sid, inputs)
 
@@ -385,6 +399,12 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 	originalPath := req.Path
 	if rewrite != nil {
 		req.Path = adapter.RewritePath(req.Path, rewrite)
+	}
+
+	// Raw body overrides the adapter-built body after template substitution,
+	// letting mutations inject malformed payloads.
+	if step.RawBody != "" {
+		req.Body = []byte(step.RawBody)
 	}
 
 	// Execute
@@ -457,6 +477,16 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		}
 	}
 
+	// OAS schema validation runs before mechanical assertions so that the
+	// schema assertion type can surface its results.
+	if e.oasCache != nil && node.OAS != nil && req != nil && resp != nil {
+		result.OASValidation = oas.ValidateStep(
+			node, e.graphOAS, e.oasCache,
+			req.Method, req.Path, req.Headers, req.Body,
+			resp.StatusCode, resp.Headers, resp.Body,
+		)
+	}
+
 	// Run mechanical assertions if configured.
 	// Assertions with Raw=true evaluate against the raw HTTP response body.
 	// Normal assertions evaluate against serialized extracted outputs when
@@ -478,10 +508,12 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 			}
 		}
 
+		schemaCheck := buildSchemaCheck(result.OASValidation)
+
 		merged := &validate.MechanicalResult{Passed: true}
 		if len(normalAssertions) > 0 {
 			nr := validate.RunMechanical(resp.StatusCode, normalBody,
-				convertAssertions(normalAssertions), plan.EvalPredicate)
+				convertAssertions(normalAssertions), plan.EvalPredicate, schemaCheck)
 			merged.Results = append(merged.Results, nr.Results...)
 			if !nr.Passed {
 				merged.Passed = false
@@ -489,7 +521,7 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		}
 		if len(rawAssertions) > 0 {
 			rr := validate.RunMechanical(resp.StatusCode, resp.Body,
-				convertAssertions(rawAssertions), plan.EvalPredicate)
+				convertAssertions(rawAssertions), plan.EvalPredicate, schemaCheck)
 			merged.Results = append(merged.Results, rr.Results...)
 			if !rr.Passed {
 				merged.Passed = false
@@ -498,16 +530,47 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		result.Validation = merged
 	}
 
-	// OAS schema validation
-	if e.oasCache != nil && node.OAS != nil && req != nil && resp != nil {
-		result.OASValidation = oas.ValidateStep(
-			node, e.graphOAS, e.oasCache,
-			req.Method, req.Path, req.Headers, req.Body,
-			resp.StatusCode, resp.Headers, resp.Body,
-		)
-	}
-
 	return result
+}
+
+// buildSchemaCheck returns a SchemaCheckFunc that reports the OAS response
+// validation result as a schema assertion outcome. Returns nil when no OAS
+// validation is available so checkSchema can mark the assertion Skipped.
+func buildSchemaCheck(v *oas.ValidationResult) validate.SchemaCheckFunc {
+	if v == nil {
+		return nil
+	}
+	return func(a validate.MechanicalAssertion) validate.AssertionResult {
+		ar := validate.AssertionResult{}
+		if v.Skipped {
+			ar.Passed = true
+			ar.Skipped = true
+			ar.Message = "schema validation skipped: " + v.SkipReason
+			return ar
+		}
+		if v.Response == nil {
+			ar.Passed = true
+			ar.Skipped = true
+			ar.Message = "schema validation skipped: no response body validated"
+			return ar
+		}
+		if v.Response.Valid {
+			ar.Passed = true
+			ar.Message = "response matches OAS schema"
+			return ar
+		}
+		ar.Passed = false
+		msgs := make([]string, 0, len(v.Response.Errors))
+		for _, e := range v.Response.Errors {
+			if e.Path != "" {
+				msgs = append(msgs, e.Path+": "+e.Message)
+			} else {
+				msgs = append(msgs, e.Message)
+			}
+		}
+		ar.Message = "response does not match OAS schema: " + strings.Join(msgs, "; ")
+		return ar
+	}
 }
 
 // buildResolveContext creates a ResolveContext from the engine's configuration.

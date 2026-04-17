@@ -69,6 +69,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
 		verboseAuth, _ := cmd.Flags().GetBool("verbose-auth")
+		noMutations, _ := cmd.Flags().GetBool("no-mutations")
 		envName := resolveEnvName(cmd)
 
 		if envName == "" {
@@ -103,6 +104,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 				NoAutoOverrides: noAutoOverrides,
 				OASValidateMode: oasValidate,
 				VerboseAuth:     verboseAuth,
+				SkipMutations:   noMutations,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,

@@ -70,10 +70,8 @@ func LoadOverlayFile(path string) (*OverlayFile, error) {
 		return nil, fmt.Errorf("parsing overlay YAML: %w", err)
 	}
 
-	for i, ov := range overlay.Overrides {
-		if ov.Match == "" {
-			return nil, fmt.Errorf("overlay override %d: match is required", i)
-		}
+	if errs := validateOverrides(overlay.Overrides); len(errs) > 0 {
+		return nil, fmt.Errorf("overlay overrides validation failed:\n- %s", strings.Join(errs, "\n- "))
 	}
 
 	if overlay.Auth != nil {
@@ -173,6 +171,16 @@ func validateOverrides(overrides []HostOverride) []string {
 		if ov.Auth != nil {
 			for _, e := range ValidateAuth(ov.Auth) {
 				errs = append(errs, fmt.Sprintf("overrides[%d]: %s", i, e))
+			}
+		}
+		if ov.ExpectFailure != nil {
+			if len(ov.ExpectFailure.Status) == 0 {
+				errs = append(errs, fmt.Sprintf("overrides[%d]: expectFailure must have at least one status", i))
+			}
+			for _, code := range ov.ExpectFailure.Status {
+				if code < 400 {
+					errs = append(errs, fmt.Sprintf("overrides[%d]: expectFailure status %d must be >= 400", i, code))
+				}
 			}
 		}
 	}

@@ -331,6 +331,7 @@ Assertions live under `assertions.mechanical` on each step.
 | `fieldExists` | `path` | JSON path exists in response |
 | `fieldEquals` | `path`, `value` | JSON path value matches expected |
 | `predicate` | `expr` | Boolean expression (e.g., `status >= 200 && status < 300`) |
+| `schema` | — | Validate response body against the node's OAS response schema. Requires the project to have OAS specs configured on its graph nodes; otherwise the assertion is reported as `skipped`. |
 
 ### Cleanup
 
@@ -345,6 +346,181 @@ cleanup:
 ```
 
 Cross-ref: [Plans and Recipes](plans.md)
+
+## Depth and Negative Testing Primitives
+
+AAT exposes three primitives for authoring per-endpoint error-case suites. All
+compose with the normal plan/run pipeline — no separate CLI surface. You, the
+agent, compose them into plans; AAT just runs them.
+
+### 1. `expectFailure` on a step
+
+Declare that failure is the expected outcome. The step passes when the response
+status matches one of the listed codes and fails if a 2xx is returned. Retries
+are skipped — the first response wins. Cleanup still runs.
+
+```yaml
+- node: createOrder
+  values:
+    productId: "NONEXISTENT"
+  expectFailure:
+    status: [400, 404]
+    description: "Unknown product should be rejected"
+```
+
+All `expectFailure.status` entries must be `>= 400`. Outputs are not stored on
+an expected-failure step (the error response has nothing meaningful downstream).
+
+### 2. `mutations:` — sibling steps for negative variants
+
+A `mutations:` block on a step expands at plan instantiation into one extra
+sibling step per entry. Each sibling inherits the parent's `dependsOn`,
+`selections`, and `values`, applies its own `set` overrides, and declares its
+own `expectStatus`. The parent step stays in place as the happy-path run.
+
+```yaml
+- id: happy
+  node: createBooking
+  dependsOn: [setup]
+  values: { lastName: "Smith", age: 30 }
+  assertions:
+    mechanical:
+      - { type: status, expect: 200 }
+      - { type: schema }              # validate response body against OAS
+  mutations:
+    - name: empty-lastName
+      set: { lastName: "" }
+      expectStatus: [400]
+    - name: negative-age
+      set: { age: -1 }
+      expectStatus: [400, 422]
+    - name: malformed-body
+      rawBody: '{"oops":'             # bypasses template substitution entirely
+      expectStatus: [400]
+```
+
+What happens at runtime:
+
+- Prereq chain (`setup`) runs once.
+- `happy` runs; if it returns 200 with a valid schema, it passes.
+- Each mutation runs as an independent sibling with id `happy--<name>` (here:
+  `happy--empty-lastName`, `happy--negative-age`, `happy--malformed-body`).
+- Each sibling produces its own archive entry, so CI output cleanly reports
+  which variants passed.
+
+| Mutation field | Required | Description |
+|----------------|----------|-------------|
+| `name` | yes | Unique within the step. Becomes the id suffix. |
+| `description` | no | Carried into the sibling's `expectFailure.description`. |
+| `set` | no* | Map of input name → value. Overrides parent values. |
+| `rawBody` | no* | Raw request body string. Overwrites the adapter-built body after template substitution. Use for malformed payloads. |
+| `expectStatus` | yes | List of acceptable failure status codes (each `>= 400`). |
+
+*At least one of `set` or `rawBody` must be provided.
+
+**Shared vs. isolated prereqs.** By default the prereq chain (anything the
+parent step depends on, transitively) runs *once* and every mutation sibling
+references its outputs. That's correct for APIs that reject bad input before
+touching state.
+
+For stateful APIs — single-use tokens, consumable inventory, the happy path
+committing a resource the mutations would then collide with — add
+`mutationScope: isolated` on the parent step:
+
+```yaml
+- id: addItem
+  node: addItem
+  dependsOn: [createCart]
+  mutationScope: isolated
+  values:
+    cartId: { from: createCart.cartId }
+    productId: "P1"
+  mutations: [...]
+```
+
+In isolated scope, AAT deep-clones the entire transitive prereq closure once
+per mutation. Cloned step ids are `<origId>__<mutationName>`; all
+`dependsOn` / `from` / `fromInput` references inside the clone subgraph
+(including the mutation sibling) are rewritten to point at the clones, so each
+mutation sees its own fresh state. Graph-level `cleanup:` pairing fires per
+clone automatically.
+
+Use `shared` (default) when prereqs are cheap and side-effect-free. Use
+`isolated` when a mutation's outcome depends on not inheriting state from
+earlier runs. Only `""`, `"shared"`, or `"isolated"` are accepted.
+
+Validation rules (enforced at instantiation):
+
+- Mutation names are unique within a step.
+- `expectStatus` is non-empty and every entry is `>= 400`.
+- `set` or `rawBody` (or both) must be present.
+- `mutationScope` is `""`, `"shared"`, or `"isolated"`, and only allowed on steps that declare `mutations:`.
+- Isolated-mutation clone ids (`<origId>__<mutationName>`) must not collide with pre-existing step ids in the plan.
+
+**Runtime skip:** `aat run plan <plan> --no-mutations` (or the same flag on
+`aat run batch`) strips every `mutations:` block in memory before
+instantiation, so the run exercises only the happy path plus its prereq
+chain. Useful for CI smoke tests and local iteration — especially with
+isolated mutations where the full negative suite re-runs the prereq chain
+per mutation and can be expensive.
+
+### 3. `rawBody` on a step (standalone)
+
+For one-off malformed-payload tests without a `mutations:` block, set `rawBody`
+directly on a step. When non-empty, it replaces the adapter-built request body
+at execution time, bypassing template placeholder substitution.
+
+```yaml
+- node: createBooking
+  rawBody: '{"this": "is", "not": valid JSON'
+  expectFailure:
+    status: [400]
+```
+
+### 4. Overlay value and `expectFailure` overrides
+
+Overlay files (`.aat-overrides.yaml`, `--env-overlay`, or `env.yaml`
+`overrides:`) can override individual input values and declare expected
+failure on matched nodes — without editing the plan. This is the primitive for
+CI-driven negative suites, local debugging, and rerunning an existing plan as
+a depth test.
+
+```yaml
+# .aat-overrides.yaml — run an existing plan as a negative test
+overrides:
+  - match: createBooking
+    values:
+      lastName: ""
+      age: -1
+    expectFailure:
+      status: [400]
+```
+
+Semantics:
+
+- `values:` merge into the resolved inputs map at step execution, overwriting
+  plan-supplied values. Precedence: overlay values > plan step values > graph
+  defaults.
+- `expectFailure:` is applied to any step whose node matches `match`, but only
+  when the step's plan doesn't already declare its own `expectFailure`.
+- Match resolution: exact matches win over glob matches on conflicting keys.
+
+### Patterns You'll Use
+
+**Depth test an endpoint that needs setup state:** write a plan whose terminal
+step targets the endpoint under test, with a `mutations:` block covering the
+negative cases. The prereq chain runs once; each mutation runs in isolation.
+
+**Turn an existing happy-path plan into a negative test without touching it:**
+drop an overlay file with `values:` and `expectFailure:` on the target node.
+Useful for local debugging and for layering error cases into a CI matrix.
+
+**Validate response shapes:** add `- type: schema` to the step's mechanical
+assertions. Requires OAS specs wired into the graph (see `OASRef` on nodes).
+
+**Mix happy-path and error cases in one archive:** combine `mutations:` with
+schema assertions on the parent. The archive captures the happy-path step, the
+schema validation, and every mutation sibling as separate entries.
 
 ## Workflow Schema
 
@@ -547,6 +723,27 @@ The archive is the primary debugging artifact. Read it to understand what happen
 ```
 
 Sensitive headers (Authorization, X-API-Key, Cookie, etc.) are redacted to `"[REDACTED]"`. Request and response bodies are embedded JSON.
+
+Mutation-expanded steps use the id format `<parentId>--<mutationName>` (e.g.,
+`createBooking--empty-lastName`). Each mutation sibling appears as a separate
+`StepRecord`, with `expectFailure` set and the parent's `dependsOn` inherited.
+
+When an OAS spec is configured on the step's node, the archive's `StepRecord`
+also carries an `oasValidation` object. If the step has a `type: schema`
+assertion, the same OAS response-validation result is surfaced as an entry in
+`validation.results`. Shape:
+
+```json
+"oasValidation": {
+  "operationId": "createBooking",
+  "skipped": false,
+  "skipReason": "only present when skipped",
+  "request":  { "valid": true, "errors": [], "compilationWarnings": [] },
+  "response": { "valid": true, "errors": [], "compilationWarnings": [] }
+}
+```
+
+Each `errors[]` entry is `{ "path": "/field", "message": "..." }`.
 
 ### Summary Schema (summary.json)
 

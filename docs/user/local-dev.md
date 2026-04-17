@@ -128,6 +128,28 @@ overrides:
     baseUrl: http://localhost:3000
 ```
 
+### Force a negative case for depth testing
+
+Overlays can mutate individual input values and declare `expectFailure` for
+matched nodes. This is handy when you want to rerun a normal plan as a
+negative test — no edits to the plan itself:
+
+```yaml
+overrides:
+  - match: createOrder
+    values:
+      productId: ""       # force a validation error
+    expectFailure:
+      status: [400]
+```
+
+With that overlay active, the existing plan runs as-is, but `createOrder`
+receives an empty `productId` and the step passes only if the server
+responds with 400. See [Environments: Input-Value and Expected-Failure
+Overrides](environments.md#input-value-and-expected-failure-overrides) for
+precedence rules and [Plans: Mutations](plans.md#mutations-codified-negative-suites)
+for codifying a whole negative suite in the plan itself.
+
 ### Target a different backend when running locally
 
 If your local service talks to a different backend than the project default (e.g. the project defaults to `pp` pre-prod, but your locally-running service hits `dev` backend resources), name the backend in the overlay:

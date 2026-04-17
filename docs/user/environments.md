@@ -514,7 +514,7 @@ An overlay file is a sparse YAML document that merges with the base environment.
 
 ### Per-Node Overrides
 
-The `overrides:` section works the same as in an environment file — each entry matches node names by glob and can override `baseUrl`, `auth`, `headers`, and `pathRewrite` for matched nodes only:
+The `overrides:` section works the same as in an environment file — each entry matches node names by glob and can override `baseUrl`, `auth`, `headers`, `pathRewrite`, input `values`, and `expectFailure` for matched nodes only:
 
 ```yaml
 # local-routing.yaml
@@ -526,6 +526,33 @@ overrides:
 ```
 
 When both the base environment and an overlay define overrides for the same match pattern, the overlay's entry appears later in the list and takes precedence (last match wins).
+
+### Input-Value and Expected-Failure Overrides
+
+An override can also inject specific input values and declare that a matched
+step is *expected* to fail. This is the primitive for authoring depth/error
+tests without editing a plan — run the existing happy-path plan, but an
+overlay forces the targeted node to receive a malformed value and pass only
+when it fails with the declared status:
+
+```yaml
+overrides:
+  - match: createBooking
+    values:
+      passengerAge: -1
+      lastName: ""
+    expectFailure:
+      status: [400, 422]
+      description: "invalid payload"
+```
+
+Semantics:
+
+- `values:` merge into the resolved inputs map at step execution time, overwriting plan-supplied values. Precedence: overlay values > plan step values > graph defaults.
+- `expectFailure:` applies to matched steps only when the plan step doesn't already declare its own `expectFailure`. Status codes must all be `>= 400`.
+- Match precedence: exact matches win over glob matches on key conflicts. For `expectFailure`, the first exact match wins; if no exact match, the first glob match wins.
+
+Both fields can be combined with `baseUrl`, `auth`, `headers`, and `pathRewrite` in a single override entry.
 
 ### Transaction-Level Auth
 
@@ -738,6 +765,12 @@ overrides:                                # optional — per-node routing overri
     pathRewrite:                          #   optional URL path rewriting
       strip: /api/v2                      #     prefix to remove
       prefix: /v1                         #     prefix to add
+    values:                               #   optional — input value overrides for matched steps
+      amount: 0                           #     each key is an input name on the matched node
+      currency: "XYZ"
+    expectFailure:                        #   optional — flip matched steps to negative-test mode
+      status: [400, 422]                  #     all entries must be >= 400
+      description: "invalid payment"
 
 values:                                   # optional — key-value pairs for {{env.KEY}}
   region: us-east

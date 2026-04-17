@@ -76,6 +76,35 @@ type Step struct {
 	Fallback      *FallbackConfig          `yaml:"fallback,omitempty" json:"fallback,omitempty"`
 	Assertions    *Assertions              `yaml:"assertions,omitempty" json:"assertions,omitempty"`
 	ExpectFailure *ExpectFailure           `yaml:"expectFailure,omitempty" json:"expectFailure,omitempty"`
+	// RawBody, when non-empty, replaces the adapter-built request body at
+	// execution time. Lets authors inject malformed payloads that bypass the
+	// template's placeholder substitution entirely.
+	RawBody string `yaml:"rawBody,omitempty" json:"rawBody,omitempty"`
+	// Mutations, when non-empty, expand at instantiation into one additional
+	// sibling step per entry. Each sibling inherits the parent's dependsOn and
+	// values, applies its own overrides, and carries its own expectFailure.
+	// The parent step remains in place as the happy-path run.
+	Mutations []Mutation `yaml:"mutations,omitempty" json:"mutations,omitempty"`
+	// MutationScope controls how mutation siblings share prerequisite state.
+	// "" / "shared" (default): all mutations reference the same prereq-chain
+	// execution as the parent — cheap, correct for APIs that reject bad input
+	// before touching state. "isolated": each mutation receives its own deep
+	// clone of the transitive prereq closure, so stateful APIs don't cause
+	// later mutations to fail for the wrong reason (consumed tokens, depleted
+	// inventory, already-committed resources, etc.).
+	MutationScope string `yaml:"mutationScope,omitempty" json:"mutationScope,omitempty"`
+}
+
+// Mutation is a negative-test variant of a step. At instantiation it produces
+// a sibling step with the parent's dependencies and values, the Set overrides
+// applied, and ExpectStatus declared as the expected failure. Mutations give
+// authors a compact way to codify depth/error testing alongside the happy path.
+type Mutation struct {
+	Name         string         `yaml:"name" json:"name"`
+	Description  string         `yaml:"description,omitempty" json:"description,omitempty"`
+	Set          map[string]any `yaml:"set,omitempty" json:"set,omitempty"`
+	RawBody      string         `yaml:"rawBody,omitempty" json:"rawBody,omitempty"`
+	ExpectStatus []int          `yaml:"expectStatus" json:"expectStatus"`
 }
 
 // StepID returns the effective step identifier.

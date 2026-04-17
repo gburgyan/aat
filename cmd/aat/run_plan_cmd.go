@@ -44,6 +44,7 @@ var runPlanCmd = &cobra.Command{
 		noAutoOverrides, _ := cmd.Flags().GetBool("no-auto-overrides")
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
 		verboseAuth, _ := cmd.Flags().GetBool("verbose-auth")
+		noMutations, _ := cmd.Flags().GetBool("no-mutations")
 
 		if envName == "" {
 			overlayEnv, overlaySrc, err := resolveOverlayEnvName(envOverlay, noAutoOverrides)
@@ -76,6 +77,7 @@ var runPlanCmd = &cobra.Command{
 			NoAutoOverrides: noAutoOverrides,
 			OASValidateMode: oasValidate,
 			VerboseAuth:     verboseAuth,
+			SkipMutations:   noMutations,
 		}
 
 		code := executeRun(ra)

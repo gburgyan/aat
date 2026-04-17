@@ -28,6 +28,7 @@ func init() {
 	runCmd.PersistentFlags().Bool("no-auto-overrides", false, "disable auto-discovery of .aat-overrides.yaml")
 	runCmd.PersistentFlags().String("oas-validate", "", "OAS validation mode: auto (default), warn, strict, off")
 	runCmd.PersistentFlags().Bool("verbose-auth", false, "log auth request/response details to stderr for debugging")
+	runCmd.PersistentFlags().Bool("no-mutations", false, "skip mutation-expanded sibling steps; run only the happy path (smoke-test mode)")
 
 	runCmd.AddCommand(runPlanCmd)
 }

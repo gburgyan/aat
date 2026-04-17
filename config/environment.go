@@ -98,18 +98,29 @@ type PathRewrite struct {
 
 // HostOverride maps a node/adapter name pattern to alternate API configuration.
 type HostOverride struct {
-	Match       string            `yaml:"match"`                 // node name or glob pattern
-	BaseURL     string            `yaml:"baseUrl,omitempty"`     // override base URL
-	Auth        *AuthConfig       `yaml:"auth,omitempty"`        // nil = inherit top-level auth
-	Headers     map[string]string `yaml:"headers,omitempty"`     // merged with env-level headers
-	PathRewrite *PathRewrite      `yaml:"pathRewrite,omitempty"` // URL path rewriting
+	Match         string                 `yaml:"match"`                   // node name or glob pattern
+	BaseURL       string                 `yaml:"baseUrl,omitempty"`       // override base URL
+	Auth          *AuthConfig            `yaml:"auth,omitempty"`          // nil = inherit top-level auth
+	Headers       map[string]string      `yaml:"headers,omitempty"`       // merged with env-level headers
+	PathRewrite   *PathRewrite           `yaml:"pathRewrite,omitempty"`   // URL path rewriting
+	Values        map[string]any         `yaml:"values,omitempty"`        // per-input value overrides merged after plan/graph resolution
+	ExpectFailure *OverrideExpectFailure `yaml:"expectFailure,omitempty"` // force negative-assertion behavior on matched steps
+}
+
+// OverrideExpectFailure declares expected failure statuses for matched nodes
+// without editing the plan. Translated to plan.ExpectFailure at engine time.
+type OverrideExpectFailure struct {
+	Status      []int  `yaml:"status"`
+	Description string `yaml:"description,omitempty"`
 }
 
 // ResolvedOverride is a HostOverride after authentication and header merging.
 type ResolvedOverride struct {
-	Pattern     string
-	APIConfig   APIConfig
-	PathRewrite *PathRewrite
+	Pattern       string
+	APIConfig     APIConfig
+	PathRewrite   *PathRewrite
+	Values        map[string]any
+	ExpectFailure *OverrideExpectFailure
 }
 
 // Environment is the top-level configuration loaded from a YAML file.
@@ -188,7 +199,9 @@ func (env *Environment) BuildOverrideConfigsWithAuth(ctx context.Context, baseHe
 				Headers: headers,
 				Values:  make(map[string]string),
 			},
-			PathRewrite: ov.PathRewrite,
+			PathRewrite:   ov.PathRewrite,
+			Values:        ov.Values,
+			ExpectFailure: ov.ExpectFailure,
 		})
 	}
 
@@ -257,7 +270,9 @@ func (env *Environment) BuildOverrideConfigsWithProvider(ctx context.Context, ba
 				Headers: headers,
 				Values:  make(map[string]string),
 			},
-			PathRewrite: ov.PathRewrite,
+			PathRewrite:   ov.PathRewrite,
+			Values:        ov.Values,
+			ExpectFailure: ov.ExpectFailure,
 		})
 	}
 

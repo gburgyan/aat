@@ -49,6 +49,7 @@ type runArgs struct {
 	AutoOverridesPath string     // resolved path to auto-discovered overrides file
 	OASValidateMode   string     // "auto", "warn", "strict", "off"
 	VerboseAuth       bool       // log auth request/response details to stderr
+	SkipMutations     bool       // strip mutations from plans before running (smoke-test mode)
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -380,6 +381,15 @@ func addResolvedOverride(router *engine.ExecutorRouter, ov config.ResolvedOverri
 		}
 	}
 	router.AddOverride(ov.Pattern, overrideExec, overrideCfg, rewrite)
+
+	var ef *plan.ExpectFailure
+	if ov.ExpectFailure != nil {
+		ef = &plan.ExpectFailure{
+			Status:      ov.ExpectFailure.Status,
+			Description: ov.ExpectFailure.Description,
+		}
+	}
+	router.AddValueOverride(ov.Pattern, ov.Values, ef)
 }
 
 // writeRunArchive creates a run archive in the output directory and returns
@@ -656,6 +666,9 @@ type runContext struct {
 	// OAS validation
 	OASCache        *oas.SpecCache // loaded specs for runtime validation (nil if none)
 	OASValidateMode string         // effective mode: "auto", "warn", "strict", "off"
+
+	// Execution options
+	SkipMutations bool // strip mutations from each plan before instantiation
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -733,6 +746,7 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		AutoOverridesPath: autoOverridesPath,
 		Layers:            args.Layers,
 		LayersDir:         args.LayersDir,
+		SkipMutations:     args.SkipMutations,
 	}
 
 	// Pre-load layers if directory is configured and any layers are referenced
@@ -832,6 +846,12 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		p = reconstituted
 	default:
 		return &runResult{setupErr: true, err: fmt.Errorf("unexpected parse result type %T", parsed)}
+	}
+
+	// Optionally strip mutations before instantiation/validation so the run
+	// exercises only the happy-path steps. Useful as a smoke-test mode.
+	if rctx.SkipMutations {
+		plan.StripMutations(p)
 	}
 
 	// Compute layered defaults from the effective set of layers (CLI + recipe).

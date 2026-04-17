@@ -234,6 +234,16 @@ Workflows:             OK (4 files, 2 templates)
 | `output "X" is not an array type` | Selection source isn't an array | Selections require array outputs; check the source step's output type |
 | `plan graphVersion incompatible with graph version` | Major version mismatch between plan and graph | Update the plan's `graphVersion` or regenerate the plan |
 | `expectFailure status N must be >= 400` | Expect-failure has a success status code | Expect-failure is for negative tests; use status codes 400+ |
+| `mutation X has empty name` | A mutation entry is missing its `name` | Add a unique `name` — it becomes the sibling step id suffix |
+| `duplicate mutation name "X"` | Two mutations on the same step share a name | Rename one; mutation names must be unique within a step |
+| `mutation "X" must declare at least one of set or rawBody` | A mutation has no input overrides | Add `set: {...}` or `rawBody: "..."` (or both) |
+| `mutation "X" must declare at least one expectStatus` | Mutation has no expected failure status | Every mutation requires `expectStatus: [400]` (or similar) |
+| `mutation "X" expectStatus N must be >= 400` | Mutation expects a success status | Mutations are negative tests; use 400+ |
+| `unknown mutationScope "X"` | `mutationScope` is something other than `"shared"` or `"isolated"` | Use one of the two supported values (or omit for the default `"shared"`) |
+| `mutationScope is set but step has no mutations` | `mutationScope` is declared on a step without a `mutations:` block | Remove `mutationScope`, or add mutations |
+| `cloned step id "X" collides with an existing step` | An isolated-mutation clone id matches a pre-existing step id | Rename either the existing step or the mutation so `<origId>__<mutationName>` is unique |
+| `overrides[N]: expectFailure status M must be >= 400` | Overlay override's `expectFailure` has a success status | Overlay `expectFailure` is for negative tests; use 400+ |
+| `overrides[N]: expectFailure must have at least one status` | Overlay override has empty `expectFailure.status` | Provide a non-empty list of `>= 400` status codes |
 
 ## Validation in CI/CD
 

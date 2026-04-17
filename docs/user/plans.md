@@ -425,6 +425,7 @@ Assertions validate the step's response. Two kinds:
 | `fieldExists` | `path` (string) | JSON path exists in response body |
 | `fieldEquals` | `path` (string), `value` (any) | JSON path value equals expected value |
 | `predicate` | `expr` (string) | Predicate expression evaluates to true against the response body |
+| `schema` | — | Validate the response body against the node's OAS response schema. Requires OAS specs wired into the graph; otherwise the assertion is reported as `skipped`. |
 
 ```yaml
 assertions:
@@ -436,6 +437,7 @@ assertions:
     - type: fieldEquals
       path: "order.status"
       value: "confirmed"
+    - type: schema
     - type: predicate
       expr: "order.totalPrice > 0 && order.totalPrice < 10000"
 ```
@@ -489,6 +491,132 @@ When `expectFailure` is set:
 - The step fails if the response returns a success status (2xx)
 - Retries are skipped — the first response determines the outcome
 - Cleanup still runs normally
+
+#### Mutations: codified negative suites
+
+A `mutations:` block on a step expands at plan instantiation into one sibling
+step per mutation. Each sibling shares the parent's `dependsOn`, `selections`,
+and `values`, then applies its own `set` overrides and declares its own
+`expectStatus`. The parent step remains in place as the happy-path run, so a
+single block produces both the positive case and its negative variants.
+
+```yaml
+- id: happy
+  node: createOrder
+  dependsOn: [setup]
+  values: { productId: "PROD-001", quantity: 1 }
+  assertions:
+    mechanical:
+      - type: status
+        expect: 201
+      - type: schema                   # validate response body shape
+  mutations:
+    - name: empty-productId
+      set: { productId: "" }
+      expectStatus: [400]
+    - name: zero-quantity
+      set: { quantity: 0 }
+      expectStatus: [400, 422]
+      description: "Server must reject zero-quantity orders"
+    - name: malformed-body
+      rawBody: '{"broken json'         # bypasses template substitution
+      expectStatus: [400]
+```
+
+At runtime this produces four archive entries: `happy`, `happy--empty-productId`,
+`happy--zero-quantity`, and `happy--malformed-body`. The prereq chain
+(`setup` here) runs once; each mutation is an independent sibling step.
+
+| Mutation field | Required | Description |
+|----------------|----------|-------------|
+| `name` | yes | Unique within the step. Becomes the sibling's id suffix. |
+| `description` | no | Carried into the sibling's `expectFailure.description`. |
+| `set` | no* | Map of input name → value. Overrides the parent's values for this sibling. |
+| `rawBody` | no* | Raw request body string. Overwrites the adapter-built body after template substitution. Use for malformed payloads that can't be expressed via `set`. |
+| `expectStatus` | yes | List of failure status codes (each `>= 400`). |
+
+*Each mutation must declare at least one of `set` or `rawBody`.
+
+Expansion rules:
+
+- Siblings inherit the parent's `dependsOn` — prereqs run once, all siblings reference their outputs.
+- The parent's `assertions` are stripped on siblings; `expectFailure` is installed from `expectStatus`/`description`.
+- Sibling ids take the form `<parentId>--<mutationName>`.
+- Happy-path assertions are unchanged on the parent.
+
+##### Shared vs. isolated prereqs
+
+By default mutations share the parent's prereq chain: the prereqs run once and
+every sibling references the same outputs. That's correct for the common case
+where the server rejects a malformed request *before* touching state.
+
+For stateful APIs, shared prereqs cause false failures: single-use tokens get
+consumed by the happy path, inventory is depleted, or the happy path commits
+a resource the mutations then collide with. Opt into isolation with
+`mutationScope: isolated` on the parent step:
+
+```yaml
+- id: addItem
+  node: addItem
+  dependsOn: [createCart]
+  mutationScope: isolated            # each mutation gets fresh prereqs
+  values:
+    cartId: { from: createCart.cartId }
+    productId: "P1"
+  mutations:
+    - name: empty-productId
+      set: { productId: "" }
+      expectStatus: [400]
+    - name: unknown-productId
+      set: { productId: "NO-SUCH" }
+      expectStatus: [404]
+```
+
+In isolated scope, AAT deep-clones the entire transitive prereq closure
+(`login`, `createCart`, anything they depend on) once per mutation. Cloned
+step ids are `<origId>__<mutationName>`; the mutation sibling's
+`dependsOn` and `from` refs are rewritten to point at the clones, so each
+sibling uses its own fresh cart, token, or other stateful resource.
+
+Graph-level cleanup (`node.cleanup: deleteX`) runs automatically for every
+cloned step, so each isolated mutation cleans up the resources it created.
+
+| Scope | When to use | Cost |
+|-------|-------------|------|
+| `shared` (default) | Input-validation errors; prereqs produce reusable state | Cheap — one prereq chain per plan |
+| `isolated` | Stateful APIs, single-use tokens, consumable resources, duplicate-detection tests that would false-trigger on the happy path's state | Prereq chain runs once per mutation |
+
+A step may not declare `mutationScope` without `mutations:`, and an unknown
+scope value ("shared"/"isolated" only) is rejected at validation.
+
+##### Smoke-test mode: skip mutations entirely
+
+Pass `--no-mutations` to `aat run plan` or `aat run batch` to strip the
+`mutations:` blocks from plans before execution. The run exercises only the
+happy-path steps and their prereq chain — useful for quick CI smoke tests,
+local iteration, or confirming the plan itself is well-formed before paying
+the cost of the full negative suite (especially with `mutationScope: isolated`
+where each mutation re-runs the prereq chain).
+
+```bash
+aat run plan plans/createOrder-with-errors.yaml --no-mutations
+aat run batch plans/ --no-mutations
+```
+
+The flag doesn't modify plan files on disk; it's applied in memory per run.
+
+#### Raw request bodies
+
+For one-off malformed-payload tests without a `mutations:` block, set `rawBody`
+directly on a step. When non-empty, the adapter-built body is overwritten at
+execution time, bypassing template placeholder substitution:
+
+```yaml
+- node: createOrder
+  rawBody: '{"oops": '
+  expectFailure:
+    status: [400]
+```
 
 ### Verification Steps
 
@@ -706,6 +834,62 @@ execution:
         quantity: 1
 ```
 
+### Full Plan with a Mutations Suite
+
+Exercise happy-path and negative variants of the same endpoint in one plan.
+The happy-path step runs first; each mutation expands into a sibling that
+shares the prereq chain:
+
+```yaml
+execution:
+  steps:
+    - id: setup
+      node: createWorkbench
+
+    - id: happy
+      node: addTraveler
+      dependsOn: [setup]
+      values:
+        surname: "Smith"
+        givenName: "Jane"
+        age: 30
+      assertions:
+        mechanical:
+          - type: status
+            expect: 200
+          - type: schema
+      mutations:
+        - name: empty-surname
+          set: { surname: "" }
+          expectStatus: [400]
+        - name: negative-age
+          set: { age: -1 }
+          expectStatus: [400, 422]
+        - name: malformed-body
+          rawBody: '{"oops":'
+          expectStatus: [400]
+```
+
+### Overlay-Driven Depth Tests
+
+For ad-hoc negative testing without editing a plan, use an overlay file to
+override individual input values and declare expected failure on matched
+nodes. The overlay applies at run time, so an existing happy-path plan can be
+rerun as a negative test just by layering in the overlay:
+
+```yaml
+# .aat-overrides.yaml
+overrides:
+  - match: createOrder
+    values:
+      productId: ""
+    expectFailure:
+      status: [400]
+```
+
+See [Environments: Overlay Files](environments.md#overlay-files) for the full
+schema, and [Local Development](local-dev.md) for auto-discovery behaviour.
+
 ### Layer Parameterization
 
 Run the same test with different data sets:
@@ -734,6 +918,12 @@ aat run batch plans/ --layer-group layers/european.yaml,layers/international.yam
 - Filter and predicate expressions parse correctly
 - `fromSelection` references valid named selections
 - `expectFailure` status codes are 400+
+- Mutation names are unique within a step
+- Each mutation declares at least one of `set` or `rawBody`
+- Mutation `expectStatus` is non-empty and every entry is `>= 400`
+- `mutationScope` is either `"shared"` (default) or `"isolated"`
+- `mutationScope` is only set on steps that declare `mutations:`
+- Isolated-mutation clone ids don't collide with existing step ids
 - Cleanup `runOn` values are valid (`always`, `success`, `failure`)
 - No duplicate step IDs
 
@@ -885,6 +1075,22 @@ execution:
       expectFailure:
         status: [400, 422]            # expected failure status codes
         description: "Why this should fail"
+
+      # Optional — raw request body override, bypasses template substitution
+      rawBody: '{"oops":'             # use for malformed-payload tests
+
+      # Optional — mutation siblings for codified negative suites
+      mutationScope: shared           # "shared" (default) or "isolated";
+                                      #   isolated clones the prereq chain per mutation
+      mutations:
+        - name: empty-input           # required; unique within the step
+          description: "why this variant should fail"
+          set:                        # map of input → value; overrides parent values
+            someInput: ""
+          expectStatus: [400]         # required; each entry must be >= 400
+        - name: malformed-body
+          rawBody: '{"oops":'         # alternative to set; replaces the body entirely
+          expectStatus: [400]
 
   # Optional — post-execution read-only checks
   verification:

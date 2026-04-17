@@ -35,21 +35,51 @@ func TestCheckStatus(t *testing.T) {
 	}
 }
 
-func TestCheckSchema(t *testing.T) {
-	ar := checkSchema(MechanicalAssertion{Type: AssertSchema, Ref: "some-schema.json"})
+func TestCheckSchema_NoCallback(t *testing.T) {
+	ar := checkSchema(MechanicalAssertion{Type: AssertSchema, Ref: "some-schema.json"}, nil)
 	assert.True(t, ar.Passed)
 	assert.True(t, ar.Skipped)
-	assert.Contains(t, ar.Message, "not yet implemented")
+	assert.Contains(t, ar.Message, "schema validation unavailable")
 	assert.Equal(t, AssertSchema, ar.Type)
 }
 
-func TestCheckSchema_AggregateStillPasses(t *testing.T) {
-	// Schema assertion is skipped but Passed=true, so aggregate should still pass.
+func TestCheckSchema_CallbackPasses(t *testing.T) {
+	cb := func(a MechanicalAssertion) AssertionResult {
+		return AssertionResult{Passed: true, Message: "response matches OAS schema"}
+	}
+	ar := checkSchema(MechanicalAssertion{Type: AssertSchema}, cb)
+	assert.True(t, ar.Passed)
+	assert.False(t, ar.Skipped)
+	assert.Equal(t, AssertSchema, ar.Type)
+	assert.Contains(t, ar.Message, "matches OAS schema")
+}
+
+func TestCheckSchema_CallbackFails(t *testing.T) {
+	cb := func(a MechanicalAssertion) AssertionResult {
+		return AssertionResult{Passed: false, Message: "/pets/0/id: expected integer"}
+	}
+	ar := checkSchema(MechanicalAssertion{Type: AssertSchema}, cb)
+	assert.False(t, ar.Passed)
+	assert.Equal(t, AssertSchema, ar.Type)
+	assert.Contains(t, ar.Message, "expected integer")
+}
+
+func TestCheckSchema_CallbackSkipped(t *testing.T) {
+	cb := func(a MechanicalAssertion) AssertionResult {
+		return AssertionResult{Passed: true, Skipped: true, Message: "spec not loaded"}
+	}
+	ar := checkSchema(MechanicalAssertion{Type: AssertSchema}, cb)
+	assert.True(t, ar.Passed)
+	assert.True(t, ar.Skipped)
+}
+
+func TestCheckSchema_AggregateStillPassesWhenSkipped(t *testing.T) {
+	// Schema assertion skipped with no callback: still reported passed, so aggregate passes.
 	assertions := []MechanicalAssertion{
 		{Type: AssertStatus, Expect: 200},
 		{Type: AssertSchema, Ref: "schema.json"},
 	}
-	result := RunMechanical(200, []byte(`{}`), assertions, nil)
+	result := RunMechanical(200, []byte(`{}`), assertions, nil, nil)
 	assert.True(t, result.Passed)
 	require.Len(t, result.Results, 2)
 	assert.True(t, result.Results[1].Skipped)
@@ -364,7 +394,7 @@ func TestRunMechanical_AllPass(t *testing.T) {
 		{Type: AssertFieldEquals, Path: "name", Value: "Alice"},
 	}
 
-	result := RunMechanical(200, body, assertions, nil)
+	result := RunMechanical(200, body, assertions, nil, nil)
 	assert.True(t, result.Passed)
 	require.Len(t, result.Results, 3)
 	for _, r := range result.Results {
@@ -380,7 +410,7 @@ func TestRunMechanical_OneFails(t *testing.T) {
 		{Type: AssertFieldEquals, Path: "name", Value: "Alice"},
 	}
 
-	result := RunMechanical(200, body, assertions, nil)
+	result := RunMechanical(200, body, assertions, nil, nil)
 	assert.False(t, result.Passed)
 	require.Len(t, result.Results, 3)
 	assert.True(t, result.Results[0].Passed)
@@ -389,7 +419,7 @@ func TestRunMechanical_OneFails(t *testing.T) {
 }
 
 func TestRunMechanical_EmptyList(t *testing.T) {
-	result := RunMechanical(200, []byte(`{}`), nil, nil)
+	result := RunMechanical(200, []byte(`{}`), nil, nil, nil)
 	assert.True(t, result.Passed)
 	assert.Empty(t, result.Results)
 }
@@ -411,7 +441,7 @@ func TestRunMechanical_MixedResults(t *testing.T) {
 		{Type: AssertPredicate, Expr: "count > 0"}, // fails: count is 0
 	}
 
-	result := RunMechanical(200, body, assertions, eval)
+	result := RunMechanical(200, body, assertions, eval, nil)
 	assert.False(t, result.Passed)
 	require.Len(t, result.Results, 3)
 	assert.True(t, result.Results[0].Passed)
@@ -423,7 +453,7 @@ func TestRunMechanical_UnknownType(t *testing.T) {
 	assertions := []MechanicalAssertion{
 		{Type: "bogus"},
 	}
-	result := RunMechanical(200, []byte(`{}`), assertions, nil)
+	result := RunMechanical(200, []byte(`{}`), assertions, nil, nil)
 	assert.False(t, result.Passed)
 	require.Len(t, result.Results, 1)
 	assert.Contains(t, result.Results[0].Message, "unknown assertion type")

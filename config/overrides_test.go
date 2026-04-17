@@ -218,3 +218,59 @@ func TestLoadOverlayFile_WithEnvironment(t *testing.T) {
 	require.Len(t, overlay.Overrides, 1)
 	assert.Equal(t, "*", overlay.Overrides[0].Match)
 }
+
+func TestLoadOverlayFile_WithValuesAndExpectFailure(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	body := "" +
+		"overrides:\n" +
+		"  - match: createBooking\n" +
+		"    values:\n" +
+		"      lastName: \"\"\n" +
+		"      age: -1\n" +
+		"    expectFailure:\n" +
+		"      status: [400, 422]\n" +
+		"      description: invalid payload\n"
+	require.NoError(t, os.WriteFile(path, []byte(body), 0644))
+
+	overlay, err := LoadOverlayFile(path)
+	require.NoError(t, err)
+	require.Len(t, overlay.Overrides, 1)
+	ov := overlay.Overrides[0]
+	assert.Equal(t, "createBooking", ov.Match)
+	assert.Equal(t, "", ov.Values["lastName"])
+	assert.EqualValues(t, -1, ov.Values["age"])
+	require.NotNil(t, ov.ExpectFailure)
+	assert.Equal(t, []int{400, 422}, ov.ExpectFailure.Status)
+	assert.Equal(t, "invalid payload", ov.ExpectFailure.Description)
+}
+
+func TestLoadOverlayFile_RejectsExpectFailureBelow400(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	body := "" +
+		"overrides:\n" +
+		"  - match: createBooking\n" +
+		"    expectFailure:\n" +
+		"      status: [200]\n"
+	require.NoError(t, os.WriteFile(path, []byte(body), 0644))
+
+	_, err := LoadOverlayFile(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), ">= 400")
+}
+
+func TestLoadOverlayFile_RejectsEmptyExpectFailureStatus(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "overlay.yaml")
+	body := "" +
+		"overrides:\n" +
+		"  - match: createBooking\n" +
+		"    expectFailure:\n" +
+		"      description: missing status\n"
+	require.NoError(t, os.WriteFile(path, []byte(body), 0644))
+
+	_, err := LoadOverlayFile(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one status")
+}
