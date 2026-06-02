@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { StepDetail, OASValidationDetail } from '../lib/types';
+  import type { StepDetail, OASValidationDetail, RequestDetail } from '../lib/types';
   import { fetchStep, fetchAttemptStep } from '../lib/api';
   import { navigate, encPath } from '../lib/router';
   import { formatDuration, httpStatusCategory } from '../lib/format';
@@ -116,6 +116,36 @@
   }
 
   let statusCat = $derived(httpStatusCategory(step?.status));
+
+  let curlCopyState = $state('');
+
+  // Quote a string for safe inclusion inside single quotes in a POSIX shell.
+  function shellQuote(s: string): string {
+    return `'${s.replace(/'/g, `'\\''`)}'`;
+  }
+
+  function buildCurl(req: RequestDetail): string {
+    const lines: string[] = [`curl -X ${req.method} ${shellQuote(req.url)}`];
+    for (const h of req.headers ?? []) {
+      lines.push(`  -H ${shellQuote(`${h.name}: ${h.value}`)}`);
+    }
+    if (req.body !== undefined && req.body !== null) {
+      const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+      lines.push(`  --data ${shellQuote(body)}`);
+    }
+    return lines.join(' \\\n');
+  }
+
+  async function copyCurl() {
+    if (!step?.request) return;
+    try {
+      await navigator.clipboard.writeText(buildCurl(step.request));
+      curlCopyState = 'Copied!';
+    } catch {
+      curlCopyState = 'Failed';
+    }
+    setTimeout(() => (curlCopyState = ''), 1500);
+  }
 
   function readPref(key: string, fallback: boolean): boolean {
     try {
@@ -242,6 +272,9 @@
           {#if step.request.originalUrl}
             <span class="override-badge">OVERRIDE</span>
           {/if}
+          <button class="curl-copy-btn" onclick={copyCurl} title="Copy this request as a cURL command">
+            {curlCopyState || 'Copy as cURL'}
+          </button>
         </div>
         {#if step.request.originalUrl}
           <div class="override-original">

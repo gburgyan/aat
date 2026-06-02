@@ -827,6 +827,25 @@ p {
   padding-left: 0.1rem;
 }
 
+.curl-copy-btn {
+  margin-left: auto;
+  flex-shrink: 0;
+  padding: 0.25rem 0.6rem;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.curl-copy-btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-primary);
+  background: var(--color-bg);
+}
+
 .section-heading {
   font-size: 0.85rem;
   font-weight: 600;
