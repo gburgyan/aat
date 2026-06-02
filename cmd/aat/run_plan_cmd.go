@@ -45,6 +45,8 @@ var runPlanCmd = &cobra.Command{
 		oasValidate, _ := cmd.Flags().GetString("oas-validate")
 		verboseAuth, _ := cmd.Flags().GetBool("verbose-auth")
 		noMutations, _ := cmd.Flags().GetBool("no-mutations")
+		stopAfter, _ := cmd.Flags().GetString("stop-after")
+		dumpState, _ := cmd.Flags().GetString("dump-state")
 
 		if envName == "" {
 			overlayEnv, overlaySrc, err := resolveOverlayEnvName(envOverlay, noAutoOverrides)
@@ -78,6 +80,8 @@ var runPlanCmd = &cobra.Command{
 			OASValidateMode: oasValidate,
 			VerboseAuth:     verboseAuth,
 			SkipMutations:   noMutations,
+			StopAfterStep:   stopAfter,
+			DumpStatePath:   dumpState,
 		}
 
 		code := executeRun(ra)
@@ -92,6 +96,8 @@ func init() {
 	// Local flags specific to single-plan execution
 	runPlanCmd.Flags().Bool("json", false, "output machine-readable JSON summary to stdout")
 	runPlanCmd.Flags().Bool("quiet", false, "suppress progress messages, show only final summary")
+	runPlanCmd.Flags().String("stop-after", "", "stop execution after the named step (by step ID); cleanup is skipped so resources stay alive for handoff")
+	runPlanCmd.Flags().String("dump-state", "", "write accumulated run state (base URL, live auth headers, step outputs) to FILE (mode 0600); use \"-\" for stdout (nested under \"state\" in --json output)")
 }
 
 // executeRun handles output modes (JSON/quiet/normal) and returns an exit code.
@@ -142,6 +148,14 @@ func executeRun(ra *runArgs) int {
 		return exitCode(res)
 	}
 
+	// Non-JSON stdout dump (--dump-state -): emit the state export as its own
+	// JSON object. In --json mode it is already nested under summary.state.
+	if ra.DumpStatePath == "-" && res.summary != nil && res.summary.State != nil {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(res.summary.State)
+	}
+
 	// Quiet (non-JSON): show the final summary line
 	if ra.Quiet && res.summary != nil {
 		attemptSuffix := ""
@@ -157,6 +171,8 @@ func executeRun(ra *runArgs) int {
 			_, _ = fmt.Fprintf(os.Stdout, "%s: %s%s\n", colorOutcome("ERROR", color), res.summary.Error, attemptSuffix)
 		case "aborted":
 			_, _ = fmt.Fprintf(os.Stdout, "%s (%d/%d steps)%s\n", colorOutcome("ABORTED", color), res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps, attemptSuffix)
+		case "stopped":
+			_, _ = fmt.Fprintf(os.Stdout, "%s (%d/%d steps)%s\n", colorOutcome("STOPPED", color), res.summary.Summary.PassedSteps, res.summary.Summary.TotalSteps, attemptSuffix)
 		}
 		if res.archivePath != "" {
 			_, _ = fmt.Fprintf(os.Stdout, "Archive: %s\n", res.archivePath)

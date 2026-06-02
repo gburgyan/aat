@@ -51,6 +51,11 @@ type Engine struct {
 
 	// plan is set during Run() for constraint-aware resolution.
 	plan *plan.Plan
+
+	// stopAfterStep, when non-empty, halts execution after the step whose
+	// StepID() matches completes successfully. Cleanup is intentionally skipped
+	// so created resources stay alive for an external harness to consume.
+	stopAfterStep string
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -88,6 +93,15 @@ func (e *Engine) WithEnvValues(values map[string]string) *Engine {
 	return e
 }
 
+// WithStopAfter halts execution after the step whose StepID() equals stepID
+// completes successfully. Cleanup is skipped so resources created up to that
+// point stay alive for an external harness to consume. An empty stepID disables
+// the checkpoint (the plan runs to completion as normal).
+func (e *Engine) WithStopAfter(stepID string) *Engine {
+	e.stopAfterStep = stepID
+	return e
+}
+
 // WithOASSpecs enables runtime OAS validation for steps that have OAS refs.
 // When strict is true, OAS validation errors cause step failure.
 func (e *Engine) WithOASSpecs(cache *oas.SpecCache, graphOAS string, strict bool) *Engine {
@@ -117,6 +131,25 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	sorted, err := TopologicalSort(instantiatedPlan.Execution.Steps)
 	if err != nil {
 		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
+	}
+
+	// 2b. Validate the stop-after step exists, if set, so a typo fails fast
+	// instead of silently running the whole plan.
+	if e.stopAfterStep != "" {
+		found := false
+		for _, step := range sorted {
+			if step.StepID() == e.stopAfterStep {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return &RunResult{
+				Outcome:          OutcomeError,
+				Error:            fmt.Errorf("--stop-after: no step %q in plan", e.stopAfterStep),
+				InstantiatedPlan: instantiatedPlan,
+			}
+		}
 	}
 
 	// 3. Validate adapter outputs match graph declarations (only for plan-used nodes)
@@ -307,6 +340,18 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 					Error:            fmt.Errorf("step %q failed mechanical validation", step.Node),
 					InstantiatedPlan: instantiatedPlan,
 				}
+			}
+		}
+
+		// Checkpoint: stop after this step without running cleanup, leaving
+		// created resources alive for an external harness to consume.
+		if e.stopAfterStep != "" && step.StepID() == e.stopAfterStep {
+			return &RunResult{
+				Outcome:          OutcomeStopped,
+				Stopped:          true,
+				StoppedAt:        step.StepID(),
+				Steps:            stepResults,
+				InstantiatedPlan: instantiatedPlan,
 			}
 		}
 	}

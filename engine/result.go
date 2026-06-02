@@ -21,6 +21,10 @@ const (
 	OutcomeError
 	// OutcomeAborted means execution was interrupted by the user (e.g. Ctrl+C).
 	OutcomeAborted
+	// OutcomeStopped means execution halted at a requested checkpoint
+	// (--stop-after). Steps up to the checkpoint passed; cleanup was skipped so
+	// created resources remain alive for an external harness.
+	OutcomeStopped
 )
 
 func (o Outcome) String() string {
@@ -33,6 +37,8 @@ func (o Outcome) String() string {
 		return "error"
 	case OutcomeAborted:
 		return "aborted"
+	case OutcomeStopped:
+		return "stopped"
 	default:
 		return "unknown"
 	}
@@ -45,6 +51,11 @@ type RunResult struct {
 	CleanupResults   []StepResult
 	Error            error
 	InstantiatedPlan *plan.Plan // fully merged plan with graph defaults, nil on early errors
+
+	// Stopped is true when execution halted at a --stop-after checkpoint.
+	Stopped bool
+	// StoppedAt is the StepID of the checkpoint step (set when Stopped is true).
+	StoppedAt string
 }
 
 // StepResult captures the outcome of a single step execution.

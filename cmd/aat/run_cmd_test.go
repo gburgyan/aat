@@ -134,6 +134,101 @@ func TestRunCommand_SuccessfulRun(t *testing.T) {
 	require.NoError(t, err, "archive.json should exist")
 }
 
+func TestRunCommand_StopAfterDumpsState(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "test-output"})
+	}))
+	defer apiServer.Close()
+
+	envFile := writeTestEnv(t, "none", apiServer.URL)
+	outputDir := filepath.Join(t.TempDir(), "runs")
+	dumpPath := filepath.Join(t.TempDir(), "state", "dump.json")
+	res := runCommand(context.Background(), &runArgs{
+		PlanPath:      "testdata/test_plan.yaml",
+		EnvPath:       envFile,
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+		OutputDir:     outputDir,
+		StopAfterStep: "testNode",
+		DumpStatePath: dumpPath,
+	}, io.Discard, TerminalInfo{})
+	require.NoError(t, res.err)
+	assert.Equal(t, engine.OutcomeStopped, res.outcome)
+
+	// Dump file written with restrictive permissions.
+	info, err := os.Stat(dumpPath)
+	require.NoError(t, err, "state dump should exist")
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+
+	data, err := os.ReadFile(dumpPath)
+	require.NoError(t, err)
+	var exp engine.StateExport
+	require.NoError(t, json.Unmarshal(data, &exp))
+	assert.Equal(t, "stopped", exp.Outcome)
+	assert.Equal(t, "testNode", exp.StoppedAt)
+	assert.Equal(t, apiServer.URL, exp.BaseURL)
+}
+
+func TestRunCommand_StopAfterDumpStateStdout(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "test-output"})
+	}))
+	defer apiServer.Close()
+
+	envFile := writeTestEnv(t, "none", apiServer.URL)
+	res := runCommand(context.Background(), &runArgs{
+		PlanPath:      "testdata/test_plan.yaml",
+		EnvPath:       envFile,
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+		OutputDir:     filepath.Join(t.TempDir(), "runs"),
+		StopAfterStep: "testNode",
+		DumpStatePath: "-",
+	}, io.Discard, TerminalInfo{})
+	require.NoError(t, res.err)
+	assert.Equal(t, engine.OutcomeStopped, res.outcome)
+
+	// "-" attaches the export to the summary (surfaced via --json) instead of
+	// writing a file.
+	require.NotNil(t, res.summary)
+	require.NotNil(t, res.summary.State, "state should be embedded in the summary for --dump-state -")
+	assert.Equal(t, "stopped", res.summary.State.Outcome)
+	assert.Equal(t, "testNode", res.summary.State.StoppedAt)
+	assert.Equal(t, apiServer.URL, res.summary.State.BaseURL)
+
+	// The embedded state must survive JSON round-trip under the "state" key.
+	data, err := json.Marshal(res.summary)
+	require.NoError(t, err)
+	var decoded map[string]any
+	require.NoError(t, json.Unmarshal(data, &decoded))
+	_, hasState := decoded["state"]
+	assert.True(t, hasState, "JSON summary should include a top-level \"state\" object")
+}
+
+func TestRunCommand_StopAfterUnknownStep(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer apiServer.Close()
+
+	envFile := writeTestEnv(t, "none", apiServer.URL)
+	res := runCommand(context.Background(), &runArgs{
+		PlanPath:      "testdata/test_plan.yaml",
+		EnvPath:       envFile,
+		GraphPath:     "testdata/test_graph.yaml",
+		TemplatesPath: "testdata/templates",
+		OutputDir:     filepath.Join(t.TempDir(), "runs"),
+		StopAfterStep: "doesNotExist",
+	}, io.Discard, TerminalInfo{})
+	require.Error(t, res.err)
+	assert.Contains(t, res.err.Error(), `no step "doesNotExist"`)
+}
+
 func TestRunCommand_FailedStep(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

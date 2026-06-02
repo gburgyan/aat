@@ -21,6 +21,63 @@ PASSED (3/3 steps, 385ms)
 
 Each line shows the step index, node name, HTTP status code, and duration. Display outputs defined in the plan appear indented below their step.
 
+## Checkpoints: Stopping Early and Handing Off State
+
+Sometimes you want AAT to drive a system into a particular state and then hand off to a different, specialized test harness — for example, run a booking plan only as far as the step that creates a workbench, then let an external script take over with that live workbench and its auth token.
+
+Two single-plan flags support this:
+
+| Flag | Description |
+|------|-------------|
+| `--stop-after STEP` | Stop execution after the step whose ID equals `STEP` completes. Cleanup is **skipped**, so resources created up to that point stay alive for the handoff. |
+| `--dump-state FILE` | Write the accumulated run state to `FILE`. Use `-` for stdout instead of a file. Usable with or without `--stop-after`. |
+
+```
+aat run plan roundtrip-booking \
+  --stop-after createWorkbench \
+  --dump-state workbench-state.json
+```
+
+The run reports a `stopped` outcome (exit code `0`), and the regular archive is still written. The dump file is JSON:
+
+```json
+{
+  "version": "1",
+  "outcome": "stopped",
+  "stoppedAt": "createWorkbench",
+  "baseUrl": "https://api.pp.example.com",
+  "auth": { "headers": { "Authorization": "Bearer ..." } },
+  "steps": [ { "stepId": "createWorkbench", "node": "createWorkbench", "outputs": { "workbenchId": "wb-42" } } ],
+  "values": { "createWorkbench.workbenchId": "wb-42" }
+}
+```
+
+- `baseUrl` and `auth.headers` come from the last request issued, capturing the live session.
+- `values` flattens every completed step's outputs as `stepId.outputName` for easy lookup.
+
+### Dumping to stdout (no file)
+
+Pass `-` as the path to emit the state on stdout instead of writing a file. Combined with `--json`, the state is nested under a top-level `state` key in the summary, so a wrapping harness can capture everything from a single JSON object on stdout:
+
+```
+aat run plan roundtrip-booking --stop-after createWorkbench --json --dump-state -
+```
+
+```json
+{
+  "outcome": "stopped",
+  "steps": [ ... ],
+  "summary": { ... },
+  "state": { "baseUrl": "...", "auth": { "headers": { ... } }, "values": { ... } }
+}
+```
+
+Without `--json`, `--dump-state -` prints the state object on its own (pair it with `--quiet` to suppress progress).
+
+> **Security:** unlike run archives, auth headers in the dump are **not redacted** — that is the point, so the external harness can replay calls. To a file it is written with mode `0600`; to stdout it lands in your terminal/pipe. Either way, treat it as a secret: do not commit, log, or share it.
+
+`STEP` is matched against the step's ID (its `id:` if set, otherwise the node name). An unknown step name fails the run with a clear error rather than silently running to completion.
+
 ## Running Batches
 
 ```
@@ -156,7 +213,7 @@ $ aat run plan smoke-test --json
 
 | Code | Meaning | When |
 |------|---------|------|
-| `0` | Passed | All steps and assertions succeeded |
+| `0` | Passed / Stopped | All steps succeeded, or a `--stop-after` checkpoint was reached |
 | `1` | Failed | One or more steps or assertions failed |
 | `2` | Error | Infrastructure or setup error (bad config, network failure, invalid plan) |
 

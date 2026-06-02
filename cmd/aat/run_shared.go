@@ -50,6 +50,8 @@ type runArgs struct {
 	OASValidateMode   string     // "auto", "warn", "strict", "off"
 	VerboseAuth       bool       // log auth request/response details to stderr
 	SkipMutations     bool       // strip mutations from plans before running (smoke-test mode)
+	StopAfterStep     string     // stop after this step ID; skip cleanup (checkpoint handoff)
+	DumpStatePath     string     // write accumulated run state to this file (mode 0600)
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -62,6 +64,10 @@ type RunSummary struct {
 	ArchivePath string        `json:"archive_path,omitempty"`
 	Attempts    int           `json:"attempts,omitempty"` // total attempts (omitted if 1)
 	Retried     bool          `json:"retried,omitempty"`  // true if any retries occurred
+	// State is the accumulated run state (base URL, live auth headers, step
+	// outputs), populated only when --dump-state=- requests stdout output.
+	// Contains UNREDACTED auth — emitted only on explicit opt-in.
+	State *engine.StateExport `json:"state,omitempty"`
 }
 
 // StepSummary is a per-step entry in the JSON summary.
@@ -124,6 +130,8 @@ func exitCode(res *runResult) int {
 		return exitCodeInfra
 	case engine.OutcomeAborted:
 		return 130
+	case engine.OutcomeStopped:
+		return 0
 	default:
 		return 0
 	}
@@ -306,6 +314,8 @@ func printRunSummary(result *engine.RunResult, out io.Writer, ti TerminalInfo) {
 		_, _ = fmt.Fprintf(out, "%s: %s\n", colorOutcome("ERROR", color), outcomeMessage(result))
 	case engine.OutcomeAborted:
 		_, _ = fmt.Fprintf(out, "%s (%d/%d steps, %s)\n", colorOutcome("ABORTED", color), len(result.Steps), total, totalDuration(result))
+	case engine.OutcomeStopped:
+		_, _ = fmt.Fprintf(out, "%s at %q (%d/%d steps, %s)\n", colorOutcome("STOPPED", color), result.StoppedAt, len(result.Steps), total, totalDuration(result))
 	}
 	if oasWarnings > 0 {
 		_, _ = fmt.Fprintf(out, "OAS: %s\n", colorize(fmt.Sprintf("%d warning(s)", oasWarnings), colorYellow, color))
@@ -668,7 +678,9 @@ type runContext struct {
 	OASValidateMode string         // effective mode: "auto", "warn", "strict", "off"
 
 	// Execution options
-	SkipMutations bool // strip mutations from each plan before instantiation
+	SkipMutations bool   // strip mutations from each plan before instantiation
+	StopAfterStep string // stop after this step ID; skip cleanup (checkpoint handoff)
+	DumpStatePath string // write accumulated run state to this file (mode 0600)
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -747,6 +759,8 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		Layers:            args.Layers,
 		LayersDir:         args.LayersDir,
 		SkipMutations:     args.SkipMutations,
+		StopAfterStep:     args.StopAfterStep,
+		DumpStatePath:     args.DumpStatePath,
 	}
 
 	// Pre-load layers if directory is configured and any layers are referenced
@@ -1017,7 +1031,8 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		WithDomain(rctx.KB).
 		WithProgress(observer).
 		WithLayers(layeredDefaults).
-		WithEnvValues(rctx.Env.Values)
+		WithEnvValues(rctx.Env.Values).
+		WithStopAfter(rctx.StopAfterStep)
 
 	if rctx.OASCache != nil {
 		eng.WithOASSpecs(rctx.OASCache, rctx.Graph.OAS, rctx.OASValidateMode == "strict")
@@ -1076,6 +1091,22 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 
 	// Build machine-readable summary
 	summary := buildRunSummary(result, archivePath)
+
+	// 8b. Dump accumulated run state for external harness consumption.
+	// A path of "-" means stdout: attach the export to the summary so it is
+	// surfaced inline by --json (or printed standalone in non-JSON mode),
+	// obviating the file. Any other value writes a 0600 file.
+	// Non-fatal: a dump failure must not change the run's exit code.
+	if rctx.DumpStatePath != "" {
+		exp := engine.BuildStateExport(result)
+		if rctx.DumpStatePath == "-" {
+			summary.State = exp
+		} else if dumpErr := engine.WriteStateExport(exp, rctx.DumpStatePath); dumpErr != nil {
+			logf("aat: warning: failed to write state dump: %s\n", dumpErr)
+		} else {
+			logf("aat: state dumped to %s\n", rctx.DumpStatePath)
+		}
+	}
 
 	return &runResult{
 		outcome:     result.Outcome,

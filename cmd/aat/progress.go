@@ -111,6 +111,8 @@ func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
 		_, _ = fmt.Fprintf(o.out, "%s: %s\n", colorOutcome("ERROR", color), outcomeMessage(result))
 	case engine.OutcomeAborted:
 		_, _ = fmt.Fprintf(o.out, "%s (%d/%d steps, %s)\n", colorOutcome("ABORTED", color), len(result.Steps), total, observerTotalDuration(result))
+	case engine.OutcomeStopped:
+		_, _ = fmt.Fprintf(o.out, "%s at %q (%d/%d steps, %s)\n", colorOutcome("STOPPED", color), result.StoppedAt, len(result.Steps), total, observerTotalDuration(result))
 	}
 }
 
