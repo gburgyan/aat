@@ -9,6 +9,9 @@ the graph and plan formats may still change before 1.0.
 ### Changed
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs
   `aat` and `aat-sandbox` with Homebrew on Linux.
+- `min` and `max` selection compare numbers sent as strings by value: a `sortField` of `"99.10"` sorts below
+  `"1000.00"`, so an API that returns prices or totals as decimal strings selects the cheapest element. A
+  string that is not a number still fails the selection, naming the element.
 
 ## [0.1.0] - 2026-09-12
 

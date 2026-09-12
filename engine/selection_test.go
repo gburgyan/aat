@@ -272,6 +272,43 @@ func TestApplySelection_Min_IntegerValues(t *testing.T) {
 	assert.Equal(t, "B", m["id"])
 }
 
+// TestApplySelection_MinMaxNumericStrings covers APIs that send amounts as
+// decimal strings: compared as strings, "1000.00" would sort below "99.10".
+func TestApplySelection_MinMaxNumericStrings(t *testing.T) {
+	arr := []any{
+		map[string]any{"id": "a", "total": "123.45"},
+		map[string]any{"id": "b", "total": "99.10"},
+		map[string]any{"id": "c", "total": "1000.00"},
+	}
+	lowest, err := applySelection(arr, &plan.SelectionConfig{Strategy: "min", SortField: "total"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, lowest.index)
+
+	highest, err := applySelection(arr, &plan.SelectionConfig{Strategy: "max", SortField: "total"})
+	require.NoError(t, err)
+	assert.Equal(t, 2, highest.index)
+}
+
+func TestSelectByFieldExtreme_MixedNumbersAndStrings(t *testing.T) {
+	arr := []any{
+		map[string]any{"id": "a", "total": 20.5},
+		map[string]any{"id": "b", "total": "7.25"},
+		map[string]any{"id": "c", "total": 12},
+	}
+	result, err := selectByFieldExtreme(arr, "total", false)
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.index)
+}
+
+func TestSelectByFieldExtreme_NonNumericStringFails(t *testing.T) {
+	arr := []any{
+		map[string]any{"total": "12"},
+		map[string]any{"total": "twelve"},
+	}
+	_, err := selectByFieldExtreme(arr, "total", true)
+	assert.EqualError(t, err, `extracting field "total" from element 1: cannot convert string "twelve" to a number`)
+}
+
 func TestElementToMap_AlreadyMap(t *testing.T) {
 	m := map[string]any{"key": "value"}
 	result, err := elementToMap(m)
@@ -297,7 +334,14 @@ func TestToFloat64_Types(t *testing.T) {
 		{"int", 42, 42.0, false},
 		{"int64", int64(100), 100.0, false},
 		{"int32", int32(50), 50.0, false},
+		{"numeric string", "123.45", 123.45, false},
+		{"padded string", " 7 ", 7, false},
+		{"negative string", "-0.5", -0.5, false},
+		{"exponent string", "1e3", 1000, false},
 		{"string", "not a number", 0, true},
+		{"empty string", "", 0, true},
+		{"NaN string", "NaN", 0, true},
+		{"Inf string", "Inf", 0, true},
 		{"bool", true, 0, true},
 	}
 

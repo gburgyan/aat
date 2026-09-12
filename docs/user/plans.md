@@ -143,7 +143,7 @@ Available fields:
 |-------|-------------|
 | `strategy` | Selection strategy (`first`, `last`, `index`, `random`, `min`, `max`, `match`) |
 | `filter` | Predicate expression to narrow the array before selection |
-| `sortField` | Field name for `min`/`max` comparison |
+| `sortField` | Field name for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | Element index for `index` strategy |
 
 ### Assertion Overrides
@@ -399,7 +399,7 @@ Named selections ensure coordinated multi-field extraction — all three values 
 | `from` | string | yes | `stepId.outputName` — the array to select from |
 | `strategy` | string | no | Selection strategy (default: `first`) |
 | `filter` | string | no | Predicate expression to narrow the array |
-| `sortField` | string | no | Field for `min`/`max` comparison |
+| `sortField` | string | no | Field for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | int | no | Element index for `index` strategy |
 
 See [Value Resolution: Array Selection](value-flow.md#array-selection) for strategy details.

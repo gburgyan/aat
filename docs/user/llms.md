@@ -164,6 +164,9 @@ outputs:
         type: money
 ```
 
+`min` and `max` selections compare their `sortField` by value. A string that holds a number, such as `"19.99"`,
+compares as that number. A `filter` does not convert strings.
+
 Cross-ref: [API Graphs](graphs.md)
 
 ## Template Schema

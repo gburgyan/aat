@@ -3,7 +3,10 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/rand/v2"
+	"strconv"
+	"strings"
 
 	"github.com/gburgyan/aat/plan"
 )
@@ -169,7 +172,9 @@ func extractNumericField(element any, field string) (float64, error) {
 	return toFloat64(val)
 }
 
-// toFloat64 coerces a value to float64.
+// toFloat64 coerces a value to float64. A string holding a decimal number, the
+// way many APIs send money amounts, is parsed; NaN and infinities are not numbers
+// to sort by.
 func toFloat64(v any) (float64, error) {
 	switch n := v.(type) {
 	case float64:
@@ -184,6 +189,12 @@ func toFloat64(v any) (float64, error) {
 		return float64(n), nil
 	case json.Number:
 		return n.Float64()
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(n), 64)
+		if err != nil || math.IsNaN(f) || math.IsInf(f, 0) {
+			return 0, fmt.Errorf("cannot convert string %q to a number", n)
+		}
+		return f, nil
 	default:
 		return 0, fmt.Errorf("cannot convert %T to float64", v)
 	}
