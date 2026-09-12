@@ -53,7 +53,7 @@ func TestCleanupStack_FILOOrder(t *testing.T) {
 	}
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	results := stack.ExecuteAll(context.Background(), g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}), NewRunState())
+	results := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).runCleanupStack(context.Background(), stack, NewRunState(), newCleanupRun(nil, nil))
 
 	require.Len(t, results, 3)
 	// FILO: C, B, A
@@ -78,7 +78,7 @@ func (a *orderTrackingAdapter) BuildRequest(inputs map[string]any, config *adapt
 
 func TestCleanupStack_Empty(t *testing.T) {
 	stack := &CleanupStack{}
-	results := stack.ExecuteAll(context.Background(), nil, nil, nil, nil)
+	results := (&Engine{}).runCleanupStack(context.Background(), stack, nil, nil)
 	assert.Nil(t, results)
 }
 
@@ -109,7 +109,7 @@ func TestCleanupStack_ErrorDoesNotStop(t *testing.T) {
 	stack.Push(CleanupEntry{NodeName: "cleanOK", ForNode: "ok"})
 	stack.Push(CleanupEntry{NodeName: "cleanFail", ForNode: "fail"})
 
-	results := stack.ExecuteAll(context.Background(), g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{}), NewRunState())
+	results := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).runCleanupStack(context.Background(), stack, NewRunState(), newCleanupRun(nil, nil))
 
 	require.Len(t, results, 2)
 	// cleanFail runs first (FILO) and errors

@@ -143,7 +143,7 @@ Available fields:
 |-------|-------------|
 | `strategy` | Selection strategy (`first`, `last`, `index`, `random`, `min`, `max`, `match`) |
 | `filter` | Predicate expression to narrow the array before selection |
-| `sortField` | Field name for `min`/`max` comparison |
+| `sortField` | Field name for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | Element index for `index` strategy |
 
 ### Assertion Overrides
@@ -399,7 +399,7 @@ Named selections ensure coordinated multi-field extraction — all three values 
 | `from` | string | yes | `stepId.outputName` — the array to select from |
 | `strategy` | string | no | Selection strategy (default: `first`) |
 | `filter` | string | no | Predicate expression to narrow the array |
-| `sortField` | string | no | Field for `min`/`max` comparison |
+| `sortField` | string | no | Field for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | int | no | Element index for `index` strategy |
 
 See [Value Resolution: Array Selection](value-flow.md#array-selection) for strategy details.
@@ -492,6 +492,14 @@ Each entry in `on` and `failOn` is either an **error category** name or an **HTT
 | `response_error` | A 2xx response whose body matched the graph's `errorDetection` rules |
 
 When `on` is omitted, the default retries `transient`, `timeout`, and `server` failures. A `failOn` match always wins, so `failOn: [auth]` stops the step on the first 401 even if `on` would otherwise retry it. Status codes must be in the range 100–599; `aat validate plan` rejects unknown category names and out-of-range codes rather than letting a typo silently disable retries.
+
+**Waiting between attempts.** A retry waits an exponential backoff: about 500 ms before the first retry, doubling each time up to 10 seconds, with ±25% jitter.
+
+- **The server can ask for longer.** A retry waits at least as long as the failed response asks, in seconds or until an HTTP date. The request comes from the `Retry-After` header, or on a 429 without one, the `RateLimit-Reset` header.
+- **Past 60 seconds, the retries stop.** The step fails with the action `failed_fast`, and the error classification's detail says how long the server asked for.
+- **Every wait counts toward the step's duration,** and Ctrl+C interrupts it.
+
+To keep a rate-limited API from answering 429 in the first place, set [`settings.minRequestInterval`](environments.md#request-pacing).
 
 #### Negative Testing (expectFailure)
 
@@ -683,7 +691,7 @@ execution:
 
 A cleanup step has just two fields: `node` and `runOn`. There is no `values:` block — inputs are filled by **output-name matching**: for each input the node declares, AAT looks for an output of the same name, first on the step that registered the resource, then on the most recent executed step that has one. `cancelOrder` with an `orderId` input picks up `orderId` from the `createOrder` step. Name your graph outputs to match the inputs of their teardown nodes and this needs no wiring at all.
 
-**Ordering.** A graph-level `cleanup:` pairing (see [API Graphs: Cleanup](graphs.md#cleanup)) runs once for each step that created a resource, from a last-in-first-out stack, so the most recently created resource is released first and nothing is sent for a resource that was never created. Listing a paired node here, as recipes and `aat prompt` plans do, does not run it a second time or change that order; the listed step's `runOn` decides whether those cleanups run. If the plan lists that node more than once, they run when any listing's `runOn` matches the outcome. Cleanup steps for other nodes, such as `sendNotification` above, run first, in declaration order.
+**Ordering.** A graph-level `cleanup:` pairing (see [API Graphs: Cleanup](graphs.md#cleanup)) runs once for each step that created a resource, from a last-in-first-out stack, so the most recently created resource is released first and nothing is sent for a resource that was never created. Listing a paired node here, as recipes and `aat prompt` plans do, does not run it a second time or change that order; the listed step's `runOn` decides whether those cleanups run. If the plan lists that node more than once, they run when any listing's `runOn` matches the outcome. Cleanup steps for other nodes, such as `sendNotification` above, run first, in declaration order. A node reached through a [cleanup chain](graphs.md#cleanup) counts as a pairing too: listing it does not run it on its own, and its `runOn` decides whether the chain continues to it.
 
 Cleanup results are recorded in the archive and in the `cleanup` array of `--json` output, and appear under a `cleanup:` block in the console. A cleanup failure never changes the run outcome. See [Running Tests: Cleanup](running.md#cleanup) for the execution-time details.
 

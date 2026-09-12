@@ -343,6 +343,9 @@ func mergeSettings(base, overlay *RuntimeSettings) *RuntimeSettings {
 	if overlay.OASValidation != "" {
 		result.OASValidation = overlay.OASValidation
 	}
+	if overlay.MinRequestInterval != "" {
+		result.MinRequestInterval = overlay.MinRequestInterval
+	}
 	return &result
 }
 

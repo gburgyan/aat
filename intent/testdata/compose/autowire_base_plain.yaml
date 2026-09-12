@@ -1,0 +1,9 @@
+execution:
+  steps:
+    - node: createCart
+
+    - node: checkout
+      dependsOn: [createCart]
+      values:
+        cartId: AUTOWIRE
+        giftMessage: AUTOWIRE

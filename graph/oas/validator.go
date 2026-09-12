@@ -208,7 +208,7 @@ func (v *Validator) outputPath(nodeName, output string) (string, bool) {
 }
 
 // collectInputNames returns all parameter names (path-item and operation level)
-// and request body property names for an operation.
+// and request body property names, allOf branches included, for an operation.
 func collectInputNames(pathItem *v3high.PathItem, op *v3high.Operation) map[string]bool {
 	names := make(map[string]bool)
 
@@ -220,12 +220,10 @@ func collectInputNames(pathItem *v3high.PathItem, op *v3high.Operation) map[stri
 	// Request body properties
 	if op.RequestBody != nil && op.RequestBody.Content != nil {
 		for mediaType := range op.RequestBody.Content.ValuesFromOldest() {
-			if mediaType.Schema != nil {
-				schema := mediaType.Schema.Schema()
-				if schema != nil && schema.Properties != nil {
-					for propName := range schema.Properties.KeysFromOldest() {
-						names[propName] = true
-					}
+			if mediaType != nil && mediaType.Schema != nil {
+				props, _, _ := objectShape(mediaType.Schema.Schema())
+				for _, prop := range props {
+					names[prop.name] = true
 				}
 			}
 		}
@@ -235,7 +233,8 @@ func collectInputNames(pathItem *v3high.PathItem, op *v3high.Operation) map[stri
 }
 
 // collectRequiredInputs returns names of required parameters (path-item and
-// operation level) and required request body properties.
+// operation level) and required request body properties, allOf branches
+// included.
 func collectRequiredInputs(pathItem *v3high.PathItem, op *v3high.Operation) map[string]bool {
 	names := make(map[string]bool)
 
@@ -249,12 +248,10 @@ func collectRequiredInputs(pathItem *v3high.PathItem, op *v3high.Operation) map[
 	// Required request body properties
 	if op.RequestBody != nil && op.RequestBody.Content != nil {
 		for mediaType := range op.RequestBody.Content.ValuesFromOldest() {
-			if mediaType.Schema != nil {
-				schema := mediaType.Schema.Schema()
-				if schema != nil {
-					for _, req := range schema.Required {
-						names[req] = true
-					}
+			if mediaType != nil && mediaType.Schema != nil {
+				_, required, _ := objectShape(mediaType.Schema.Schema())
+				for name := range required {
+					names[name] = true
 				}
 			}
 		}

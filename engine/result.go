@@ -105,6 +105,11 @@ type StepResult struct {
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
 	ActualBaseURL     string                     // executor's BaseURL used for this step (set when Request is non-nil)
 	OriginalPath      string                     // request path before rewriting (empty if no rewrite occurred)
+	// CleanupFor links a cleanup step to what it cleans up after: the ID of
+	// the step that created the resource, or of the cleanup step before it in
+	// a chain. Empty for main steps and for plan-level cleanup steps that are
+	// not a graph pairing.
+	CleanupFor string
 }
 
 // DisplayOutput captures an output value tagged for display to the user.

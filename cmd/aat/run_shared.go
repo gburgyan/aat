@@ -87,6 +87,9 @@ type StepSummary struct {
 	AssertionsFailed int                  `json:"assertions_failed"`
 	FailedAssertions []string             `json:"failed_assertions,omitempty"` // "type: message" per failed assertion
 	DisplayOutputs   []DisplayOutputEntry `json:"display_outputs,omitempty"`
+	// CleanupFor, on a cleanup step, is the ID of the step whose resource it
+	// releases, or of the cleanup step before it in a chain.
+	CleanupFor string `json:"cleanup_for,omitempty"`
 }
 
 // DisplayOutputEntry is a display-tagged output in the JSON summary.
@@ -229,6 +232,7 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		Status:     step.StatusCode,
 		DurationMs: step.Duration.Milliseconds(),
 		Retries:    step.RetryCount,
+		CleanupFor: step.CleanupFor,
 	}
 	for _, c := range step.RetriedOn {
 		ss.RetriedOn = append(ss.RetriedOn, c.String())
@@ -650,6 +654,10 @@ type runContext struct {
 	OASCache        *oas.SpecCache // loaded specs for runtime validation (nil if none)
 	OASValidateMode string         // effective mode: "auto", "strict", "off"
 
+	// Pacer spaces requests across every run of this invocation, including the
+	// runs of a parallel batch (nil = no pacing).
+	Pacer *engine.Pacer
+
 	// Execution options
 	SkipMutations bool   // strip mutations from each plan before instantiation
 	StopAfterStep string // stop after this step ID; skip cleanup (checkpoint handoff)
@@ -745,6 +753,17 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		return nil, err
 	}
 	rctx.OASValidateMode = oasMode
+
+	// One pacer for every run of this invocation, so the plans of a parallel
+	// batch share the environment's request interval.
+	interval, err := env.Settings.RequestInterval()
+	if err != nil {
+		return nil, fmt.Errorf("settings.minRequestInterval: %w", err)
+	}
+	rctx.Pacer = engine.NewPacer(interval)
+	if rctx.Pacer != nil {
+		logf("aat: pacing requests at least %s apart\n", interval)
+	}
 
 	// Load OAS specs for runtime validation (unless disabled)
 	if oasMode != "off" {
@@ -945,7 +964,8 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		WithProgress(observer).
 		WithLayers(layeredDefaults).
 		WithEnvValues(rctx.Env.Values).
-		WithStopAfter(rctx.StopAfterStep)
+		WithStopAfter(rctx.StopAfterStep).
+		WithPacer(rctx.Pacer)
 
 	if rctx.OASCache != nil {
 		eng.WithOASSpecs(rctx.OASCache, rctx.Graph.OAS, rctx.OASValidateMode == "strict")

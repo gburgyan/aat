@@ -580,6 +580,22 @@ func TestProgressOutput_NotQuiet(t *testing.T) {
 	assert.Contains(t, output, "PASSED")
 }
 
+func TestBuildRunSummary_CleanupLinks(t *testing.T) {
+	result := &engine.RunResult{
+		Outcome: engine.OutcomePassed,
+		CleanupResults: []engine.StepResult{
+			{StepID: "deleteCart", Node: "deleteCart", StatusCode: 204, CleanupFor: "firstCart"},
+			{StepID: "deleteCart_2", Node: "deleteCart", StatusCode: 204, CleanupFor: "secondCart"},
+		},
+	}
+
+	s := buildRunSummary(result, "")
+
+	require.Len(t, s.Cleanup, 2)
+	assert.Equal(t, []string{"deleteCart", "deleteCart_2"}, []string{s.Cleanup[0].Name, s.Cleanup[1].Name})
+	assert.Equal(t, []string{"firstCart", "secondCart"}, []string{s.Cleanup[0].CleanupFor, s.Cleanup[1].CleanupFor})
+}
+
 func TestRunSummary_ArchivePath(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

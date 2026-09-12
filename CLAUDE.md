@@ -296,7 +296,7 @@ aat plan list [--manifest FILE]
 aat env list [--manifest FILE] [--env-config FILE] [--var KEY=VALUE]
 
 # Scaffold from OpenAPI spec
-aat generate --oas FILE [--output-graph graph.yaml|-] [--output-templates templates/]   # "-" alone writes no files
+aat generate --oas FILE [--output-graph graph.yaml|-] [--output-templates templates/] [--force]   # "-" alone writes no files; --force replaces existing files
 
 # Documentation generation
 aat docs generate --graph FILE [--domain FILE] [--output FILE] [--title TEXT] [--split]

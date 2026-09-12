@@ -2,7 +2,6 @@ package oas
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/pb33f/libopenapi/datamodel/high/base"
@@ -58,9 +57,11 @@ func (r ScaffoldExtractRule) MarshalYAML() (interface{}, error) {
 	return rawScaffoldExtractRule(r), nil
 }
 
-// Generate produces a graph and template stubs from an OAS spec.
-// specFile is used as the graph-level OAS reference (just the filename).
-func Generate(model *v3high.Document, specFile string) (*GenerateResult, error) {
+// Generate produces a graph and template stubs from an OAS spec. specRef
+// becomes the graph's oas: reference, which AAT resolves from the directory the
+// graph file is in. Warnings name the operations it skips and the parts of a
+// request a template leaves to write by hand.
+func Generate(model *v3high.Document, specRef string) (*GenerateResult, error) {
 	if model.Paths == nil {
 		return nil, fmt.Errorf("OAS spec has no paths")
 	}
@@ -68,39 +69,35 @@ func Generate(model *v3high.Document, specFile string) (*GenerateResult, error) 
 	result := &GenerateResult{
 		Graph: &graph.Graph{
 			Version: "1.0.0",
-			OAS:     specFile,
+			OAS:     specRef,
 			Nodes:   make(map[string]*graph.Node),
 		},
 	}
 
 	for pathStr, pathItem := range model.Paths.PathItems.FromOldest() {
-		type methodOp struct {
-			method string
-			op     *v3high.Operation
-		}
-		candidates := []methodOp{
-			{"GET", pathItem.Get},
-			{"POST", pathItem.Post},
-			{"PUT", pathItem.Put},
-			{"DELETE", pathItem.Delete},
-			{"PATCH", pathItem.Patch},
-		}
-
-		for _, c := range candidates {
-			if c.op == nil {
-				continue
-			}
-			if c.op.OperationId == "" {
+		for _, mo := range PathOperations(pathItem) {
+			op := mo.Operation
+			if op.OperationId == "" {
 				result.Warnings = append(result.Warnings,
-					fmt.Sprintf("skipping %s %s: no operationId", c.method, pathStr))
+					fmt.Sprintf("skipping %s %s: no operationId", mo.Method, pathStr))
 				continue
 			}
 
-			node := generateNode(pathItem, c.op)
-			tmpl := generateTemplate(c.method, pathStr, pathItem, c.op)
+			params := OperationParameters(pathItem, op)
+			var notes []string
+			for _, param := range params {
+				if note := parameterStyleNote(param); note != "" {
+					notes = append(notes, note)
+				}
+			}
+			body, bodyNotes := describeRequestBody(op)
+			for _, note := range append(notes, bodyNotes...) {
+				result.Warnings = append(result.Warnings,
+					fmt.Sprintf("%s %s (%s): %s", mo.Method, pathStr, op.OperationId, note))
+			}
 
-			result.Graph.Nodes[c.op.OperationId] = node
-			result.Templates = append(result.Templates, tmpl)
+			result.Graph.Nodes[op.OperationId] = generateNode(params, op, body)
+			result.Templates = append(result.Templates, generateTemplate(mo.Method, pathStr, params, op, body))
 		}
 	}
 
@@ -111,13 +108,13 @@ func Generate(model *v3high.Document, specFile string) (*GenerateResult, error) 
 	return result, nil
 }
 
-// generateNode builds a graph.Node from one OAS operation.
-func generateNode(pathItem *v3high.PathItem, op *v3high.Operation) *graph.Node {
+// generateNode builds a graph.Node from one OAS operation. The node's name is
+// its key in the graph, so Name stays empty and the graph file has no name:.
+func generateNode(params []*v3high.Parameter, op *v3high.Operation, body requestBody) *graph.Node {
 	node := &graph.Node{
-		Name:        op.OperationId,
 		Description: op.Summary,
 		Adapter:     op.OperationId,
-		Inputs:      collectNodeInputs(pathItem, op),
+		Inputs:      collectNodeInputs(params, body),
 		Outputs:     collectNodeOutputs(op),
 		OAS: &graph.OASRef{
 			OperationID: op.OperationId,
@@ -127,10 +124,9 @@ func generateNode(pathItem *v3high.PathItem, op *v3high.Operation) *graph.Node {
 }
 
 // generateTemplate builds a ScaffoldTemplate from one OAS operation. Optional
-// query parameters, headers, and body properties sit inside {{?name}} blocks,
-// so a generated template runs with only its required inputs.
-func generateTemplate(method, path string, pathItem *v3high.PathItem, op *v3high.Operation) *ScaffoldTemplate {
-	params := OperationParameters(pathItem, op)
+// query parameters, cookies, headers, and body properties sit inside {{?name}}
+// blocks, so a generated template runs with only its required inputs.
+func generateTemplate(method, path string, params []*v3high.Parameter, op *v3high.Operation, body requestBody) *ScaffoldTemplate {
 	tmpl := &ScaffoldTemplate{
 		Adapter:  op.OperationId,
 		Protocol: "http",
@@ -141,19 +137,22 @@ func generateTemplate(method, path string, pathItem *v3high.PathItem, op *v3high
 	}
 
 	// Path with converted params and the query string
-	var query []templateField
+	var query, cookies []templateField
 	for _, param := range params {
-		if param.In == "query" {
-			query = append(query, templateField{name: param.Name, required: param.Required != nil && *param.Required})
+		field := templateField{name: param.Name, required: param.Required != nil && *param.Required}
+		switch param.In {
+		case "query":
+			query = append(query, field)
+		case "cookie":
+			cookies = append(cookies, field)
 		}
 	}
 	tmpl.Request.Path = convertPathParams(path) + buildQueryString(query)
 
-	// Headers
+	// Headers: the body's media type, header parameters, and one Cookie header
 	headers := make(map[string]string)
-	hasRequestBody := op.RequestBody != nil && op.RequestBody.Content != nil
-	if hasRequestBody {
-		headers["Content-Type"] = "application/json"
+	if body.generated() {
+		headers["Content-Type"] = body.mediaType
 	}
 	for _, param := range params {
 		if param.In != "header" {
@@ -165,13 +164,20 @@ func generateTemplate(method, path string, pathItem *v3high.PathItem, op *v3high
 			headers[param.Name] = fmt.Sprintf("{{?%s}}{{%s}}{{/%s}}", param.Name, param.Name, param.Name)
 		}
 	}
+	if len(cookies) > 0 {
+		headers["Cookie"] = buildPairs(cookies, "", "; ")
+	}
 	if len(headers) > 0 {
 		tmpl.Request.Headers = headers
 	}
 
 	// Body
-	if hasRequestBody {
-		tmpl.Request.Body = buildBodyTemplate(op)
+	if body.generated() {
+		if body.kind == bodyForm {
+			tmpl.Request.Body = buildPairs(body.fields(), "", "&")
+		} else {
+			tmpl.Request.Body = buildJSONBody(body.fields())
+		}
 	}
 
 	// Extract map
@@ -181,30 +187,37 @@ func generateTemplate(method, path string, pathItem *v3high.PathItem, op *v3high
 	return tmpl
 }
 
-// templateField is a query parameter or body property a template sends.
+// templateField is a query parameter, cookie, or body property a template sends.
 type templateField struct {
 	name     string
 	required bool
-	raw      bool // body only: the value is inserted as a JSON literal, not a quoted string
+	raw      bool // JSON body only: the value is inserted as a JSON literal, not a quoted string
 }
 
-// buildQueryString renders "?a={{a}}&b={{b}}" for required parameters, with
-// each optional parameter in a conditional block whose separator is correct
-// whichever optional values are present.
+// buildQueryString renders "?a={{a}}&b={{b}}" for query parameters.
 func buildQueryString(fields []templateField) string {
+	return buildPairs(fields, "?", "&")
+}
+
+// buildPairs renders name={{name}} pairs joined by sep, with lead before the
+// first: required fields in order, then each optional field in a conditional
+// block whose separator is correct whichever optional values are present. It
+// renders query strings, form bodies, and the Cookie header.
+func buildPairs(fields []templateField, lead, sep string) string {
 	required, optional := splitRequired(fields)
+	render := func(f templateField) string {
+		return f.name + "={{" + f.name + "}}"
+	}
 	var b strings.Builder
 	for i, f := range required {
 		if i == 0 {
-			b.WriteString("?")
+			b.WriteString(lead)
 		} else {
-			b.WriteString("&")
+			b.WriteString(sep)
 		}
-		b.WriteString(f.name + "={{" + f.name + "}}")
+		b.WriteString(render(f))
 	}
-	writeOptional(&b, optional, len(required) > 0, "?", "&", func(f templateField) string {
-		return f.name + "={{" + f.name + "}}"
-	})
+	writeOptional(&b, optional, len(required) > 0, lead, sep, render)
 	return b.String()
 }
 
@@ -257,13 +270,134 @@ func writeOptional(b *strings.Builder, optional []templateField, afterRequired b
 	}
 }
 
-// collectNodeInputs gathers inputs from OAS parameters (path-item and
-// operation level) and the request body.
-func collectNodeInputs(pathItem *v3high.PathItem, op *v3high.Operation) []graph.Input {
+// parameterStyleNote describes a parameter serialization a template does not
+// reproduce: a style other than the default for its location, or explode:
+// false on a query or cookie list or object. It returns "" otherwise.
+func parameterStyleNote(param *v3high.Parameter) string {
+	if param == nil {
+		return ""
+	}
+	defaultStyle := "simple"
+	if param.In == "query" || param.In == "cookie" {
+		defaultStyle = "form"
+	}
+	if param.Style != "" && param.Style != defaultStyle {
+		return fmt.Sprintf("parameter %q uses style %s, which the template does not reproduce; rewrite it by hand", param.Name, param.Style)
+	}
+	if defaultStyle == "form" && param.Explode != nil && !*param.Explode && param.Schema != nil {
+		switch schemaType(param.Schema.Schema()) {
+		case "array", "object":
+			return fmt.Sprintf("parameter %q sets explode: false, which the template does not reproduce; rewrite it by hand", param.Name)
+		}
+	}
+	return ""
+}
+
+// bodyKind is how a scaffold treats a request body media type.
+type bodyKind int
+
+const (
+	bodyOther     bodyKind = iota // not generated: no inputs and no body
+	bodyJSON                      // application/json or another JSON type
+	bodyForm                      // application/x-www-form-urlencoded
+	bodyMultipart                 // multipart/*: inputs, but no body
+)
+
+// requestBody is what a scaffold takes from an operation's request body: the
+// media type it picked and that schema's properties.
+type requestBody struct {
+	kind      bodyKind
+	mediaType string // as the spec writes it; the template's Content-Type
+	props     []schemaProperty
+	required  map[string]bool
+}
+
+// generated reports whether the template gets a body and a Content-Type: a
+// JSON or form body whose schema has properties.
+func (b requestBody) generated() bool {
+	return (b.kind == bodyJSON || b.kind == bodyForm) && len(b.props) > 0
+}
+
+// fields returns the body's properties as template fields.
+func (b requestBody) fields() []templateField {
+	fields := make([]templateField, len(b.props))
+	for i, p := range b.props {
+		fields[i] = templateField{name: p.name, required: b.required[p.name], raw: isJSONLiteralType(p.proxy)}
+	}
+	return fields
+}
+
+// mediaKind classifies a request body media type, ignoring parameters such as
+// charset.
+func mediaKind(mediaType string) bodyKind {
+	name, _, _ := strings.Cut(mediaType, ";")
+	name = strings.ToLower(strings.TrimSpace(name))
+	switch {
+	case name == "application/json" || strings.HasSuffix(name, "+json"):
+		return bodyJSON
+	case name == "application/x-www-form-urlencoded":
+		return bodyForm
+	case strings.HasPrefix(name, "multipart/"):
+		return bodyMultipart
+	}
+	return bodyOther
+}
+
+// describeRequestBody picks the request body media type a scaffold generates
+// from: JSON (application/json before other JSON types), then a form, then
+// multipart. The notes say what the template leaves to write by hand.
+func describeRequestBody(op *v3high.Operation) (requestBody, []string) {
+	if op.RequestBody == nil || op.RequestBody.Content == nil || op.RequestBody.Content.Len() == 0 {
+		return requestBody{}, nil
+	}
+
+	var body requestBody
+	var content *v3high.MediaType
+	var listed []string
+	for name, mt := range op.RequestBody.Content.FromOldest() {
+		listed = append(listed, name)
+		kind := mediaKind(name)
+		if kind == bodyOther || mt == nil {
+			continue
+		}
+		if content == nil || kind < body.kind || (kind == bodyJSON && name == "application/json" && body.mediaType != "application/json") {
+			body.kind, body.mediaType, content = kind, name, mt
+		}
+	}
+	if content == nil {
+		return requestBody{}, []string{fmt.Sprintf("the %s request body is not generated; write the body and its Content-Type by hand", strings.Join(listed, " or "))}
+	}
+
+	var schema *base.Schema
+	if content.Schema != nil {
+		schema = content.Schema.Schema()
+	}
+	var composed bool
+	body.props, body.required, composed = objectShape(schema)
+
+	var notes []string
+	switch {
+	case body.kind == bodyMultipart && len(body.props) > 0:
+		notes = append(notes, fmt.Sprintf("the %s body is not generated; its properties are inputs, so write the body by hand", body.mediaType))
+	case body.kind == bodyMultipart:
+		notes = append(notes, fmt.Sprintf("the %s body is not generated; write it by hand", body.mediaType))
+	case composed && len(body.props) == 0:
+		notes = append(notes, fmt.Sprintf("the %s body schema uses oneOf or anyOf; write the body by hand", body.mediaType))
+	case composed:
+		notes = append(notes, fmt.Sprintf("the %s body schema uses oneOf or anyOf; only the properties outside them are generated", body.mediaType))
+	case len(body.props) == 0:
+		notes = append(notes, fmt.Sprintf("the %s body schema declares no properties; write the body by hand", body.mediaType))
+	}
+	return body, notes
+}
+
+// collectNodeInputs gathers inputs from an operation's parameters (path-item
+// and operation level) and the properties of its request body.
+func collectNodeInputs(params []*v3high.Parameter, body requestBody) []graph.Input {
 	var inputs []graph.Input
 
 	// Parameters (query, header, path, cookie)
-	for _, param := range OperationParameters(pathItem, op) {
+	for _, param := range params {
 		inp := graph.Input{
 			Name: param.Name,
 		}
@@ -284,33 +418,18 @@ func collectNodeInputs(pathItem *v3high.PathItem, op *v3high.Operation) []graph.
 	}
 
 	// Request body properties
-	if op.RequestBody != nil && op.RequestBody.Content != nil {
-		jsonContent := op.RequestBody.Content.GetOrZero("application/json")
-		if jsonContent != nil && jsonContent.Schema != nil {
-			schema := jsonContent.Schema.Schema()
-			if schema != nil {
-				requiredSet := make(map[string]bool)
-				for _, r := range schema.Required {
-					requiredSet[r] = true
-				}
-
-				for _, prop := range resolveSchemaProperties(schema) {
-					propName, propProxy := prop.name, prop.proxy
-					inp := graph.Input{
-						Name: propName,
-					}
-					if propProxy != nil {
-						propSchema := propProxy.Schema()
-						inp.Type = mapSchemaType(propSchema)
-						inp.Constraints = extractConstraints(propSchema)
-					} else {
-						inp.Type = "string"
-					}
-					inp.Optional = !requiredSet[propName]
-					inputs = append(inputs, inp)
-				}
-			}
+	for _, prop := range body.props {
+		inp := graph.Input{
+			Name:     prop.name,
+			Type:     "string",
+			Optional: !body.required[prop.name],
 		}
+		if prop.proxy != nil {
+			propSchema := prop.proxy.Schema()
+			inp.Type = mapSchemaType(propSchema)
+			inp.Constraints = extractConstraints(propSchema)
+		}
+		inputs = append(inputs, inp)
 	}
 
 	return inputs
@@ -341,7 +460,7 @@ func collectNodeOutputs(op *v3high.Operation) []graph.Output {
 		}
 
 		// Array response
-		if len(schema.Type) > 0 && schema.Type[0] == "array" {
+		if schemaType(schema) == "array" {
 			return collectArrayOutput(op.OperationId, schema)
 		}
 
@@ -361,42 +480,38 @@ func collectArrayOutput(operationId string, schema *base.Schema) []graph.Output 
 	}
 
 	if schema.Items != nil && schema.Items.IsA() {
-		itemSchema := schema.Items.A.Schema()
-		if itemSchema != nil {
-			for _, prop := range resolveSchemaProperties(itemSchema) {
-				propName, propProxy := prop.name, prop.proxy
-				field := graph.Field{
-					Name: propName,
-				}
-				if propProxy != nil {
-					field.Type = mapSchemaType(propProxy.Schema())
-				} else {
-					field.Type = "string"
-				}
-				out.ElementFields = append(out.ElementFields, field)
+		props, _, _ := objectShape(schema.Items.A.Schema())
+		for _, prop := range props {
+			field := graph.Field{
+				Name: prop.name,
+				Type: "string",
 			}
+			if prop.proxy != nil {
+				field.Type = mapSchemaType(prop.proxy.Schema())
+			}
+			out.ElementFields = append(out.ElementFields, field)
 		}
 	}
 
 	return []graph.Output{out}
 }
 
-// collectObjectOutputs builds outputs from an object schema's properties. A
-// property the schema does not list as required becomes an optional output, so
-// a response that omits it does not fail extraction.
+// collectObjectOutputs builds outputs from an object schema's properties,
+// allOf branches included. A property the schema does not list as required
+// becomes an optional output, so a response that omits it does not fail
+// extraction.
 func collectObjectOutputs(schema *base.Schema) []graph.Output {
+	props, required, _ := objectShape(schema)
 	var outputs []graph.Output
 
-	for _, prop := range resolveSchemaProperties(schema) {
-		propName, propProxy := prop.name, prop.proxy
+	for _, prop := range props {
 		out := graph.Output{
-			Name:     propName,
-			Optional: !slices.Contains(schema.Required, propName),
+			Name:     prop.name,
+			Type:     "string",
+			Optional: !required[prop.name],
 		}
-		if propProxy != nil {
-			out.Type = mapSchemaType(propProxy.Schema())
-		} else {
-			out.Type = "string"
+		if prop.proxy != nil {
+			out.Type = mapSchemaType(prop.proxy.Schema())
 		}
 		outputs = append(outputs, out)
 	}
@@ -423,18 +538,65 @@ func resolveSchemaProperties(schema *base.Schema) []schemaProperty {
 	return props
 }
 
+// maxShapeDepth bounds how far objectShape follows allOf, which a circular
+// $ref could otherwise follow forever.
+const maxShapeDepth = 16
+
+// objectShape returns the properties of an object schema, its own and then
+// those of each allOf branch, in spec order, and the property names they
+// require. A property declared twice keeps its first place and schema.
+// composed reports a oneOf or anyOf, whose alternatives are left out.
+func objectShape(schema *base.Schema) (props []schemaProperty, required map[string]bool, composed bool) {
+	required = make(map[string]bool)
+	seen := make(map[string]bool)
+	var walk func(s *base.Schema, depth int)
+	walk = func(s *base.Schema, depth int) {
+		if s == nil || depth > maxShapeDepth {
+			return
+		}
+		if len(s.OneOf) > 0 || len(s.AnyOf) > 0 {
+			composed = true
+		}
+		for _, p := range resolveSchemaProperties(s) {
+			if !seen[p.name] {
+				seen[p.name] = true
+				props = append(props, p)
+			}
+		}
+		for _, name := range s.Required {
+			required[name] = true
+		}
+		for _, branch := range s.AllOf {
+			if branch != nil {
+				walk(branch.Schema(), depth+1)
+			}
+		}
+	}
+	walk(schema, 0)
+	return props, required, composed
+}
+
+// schemaType returns a schema's type. In an OpenAPI 3.1 type list "null" is
+// skipped, so ["null", "integer"] is "integer". An untyped schema gives "".
+func schemaType(schema *base.Schema) string {
+	if schema == nil {
+		return ""
+	}
+	for _, t := range schema.Type {
+		if t != "null" {
+			return t
+		}
+	}
+	return ""
+}
+
 // mapSchemaType converts an OAS JSON Schema type+format to an AAT graph type.
 func mapSchemaType(schema *base.Schema) string {
 	if schema == nil {
 		return "string"
 	}
 
-	typeName := ""
-	if len(schema.Type) > 0 {
-		typeName = schema.Type[0]
-	}
-
-	switch typeName {
+	switch schemaType(schema) {
 	case "string":
 		switch schema.Format {
 		case "date":
@@ -456,6 +618,15 @@ func mapSchemaType(schema *base.Schema) string {
 			elemType = mapSchemaType(schema.Items.A.Schema())
 		}
 		return elemType + "[]"
+	case "object":
+		return "object"
+	case "":
+		// An untyped schema that declares properties, or composes them with
+		// allOf, is an object.
+		if (schema.Properties != nil && schema.Properties.Len() > 0) || len(schema.AllOf) > 0 {
+			return "object"
+		}
+		return "string"
 	default:
 		return "string"
 	}
@@ -531,33 +702,11 @@ func convertPathParams(path string) string {
 	return result.String()
 }
 
-// buildBodyTemplate creates a JSON body with a {{placeholder}} for each top-level
-// property, in spec order: required properties first, then each optional one
-// in a conditional block. Strings are quoted; integers, numbers, booleans, and
-// arrays are inserted as JSON literals.
-func buildBodyTemplate(op *v3high.Operation) string {
-	if op.RequestBody == nil || op.RequestBody.Content == nil {
-		return ""
-	}
-
-	jsonContent := op.RequestBody.Content.GetOrZero("application/json")
-	if jsonContent == nil || jsonContent.Schema == nil {
-		return ""
-	}
-
-	schema := jsonContent.Schema.Schema()
-	if schema == nil || schema.Properties == nil || schema.Properties.Len() == 0 {
-		return ""
-	}
-
-	requiredSet := make(map[string]bool, len(schema.Required))
-	for _, r := range schema.Required {
-		requiredSet[r] = true
-	}
-	var fields []templateField
-	for name, proxy := range schema.Properties.FromOldest() {
-		fields = append(fields, templateField{name: name, required: requiredSet[name], raw: isJSONLiteralType(proxy)})
-	}
+// buildJSONBody creates a JSON body with a {{placeholder}} for each property,
+// in spec order: required properties first, then each optional one in a
+// conditional block. Strings are quoted; integers, numbers, booleans, arrays,
+// and objects are inserted as JSON literals.
+func buildJSONBody(fields []templateField) string {
 	required, optional := splitRequired(fields)
 
 	render := func(f templateField) string {
@@ -580,18 +729,21 @@ func buildBodyTemplate(op *v3high.Operation) string {
 }
 
 // isJSONLiteralType reports whether a body property is inserted unquoted: an
-// integer, number, boolean, or array.
+// integer, number, boolean, array, or object, including an untyped schema that
+// declares properties or allOf.
 func isJSONLiteralType(proxy *base.SchemaProxy) bool {
 	if proxy == nil {
 		return false
 	}
 	schema := proxy.Schema()
-	if schema == nil || len(schema.Type) == 0 {
+	if schema == nil {
 		return false
 	}
-	switch schema.Type[0] {
-	case "integer", "number", "boolean", "array":
+	switch schemaType(schema) {
+	case "integer", "number", "boolean", "array", "object":
 		return true
+	case "":
+		return (schema.Properties != nil && schema.Properties.Len() > 0) || len(schema.AllOf) > 0
 	}
 	return false
 }
@@ -618,7 +770,7 @@ func isArrayResponse(op *v3high.Operation) bool {
 		if schema == nil {
 			continue
 		}
-		return len(schema.Type) > 0 && schema.Type[0] == "array"
+		return schemaType(schema) == "array"
 	}
 	return false
 }

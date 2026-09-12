@@ -163,7 +163,8 @@ func enrichFromTemplate(ic *InputContext, step plan.Step) {
 	if sv.FromResolved != "" {
 		ic.FromResolved = sv.FromResolved
 	}
-	if sv.Default != nil {
+	// An AUTOWIRE marker is not a value to offer as the current one.
+	if marker, _ := plan.AutowireMarker(sv); sv.Default != nil && !marker {
 		ic.CurrentDefault = fmt.Sprintf("%v", sv.Default)
 	}
 	if len(sv.Pool) > 0 {

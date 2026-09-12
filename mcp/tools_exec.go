@@ -141,7 +141,8 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	eng := engine.NewEngine(s.ctx.Graph, s.ctx.Registry, router).
 		WithDomain(s.ctx.KB).
 		WithEnvValues(s.ctx.Environment.Values).
-		WithLayers(layeredDefaults)
+		WithLayers(layeredDefaults).
+		WithPacer(s.ctx.Pacer)
 
 	result := eng.Run(ctx, p)
 
@@ -230,8 +231,15 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 			} else if step.Response != nil {
 				status = fmt.Sprintf("%d", step.StatusCode)
 			}
+			label := step.StepID
+			if label == "" {
+				label = step.Node
+			}
+			if step.CleanupFor != "" {
+				label += " (for " + step.CleanupFor + ")"
+			}
 			fmt.Fprintf(&b, "- %s: %s (%s)\n",
-				step.Node, status, formatDurationMs(step.Duration.Milliseconds()))
+				label, status, formatDurationMs(step.Duration.Milliseconds()))
 		}
 	}
 

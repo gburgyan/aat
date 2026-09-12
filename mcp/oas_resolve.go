@@ -974,29 +974,16 @@ func (s *Server) listAllOperations(tag, keyword, method string) []oasOperation {
 			continue
 		}
 		for pathStr, pathItem := range doc.Paths.PathItems.FromOldest() {
-			for _, pair := range []struct {
-				method string
-				op     *v3high.Operation
-			}{
-				{"GET", pathItem.Get},
-				{"POST", pathItem.Post},
-				{"PUT", pathItem.Put},
-				{"DELETE", pathItem.Delete},
-				{"PATCH", pathItem.Patch},
-			} {
-				if pair.op == nil {
-					continue
-				}
-
+			for _, pair := range oas.PathOperations(pathItem) {
 				// Method filter
-				if method != "" && !strings.EqualFold(pair.method, method) {
+				if method != "" && !strings.EqualFold(pair.Method, method) {
 					continue
 				}
 
 				// Tag filter
 				if tag != "" {
 					found := false
-					for _, t := range pair.op.Tags {
+					for _, t := range pair.Operation.Tags {
 						if strings.EqualFold(t, tag) {
 							found = true
 							break
@@ -1011,13 +998,13 @@ func (s *Server) listAllOperations(tag, keyword, method string) []oasOperation {
 				if keyword != "" {
 					kw := strings.ToLower(keyword)
 					match := false
-					if pair.op.OperationId != "" && strings.Contains(strings.ToLower(pair.op.OperationId), kw) {
+					if pair.Operation.OperationId != "" && strings.Contains(strings.ToLower(pair.Operation.OperationId), kw) {
 						match = true
 					}
-					if !match && pair.op.Summary != "" && strings.Contains(strings.ToLower(pair.op.Summary), kw) {
+					if !match && pair.Operation.Summary != "" && strings.Contains(strings.ToLower(pair.Operation.Summary), kw) {
 						match = true
 					}
-					if !match && pair.op.Description != "" && strings.Contains(strings.ToLower(pair.op.Description), kw) {
+					if !match && pair.Operation.Description != "" && strings.Contains(strings.ToLower(pair.Operation.Description), kw) {
 						match = true
 					}
 					if !match {
@@ -1026,13 +1013,13 @@ func (s *Server) listAllOperations(tag, keyword, method string) []oasOperation {
 				}
 
 				op := oasOperation{
-					OperationID: pair.op.OperationId,
-					Method:      pair.method,
+					OperationID: pair.Operation.OperationId,
+					Method:      pair.Method,
 					Path:        pathStr,
-					Summary:     pair.op.Summary,
-					Tags:        pair.op.Tags,
-					Deprecated:  pair.op.Deprecated != nil && *pair.op.Deprecated,
-					GraphNode:   mapped[pair.op.OperationId],
+					Summary:     pair.Operation.Summary,
+					Tags:        pair.Operation.Tags,
+					Deprecated:  pair.Operation.Deprecated != nil && *pair.Operation.Deprecated,
+					GraphNode:   mapped[pair.Operation.OperationId],
 				}
 				ops = append(ops, op)
 			}

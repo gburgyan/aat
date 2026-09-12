@@ -19,6 +19,7 @@ func TestIsPlaceholder(t *testing.T) {
 	}{
 		{"bare AUTOWIRE", plan.StepValue{Default: "AUTOWIRE"}, true},
 		{"legacy PLACEHOLDER", plan.StepValue{Default: "PLACEHOLDER"}, true},
+		{"optional AUTOWIRE?", plan.StepValue{Default: "AUTOWIRE?"}, true},
 		{"lowercase", plan.StepValue{Default: "placeholder"}, false},
 		{"lowercase autowire", plan.StepValue{Default: "autowire"}, false},
 		{"non-string", plan.StepValue{Default: 123}, false},

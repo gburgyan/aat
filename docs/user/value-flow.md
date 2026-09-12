@@ -121,7 +121,9 @@ The `fromSelection` syntax is `selectionName.fieldName`. If the field part is om
 | `max` | `sortField` | Element with the largest value of `sortField` |
 | `match` | `filter` | First element matching the filter predicate (no pre-filtering) |
 
-For `min` and `max`, the `sortField` must resolve to a numeric value. The `field` parameter (if set) determines which field to extract from the winning element.
+For `min` and `max`, the `sortField` must resolve to a number or to a string that holds one, such as `"99.10"`: APIs often send prices and totals as decimal strings, and they compare by value. Any other value fails the selection. The `field` parameter (if set) determines which field to extract from the winning element.
+
+A `filter` does not convert strings: comparing a string field with a number fails. Filter such fields with string equality, or let `min` and `max` do the numeric comparison.
 
 ### Filtering
 

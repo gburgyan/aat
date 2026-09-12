@@ -30,7 +30,7 @@ aat run plan smoke-test --json
 | `outcome` | string | `"passed"`, `"failed"`, `"error"`, `"aborted"` (interrupted), or `"stopped"` (`--stop-after` checkpoint) |
 | `error` | string | Why the run did not pass, such as `step "createOrder" returned status 400` (omitted when the run passed) |
 | `steps` | array | Per-step results (see StepSummary below) |
-| `cleanup` | array | Cleanup step results (same schema as steps; omitted if none) |
+| `cleanup` | array | Cleanup step results (same schema as steps, plus `cleanup_for`: the step whose resource each one releases, or the cleanup step before it in a chain; omitted if none) |
 | `summary` | object | Aggregate stats: `total_steps`, `passed_steps`, `failed_steps` (main steps only), `duration_ms` (the run's wall-clock time, retry waits and cleanup included), and `issues` — a map of issue category to count (currently `oas` for OpenAPI violations; omitted when empty) |
 | `archive_path` | string | Path to the run's `archive.json` |
 | `attempts` | int | Total execution attempts (omitted if 1) |
@@ -45,7 +45,7 @@ aat run plan smoke-test --json
 | `name` | string | Step ID from the plan (a mutation sibling's generated ID, such as `addItem--zero-quantity`) |
 | `node` | string | Graph node name |
 | `status` | int | HTTP status code (`0` when no response arrived) |
-| `duration_ms` | int | Step duration in milliseconds, from the first attempt to the end of the last, retry waits included |
+| `duration_ms` | int | Step duration in milliseconds, from the first attempt to the end of the last, retry and pacing waits included |
 | `passed` | bool | Whether the step succeeded: no error, a status below 400 (or one its `expectFailure` lists), and no failed assertion |
 | `error` | string | Error message, such as `status 400` (omitted if step passed) |
 | `retries` | int | Number of step-level retries |

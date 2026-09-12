@@ -1,0 +1,9 @@
+execution:
+  steps:
+    - id: late
+      node: createCart
+      dependsOn: [checkout]
+
+    - node: checkout
+      values:
+        cartId: AUTOWIRE

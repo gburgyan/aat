@@ -406,6 +406,47 @@ environments:
 	assert.Equal(t, "strict", env.Settings.OASValidation) // inherited
 }
 
+func TestLoadNamedEnvironment_MinRequestInterval(t *testing.T) {
+	path := writeTempYAML(t, `
+shared:
+  settings:
+    minRequestInterval: 250ms
+
+environments:
+  dev:
+    apiBaseUrl: https://dev.example.com
+    auth:
+      type: none
+  live:
+    extends: dev
+    vars:
+      pace: 1s
+    settings:
+      minRequestInterval: ${pace}
+`)
+
+	dev, err := LoadNamedEnvironment(path, "dev")
+	require.NoError(t, err)
+	assert.Equal(t, "250ms", dev.Settings.MinRequestInterval, "inherited from shared")
+
+	live, err := LoadNamedEnvironment(path, "live")
+	require.NoError(t, err)
+	assert.Equal(t, "1s", live.Settings.MinRequestInterval, "the environment's own value, after var substitution")
+
+	typo := writeTempYAML(t, `
+environments:
+  dev:
+    apiBaseUrl: https://dev.example.com
+    auth:
+      type: none
+    settings:
+      minRequestInterval: "250"
+`)
+	_, err = LoadNamedEnvironment(typo, "dev")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `settings.minRequestInterval: invalid duration "250"`)
+}
+
 func TestLoadEnvironment_RejectsMultiEnv(t *testing.T) {
 	yaml := `
 environments:

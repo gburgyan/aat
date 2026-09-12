@@ -1,0 +1,7 @@
+execution:
+  steps:
+    - node: producerNode
+
+    - node: testNode
+      values:
+        input1: AUTOWIRE

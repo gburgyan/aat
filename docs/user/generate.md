@@ -1,6 +1,6 @@
 # Scaffolding from OpenAPI
 
-`aat generate` reads an OpenAPI 3 spec and writes a starting [graph](graphs.md) with one node per operation, plus one [request template](templates.md) per node. It saves the typing: the scaffold carries each operation's method, path, parameters, JSON body properties, and response fields.
+`aat generate` reads an OpenAPI 3 spec and writes a starting [graph](graphs.md) with one node per operation, plus one [request template](templates.md) per node. It saves the typing: the scaffold carries each operation's method, path, parameters, body properties, and response fields.
 
 What it cannot know is how your API is used: which operation must run before which, which one undoes another, where a value comes from, or which of a response's fields a test cares about. A scaffold is a first draft to trim and wire up by hand. [What a Hand-Tuned Graph Adds](#what-a-hand-tuned-graph-adds) compares a generated graph with the shop example's.
 
@@ -19,25 +19,37 @@ Generated 17 nodes, 17 templates written to templates/
 | `--oas` | path | — | The OpenAPI spec to read, YAML or JSON (required) |
 | `--output-graph` | path | `graph.yaml` | Graph file to write; `-` prints the graph to stdout instead |
 | `--output-templates` | path | `templates` | Directory for the templates, created if missing. With `--output-graph -`, templates are written only when this flag is given |
+| `--force` | bool | `false` | Replace a graph file or templates that already exist |
 
-Paths are relative to the working directory. `aat generate` does not look for or read a project manifest. Warnings go to stderr, and a failure (a missing `--oas`, an unreadable spec, a spec with no operations that have an `operationId`) exits with code `2`.
+Paths are relative to the working directory. `aat generate` does not look for or read a project manifest. Warnings go to stderr. A failure exits with code `2`. Failures include:
+
+- a missing `--oas`
+- an unreadable spec
+- a spec with no operations that have an `operationId`
+- files that already exist, without `--force`
 
 The spec must be OpenAPI 3.0 or 3.1. A Swagger 2.0 file fails with `supplied spec is a different version (oas2)`; convert it to OpenAPI 3 first.
 
 ## What It Writes
 
-- **A graph file** with `version: 1.0.0`, an `oas:` reference to the spec (see [Gotchas](#gotchas)), and one node per operation.
+- **A graph file** with `version: 1.0.0`, an `oas:` reference to the spec (relative to the graph file's directory), and one node per operation.
 - **One template per node**, named `<operationId>.yaml`, in the templates directory.
 
 Nothing else: no `aat-project.yaml`, environment file, domain file, workflows, layers, or plans. [From Scaffold to Project](#from-scaffold-to-project) lists what to add.
 
-Only GET, POST, PUT, DELETE, and PATCH operations are generated; HEAD, OPTIONS, and TRACE operations are skipped silently. An operation without an `operationId` is skipped with a warning:
+Operations of every method are generated: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, and TRACE. An operation without an `operationId` is skipped with a warning:
 
 ```text
 warning: skipping DELETE /widgets/{widgetId}: no operationId
 ```
 
-Regenerating from the same spec produces identical files. Nodes and extract rules are sorted by name, inputs and outputs keep the spec's order, and the YAML is indented with four spaces.
+Other warnings name a part of a request that the template leaves for you to write, such as a multipart body (see [Request Bodies](#request-bodies)) or a parameter with a `style` other than the default:
+
+```text
+warning: POST /receipts (uploadReceipt): the multipart/form-data body is not generated; its properties are inputs, so write the body by hand
+```
+
+Regenerating from the same spec with `--force` produces identical files. Nodes and extract rules are sorted by name, inputs and outputs keep the spec's order, and the YAML is indented with four spaces.
 
 ## Nodes
 
@@ -45,7 +57,6 @@ Each node is named after its `operationId`, which is also its `adapter` and its 
 
 ```yaml
     listProducts:
-        name: listProducts
         description: List catalog products
         adapter: listProducts
         inputs:
@@ -63,11 +74,11 @@ Each node is named after its `operationId`, which is also its `adapter` and its 
             operationId: listProducts
 ```
 
-The `name:` line repeats the map key and can be deleted. Nodes with no summary, inputs, or outputs get `description: ""`, `inputs: []`, or `outputs: []`.
+The node's name is its key in the graph. Nodes with no summary, inputs, or outputs get `description: ""`, `inputs: []`, or `outputs: []`.
 
 ### Inputs
 
-Inputs come from the operation's parameters (path-level and operation-level; an operation-level parameter replaces a path-level one with the same name and location), followed by the top-level properties of an `application/json` request body.
+Inputs come from the operation's parameters (path-level and operation-level; an operation-level parameter replaces a path-level one with the same name and location), followed by the top-level properties of the request body, including those of `allOf` branches. [Request Bodies](#request-bodies) says which of the body's media types is used.
 
 - Path parameters are required. Query, header, and cookie parameters are `optional: true` unless the spec marks them `required: true`.
 - Body properties are optional unless listed in the body schema's `required`.
@@ -86,10 +97,10 @@ Types map as follows:
 | `type: boolean` | `boolean` |
 | `type: array` of a scalar type | that type with `[]`, such as `string[]` |
 | `type: array` of objects | `string[]`, with no `elementFields` |
-| `type: object` | `string` |
-| no `type`, a composed schema (`allOf`, `oneOf`, `anyOf`), or a parameter without a `schema` | `string` |
+| `type: object`, or no `type` with `properties` or `allOf` | `object` |
+| any other schema without a `type` (including `oneOf` and `anyOf`), or a parameter without a `schema` | `string` |
 
-For OpenAPI 3.1 type lists only the first entry counts: `[string, "null"]` maps to `string`, but `["null", integer]` also maps to `string`.
+In an OpenAPI 3.1 type list, `"null"` is skipped: `[string, "null"]` maps to `string`, and `["null", integer]` to `integer`.
 
 Schema validation keywords become [input constraints](graphs.md#inputs): `minLength`, `maxLength`, and `pattern` keep their names, and `minimum` and `maximum` become `min` and `max`. [Custom types](graphs.md#types), `enum[...]` types, and defaults are yours to add.
 
@@ -97,8 +108,11 @@ Schema validation keywords become [input constraints](graphs.md#inputs): `minLen
 
 Outputs come from the first `2xx` response, in the spec's order, that has an `application/json` schema. Other responses are ignored.
 
-- **An object response** becomes one output per top-level property, each extracted by its own name. Nested objects and arrays of objects are extracted whole, typed as in the table above.
-- **An array response** becomes a single output of type `object[]` whose `elementFields` are the item's properties, extracted from the whole body with `path: '@this'` and a `fields` entry per property. The output is named after the operation with a leading `list`, `search`, `find`, `get`, `fetch`, or `query` removed (`listWidgets` gives `widgets`), and is named `items` when the operation starts with none of those words.
+- **An object response** becomes one output per top-level property, including those of `allOf` branches, each extracted by its own name. Nested objects and arrays of objects are extracted whole, typed as in the table above.
+- **An array response** becomes a single output of type `object[]`:
+  - Its `elementFields` are the item's properties.
+  - It is extracted from the whole body with `path: '@this'` and a `fields` entry per property.
+  - It is named after the operation with a leading `list`, `search`, `find`, `get`, `fetch`, or `query` removed, so `listWidgets` gives `widgets`. It is named `items` when the operation starts with none of those words.
 - **No JSON 2xx response** (a `204`, say) gives no outputs and a template with `response: {}`.
 
 Property descriptions are not copied. A property the response schema does not list as `required` becomes an `optional: true` output with an optional extract rule, so a response that leaves it out still passes. The shop API omits `couponCode` from a cart with no coupon, and the generated `createCart` template allows for that:
@@ -132,11 +146,11 @@ After a required parameter, each optional block simply starts with `&`. When eve
     path: /search{{?q|page|tags}}?{{/q|page|tags}}{{?q}}q={{q}}{{/q}}{{?page}}{{?q}}&{{/q}}page={{page}}{{/page}}{{?tags}}{{?q|page}}&{{/q|page}}tags={{tags}}{{/tags}}
 ```
 
-That renders as `/search` with no values, `/search?page=2` with only `page`, and `/search?q=tent&page=2&tags=["a"]` with all three. An array value is inserted as JSON text, as the `tags` example shows. If your API expects another form, such as `tags=a,b` or `tags=a&tags=b`, rewrite that parameter by hand.
+That renders as `/search` with no values, `/search?page=2` with only `page`, and `/search?q=tent&page=2&tags=a&tags=b` with all three. A list value repeats its `key=` pair, OpenAPI's default for query parameters; an empty list still sends `tags=`. If your API expects another form, such as `tags=a,b`, rewrite that parameter by hand.
 
 ### Headers
 
-A template for an operation with a request body sends `Content-Type: application/json`. Header parameters become headers: a required one is a plain placeholder, and an optional one is a conditional block, which AAT leaves out of the request when it resolves to nothing:
+A template with a body sends a `Content-Type` of the body's media type. Header parameters become headers: a required one is a plain placeholder, and an optional one is a conditional block, which AAT leaves out of the request when it resolves to nothing:
 
 ```yaml
     headers:
@@ -144,9 +158,23 @@ A template for an operation with a request body sends `Content-Type: application
         X-Tenant: '{{X-Tenant}}'
 ```
 
+Cookie parameters become one `Cookie` header: required cookies first, then each optional one in a conditional block. A cookie value is inserted as it is.
+
+```yaml
+    headers:
+        Cookie: 'sessionId={{sessionId}}{{?theme}}; theme={{theme}}{{/theme}}'
+```
+
 ### Request Bodies
 
-The body is a flat JSON object with one placeholder per top-level property of the `application/json` schema: required properties first, in spec order, then each optional property in a conditional block that carries its own comma. String values are quoted; integer, number, boolean, and array values are inserted as JSON literals. The generated `paymentCharge` template from the shop spec:
+The scaffold builds the body from one of the operation's request media types. It prefers `application/json`, then another JSON type such as `application/merge-patch+json`, then `application/x-www-form-urlencoded`, then `multipart/*`. The schema's top-level properties become inputs, including those of `allOf` branches.
+
+A **JSON body** is a flat JSON object with one placeholder per property: required properties first, in spec order, then each optional property in a conditional block that carries its own comma.
+
+- **String values** are quoted.
+- **Integer, number, boolean, array, and object values** are inserted as JSON literals.
+
+The generated `paymentCharge` template from the shop spec:
 
 ```yaml
 adapter: paymentCharge
@@ -181,10 +209,16 @@ response:
 
 Its body is the same as the hand-written one in `examples/shop/templates/paymentCharge.yaml`. With only the required values, it sends `{"orderId": ..., "amount": ..., "currency": ..., "method": ...}`; a body whose properties are all optional renders as `{}` when none are set.
 
-Two cases need hand editing:
+An object property is typed `object` and placed as `"shipping": {{shipping}}`. Give it a map, such as a plan value `shipping: {default: {city: Austin}}`, or JSON text. Either one is sent as a nested object.
 
-- **Object properties** are quoted like strings (`"meta": "{{meta}}"`) and typed `string`. Replace the placeholder with the nested object you want to send.
-- **Non-JSON and composed bodies** produce no body inputs and no `body`. A form-encoded or multipart body still gets the `Content-Type: application/json` header, and a body schema built with `allOf`, `oneOf`, or `anyOf` yields nothing to fill in. Write those bodies and headers yourself.
+A **form body** is a query string, `orderId={{orderId}}{{?note}}&note={{note}}{{/note}}`, sent with `Content-Type: application/x-www-form-urlencoded`. A list value repeats its pair, as in a query string; an object value is sent as JSON text.
+
+These bodies are left for you to write, each with a warning:
+
+- **Multipart:** the properties become inputs, but the template has no `body` and no `Content-Type`, which must carry the multipart boundary.
+- **Any other media type,** such as `application/octet-stream` or `application/xml`: no inputs, no `body`, and no `Content-Type`.
+- **A JSON or form schema without properties,** such as a bare `type: object` or an array: no `body` and no `Content-Type`.
+- **`oneOf` or `anyOf`:** the alternatives are left out. Properties declared outside them still become inputs and body fields.
 
 ## What It Ignores
 
@@ -192,7 +226,7 @@ Two cases need hand editing:
 |-------------|------------------------|
 | `servers`, including per-path servers | Nothing. Base URLs, and routing some operations to another host, belong in the [environment file](environments.md#multi-host-routing) |
 | `securitySchemes` and `security` | Nothing. Configure [authentication](environments.md#authentication) in the environment file |
-| Cookie parameters | Added as graph inputs, but not sent by the template |
+| A parameter `style` other than the default, or `explode: false` on a list or object | A warning. The template sends the value the default way |
 | Parameter descriptions, `enum`, `default`, and `example` values | Dropped |
 | Non-`2xx` responses, response headers, and non-JSON response bodies | Dropped |
 | Tags, `deprecated`, callbacks, and links | Dropped |
@@ -209,9 +243,16 @@ Add `--output-templates DIR` to write the templates as well while the graph goes
 
 ## Gotchas
 
-- **The `oas:` reference is only the spec's file name.** `aat generate --oas specs/shop.yaml` writes `oas: shop.yaml`, and AAT resolves that path relative to the graph file's directory. Unless the graph sits next to the spec, `aat validate` fails its OAS section (`loading spec "shop.yaml": ... no such file or directory`) and `aat run` prints `could not load OAS spec` and runs without runtime OAS validation. Edit the line to the spec's path relative to the graph, such as `oas: specs/shop.yaml`. See [OAS References](graphs.md#oas-references).
-- **Nothing is protected from overwriting.** The command replaces the graph file and any template with the same name without asking. Templates in the directory for other adapters are left alone. Generate into a scratch directory and copy what you need into an existing project.
-- **Valid is not the same as runnable.** A scaffold that passes `aat validate --strict` can still send the wrong thing: object body properties are quoted as strings, and array query parameters render as JSON text.
+- **The `oas:` reference is relative to where the graph is written.**
+  - `aat generate --oas specs/shop.yaml --output-graph project/graph.yaml` writes `oas: ../specs/shop.yaml`, which AAT resolves from the graph file's directory.
+  - With `--output-graph -`, the path is relative to the working directory. Adjust it if you save the graph somewhere else.
+  - See [OAS References](graphs.md#oas-references).
+- **Existing files are not replaced without `--force`.**
+  - Before writing, the command checks the graph file and every template it would write.
+  - If any exist, it lists them, writes nothing, and exits with code `2`.
+  - Templates in the directory for other adapters are always left alone.
+  - Two operationIds that differ only in case are an error, since their templates would be one file on a case-insensitive file system.
+- **Valid is not the same as runnable.** A scaffold that passes `aat validate --strict` can still send the wrong thing. A query parameter that the API expects as `tags=a,b` is sent as `tags=a&tags=b`; a spec that says so with `explode: false` only gets a warning. Read the warnings: each names a part of a request to write by hand.
 
 ## From Scaffold to Project
 
@@ -229,7 +270,6 @@ The [shop example](examples/shop.md) ships the spec its sandbox serves (`example
 
 ```yaml
     addItem:
-        name: addItem
         description: Add an item to a cart
         adapter: addItem
         inputs:

@@ -68,6 +68,7 @@ Each step record holds:
 | `expectFailure` | For negative steps: expected statuses, actual status, pass or fail |
 | `oasValidation` | Request and response checks against the OpenAPI spec |
 | `errorClassification`, `error`, `retryCount`, `retriedOn` | Error category and detail for a failed step, and the category of each step-level retry |
+| `cleanupFor` | On a cleanup step: the step whose resource it releases, or the cleanup step before it in a [cleanup chain](graphs.md#cleanup). Cleanup step IDs are unique within a run (`deleteCart`, then `deleteCart_2`) |
 
 ## What Is Redacted, and What Is Not
 

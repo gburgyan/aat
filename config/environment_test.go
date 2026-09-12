@@ -148,6 +148,43 @@ func TestValidateEnvironment_APIKeyMissingHeaderName(t *testing.T) {
 	assert.Contains(t, err.Error(), "auth.headerName is required")
 }
 
+func TestValidateEnvironment_MinRequestInterval(t *testing.T) {
+	tests := []struct {
+		name     string
+		interval string
+		want     string // RequestInterval as a duration string
+		wantErr  string
+	}{
+		{name: "unset", interval: "", want: "0s"},
+		{name: "milliseconds", interval: "250ms", want: "250ms"},
+		{name: "fractional seconds", interval: "1.5s", want: "1.5s"},
+		{name: "zero turns pacing off", interval: "0s", want: "0s"},
+		{name: "no unit", interval: "250", wantErr: `settings.minRequestInterval: invalid duration "250" (use a unit, such as 250ms or 1s)`},
+		{name: "negative", interval: "-1s", wantErr: `settings.minRequestInterval: invalid duration "-1s"`},
+		{name: "not a duration", interval: "fast", wantErr: `settings.minRequestInterval: invalid duration "fast"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := &Environment{
+				Name:       "test",
+				APIBaseURL: "https://api.example.com",
+				Auth:       AuthConfig{Type: "none"},
+				Settings:   RuntimeSettings{MinRequestInterval: tt.interval},
+			}
+			err := ValidateEnvironment(env)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			got, err := env.Settings.RequestInterval()
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got.String())
+		})
+	}
+}
+
 func TestValidateEnvironment_OASValidationMode(t *testing.T) {
 	tests := []struct {
 		name    string

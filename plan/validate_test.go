@@ -74,6 +74,69 @@ func TestValidate_MissingRequiredInput(t *testing.T) {
 	assert.Contains(t, valErr.Error(), "departureDate")
 }
 
+// checkoutValidationGraph has one step with a required input, a required input
+// with a graph default, and an optional input.
+func checkoutValidationGraph() *graph.Graph {
+	return &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"checkout": {
+				Name: "checkout", Adapter: "checkout",
+				Inputs: []graph.Input{
+					{Name: "cartId", Type: "string"},
+					{Name: "currency", Type: "string", Default: &graph.InputDefault{Value: "USD"}},
+					{Name: "giftMessage", Type: "string", Optional: true},
+				},
+			},
+		},
+	}
+}
+
+func checkoutPlan(values map[string]StepValue) *Plan {
+	return &Plan{Execution: Execution{Steps: []Step{{Node: "checkout", Values: values}}}}
+}
+
+func TestValidate_UnresolvedAutowire(t *testing.T) {
+	tests := []struct {
+		name   string
+		values map[string]StepValue
+		want   string // empty when no AUTOWIRE error is expected
+	}{
+		{
+			name:   "plain marker",
+			values: map[string]StepValue{"cartId": {Default: "AUTOWIRE"}, "currency": {Default: "USD"}},
+			want:   `step 0 (checkout): input "cartId" is an unresolved AUTOWIRE: no step before it produces an output named "cartId"`,
+		},
+		{
+			name:   "optional marker left in a hand-written plan",
+			values: map[string]StepValue{"cartId": {Default: "cart-1"}, "currency": {Default: "USD"}, "giftMessage": {Default: "AUTOWIRE?"}},
+			want:   `input "giftMessage" is an unresolved AUTOWIRE`,
+		},
+		{
+			name:   "legacy PLACEHOLDER",
+			values: map[string]StepValue{"cartId": {Default: "PLACEHOLDER"}, "currency": {Default: "USD"}},
+			want:   `input "cartId" is an unresolved AUTOWIRE`,
+		},
+		{
+			name:   "literal values",
+			values: map[string]StepValue{"cartId": {Default: "cart-1"}, "currency": {Default: "USD"}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := Validate(checkoutPlan(tt.values), checkoutValidationGraph())
+			if tt.want == "" {
+				if err != nil {
+					assert.NotContains(t, err.Error(), "AUTOWIRE")
+				}
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
 func TestValidate_VersionIncompatible(t *testing.T) {
 	g := loadAirlineGraph(t)
 	p := &Plan{

@@ -164,6 +164,9 @@ outputs:
         type: money
 ```
 
+`min` and `max` selections compare their `sortField` by value. A string that holds a number, such as `"19.99"`,
+compares as that number. A `filter` does not convert strings.
+
 Cross-ref: [API Graphs](graphs.md)
 
 ## Template Schema
@@ -227,7 +230,12 @@ auth:
 
 headers:
   Accept: application/json
+
+settings:
+  minRequestInterval: 250ms   # optional: space request starts for a rate-limited API
 ```
+
+`settings.minRequestInterval` needs a unit (`250ms`, `1s`). One interval covers everything a command sends, including every plan of a `--parallel` batch, retries, verification, and cleanup.
 
 That is the single-environment format. A multi-environment file has top-level `shared:` and `environments:` instead, with `extends`, `vars` (`${name}` substitution), and `include`; select one with `--env` or the manifest's `defaultEnvironment`.
 
@@ -345,6 +353,14 @@ assertions:
       expr: 'orderStatus == "confirmed"'
 ```
 
+### Retry
+
+A step retries with `retry: {max: 3, on: [transient]}`. `transient` covers HTTP 429, 502, 503, and 504, and a rule can also be a status code (`on: [503]`).
+
+Between attempts the step waits a backoff (500 ms, doubling, up to 10 s). It waits longer when the failed response asks: its `Retry-After` header, or `RateLimit-Reset` on a 429. A server that asks for more than 60 s ends the retries.
+
+To stay under a rate limit in the first place, set `settings.minRequestInterval` in the environment file.
+
 ### Cleanup
 
 Cleanup steps run after the plan completes (success or failure) to release resources:
@@ -356,6 +372,8 @@ cleanup:
 ```
 
 A cleanup step takes only `node` and `runOn`. Its inputs are matched by name against the outputs of the steps that ran, so `cancelOrder`'s `orderId` input takes the `orderId` output of the step that produced one. A node's graph-level `cleanup:` pairing runs even when the plan does not list it.
+
+A cleanup node can have its own `cleanup:`, which makes a chain. The second node runs right after the first succeeds and takes that step's outputs first. That covers a release that takes two calls, such as requesting a refund and then confirming it with the refund's ID. Name the first cleanup node's output after the second one's input.
 
 Cross-ref: [Plans and Recipes](plans.md)
 
@@ -608,6 +626,13 @@ execution:
       runOn: always
 ```
 
+**Wiring template inputs.** A template can leave an input for composition to wire:
+- **`AUTOWIRE`** takes the output of the same name from another step. That is the last producer in the plan so far, or, in a final pass after slots and addons, the nearest earlier step.
+- **Addon `wire:` map.** It names a source for an input instead:
+  - `$after.outputName` names the step the addon attached after.
+  - `MANUAL` leaves the input for a recipe override.
+- **`AUTOWIRE?`** is for an optional input that only some compositions feed, such as a value only an addon produces. It is wired when a step produces the output and left unset otherwise. Mark the graph input `optional: true` and wrap its template field in `{{?name}}…{{/name}}`.
+
 Cross-ref: [Workflows](workflows.md)
 
 ## Iteration Loop
@@ -681,6 +706,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
 {
   "stepId": "string",
   "node": "string",
+  "cleanupFor": "string (cleanup steps only: the step whose resource it releases, or the cleanup step before it in a chain)",
   "startTime": "RFC3339",
   "durationMs": 0,
   "inputs": { "paramName": "resolvedValue" },
@@ -884,7 +910,7 @@ In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts
 - **Graph defaults wire the common case; plans wire the rest**: nodes define what an operation accepts and produces, an input's `default: {from: ...}` names the output it usually takes, and plans override or add wiring for a specific test.
 - **Read archives on failure**: when a test fails, read `archive.json` — `steps[].request` and `steps[].response` show the actual HTTP exchange, `steps[].validation` shows which assertions failed, and `steps[].errorClassification` explains what went wrong.
 - **Ordering is declared, not wired**: nodes use `requires`/`satisfies` tokens, not explicit edges. If node B needs node A to have run, give A a token that B requires; the MCP tracing tools and `aat validate` use them. A full plan runs its steps in `dependsOn` order, so list dependencies there (composing a recipe adds them from the tokens); data moves through step values (`from`, selections) and graph defaults, not through tokens.
-- **Cleanup pairing**: if a node creates a resource, set its `cleanup` field to the deletion node. The engine runs the pairing after the plan even when the plan does not list it.
+- **Cleanup pairing**: if a node creates a resource, set its `cleanup` field to the deletion node. The engine runs the pairing after the plan even when the plan does not list it. When releasing the resource takes two calls, give the first cleanup node a `cleanup` of its own. The second node runs right after the first succeeds and takes its outputs.
 - **Template placeholders must match node inputs**: every `{{name}}` in a template should correspond to an input on the linked node; a placeholder that gets no value fails the request.
 - **Keep secrets out of files**: credentials use `source: env` to read OS environment variables (`source: literal` exists for demo values only).
 - **No LLM at run time**: `aat run` and the MCP `execute_plan` tool never call a model; nothing selects values or workflows with an LLM while a plan runs. Only `aat prompt` and the MCP `generate_plan` tool call an LLM, and only to draft a plan.

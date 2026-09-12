@@ -164,10 +164,11 @@ func TestShopExample(t *testing.T) {
 		assert.Equal(t, engine.OutcomePassed, res.outcome)
 		assert.Equal(t, 1, stepByNode(t, res.summary, "checkInventory").Retries, "one response_error retry")
 		assert.Equal(t, 2, stepByNode(t, res.summary, "getShipment").Retries, "two transient retries")
-		// Three backoff waits of at least 375, 375, and 750ms (500ms and 1s less
-		// 25% jitter) count toward the steps and the run.
-		assert.GreaterOrEqual(t, stepByNode(t, res.summary, "getShipment").DurationMs, int64(1125), "the step's duration includes its retry waits")
-		assert.GreaterOrEqual(t, res.summary.Summary.DurationMs, int64(1500), "the run's duration is wall-clock time")
+		// Retry waits count toward the steps and the run: checkInventory's backoff
+		// of at least 375ms (500ms less 25% jitter), and getShipment's two waits
+		// of a full second each, because the sandbox's 503s send Retry-After: 1.
+		assert.GreaterOrEqual(t, stepByNode(t, res.summary, "getShipment").DurationMs, int64(2000), "the step's duration includes its retry waits")
+		assert.GreaterOrEqual(t, res.summary.Summary.DurationMs, int64(2375), "the run's duration is wall-clock time")
 	})
 
 	t.Run("checkpoint handoff", func(t *testing.T) {
@@ -282,11 +283,18 @@ type shopProject struct {
 // overrides of the env.yaml apiHost and payHost vars (see vars).
 func newShopProject(t *testing.T) *shopProject {
 	t.Helper()
+	return newShopProjectWith(t, func(h http.Handler) http.Handler { return h })
+}
+
+// newShopProjectWith is newShopProject with wrap around both sandbox handlers,
+// so a test can observe the requests that reach them.
+func newShopProjectWith(t *testing.T, wrap func(http.Handler) http.Handler) *shopProject {
+	t.Helper()
 
 	srv := shop.New(shop.Options{Latency: 0, Seed: 1})
-	api := httptest.NewServer(srv.APIHandler())
+	api := httptest.NewServer(wrap(srv.APIHandler()))
 	t.Cleanup(api.Close)
-	pay := httptest.NewServer(srv.PaymentsHandler())
+	pay := httptest.NewServer(wrap(srv.PaymentsHandler()))
 	t.Cleanup(pay.Close)
 
 	fsys, err := aat.ShopExampleFS()

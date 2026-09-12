@@ -1,0 +1,15 @@
+execution:
+  steps:
+    - node: createCart
+
+    - node: copyCart
+      dependsOn: [createCart]
+
+    - node: checkout
+      dependsOn: [copyCart]
+      values:
+        cartId: AUTOWIRE
+
+    - id: copyAgain
+      node: copyCart
+      dependsOn: [checkout]

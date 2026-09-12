@@ -6,9 +6,63 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+### Added
+- `settings.minRequestInterval` paces requests for APIs with rate limits: the starts of any two requests are at
+  least that far apart, such as `250ms`. One interval covers everything a command sends, including the plans of
+  a parallel batch, retries, verification, and cleanup. `aat prompt` and the MCP server's `execute_plan` honor it
+  too. A value without a unit, such as `250`, is rejected when the environment file loads.
+- Step retries honor the server's `Retry-After` header, and on a 429 without one, `RateLimit-Reset`. A retry waits
+  at least as long as the failed response asks, in seconds or until an HTTP date, instead of only the backoff.
+- Cleanup chains: a cleanup node can declare its own `cleanup`. It runs right after that cleanup step succeeds and
+  takes its outputs first, so a resource released in two calls (request, then confirm) is cleaned up completely.
+  Chained outputs stay inside the chain. Archive cleanup records gain `cleanupFor` (`cleanup_for` in `--json`),
+  naming the step each one cleans up after.
+- `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
+  step produces the output, such as one an addon adds, and left unset otherwise.
+- `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,
+  which it sends as one `Cookie` header. Body and response properties from `allOf` branches become inputs and
+  outputs, and an OpenAPI 3.1 type list such as `["null", integer]` maps to its non-null type. The MCP server's
+  operation search lists operations of every method too.
+
 ### Changed
+- Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
+  slot step can take an output that only an addon produces, and a base workflow without slots or addons resolves
+  its markers. The final pass takes the nearest earlier producer that does not depend on the step. Markers the
+  earlier passes already wired are unchanged.
+- A plan that still holds an `AUTOWIRE` marker after composition fails validation, naming the step and input,
+  instead of sending the word `AUTOWIRE`. `aat prompt` asks the model for those inputs, and `aat validate plan`
+  composes standalone base workflows before validating them.
+- Workflow compatibility checks cover base workflows and slot options. A plain `AUTOWIRE` that the base and its slots
+  cannot feed is a warning that names any addon producing the output. `AUTOWIRE?` on a required input with no graph
+  default is also a warning. `AUTOWIRE?` in an addon never warns as unfed.
+- `aat generate` no longer replaces an existing graph file or template: it lists them, writes nothing, and exits 2
+  unless given `--force`. OperationIds that differ only in case are an error, since their templates would be one
+  file on a case-insensitive file system.
+- A generated template sets `Content-Type` only when it has a body, to that body's media type; before, every operation
+  with a request body got `application/json`. `aat generate` warns about what a template leaves to write by hand:
+  multipart and other bodies, a body schema with `oneOf`, `anyOf`, or no properties, and a parameter with a
+  non-default `style` or `explode: false`. OAS validation reads request body properties from `allOf` branches too.
+- A list value in a request URL or form body is no longer sent as JSON text. Right after `key=` in a query or form body
+  it repeats the pair (`tags=a&tags=b`); anywhere else its elements are encoded one by one and joined with commas
+  (`/items/1,2`).
+- A step whose failed response asks for a wait longer than 60 seconds stops retrying (`failed_fast`), and the
+  error detail says how long the server asked for. Before, the retries went out after the backoff regardless.
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs
   `aat` and `aat-sandbox` with Homebrew on Linux.
+- `min` and `max` selection compare numbers sent as strings by value: a `sortField` of `"99.10"` sorts below
+  `"1000.00"`, so an API that returns prices or totals as decimal strings selects the cheapest element. A
+  string that is not a number still fails the selection, naming the element.
+- Graph validation rejects cleanup pairings that loop back, such as a node cleaned up by `b` whose own cleanup is
+  that node again. The error names the cycle once, as `a → b → a`.
+- Cleanup step IDs are unique within a run: a node's second cleanup step is `deleteCart_2` in archives and `--json`
+  output, as the web UI already named it. Cleanup responses are checked against the graph's error detection rules.
+  A flagged response records `responseBodyError` and ends its chain; the run outcome is unchanged.
+
+### Fixed
+- `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
+  resolves. It used to write only the spec's file name.
+- `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,
+  and no longer writes a node-level `name:` line.
 
 ## [0.1.0] - 2026-09-12
 

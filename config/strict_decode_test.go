@@ -28,7 +28,7 @@ func TestLoadEnvironment_UnknownKeys(t *testing.T) {
 
 		_, err := LoadEnvironment(path)
 		require.Error(t, err)
-		assert.Equal(t, path+`: line 6: unknown key "defaultRetries" in runtime settings (valid keys: oasValidation)`, err.Error())
+		assert.Equal(t, path+`: line 6: unknown key "defaultRetries" in runtime settings (valid keys: minRequestInterval, oasValidation)`, err.Error())
 	})
 
 	t.Run("multi-environment file", func(t *testing.T) {

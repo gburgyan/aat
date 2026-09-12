@@ -413,3 +413,119 @@ func TestRetryStatusCodeRuleIgnoresOtherStatuses(t *testing.T) {
 	assert.Equal(t, 0, result.Steps[0].RetryCount, "502 does not match the 503 rule")
 	assert.Equal(t, int32(1), callCount.Load())
 }
+
+func TestRetryAfter_Parse(t *testing.T) {
+	now := time.Date(2026, 9, 12, 19, 19, 30, 0, time.UTC)
+	tests := []struct {
+		name   string
+		header string
+		value  string
+		status int
+		want   time.Duration
+		ok     bool
+	}{
+		{"seconds", "Retry-After", "1", 503, time.Second, true},
+		{"padded seconds", "Retry-After", " 5 ", 429, 5 * time.Second, true},
+		{"zero", "Retry-After", "0", 503, 0, true},
+		{"IMF-fixdate", "Retry-After", "Sat, 12 Sep 2026 19:20:00 GMT", 503, 30 * time.Second, true},
+		{"RFC 850 date", "Retry-After", "Saturday, 12-Sep-26 19:20:00 GMT", 503, 30 * time.Second, true},
+		{"ANSI C date", "Retry-After", "Sat Sep 12 19:20:00 2026", 503, 30 * time.Second, true},
+		{"past date", "Retry-After", "Sat, 12 Sep 2026 19:00:00 GMT", 503, 0, true},
+		{"negative", "Retry-After", "-1", 503, 0, false},
+		{"fraction", "Retry-After", "1.5", 503, 0, false},
+		{"text", "Retry-After", "soon", 503, 0, false},
+		{"absent", "Retry-After", "", 503, 0, false},
+		{"rate-limit reset date on a 429", "RateLimit-Reset", "Sat, 12 Sep 2026 19:20:00 GMT", 429, 30 * time.Second, true},
+		{"rate-limit reset seconds on a 429", "RateLimit-Reset", "12", 429, 12 * time.Second, true},
+		{"rate-limit reset ignored on a 503", "RateLimit-Reset", "12", 503, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := http.Header{}
+			if tt.value != "" {
+				h.Set(tt.header, tt.value)
+			}
+			got, ok := retryAfter(h, tt.status, now)
+			assert.Equal(t, tt.ok, ok)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// retryAfterServer answers the first request with status and a Retry-After of
+// retryAfterValue, and every later request with 200.
+func retryAfterServer(t *testing.T, calls *atomic.Int32, status int, retryAfterValue string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", retryAfterValue)
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"error": "slow down"}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestRetryHonorsRetryAfter(t *testing.T) {
+	var calls atomic.Int32
+	server := retryAfterServer(t, &calls, http.StatusTooManyRequests, "1")
+
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), buildRetryPlan(&plan.RetryConfig{Max: 2}))
+
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 1, result.Steps[0].RetryCount)
+	assert.Equal(t, int32(2), calls.Load())
+	assert.GreaterOrEqual(t, result.Steps[0].Duration, time.Second, "the retry waited the server's second, not the shorter backoff")
+}
+
+func TestRetryAfterZeroKeepsBackoff(t *testing.T) {
+	var calls atomic.Int32
+	server := retryAfterServer(t, &calls, http.StatusServiceUnavailable, "0")
+
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), buildRetryPlan(&plan.RetryConfig{Max: 2}))
+
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.GreaterOrEqual(t, result.Steps[0].Duration, 375*time.Millisecond, "the backoff still applies")
+}
+
+func TestRetryAfterBeyondLimitFailsFast(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	start := time.Now()
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), buildRetryPlan(&plan.RetryConfig{Max: 3}))
+
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	assert.Equal(t, int32(1), calls.Load(), "no retry is sent before the server's time")
+	assert.Less(t, time.Since(start), time.Second)
+	require.Len(t, result.Steps, 1)
+	require.NotNil(t, result.Steps[0].ErrorClass)
+	assert.Equal(t, "failed_fast", result.Steps[0].ErrorClass.Action)
+	assert.Equal(t, "HTTP 429 Too Many Requests; the server asked to wait 1h0m0s before retrying, longer than the 1m0s limit",
+		result.Steps[0].ErrorClass.Detail)
+}
+
+func TestRetryAfterWaitHonorsContext(t *testing.T) {
+	var calls atomic.Int32
+	server := retryAfterServer(t, &calls, http.StatusServiceUnavailable, "30")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	result := buildRetryEngine(t, server.URL).Run(ctx, buildRetryPlan(&plan.RetryConfig{Max: 2}))
+
+	assert.Equal(t, OutcomeAborted, result.Outcome)
+	assert.Less(t, time.Since(start), 5*time.Second, "a cancelled run does not sit out the server's 30 seconds")
+	assert.Equal(t, int32(1), calls.Load())
+}

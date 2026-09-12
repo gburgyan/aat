@@ -44,7 +44,7 @@ PASSED (5/5 steps, 354ms)
 Archive: /path/to/shop/_output/runs/run-20260910-231357-eca8e0b3/archive.json
 ```
 
-Each step line shows the step index, the step ID, the HTTP status code, and the duration. The step ID is what `--stop-after` and `dependsOn` take; when it differs from the node and the column has room, the node follows in parentheses (`addProduct (addItem)`), and on a narrow terminal the ID stands alone (`checkout`, whose node is `checkoutCart`). A step's duration runs from its first attempt to the end of its last, so retry waits count, and the outcome line reports the run's wall-clock time. Display outputs defined in the plan appear indented below their step, and cleanup steps follow the main steps.
+Each step line shows the step index, the step ID, the HTTP status code, and the duration. The step ID is what `--stop-after` and `dependsOn` take; when it differs from the node and the column has room, the node follows in parentheses (`addProduct (addItem)`), and on a narrow terminal the ID stands alone (`checkout`, whose node is `checkoutCart`). A step's duration runs from its first attempt to the end of its last, so retry waits count, as does any wait for [request pacing](environments.md#request-pacing), and the outcome line reports the run's wall-clock time. Display outputs defined in the plan appear indented below their step, and cleanup steps follow the main steps.
 
 ## Checkpoints
 
@@ -84,6 +84,8 @@ aat run batch --parallel 4
 ```
 
 In parallel mode, AAT displays a compact progress renderer that tracks all active plans. Sequential mode shows step-by-step output for each plan.
+
+Parallel plans share the environment's [request pacing](environments.md#request-pacing): with `settings.minRequestInterval: 250ms`, `--parallel 4` still starts at most four requests a second.
 
 ### Layer Expansion
 
@@ -313,7 +315,7 @@ Cleanup runs after the main steps finish — whether the plan passed, failed, er
 Two sources of cleanup work combine, in this order:
 
 1. **Plan-level cleanup steps** (`execution.cleanup:` in the plan) for nodes that are not a graph pairing of a step in the plan run first, in declaration order. Each step's `runOn` (`always`, `success`, `failure`; empty means `always`) is checked against the outcome — `success` runs only when the plan passed, `failure` runs when it failed, errored, or was aborted.
-2. **Graph-level cleanup pairings** (`cleanup: deleteX` on a node) run next from a stack: every main step whose node declares a cleanup partner pushes that partner when the step succeeds, and the stack unwinds last-in-first-out, so the most recently created resource is torn down first. Two steps on the same node push two entries, one per resource. A plan-level cleanup step that names a paired node does not run separately; its `runOn` decides whether that node's entries run.
+2. **Graph-level cleanup pairings** (`cleanup: deleteX` on a node) run next from a stack: every main step whose node declares a cleanup partner pushes that partner when the step succeeds, and the stack unwinds last-in-first-out, so the most recently created resource is torn down first. Two steps on the same node push two entries, one per resource. A plan-level cleanup step that names a paired node does not run separately; its `runOn` decides whether that node's entries run. A cleanup step that succeeds is followed at once by its own node's cleanup pairing, if it has one (a [cleanup chain](graphs.md#cleanup)), so a release that takes two calls finishes before the next resource is torn down.
 
 A plan composed from a workflow (a recipe, or a plan from `aat prompt`) lists each graph pairing in its `cleanup:` section. The order and the number of calls still come from the stack, so a recipe deletes the order before the cart, and sends nothing for a cart it never created.
 
@@ -333,7 +335,7 @@ aat run plan flaky-test --retries 2
 
 Each failed attempt is saved as `attempt-01.json`, `attempt-02.json`, etc. in the run directory, and the final attempt (whether it passed or not) as `archive.json` (see [Archives: Layout](archives.md#layout)). Setup errors (invalid plan, missing config, failed authentication) are not retried, and neither is a run that stopped at a checkpoint.
 
-A two-second delay separates attempts to avoid hammering the API.
+A two-second delay separates attempts to avoid hammering the API. Plan-level attempts do not read a response's `Retry-After`; a step's own `retry:` does (see [Plans: Retry](plans.md#retry)).
 
 ## Archives
 
