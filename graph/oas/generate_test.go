@@ -243,70 +243,24 @@ func TestGenerate_DeletePet_Template(t *testing.T) {
 func TestMapSchemaType(t *testing.T) {
 	tests := []struct {
 		name   string
-		typ    []string
-		format string
+		schema *base.Schema
 		want   string
 	}{
-		{"string", []string{"string"}, "", "string"},
-		{"date", []string{"string"}, "date", "date"},
-		{"datetime", []string{"string"}, "date-time", "datetime"},
-		{"integer", []string{"integer"}, "", "integer"},
-		{"number", []string{"number"}, "", "float"},
-		{"boolean", []string{"boolean"}, "", "boolean"},
-		{"object", []string{"object"}, "", "string"},
-		{"unknown", []string{}, "", "string"},
-		{"nil", nil, "", "string"},
+		{"string", &base.Schema{Type: []string{"string"}}, "string"},
+		{"date", &base.Schema{Type: []string{"string"}, Format: "date"}, "date"},
+		{"datetime", &base.Schema{Type: []string{"string"}, Format: "date-time"}, "datetime"},
+		{"integer", &base.Schema{Type: []string{"integer"}}, "integer"},
+		{"number", &base.Schema{Type: []string{"number"}}, "float"},
+		{"boolean", &base.Schema{Type: []string{"boolean"}}, "boolean"},
+		{"object", &base.Schema{Type: []string{"object"}}, "object"},
+		{"no type", &base.Schema{}, "string"},
+		{"nil", nil, "string"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.typ == nil {
-				got := mapSchemaType(nil)
-				assert.Equal(t, tt.want, got)
-				return
-			}
-			// We can't easily construct base.Schema with Items for arrays here,
-			// so test the non-array cases directly
-			schema := &schemaStub{typ: tt.typ, format: tt.format}
-			got := mapSchemaTypeFromStub(schema)
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want, mapSchemaType(tt.schema))
 		})
-	}
-}
-
-// schemaStub is a helper for testing mapSchemaType without full libopenapi schemas.
-type schemaStub struct {
-	typ    []string
-	format string
-}
-
-// mapSchemaTypeFromStub mirrors mapSchemaType logic for test stubs.
-func mapSchemaTypeFromStub(s *schemaStub) string {
-	if s == nil {
-		return "string"
-	}
-	typeName := ""
-	if len(s.typ) > 0 {
-		typeName = s.typ[0]
-	}
-	switch typeName {
-	case "string":
-		switch s.format {
-		case "date":
-			return "date"
-		case "date-time":
-			return "datetime"
-		default:
-			return "string"
-		}
-	case "integer":
-		return "integer"
-	case "number":
-		return "float"
-	case "boolean":
-		return "boolean"
-	default:
-		return "string"
 	}
 }
 

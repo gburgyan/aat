@@ -1,0 +1,33 @@
+openapi: 3.0.3
+info:
+  title: Request shapes
+  version: "1.0"
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shipping]
+              properties:
+                shipping:
+                  type: object
+                  properties:
+                    city: {type: string}
+                    postalCode: {type: string}
+                meta:
+                  properties:
+                    source: {type: string}
+                note: {type: string}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  orderId: {type: string}

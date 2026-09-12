@@ -31,6 +31,13 @@ the graph and plan formats may still change before 1.0.
 - Workflow compatibility checks cover base workflows and slot options. A plain `AUTOWIRE` that the base and its slots
   cannot feed is a warning that names any addon producing the output. `AUTOWIRE?` on a required input with no graph
   default is also a warning. `AUTOWIRE?` in an addon never warns as unfed.
+- `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
+  resolves. It used to write only the spec's file name.
+- `aat generate` no longer replaces an existing graph file or template: it lists them, writes nothing, and exits 2
+  unless given `--force`. OperationIds that differ only in case are an error, since their templates would be one
+  file on a case-insensitive file system.
+- `aat generate` types object body properties `object` and inserts them as JSON literals, and no longer writes a
+  node-level `name:` line.
 - A step whose failed response asks for a wait longer than 60 seconds stops retrying (`failed_fast`), and the
   error detail says how long the server asked for. Before, the retries went out after the backoff regardless.
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs

@@ -136,7 +136,7 @@ func (w Workflow) IsSlot() bool {
 
 // Node represents a single logical API operation in the graph.
 type Node struct {
-	Name           string               // populated from map key during parsing, not from YAML
+	Name           string               `yaml:"name,omitempty"` // populated from the map key during parsing; not written when empty
 	Description    string               `yaml:"description"`
 	Adapter        string               `yaml:"adapter"`
 	Tags           []string             `yaml:"tags,omitempty"`

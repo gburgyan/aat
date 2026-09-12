@@ -58,9 +58,10 @@ func (r ScaffoldExtractRule) MarshalYAML() (interface{}, error) {
 	return rawScaffoldExtractRule(r), nil
 }
 
-// Generate produces a graph and template stubs from an OAS spec.
-// specFile is used as the graph-level OAS reference (just the filename).
-func Generate(model *v3high.Document, specFile string) (*GenerateResult, error) {
+// Generate produces a graph and template stubs from an OAS spec. specRef
+// becomes the graph's oas: reference, which AAT resolves from the directory the
+// graph file is in.
+func Generate(model *v3high.Document, specRef string) (*GenerateResult, error) {
 	if model.Paths == nil {
 		return nil, fmt.Errorf("OAS spec has no paths")
 	}
@@ -68,7 +69,7 @@ func Generate(model *v3high.Document, specFile string) (*GenerateResult, error) 
 	result := &GenerateResult{
 		Graph: &graph.Graph{
 			Version: "1.0.0",
-			OAS:     specFile,
+			OAS:     specRef,
 			Nodes:   make(map[string]*graph.Node),
 		},
 	}
@@ -111,10 +112,10 @@ func Generate(model *v3high.Document, specFile string) (*GenerateResult, error) 
 	return result, nil
 }
 
-// generateNode builds a graph.Node from one OAS operation.
+// generateNode builds a graph.Node from one OAS operation. The node's name is
+// its key in the graph, so Name stays empty and the graph file has no name:.
 func generateNode(pathItem *v3high.PathItem, op *v3high.Operation) *graph.Node {
 	node := &graph.Node{
-		Name:        op.OperationId,
 		Description: op.Summary,
 		Adapter:     op.OperationId,
 		Inputs:      collectNodeInputs(pathItem, op),
@@ -456,6 +457,15 @@ func mapSchemaType(schema *base.Schema) string {
 			elemType = mapSchemaType(schema.Items.A.Schema())
 		}
 		return elemType + "[]"
+	case "object":
+		return "object"
+	case "":
+		// An untyped schema that declares properties, or composes them with
+		// allOf, is an object.
+		if (schema.Properties != nil && schema.Properties.Len() > 0) || len(schema.AllOf) > 0 {
+			return "object"
+		}
+		return "string"
 	default:
 		return "string"
 	}
@@ -580,17 +590,21 @@ func buildBodyTemplate(op *v3high.Operation) string {
 }
 
 // isJSONLiteralType reports whether a body property is inserted unquoted: an
-// integer, number, boolean, or array.
+// integer, number, boolean, array, or object, including an untyped schema that
+// declares properties or allOf.
 func isJSONLiteralType(proxy *base.SchemaProxy) bool {
 	if proxy == nil {
 		return false
 	}
 	schema := proxy.Schema()
-	if schema == nil || len(schema.Type) == 0 {
+	if schema == nil {
 		return false
 	}
+	if len(schema.Type) == 0 {
+		return (schema.Properties != nil && schema.Properties.Len() > 0) || len(schema.AllOf) > 0
+	}
 	switch schema.Type[0] {
-	case "integer", "number", "boolean", "array":
+	case "integer", "number", "boolean", "array", "object":
 		return true
 	}
 	return false
