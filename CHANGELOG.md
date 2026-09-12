@@ -19,6 +19,10 @@ the graph and plan formats may still change before 1.0.
   naming the step each one cleans up after.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
+- `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,
+  which it sends as one `Cookie` header. Body and response properties from `allOf` branches become inputs and
+  outputs, and an OpenAPI 3.1 type list such as `["null", integer]` maps to its non-null type. The MCP server's
+  operation search lists operations of every method too.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
@@ -38,8 +42,13 @@ the graph and plan formats may still change before 1.0.
   file on a case-insensitive file system.
 - `aat generate` types object body properties `object` and inserts them as JSON literals, and no longer writes a
   node-level `name:` line.
-- A list value in a request URL is no longer sent as JSON text. Right after `key=` in the query it repeats the pair
-  (`tags=a&tags=b`); anywhere else in the URL its elements are encoded one by one and joined with commas (`/items/1,2`).
+- A generated template sets `Content-Type` only when it has a body, to that body's media type; before, every operation
+  with a request body got `application/json`. `aat generate` warns about what a template leaves to write by hand:
+  multipart and other bodies, a body schema with `oneOf`, `anyOf`, or no properties, and a parameter with a
+  non-default `style` or `explode: false`. OAS validation reads request body properties from `allOf` branches too.
+- A list value in a request URL or form body is no longer sent as JSON text. Right after `key=` in a query or form body
+  it repeats the pair (`tags=a&tags=b`); anywhere else its elements are encoded one by one and joined with commas
+  (`/items/1,2`).
 - A step whose failed response asks for a wait longer than 60 seconds stops retrying (`failed_fast`), and the
   error detail says how long the server asked for. Before, the retries went out after the backoff regardless.
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs

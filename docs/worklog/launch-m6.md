@@ -161,3 +161,48 @@ An addon's `AUTOWIRE?` inputs are never reported as unfed.
   would have skipped a base's own markers.
 - **Effect on real projects:** the shop is unchanged. The private airline project gains one warning, for a base
   marker that no workflow step produces.
+
+## 2026-09-12 — A9 to A11: `aat generate` and lists in requests
+
+**What:**
+- **A9 (F7).** `aat generate`:
+  - writes the `oas:` reference relative to the graph file
+  - refuses to replace existing files without `--force`
+  - types object body properties `object`
+  - leaves out the node-level `name:`
+- **A10 (F26).** A list value right after `key=` in a query string or form body repeats the pair. Anywhere else in a
+  URL, its elements are joined with commas.
+- **A11 (F26).** The generator:
+  - covers every HTTP method, form bodies, cookie parameters, `allOf` schemas, and OpenAPI 3.1 type lists
+  - warns about each part of a request it leaves to write by hand
+
+**Decisions:**
+- **Lists follow OpenAPI's defaults, in hand-written templates too.**
+  - A query parameter or form field defaults to `style: form` with `explode: true` (`tags=a&tags=b`), and a path
+    parameter to `simple` (`a,b`).
+  - Before, a list went out as escaped JSON text, which no API reads as a list.
+  - Other styles (`pipeDelimited`, `spaceDelimited`, `deepObject`, `label`, `matrix`, `explode: false`) get a
+    generator warning, not new template syntax.
+- **The pair's key comes from the template's literal text.** The scanner that escapes each value for its position
+  also keeps the text since the last `?` or `&`. A list repeats the pair only when it directly follows `key=` as the
+  pair's first value.
+- **One media type per body: JSON, then a form, then multipart.**
+  - `application/json` wins over other JSON types, which keeps the header earlier scaffolds wrote.
+  - Multipart properties become inputs, but the body is left out, because its `Content-Type` needs a boundary.
+- **No `Content-Type` without a body.** Scaffolds used to send `application/json` for every request body, including
+  ones they could not write.
+- **`allOf` is merged; `oneOf` and `anyOf` are not.**
+  - Merging branches has one answer. Choosing an alternative is a test design decision, so the generator warns and
+    keeps only the properties declared outside the alternatives.
+  - OAS validation merges `allOf` the same way, so a scaffold passes it.
+- **Warnings are the list of hand edits.** A scaffold can pass `aat validate --strict` and still send a body the API
+  rejects. Each warning names the method, the path, and the operation.
+- **The MCP server's operation search shares the method list** with the generator and the validator's operation
+  lookup.
+- **Effect:**
+  - The shop's scaffold and `aat validate --strict` output are unchanged.
+  - In the private airline project, `allOf` merging clears three input warnings and adds two, for required body
+    properties a node does not declare.
+  - Neither project puts a list in a template URL or uses a form body, so A10 changes nothing either one sends.
+  - The offered third-party spec generates 39 nodes with 10 warnings, each a JSON body whose schema is a bare
+    `type: object`.

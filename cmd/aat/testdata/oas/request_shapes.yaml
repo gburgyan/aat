@@ -1,0 +1,80 @@
+openapi: 3.0.3
+info:
+  title: Request shapes
+  version: "1.0"
+paths:
+  /products:
+    get:
+      operationId: searchProducts
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string}}
+        - name: tags
+          in: query
+          schema:
+            type: array
+            items: {type: string}
+        - {name: sessionId, in: cookie, required: true, schema: {type: string}}
+        - {name: theme, in: cookie, schema: {type: string}}
+      responses:
+        "200":
+          description: Products
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: {type: integer}
+  /refunds:
+    post:
+      operationId: requestRefund
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [orderId]
+              properties:
+                orderId: {type: string}
+                reasons:
+                  type: array
+                  items: {type: string}
+      responses:
+        "202":
+          description: Accepted
+  /coupons:
+    post:
+      operationId: createCoupon
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/CouponBase"
+                - type: object
+                  required: [percentOff]
+                  properties:
+                    percentOff: {type: integer}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CouponBase"
+                  - type: object
+                    properties:
+                      couponId: {type: string}
+  /health:
+    head:
+      operationId: headHealth
+      responses:
+        "200":
+          description: Up
+components:
+  schemas:
+    CouponBase:
+      type: object
+      required: [code]
+      properties:
+        code: {type: string}

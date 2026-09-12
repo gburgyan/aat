@@ -28,7 +28,7 @@ const (
 	// JSON value outside one.
 	renderJSON
 	// renderForm URL-encodes each value of an application/x-www-form-urlencoded
-	// body.
+	// body, with lists handled as in a query.
 	renderForm
 )
 
@@ -87,8 +87,8 @@ func bodyContext(headers map[string]string, body string) renderContext {
 type contextScanner struct {
 	ctx      renderContext
 	inQuery  bool   // renderPath: a literal "?" has been seen
-	segment  string // renderPath query: literal text since the last "?" or "&"
-	valued   bool   // renderPath query: a value was inserted since the last "?" or "&"
+	segment  string // query or form body: literal text since the last "?" or "&"
+	valued   bool   // query or form body: a value was inserted since the last "?" or "&"
 	inString bool   // renderJSON: inside a string literal
 	escaped  bool   // renderJSON: the previous character was a backslash in a string
 }
@@ -125,13 +125,14 @@ func escapeList(v any, escape func(string) string, sep string) string {
 // out of a string or into the query.
 func (s *contextScanner) feed(literal string) {
 	switch s.ctx {
-	case renderPath:
+	case renderPath, renderForm:
 		for i := 0; i < len(literal); i++ {
 			switch c := literal[i]; {
-			case c == '?' && !s.inQuery, s.inQuery && c == '&':
-				s.inQuery = true
+			case s.ctx == renderPath && !s.inQuery:
+				s.inQuery = c == '?'
+			case c == '&':
 				s.segment, s.valued = "", false
-			case s.inQuery:
+			default:
 				s.segment += literal[i : i+1]
 			}
 		}
@@ -156,16 +157,9 @@ func (s *contextScanner) escape(v any) string {
 		if !s.inQuery {
 			return escapeList(v, url.PathEscape, ",")
 		}
-		sep := ","
-		if key, ok := strings.CutSuffix(s.segment, "="); ok && key != "" && !s.valued && !strings.Contains(key, "=") {
-			// A list right after key= repeats the pair, the OpenAPI default for a
-			// query parameter: tags=a&tags=b.
-			sep = "&" + key + "="
-		}
-		s.valued = true
-		return escapeList(v, url.QueryEscape, sep)
+		return s.escapePair(v)
 	case renderForm:
-		return url.QueryEscape(formatValue(v))
+		return s.escapePair(v)
 	case renderJSON:
 		if s.inString {
 			return jsonStringContent(formatValue(v))
@@ -174,6 +168,18 @@ func (s *contextScanner) escape(v any) string {
 	default:
 		return formatValue(v)
 	}
+}
+
+// escapePair URL-encodes a value in a query string or form body. A list right
+// after key= repeats the pair, the OpenAPI default for query parameters and
+// form fields: tags=a&tags=b. Anywhere else its elements are joined with commas.
+func (s *contextScanner) escapePair(v any) string {
+	sep := ","
+	if key, ok := strings.CutSuffix(s.segment, "="); ok && key != "" && !s.valued && !strings.Contains(key, "=") {
+		sep = "&" + key + "="
+	}
+	s.valued = true
+	return escapeList(v, url.QueryEscape, sep)
 }
 
 // formatValue returns the text of a substituted value: a string as it is, a

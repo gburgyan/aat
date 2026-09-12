@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Request shapes
   version: "1.0"
@@ -22,6 +22,8 @@ paths:
                   properties:
                     source: {type: string}
                 note: {type: string}
+                quantity:
+                  type: ["null", integer]
       responses:
         "201":
           description: Created
@@ -31,3 +33,190 @@ paths:
                 type: object
                 properties:
                   orderId: {type: string}
+  /labels:
+    get:
+      operationId: listLabels
+      responses:
+        "200":
+          description: Labels
+          content:
+            application/json:
+              schema:
+                type: ["null", array]
+                items:
+                  type: object
+                  properties:
+                    label: {type: string}
+  /refunds:
+    post:
+      operationId: requestRefund
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [orderId]
+              properties:
+                orderId: {type: string}
+                reasons:
+                  type: array
+                  items: {type: string}
+                note: {type: string}
+      responses:
+        "202":
+          description: Accepted
+  /receipts:
+    post:
+      operationId: uploadReceipt
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+                caption: {type: string}
+      responses:
+        "201":
+          description: Created
+  /exports/{exportId}:
+    put:
+      operationId: putExport
+      parameters:
+        - {name: exportId, in: path, required: true, schema: {type: string}}
+      requestBody:
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "204":
+          description: Stored
+  /coupons:
+    post:
+      operationId: createCoupon
+      requestBody:
+        content:
+          application/xml:
+            schema:
+              type: object
+              properties:
+                code: {type: string}
+          application/vnd.shop+json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/CouponBase"
+                - type: object
+                  required: [percentOff]
+                  properties:
+                    percentOff: {type: integer}
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CouponBase"
+                  - type: object
+                    required: [couponId]
+                    properties:
+                      couponId: {type: string}
+  /carts/{cartId}:
+    patch:
+      operationId: updateCart
+      parameters:
+        - {name: cartId, in: path, required: true, schema: {type: string}}
+      requestBody:
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                couponCode: {type: string}
+          application/json:
+            schema:
+              type: object
+              properties:
+                couponCode: {type: string}
+      responses:
+        "200":
+          description: Updated
+  /carts/{cartId}/merge:
+    post:
+      operationId: mergeCart
+      parameters:
+        - {name: cartId, in: path, required: true, schema: {type: string}}
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "200":
+          description: Merged
+  /gift-cards:
+    post:
+      operationId: createGiftCard
+      requestBody:
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  properties:
+                    amount: {type: number}
+                - type: object
+                  properties:
+                    design: {type: string}
+      responses:
+        "201":
+          description: Created
+  /session:
+    get:
+      operationId: getSession
+      parameters:
+        - {name: sessionId, in: cookie, required: true, schema: {type: string}}
+        - {name: theme, in: cookie, schema: {type: string}}
+        - name: ids
+          in: query
+          style: pipeDelimited
+          schema:
+            type: array
+            items: {type: string}
+        - name: fields
+          in: query
+          explode: false
+          schema:
+            type: array
+            items: {type: string}
+        - name: region
+          in: query
+          explode: false
+          schema: {type: string}
+      responses:
+        "200":
+          description: Session
+  /health:
+    head:
+      operationId: headHealth
+      responses:
+        "200":
+          description: Up
+    options:
+      operationId: optionsHealth
+      responses:
+        "204":
+          description: Allowed
+    trace:
+      operationId: traceHealth
+      responses:
+        "200":
+          description: Echo
+components:
+  schemas:
+    CouponBase:
+      type: object
+      required: [code]
+      properties:
+        code: {type: string}
+        expiresAt: {type: string, format: date-time}

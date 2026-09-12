@@ -103,25 +103,44 @@ func FindOperation(model *v3high.Document, operationID string) (method string, p
 	}
 
 	for pathStr, pi := range model.Paths.PathItems.FromOldest() {
-		type methodOp struct {
-			method string
-			op     *v3high.Operation
-		}
-		candidates := []methodOp{
-			{"GET", pi.Get},
-			{"POST", pi.Post},
-			{"PUT", pi.Put},
-			{"DELETE", pi.Delete},
-			{"PATCH", pi.Patch},
-		}
-		for _, c := range candidates {
-			if c.op != nil && c.op.OperationId == operationID {
-				return c.method, pathStr, pi, c.op, nil
+		for _, mo := range PathOperations(pi) {
+			if mo.Operation.OperationId == operationID {
+				return mo.Method, pathStr, pi, mo.Operation, nil
 			}
 		}
 	}
 
 	return "", "", nil, nil, fmt.Errorf("operationId %q not found in spec", operationID)
+}
+
+// MethodOperation is one operation of a path item and its HTTP method.
+type MethodOperation struct {
+	Method    string
+	Operation *v3high.Operation
+}
+
+// PathOperations returns the operations a path item defines, in the order GET,
+// POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE.
+func PathOperations(pi *v3high.PathItem) []MethodOperation {
+	if pi == nil {
+		return nil
+	}
+	var ops []MethodOperation
+	for _, mo := range []MethodOperation{
+		{Method: "GET", Operation: pi.Get},
+		{Method: "POST", Operation: pi.Post},
+		{Method: "PUT", Operation: pi.Put},
+		{Method: "DELETE", Operation: pi.Delete},
+		{Method: "PATCH", Operation: pi.Patch},
+		{Method: "HEAD", Operation: pi.Head},
+		{Method: "OPTIONS", Operation: pi.Options},
+		{Method: "TRACE", Operation: pi.Trace},
+	} {
+		if mo.Operation != nil {
+			ops = append(ops, mo)
+		}
+	}
+	return ops
 }
 
 // OperationParameters returns the parameters that apply to an operation: the

@@ -78,6 +78,47 @@ func TestSubstitutePlaceholders_ListsInURL(t *testing.T) {
 	}
 }
 
+func TestSubstitutePlaceholders_ListsInFormBody(t *testing.T) {
+	tests := []struct {
+		name   string
+		tmpl   string
+		inputs map[string]any
+		want   string
+	}{
+		{
+			name:   "a list after key= repeats the pair",
+			tmpl:   "orderId={{orderId}}&reasons={{reasons}}",
+			inputs: map[string]any{"orderId": "o 1", "reasons": []any{"late", "a&b"}},
+			want:   "orderId=o+1&reasons=late&reasons=a%26b",
+		},
+		{
+			name:   "a question mark is literal text",
+			tmpl:   "q=?&tags={{tags}}",
+			inputs: map[string]any{"tags": []any{"a", "b"}},
+			want:   "q=?&tags=a&tags=b",
+		},
+		{
+			name:   "without a key elements are joined with commas",
+			tmpl:   "{{tags}}",
+			inputs: map[string]any{"tags": []any{"a", "b"}},
+			want:   "a,b",
+		},
+		{
+			name:   "a scalar is escaped as before",
+			tmpl:   "note={{note}}",
+			inputs: map[string]any{"note": "a&b c"},
+			want:   "note=a%26b+c",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := substitutePlaceholders(tt.tmpl, tt.inputs, renderForm)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
 func TestSubstitutePlaceholders_ListInJSONBodyUnchanged(t *testing.T) {
 	got, err := substitutePlaceholders(`{"tags": {{tags}}}`, map[string]any{"tags": []any{"a", "b"}}, renderJSON)
 	require.NoError(t, err)

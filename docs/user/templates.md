@@ -84,7 +84,7 @@ Each value is escaped for the place it fills, so a value cannot change the shape
 | Path, after the first `?` | URL-encoded as a query component: `a&b` becomes `a%26b`. A list right after `key=` repeats the pair, so `tags={{tags}}` becomes `tags=a&tags=b`, and an empty list sends `tags=`. Anywhere else in the query, a list's elements are joined with commas |
 | JSON body, inside quotes | JSON-escaped, so a quote, backslash, or newline stays inside the string |
 | JSON body, outside quotes | Written as JSON: numbers in plain digits, arrays and objects as JSON, a null value as `null`. A string goes in as it is |
-| Form body (`application/x-www-form-urlencoded`) | URL-encoded |
+| Form body (`application/x-www-form-urlencoded`) | URL-encoded. A list right after `key=` repeats the pair, as in a query |
 | Header, or any other body | Inserted as text |
 
 A body counts as JSON when its `Content-Type` contains `json`, or when it has no `Content-Type` and starts with `{` or `[`. Values that iteration blocks insert are escaped the same way. To send a malformed payload on purpose, give the step a `rawBody`, which replaces the rendered body.

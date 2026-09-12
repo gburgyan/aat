@@ -1,6 +1,6 @@
 # Scaffolding from OpenAPI
 
-`aat generate` reads an OpenAPI 3 spec and writes a starting [graph](graphs.md) with one node per operation, plus one [request template](templates.md) per node. It saves the typing: the scaffold carries each operation's method, path, parameters, JSON body properties, and response fields.
+`aat generate` reads an OpenAPI 3 spec and writes a starting [graph](graphs.md) with one node per operation, plus one [request template](templates.md) per node. It saves the typing: the scaffold carries each operation's method, path, parameters, body properties, and response fields.
 
 What it cannot know is how your API is used: which operation must run before which, which one undoes another, where a value comes from, or which of a response's fields a test cares about. A scaffold is a first draft to trim and wire up by hand. [What a Hand-Tuned Graph Adds](#what-a-hand-tuned-graph-adds) compares a generated graph with the shop example's.
 
@@ -37,10 +37,16 @@ The spec must be OpenAPI 3.0 or 3.1. A Swagger 2.0 file fails with `supplied spe
 
 Nothing else: no `aat-project.yaml`, environment file, domain file, workflows, layers, or plans. [From Scaffold to Project](#from-scaffold-to-project) lists what to add.
 
-Only GET, POST, PUT, DELETE, and PATCH operations are generated; HEAD, OPTIONS, and TRACE operations are skipped silently. An operation without an `operationId` is skipped with a warning:
+Operations of every method are generated: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, and TRACE. An operation without an `operationId` is skipped with a warning:
 
 ```text
 warning: skipping DELETE /widgets/{widgetId}: no operationId
+```
+
+Other warnings name a part of a request that the template leaves for you to write, such as a multipart body (see [Request Bodies](#request-bodies)) or a parameter with a `style` other than the default:
+
+```text
+warning: POST /receipts (uploadReceipt): the multipart/form-data body is not generated; its properties are inputs, so write the body by hand
 ```
 
 Regenerating from the same spec with `--force` produces identical files. Nodes and extract rules are sorted by name, inputs and outputs keep the spec's order, and the YAML is indented with four spaces.
@@ -72,7 +78,7 @@ The node's name is its key in the graph. Nodes with no summary, inputs, or outpu
 
 ### Inputs
 
-Inputs come from the operation's parameters (path-level and operation-level; an operation-level parameter replaces a path-level one with the same name and location), followed by the top-level properties of an `application/json` request body.
+Inputs come from the operation's parameters (path-level and operation-level; an operation-level parameter replaces a path-level one with the same name and location), followed by the top-level properties of the request body, including those of `allOf` branches. [Request Bodies](#request-bodies) says which of the body's media types is used.
 
 - Path parameters are required. Query, header, and cookie parameters are `optional: true` unless the spec marks them `required: true`.
 - Body properties are optional unless listed in the body schema's `required`.
@@ -94,7 +100,7 @@ Types map as follows:
 | `type: object`, or no `type` with `properties` or `allOf` | `object` |
 | any other schema without a `type` (including `oneOf` and `anyOf`), or a parameter without a `schema` | `string` |
 
-For OpenAPI 3.1 type lists only the first entry counts: `[string, "null"]` maps to `string`, but `["null", integer]` also maps to `string`.
+In an OpenAPI 3.1 type list, `"null"` is skipped: `[string, "null"]` maps to `string`, and `["null", integer]` to `integer`.
 
 Schema validation keywords become [input constraints](graphs.md#inputs): `minLength`, `maxLength`, and `pattern` keep their names, and `minimum` and `maximum` become `min` and `max`. [Custom types](graphs.md#types), `enum[...]` types, and defaults are yours to add.
 
@@ -102,7 +108,7 @@ Schema validation keywords become [input constraints](graphs.md#inputs): `minLen
 
 Outputs come from the first `2xx` response, in the spec's order, that has an `application/json` schema. Other responses are ignored.
 
-- **An object response** becomes one output per top-level property, each extracted by its own name. Nested objects and arrays of objects are extracted whole, typed as in the table above.
+- **An object response** becomes one output per top-level property, including those of `allOf` branches, each extracted by its own name. Nested objects and arrays of objects are extracted whole, typed as in the table above.
 - **An array response** becomes a single output of type `object[]`:
   - Its `elementFields` are the item's properties.
   - It is extracted from the whole body with `path: '@this'` and a `fields` entry per property.
@@ -144,7 +150,7 @@ That renders as `/search` with no values, `/search?page=2` with only `page`, and
 
 ### Headers
 
-A template for an operation with a request body sends `Content-Type: application/json`. Header parameters become headers: a required one is a plain placeholder, and an optional one is a conditional block, which AAT leaves out of the request when it resolves to nothing:
+A template with a body sends a `Content-Type` of the body's media type. Header parameters become headers: a required one is a plain placeholder, and an optional one is a conditional block, which AAT leaves out of the request when it resolves to nothing:
 
 ```yaml
     headers:
@@ -152,9 +158,18 @@ A template for an operation with a request body sends `Content-Type: application
         X-Tenant: '{{X-Tenant}}'
 ```
 
+Cookie parameters become one `Cookie` header: required cookies first, then each optional one in a conditional block. A cookie value is inserted as it is.
+
+```yaml
+    headers:
+        Cookie: 'sessionId={{sessionId}}{{?theme}}; theme={{theme}}{{/theme}}'
+```
+
 ### Request Bodies
 
-The body is a flat JSON object with one placeholder per top-level property of the `application/json` schema: required properties first, in spec order, then each optional property in a conditional block that carries its own comma.
+The scaffold builds the body from one of the operation's request media types. It prefers `application/json`, then another JSON type such as `application/merge-patch+json`, then `application/x-www-form-urlencoded`, then `multipart/*`. The schema's top-level properties become inputs, including those of `allOf` branches.
+
+A **JSON body** is a flat JSON object with one placeholder per property: required properties first, in spec order, then each optional property in a conditional block that carries its own comma.
 
 - **String values** are quoted.
 - **Integer, number, boolean, array, and object values** are inserted as JSON literals.
@@ -196,7 +211,14 @@ Its body is the same as the hand-written one in `examples/shop/templates/payment
 
 An object property is typed `object` and placed as `"shipping": {{shipping}}`. Give it a map, such as a plan value `shipping: {default: {city: Austin}}`, or JSON text. Either one is sent as a nested object.
 
-A **non-JSON or composed body** needs hand editing. It produces no body inputs and no `body`. A form-encoded or multipart body still gets the `Content-Type: application/json` header, and a body schema built with `allOf`, `oneOf`, or `anyOf` yields nothing to fill in. Write those bodies and headers yourself.
+A **form body** is a query string, `orderId={{orderId}}{{?note}}&note={{note}}{{/note}}`, sent with `Content-Type: application/x-www-form-urlencoded`. A list value repeats its pair, as in a query string; an object value is sent as JSON text.
+
+These bodies are left for you to write, each with a warning:
+
+- **Multipart:** the properties become inputs, but the template has no `body` and no `Content-Type`, which must carry the multipart boundary.
+- **Any other media type,** such as `application/octet-stream` or `application/xml`: no inputs, no `body`, and no `Content-Type`.
+- **A JSON or form schema without properties,** such as a bare `type: object` or an array: no `body` and no `Content-Type`.
+- **`oneOf` or `anyOf`:** the alternatives are left out. Properties declared outside them still become inputs and body fields.
 
 ## What It Ignores
 
@@ -204,7 +226,7 @@ A **non-JSON or composed body** needs hand editing. It produces no body inputs a
 |-------------|------------------------|
 | `servers`, including per-path servers | Nothing. Base URLs, and routing some operations to another host, belong in the [environment file](environments.md#multi-host-routing) |
 | `securitySchemes` and `security` | Nothing. Configure [authentication](environments.md#authentication) in the environment file |
-| Cookie parameters | Added as graph inputs, but not sent by the template |
+| A parameter `style` other than the default, or `explode: false` on a list or object | A warning. The template sends the value the default way |
 | Parameter descriptions, `enum`, `default`, and `example` values | Dropped |
 | Non-`2xx` responses, response headers, and non-JSON response bodies | Dropped |
 | Tags, `deprecated`, callbacks, and links | Dropped |
@@ -230,7 +252,7 @@ Add `--output-templates DIR` to write the templates as well while the graph goes
   - If any exist, it lists them, writes nothing, and exits with code `2`.
   - Templates in the directory for other adapters are always left alone.
   - Two operationIds that differ only in case are an error, since their templates would be one file on a case-insensitive file system.
-- **Valid is not the same as runnable.** A scaffold that passes `aat validate --strict` can still send the wrong thing. A query parameter that the API expects as `tags=a,b` is sent as `tags=a&tags=b`, and a non-JSON or composed body has to be written by hand.
+- **Valid is not the same as runnable.** A scaffold that passes `aat validate --strict` can still send the wrong thing. A query parameter that the API expects as `tags=a,b` is sent as `tags=a&tags=b`; a spec that says so with `explode: false` only gets a warning. Read the warnings: each names a part of a request to write by hand.
 
 ## From Scaffold to Project
 
