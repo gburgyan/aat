@@ -449,6 +449,24 @@ func TestIsInputFed_ConfigurableStructurallyWired(t *testing.T) {
 
 // --- isInputFed: locked ---
 
+func TestIsInputFed_AutowireMarker(t *testing.T) {
+	step := plan.Step{Node: "checkout", Values: map[string]plan.StepValue{
+		"cartId":      {Default: "AUTOWIRE"},
+		"currency":    {Default: "AUTOWIRE"},
+		"note":        {Default: "AUTOWIRE"},
+		"giftMessage": {Default: "AUTOWIRE?"},
+	}}
+
+	assert.False(t, isInputFed(step, graph.Input{Name: "cartId", Type: "string"}),
+		"an unresolved AUTOWIRE needs a value")
+	assert.False(t, isInputFed(step, graph.Input{Name: "currency", Type: "string", Default: &graph.InputDefault{Value: "USD"}}),
+		"a graph default does not apply while the marker holds the key")
+	assert.False(t, isInputFed(step, graph.Input{Name: "note", Type: "string", Optional: true}),
+		"a plain marker on an optional input still fails validation, so it needs a value")
+	assert.True(t, isInputFed(step, graph.Input{Name: "giftMessage", Type: "string", Optional: true}),
+		"an optional marker may stay unset")
+}
+
 func TestIsInputFed_LockedIsTrue(t *testing.T) {
 	// Locked inputs are always fed — they should never appear in the unfed list.
 	g := &graph.Graph{

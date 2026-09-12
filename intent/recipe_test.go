@@ -103,6 +103,9 @@ func TestReconstitute_WithAddons(t *testing.T) {
 			Workflow: "Base",
 			Addons:   []string{"Addon"},
 		},
+		// No step produces the addon's specialInput, so its AUTOWIRE marker
+		// needs a value from the recipe.
+		Overrides: plan.RecipeOverrides{Values: map[string]any{"inc0_addon1.specialInput": "vip"}},
 	}
 
 	p, err := Reconstitute(recipe, g, ".")

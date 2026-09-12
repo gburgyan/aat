@@ -4,8 +4,17 @@ workflows:
   - name: Good Workflow
     description: "A workflow with a valid template"
     template: plans/good-template.yaml
+  - name: Wired Workflow
+    description: "A standalone base whose input composition wires with AUTOWIRE"
+    template: plans/wired-template.yaml
 
 nodes:
+  producerNode:
+    description: "Produces the value testNode takes"
+    adapter: test.producer
+    outputs:
+      - name: input1
+        type: string
   testNode:
     description: "A simple test node"
     adapter: test.adapter

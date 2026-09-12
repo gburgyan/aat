@@ -25,6 +25,9 @@ the graph and plan formats may still change before 1.0.
   slot step can take an output that only an addon produces, and a base workflow without slots or addons resolves
   its markers. The final pass takes the nearest earlier producer that does not depend on the step. Markers the
   earlier passes already wired are unchanged.
+- A plan that still holds an `AUTOWIRE` marker after composition fails validation, naming the step and input,
+  instead of sending the word `AUTOWIRE`. `aat prompt` asks the model for those inputs, and `aat validate plan`
+  composes standalone base workflows before validating them.
 - A step whose failed response asks for a wait longer than 60 seconds stops retrying (`failed_fast`), and the
   error detail says how long the server asked for. Before, the retries went out after the backoff regardless.
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs

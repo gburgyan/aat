@@ -122,3 +122,21 @@ markers. `AUTOWIRE?` marks an optional input: wired when a step produces the out
     entries in post-processing.
   - No existing wiring changed.
   - The shop composed identically.
+
+## 2026-09-12 — A7: an unresolved AUTOWIRE fails validation
+
+**What:** A plan that still holds an `AUTOWIRE` marker fails plan validation, naming the step and the input, instead
+of sending the word as a value. `aat prompt` treats such an input as one the model must fill. `aat validate plan`
+composes a standalone base before validating it, so the base's markers are wired as a recipe's would be.
+
+**Decisions:**
+- **One new rule, not two.** The design also rejected a required input set to `{}` with no graph default. `aat prompt`
+  recovers from a broken reference by blanking it to `{}` and validating again, and that rule turned the recovery
+  into a failure. The engine still reports an empty required input when the step runs.
+- **A plain marker counts as unfed even on an optional input,** because validation rejects it there too.
+  `AUTOWIRE?` on an optional input still counts as fed.
+- **The prompt never offers the marker as an input's current value.**
+- **No regressions in real projects.** `aat validate --strict` reports the same things before P8 and after A7 for
+  the shop and the private airline project. The outputs were compared as sets of lines, because the order of some
+  validator messages varies between runs.
+- **One fixture changed.** Its addon input had a marker that no node produces; it now takes a recipe override.

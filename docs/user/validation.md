@@ -194,6 +194,7 @@ Plan validation catches:
 - **Value references** — `from` references point to valid steps and outputs
 - **Dependency completeness** — `from` references have matching `dependsOn` entries
 - **Dependency cycles** — no circular `dependsOn` chains
+- **Unresolved AUTOWIRE** — no input still holds an `AUTOWIRE` marker (composition leaves one only when no step produces the output)
 - **Duplicate step IDs** — step names are unique within the plan
 - **Required inputs** — non-optional inputs have a plan value, reference, or default
 - **Selection configs** — valid strategy, source exists, field references match elementFields
@@ -259,6 +260,7 @@ Workflows:             OK (4 files, 2 templates)
 | `line N: invalid YAML: ...` | The file is not valid YAML | Fix the syntax at or just before line N (the first line's errors carry no number) |
 | `node "X" not found in graph` | Step references a node that doesn't exist | Check node name spelling in your plan; run `aat validate graph` to see available nodes |
 | `required input "X" has no plan value` | A non-optional input is missing from the step's values | Add a value, `from` reference, or make the input optional in the graph |
+| `input "X" is an unresolved AUTOWIRE` | Composition found no step before this one that produces an output named X | Add the step or addon that produces it, wire it with an addon's `wire:` map, set it in a recipe's `overrides.values`, or use `AUTOWIRE?` for an optional input |
 | `'from' reference "X" for "Y": "Z" is not a step` | A value's `from` references a step name that doesn't exist in the plan | Check the step ID spelling; `from` uses step names, not node names |
 | `has 'from' reference to "X" but does not list it in dependsOn` | A data dependency is missing from `dependsOn` | Add the referenced step to `dependsOn` to ensure execution order |
 | `dependsOn cycle detected` | Steps have circular dependencies | Remove the circular reference; draw out the dependency chain to find the loop |

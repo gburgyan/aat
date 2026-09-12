@@ -138,6 +138,12 @@ func Validate(p *Plan, g *graph.Graph) error {
 			}
 		}
 
+		// Composition leaves an AUTOWIRE marker only when no step produces the
+		// output, and the marker is never a value to send.
+		for _, name := range unresolvedAutowireInputs(step.Values) {
+			errs = append(errs, fmt.Sprintf("step %d (%s): input %q is an unresolved AUTOWIRE: no step before it produces an output named %q; wire it or set it in a recipe override", i, sid, name, name))
+		}
+
 		// Validate step.Selections (named selections) — from uses step IDs
 		for selName, sel := range step.Selections {
 			if sel.From == "" {

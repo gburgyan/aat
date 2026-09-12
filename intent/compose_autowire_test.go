@@ -122,3 +122,21 @@ func TestCompose_AddonMarkerKeepsItsWiring(t *testing.T) {
 	p := composeAutowire(t, "Checkout", "Gift Wrap")
 	assert.Equal(t, "createCart.cartId", autowireStep(t, p, "inc0_addGiftWrap").Values["cartId"].From)
 }
+
+func TestReconstitute_UnresolvedAutowire(t *testing.T) {
+	recipe := func(values map[string]any) *plan.Recipe {
+		return &plan.Recipe{
+			Kind:      "recipe",
+			Selection: plan.RecipeSelection{Workflow: "Checkout Plain"},
+			Overrides: plan.RecipeOverrides{Values: values},
+		}
+	}
+
+	_, err := Reconstitute(recipe(nil), autowireTestGraph(), ".")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `input "giftMessage" is an unresolved AUTOWIRE`)
+
+	p, err := Reconstitute(recipe(map[string]any{"checkout.giftMessage": "Happy birthday"}), autowireTestGraph(), ".")
+	require.NoError(t, err, "a recipe override fills the input the marker left")
+	assert.Equal(t, "Happy birthday", autowireStep(t, p, "checkout").Values["giftMessage"].Default)
+}

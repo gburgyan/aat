@@ -244,7 +244,7 @@ Steps in workflow templates often need inputs that come from the base workflow's
 1. **Explicit Wire map** — if the addon's `wire` map provides a mapping for this input name, use it.
 2. **Output name match** — a step already in the plan produces an output with the same name as the input; the last such step wins.
 3. **Final pass** — once slots and addons are in place, a marker still unresolved takes the nearest earlier step that produces the output (skipping any step that depends on the marker's own step). A base or slot step can therefore take an output that only an addon adds.
-4. **Leave unresolved** — if nothing produces it, the AUTOWIRE marker stays for a recipe's `overrides.values` (or `aat prompt`) to fill; `aat validate workflow` reports addon AUTOWIRE inputs that cannot be wired.
+4. **Leave unresolved** — if nothing produces it, the AUTOWIRE marker stays for a recipe's `overrides.values` (or `aat prompt`) to fill. A plan that still holds the marker fails validation instead of sending it, and `aat validate workflow` reports addon AUTOWIRE inputs that cannot be wired.
 
 #### Optional Inputs: `AUTOWIRE?`
 

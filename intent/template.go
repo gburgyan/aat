@@ -123,6 +123,11 @@ func unfedInputSet(p *plan.Plan, g *graph.Graph) map[string]bool {
 // auto-wiring (e.g., "fly out of Nashville on BOTH legs").
 func isInputFed(step plan.Step, inp graph.Input) bool {
 	if sv, exists := step.Values[inp.Name]; exists {
+		// A plain AUTOWIRE that composition could not resolve needs a value,
+		// even on an optional input: plan validation rejects the marker.
+		if marker, optional := plan.AutowireMarker(sv); marker && !optional {
+			return false
+		}
 		if sv.Locked {
 			return true
 		}

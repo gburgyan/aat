@@ -172,7 +172,13 @@ func validateAllTemplates(graphPath string, g *graph.Graph, showUnfed bool) int 
 			}
 		}
 		if !wf.IsAddon() && !wf.IsSlot() && !hasSlotMarkers {
-			if _, err := plan.InstantiateAndValidate(p, g); err != nil {
+			// Compose the base first, so its AUTOWIRE markers are wired the way
+			// a recipe's would be.
+			composed, err := intent.Compose(intent.ComposeRequest{Base: wf, Graph: g, GraphDir: graphDir})
+			if err == nil {
+				_, err = plan.InstantiateAndValidate(composed, g)
+			}
+			if err != nil {
 				fmt.Printf("  %-40s FAIL\n", wf.Name)
 				fmt.Printf("    %s\n", err)
 				hasError = true
