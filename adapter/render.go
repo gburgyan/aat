@@ -20,7 +20,9 @@ const (
 	// neither JSON nor form-encoded.
 	renderRaw renderContext = iota
 	// renderPath URL-encodes each value: as one path segment before the
-	// template's first literal "?", and as a query component after it.
+	// template's first literal "?", and as a query component after it. A list
+	// directly after "key=" in the query repeats the pair; anywhere else its
+	// elements are joined with commas.
 	renderPath
 	// renderJSON escapes a value inside a JSON string literal and writes it as a
 	// JSON value outside one.
@@ -84,9 +86,38 @@ func bodyContext(headers map[string]string, body string) renderContext {
 // and escapes each value for the position it fills.
 type contextScanner struct {
 	ctx      renderContext
-	inQuery  bool // renderPath: a literal "?" has been seen
-	inString bool // renderJSON: inside a string literal
-	escaped  bool // renderJSON: the previous character was a backslash in a string
+	inQuery  bool   // renderPath: a literal "?" has been seen
+	segment  string // renderPath query: literal text since the last "?" or "&"
+	valued   bool   // renderPath query: a value was inserted since the last "?" or "&"
+	inString bool   // renderJSON: inside a string literal
+	escaped  bool   // renderJSON: the previous character was a backslash in a string
+}
+
+// listElements returns the elements of v when v is a slice or an array.
+func listElements(v any) ([]any, bool) {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() || (rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array) {
+		return nil, false
+	}
+	elems := make([]any, rv.Len())
+	for i := range elems {
+		elems[i] = rv.Index(i).Interface()
+	}
+	return elems, true
+}
+
+// escapeList escapes each element of a list and joins them with sep. A value
+// that is not a list is escaped whole.
+func escapeList(v any, escape func(string) string, sep string) string {
+	elems, ok := listElements(v)
+	if !ok {
+		return escape(formatValue(v))
+	}
+	parts := make([]string, len(elems))
+	for i, e := range elems {
+		parts[i] = escape(formatValue(e))
+	}
+	return strings.Join(parts, sep)
 }
 
 // feed advances the scanner over literal template text. Substituted values are
@@ -95,8 +126,14 @@ type contextScanner struct {
 func (s *contextScanner) feed(literal string) {
 	switch s.ctx {
 	case renderPath:
-		if strings.Contains(literal, "?") {
-			s.inQuery = true
+		for i := 0; i < len(literal); i++ {
+			switch c := literal[i]; {
+			case c == '?' && !s.inQuery, s.inQuery && c == '&':
+				s.inQuery = true
+				s.segment, s.valued = "", false
+			case s.inQuery:
+				s.segment += literal[i : i+1]
+			}
 		}
 	case renderJSON:
 		for i := 0; i < len(literal); i++ {
@@ -116,10 +153,17 @@ func (s *contextScanner) feed(literal string) {
 func (s *contextScanner) escape(v any) string {
 	switch s.ctx {
 	case renderPath:
-		if s.inQuery {
-			return url.QueryEscape(formatValue(v))
+		if !s.inQuery {
+			return escapeList(v, url.PathEscape, ",")
 		}
-		return url.PathEscape(formatValue(v))
+		sep := ","
+		if key, ok := strings.CutSuffix(s.segment, "="); ok && key != "" && !s.valued && !strings.Contains(key, "=") {
+			// A list right after key= repeats the pair, the OpenAPI default for a
+			// query parameter: tags=a&tags=b.
+			sep = "&" + key + "="
+		}
+		s.valued = true
+		return escapeList(v, url.QueryEscape, sep)
 	case renderForm:
 		return url.QueryEscape(formatValue(v))
 	case renderJSON:

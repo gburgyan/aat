@@ -38,6 +38,8 @@ the graph and plan formats may still change before 1.0.
   file on a case-insensitive file system.
 - `aat generate` types object body properties `object` and inserts them as JSON literals, and no longer writes a
   node-level `name:` line.
+- A list value in a request URL is no longer sent as JSON text. Right after `key=` in the query it repeats the pair
+  (`tags=a&tags=b`); anywhere else in the URL its elements are encoded one by one and joined with commas (`/items/1,2`).
 - A step whose failed response asks for a wait longer than 60 seconds stops retrying (`failed_fast`), and the
   error detail says how long the server asked for. Before, the retries went out after the backoff regardless.
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs

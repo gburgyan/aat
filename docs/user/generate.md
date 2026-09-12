@@ -140,7 +140,7 @@ After a required parameter, each optional block simply starts with `&`. When eve
     path: /search{{?q|page|tags}}?{{/q|page|tags}}{{?q}}q={{q}}{{/q}}{{?page}}{{?q}}&{{/q}}page={{page}}{{/page}}{{?tags}}{{?q|page}}&{{/q|page}}tags={{tags}}{{/tags}}
 ```
 
-That renders as `/search` with no values, `/search?page=2` with only `page`, and `/search?q=tent&page=2&tags=["a"]` with all three. An array value is inserted as JSON text, as the `tags` example shows. If your API expects another form, such as `tags=a,b` or `tags=a&tags=b`, rewrite that parameter by hand.
+That renders as `/search` with no values, `/search?page=2` with only `page`, and `/search?q=tent&page=2&tags=a&tags=b` with all three. A list value repeats its `key=` pair, OpenAPI's default for query parameters; an empty list still sends `tags=`. If your API expects another form, such as `tags=a,b`, rewrite that parameter by hand.
 
 ### Headers
 
@@ -230,7 +230,7 @@ Add `--output-templates DIR` to write the templates as well while the graph goes
   - If any exist, it lists them, writes nothing, and exits with code `2`.
   - Templates in the directory for other adapters are always left alone.
   - Two operationIds that differ only in case are an error, since their templates would be one file on a case-insensitive file system.
-- **Valid is not the same as runnable.** A scaffold that passes `aat validate --strict` can still send the wrong thing: array query parameters render as JSON text.
+- **Valid is not the same as runnable.** A scaffold that passes `aat validate --strict` can still send the wrong thing. A query parameter that the API expects as `tags=a,b` is sent as `tags=a&tags=b`, and a non-JSON or composed body has to be written by hand.
 
 ## From Scaffold to Project
 
