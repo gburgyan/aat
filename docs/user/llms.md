@@ -626,6 +626,13 @@ execution:
       runOn: always
 ```
 
+**Wiring template inputs.** A template can leave an input for composition to wire:
+- **`AUTOWIRE`** takes the output of the same name from another step. That is the last producer in the plan so far, or, in a final pass after slots and addons, the nearest earlier step.
+- **Addon `wire:` map.** It names a source for an input instead:
+  - `$after.outputName` names the step the addon attached after.
+  - `MANUAL` leaves the input for a recipe override.
+- **`AUTOWIRE?`** is for an optional input that only some compositions feed, such as a value only an addon produces. It is wired when a step produces the output and left unset otherwise. Mark the graph input `optional: true` and wrap its template field in `{{?name}}…{{/name}}`.
+
 Cross-ref: [Workflows](workflows.md)
 
 ## Iteration Loop

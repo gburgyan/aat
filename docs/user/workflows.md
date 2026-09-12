@@ -239,11 +239,38 @@ Steps in workflow templates often need inputs that come from the base workflow's
         seatOfferingId: {fromSelection: seat.seatIdentifierValue}
 ```
 
-`AUTOWIRE` tells the composition pipeline to automatically resolve this input from an output of an earlier step with a matching name. The resolution order is:
+`AUTOWIRE` tells the composition pipeline to resolve this input from another step's output with a matching name. The resolution order is:
 
-1. **Explicit Wire map** — if the addon's `wire` map provides a mapping for this input name, use it
-2. **Output name match** — scan all earlier steps for an output with the same name as the input
-3. **Leave unresolved** — if no match is found, the AUTOWIRE marker stays for a recipe's `overrides.values` (or `aat prompt`) to fill; `aat validate workflow` reports addon AUTOWIRE inputs that cannot be wired
+1. **Explicit Wire map** — if the addon's `wire` map provides a mapping for this input name, use it.
+2. **Output name match** — a step already in the plan produces an output with the same name as the input; the last such step wins.
+3. **Final pass** — once slots and addons are in place, a marker still unresolved takes the nearest earlier step that produces the output (skipping any step that depends on the marker's own step). A base or slot step can therefore take an output that only an addon adds.
+4. **Leave unresolved** — if nothing produces it, the AUTOWIRE marker stays for a recipe's `overrides.values` (or `aat prompt`) to fill; `aat validate workflow` reports addon AUTOWIRE inputs that cannot be wired.
+
+#### Optional Inputs: `AUTOWIRE?`
+
+Use `AUTOWIRE?` for an optional input that only some compositions can feed. It resolves exactly like `AUTOWIRE`, but when no step produces the output the input is left unset instead of unresolved:
+
+```yaml
+# workflows/checkout-base.yaml (excerpt)
+    - node: checkout
+      values:
+        cartId: AUTOWIRE
+        giftMessage: AUTOWIRE?     # only the Gift Wrap addon produces giftMessage
+```
+
+```yaml
+# workflows/addons/gift-wrap.yaml (the addon attaches after createCart)
+execution:
+  steps:
+    - node: addGiftWrap
+      values:
+        cartId: AUTOWIRE
+```
+
+- **With the addon:** `checkout.giftMessage` is wired to `inc0_addGiftWrap.giftMessage`, and `checkout` waits for that step.
+- **Without it:** `giftMessage` is not sent.
+- **What the input needs:** the graph must mark it `optional: true`, and the node's template should wrap the field in a conditional block (`{{?giftMessage}}…{{/giftMessage}}`) so the field is left out when unset.
+- **Defaults:** graph and layer defaults do not apply to an input that `AUTOWIRE?` leaves unset.
 
 ### Cleanup in Templates
 
@@ -334,11 +361,12 @@ The `$after.` prefix is essential when the addon's `after` field is a list. The 
 
 ### Auto-Wiring Resolution
 
-For each `AUTOWIRE` placeholder in an addon's steps, the composition pipeline follows a three-tier resolution:
+For each `AUTOWIRE` or `AUTOWIRE?` placeholder in an addon's steps, the composition pipeline tries, in order:
 
-1. **Explicit Wire** — the addon's `wire` map provides a direct mapping
-2. **Output name match** — an earlier step (from the base plan or previous addons) produces an output with the same name as the input
-3. **Leave unresolved** — no match found; the AUTOWIRE marker remains for a recipe override (or `aat prompt`)
+1. **Explicit Wire** — the addon's `wire` map provides a direct mapping.
+2. **Output name match** — a step already in the plan (from the base plan, a slot option, or a previous addon) produces an output with the same name as the input; the last such step wins.
+3. **Final pass** — after every addon is spliced, the nearest earlier step that produces the output, which can be another addon's step.
+4. **Leave unresolved** — no match found. An `AUTOWIRE` marker remains for a recipe override (or `aat prompt`); an `AUTOWIRE?` input is left unset.
 
 ### Priority and Ordering
 
@@ -419,9 +447,11 @@ Each addon is processed in priority order:
 
 Because slots are filled first, addons see slot option steps: an addon can attach after a node that the chosen slot option contributes, and `AUTOWIRE` an output that every option of a slot produces. `aat validate` checks addon compatibility the same way.
 
-### Step 5: Fix Dependencies
+### Step 5: Resolve Remaining AUTOWIRE and Fix Dependencies
 
 The pipeline scans all `from` references and ensures corresponding `dependsOn` entries exist. This catches cases where auto-wiring created data dependencies without explicit ordering.
+
+It then wires the markers the earlier passes left. Each takes the nearest earlier step that produces an output of its name, unless that step depends on the marker's own step. An unmatched `AUTOWIRE?` is left unset.
 
 ### Step 6: Apply Recipe Overrides
 

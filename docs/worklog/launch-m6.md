@@ -100,3 +100,25 @@ releases a resource in two calls is cleaned up completely. Graph validation reje
   graph; the engine still stops a chain that revisits a node, for graphs built in code.
 - **A listed chained node follows its `runOn`.** Composed plans list direct pairings; a plan that lists a chained node
   gates that link of the chain rather than running it on its own.
+
+## 2026-09-12 — A6: AUTOWIRE after addons, and `AUTOWIRE?`
+
+**What:** A final pass wires the AUTOWIRE markers that the slot and addon passes leave, once every step is in place.
+A base or slot step can now take an output that only an addon adds, and a base without slots or addons resolves its
+markers. `AUTOWIRE?` marks an optional input: wired when a step produces the output, left unset otherwise.
+
+**Decisions:**
+- **The existing passes keep their rule; only the new pass uses "nearest earlier".** The plan called for moving every
+  pass to the nearest earlier producer. Slot and addon markers resolve today from the last producer anywhere, and
+  projects rely on that: the private airline project has 58 markers in 39 templates. Changing that rule would rewire
+  working plans to add a feature that needs only the markers left over.
+- **The final pass skips a producer that depends on the consumer,** so it never creates a dependency cycle.
+- **An unmatched `AUTOWIRE?` becomes an empty value, not a deleted key.** The engine already treats `{}` on an
+  optional input as unset. A deleted key would let a graph default `from:` a step the plan lacks fail validation.
+- **Rewiring check.** Every recipe, every base, and every base with each addon was composed before (f978482) and after
+  the change, for the shop and the private airline project. Results:
+  - None of the private project's 53 recipes changed.
+  - 25 of 390 base and addon compositions gained `dependsOn` entries and lost none. Recipes already get those
+    entries in post-processing.
+  - No existing wiring changed.
+  - The shop composed identically.

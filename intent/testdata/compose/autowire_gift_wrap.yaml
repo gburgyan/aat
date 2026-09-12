@@ -1,0 +1,5 @@
+execution:
+  steps:
+    - node: addGiftWrap
+      values:
+        cartId: AUTOWIRE

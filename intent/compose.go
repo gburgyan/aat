@@ -50,6 +50,10 @@ func Compose(req ComposeRequest) (*plan.Plan, error) {
 		}
 	}
 
+	// Wire the markers the slot and addon passes left, now that every step is
+	// in place.
+	resolveRemainingAutowire(parent, req.Graph)
+
 	return parent, nil
 }
 
@@ -177,12 +181,13 @@ func prefixStepRefs(sub *plan.Plan, prefix string) {
 	// Prefix cleanup nodes are not prefixed — they reference graph node names.
 }
 
-// autoWirePlaceholders resolves AUTOWIRE values in the sub-workflow.
-// For each step input with Default == "AUTOWIRE":
+// autoWirePlaceholders resolves AUTOWIRE and AUTOWIRE? markers in the
+// sub-workflow. For each step input holding a marker:
 //  1. Check explicit Wire map — if the input name is in Wire, use that ref.
 //  2. If Wire[name] == "MANUAL", clear the value (LLM fills it).
 //  3. Otherwise, scan outputMap for a matching output name. Last producer wins.
-//  4. If no match found, leave AUTOWIRE (LLM or user must fill it).
+//  4. If no match found, leave the marker for resolveRemainingAutowire, which
+//     runs once the plan is fully composed.
 func autoWirePlaceholders(sub *plan.Plan, outputMap map[string]string, wire map[string]string, g *graph.Graph) {
 	for i := range sub.Execution.Steps {
 		step := &sub.Execution.Steps[i]
@@ -217,16 +222,16 @@ func autoWirePlaceholders(sub *plan.Plan, outputMap map[string]string, wire map[
 				continue
 			}
 
-			// No match — leave AUTOWIRE marker. Will show up as unfed input.
+			// No match — leave the marker for the final pass.
 		}
 	}
 }
 
-// isPlaceholder returns true if the StepValue is an AUTOWIRE marker string.
-// Also accepts legacy "PLACEHOLDER" for backward compatibility.
+// isPlaceholder returns true if the StepValue is an AUTOWIRE marker: AUTOWIRE,
+// AUTOWIRE?, or the legacy PLACEHOLDER.
 func isPlaceholder(sv plan.StepValue) bool {
-	s, ok := sv.Default.(string)
-	return ok && (s == "AUTOWIRE" || s == "PLACEHOLDER")
+	marker, _ := plan.AutowireMarker(sv)
+	return marker
 }
 
 // isRootStep returns true if the step has no dependencies within the given

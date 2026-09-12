@@ -246,8 +246,12 @@ func (s *Server) listPlaceholders(wf graph.Workflow) []string {
 	seen := make(map[string]bool)
 	for _, step := range p.Execution.Steps {
 		for inputName, sv := range step.Values {
-			if s, ok := sv.Default.(string); ok && (s == "AUTOWIRE" || s == "PLACEHOLDER") && !seen[inputName] {
-				placeholders = append(placeholders, inputName)
+			if marker, optional := plan.AutowireMarker(sv); marker && !seen[inputName] {
+				label := inputName
+				if optional {
+					label += "?"
+				}
+				placeholders = append(placeholders, label)
 				seen[inputName] = true
 			}
 		}
@@ -514,11 +518,13 @@ func classifyStepValue(sv plan.StepValue) (source, ref string) {
 	case sv.FromSelection != "":
 		return "fromSelection", sv.FromSelection
 	case sv.Default != nil:
-		s := fmt.Sprintf("%v", sv.Default)
-		if s == "AUTOWIRE" || s == "PLACEHOLDER" {
+		if marker, optional := plan.AutowireMarker(sv); marker {
+			if optional {
+				return "AUTOWIRE?", "(optional; needs wiring)"
+			}
 			return "AUTOWIRE", "(needs wiring)"
 		}
-		return "literal", s
+		return "literal", fmt.Sprintf("%v", sv.Default)
 	default:
 		return "empty", "(unset)"
 	}
