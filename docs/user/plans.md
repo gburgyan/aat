@@ -493,6 +493,14 @@ Each entry in `on` and `failOn` is either an **error category** name or an **HTT
 
 When `on` is omitted, the default retries `transient`, `timeout`, and `server` failures. A `failOn` match always wins, so `failOn: [auth]` stops the step on the first 401 even if `on` would otherwise retry it. Status codes must be in the range 100–599; `aat validate plan` rejects unknown category names and out-of-range codes rather than letting a typo silently disable retries.
 
+**Waiting between attempts.** A retry waits an exponential backoff: about 500 ms before the first retry, doubling each time up to 10 seconds, with ±25% jitter.
+
+- **The server can ask for longer.** A retry waits at least as long as the failed response asks, in seconds or until an HTTP date. The request comes from the `Retry-After` header, or on a 429 without one, the `RateLimit-Reset` header.
+- **Past 60 seconds, the retries stop.** The step fails with the action `failed_fast`, and the error classification's detail says how long the server asked for.
+- **Every wait counts toward the step's duration,** and Ctrl+C interrupts it.
+
+To keep a rate-limited API from answering 429 in the first place, set [`settings.minRequestInterval`](environments.md#request-pacing).
+
 #### Negative Testing (expectFailure)
 
 Steps can declare that failure is the *expected* outcome:

@@ -335,7 +335,7 @@ aat run plan flaky-test --retries 2
 
 Each failed attempt is saved as `attempt-01.json`, `attempt-02.json`, etc. in the run directory, and the final attempt (whether it passed or not) as `archive.json` (see [Archives: Layout](archives.md#layout)). Setup errors (invalid plan, missing config, failed authentication) are not retried, and neither is a run that stopped at a checkpoint.
 
-A two-second delay separates attempts to avoid hammering the API.
+A two-second delay separates attempts to avoid hammering the API. Plan-level attempts do not read a response's `Retry-After`; a step's own `retry:` does (see [Plans: Retry](plans.md#retry)).
 
 ## Archives
 

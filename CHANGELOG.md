@@ -11,8 +11,12 @@ the graph and plan formats may still change before 1.0.
   least that far apart, such as `250ms`. One interval covers everything a command sends, including the plans of
   a parallel batch, retries, verification, and cleanup. `aat prompt` and the MCP server's `execute_plan` honor it
   too. A value without a unit, such as `250`, is rejected when the environment file loads.
+- Step retries honor the server's `Retry-After` header, and on a 429 without one, `RateLimit-Reset`. A retry waits
+  at least as long as the failed response asks, in seconds or until an HTTP date, instead of only the backoff.
 
 ### Changed
+- A step whose failed response asks for a wait longer than 60 seconds stops retrying (`failed_fast`), and the
+  error detail says how long the server asked for. Before, the retries went out after the backoff regardless.
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs
   `aat` and `aat-sandbox` with Homebrew on Linux.
 - `min` and `max` selection compare numbers sent as strings by value: a `sortField` of `"99.10"` sorts below

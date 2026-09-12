@@ -353,6 +353,14 @@ assertions:
       expr: 'orderStatus == "confirmed"'
 ```
 
+### Retry
+
+A step retries with `retry: {max: 3, on: [transient]}`. `transient` covers HTTP 429, 502, 503, and 504, and a rule can also be a status code (`on: [503]`).
+
+Between attempts the step waits a backoff (500 ms, doubling, up to 10 s). It waits longer when the failed response asks: its `Retry-After` header, or `RateLimit-Reset` on a 429. A server that asks for more than 60 s ends the retries.
+
+To stay under a rate limit in the first place, set `settings.minRequestInterval` in the environment file.
+
 ### Cleanup
 
 Cleanup steps run after the plan completes (success or failure) to release resources:

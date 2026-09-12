@@ -62,3 +62,19 @@ and the MCP server's `execute_plan` all honor it.
   than read as some unit.
 - **OAuth2 token requests are not paced.** The auth provider sends them outside the engine, once per run context.
 - **Pacing waits count toward step durations,** as retry waits do.
+
+## 2026-09-12 — A3: step retries honor Retry-After
+
+**What:** A step retry waits at least as long as the failed response asks, from its `Retry-After` header or, on a 429
+without one, its `RateLimit-Reset` header. A request for more than 60 seconds ends the retries.
+
+**Decisions:**
+- **`RateLimit-Reset` counts on a 429.** A rate-limited API may send it without `Retry-After`; Duffel sends one as an
+  HTTP date. Both headers are read as seconds or as an HTTP date (RFC 9110).
+- **The server's wait is a floor.** The step waits the longer of its backoff and the server's delay, with no jitter
+  below the server's value.
+- **Past 60 seconds the step fails fast.** Retrying before the server's time only spends attempts, and waiting an hour
+  stalls the run. `errorClassification.detail` says how long the server asked for.
+- **`Retry-After` does not hold the shared pacer.** That would need a key per host or credential, and it would stall
+  unrelated runs: the shop sandbox's 503 is about one shipment.
+- **Unchanged:** plan-level `--retries` keeps its fixed two seconds, and cleanup still never retries.

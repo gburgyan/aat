@@ -2,13 +2,21 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"math/rand"
+	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
 )
+
+// maxRetryAfter caps how long a step waits when the server asks it to wait
+// before retrying. A server that asks for longer ends the step's retries.
+const maxRetryAfter = 60 * time.Second
 
 // executeStepWithTracking wraps executeStepWithRetry.
 func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
@@ -19,7 +27,7 @@ func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, no
 // RetryConfig. If no RetryConfig is set, it behaves identically to executeStep.
 // The result of a retried step is its last attempt's, timed from the start of
 // the first attempt, so its duration includes the failed attempts and the
-// backoff between them.
+// waits between them.
 func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) (result StepResult) {
 	result = e.executeStep(ctx, step, node, state)
 	firstStart := result.StartTime
@@ -78,13 +86,29 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 			return result
 		}
 
+		// Wait out the backoff, or as long as the server asked if that is longer.
+		wait := retryBackoff(attempt)
+		if result.Response != nil {
+			if after, ok := retryAfter(result.Response.Headers, result.StatusCode, time.Now()); ok {
+				if after > maxRetryAfter {
+					cls.Action = "failed_fast"
+					cls.Detail += fmt.Sprintf("; the server asked to wait %s before retrying, longer than the %s limit",
+						after.Round(time.Second), maxRetryAfter)
+					cls.RetryAttempt = attempt - 1
+					result.ErrorClass = cls
+					result.RetryCount = attempt - 1
+					return result
+				}
+				wait = max(wait, after)
+			}
+		}
+
 		// Mark the classification as retried
 		cls.Action = "retried"
 		cls.RetryAttempt = attempt - 1
 		retriedOn = append(retriedOn, cls.Category)
 
-		// Wait with backoff, respecting context cancellation
-		backoff := retryBackoff(attempt)
+		// Wait, respecting context cancellation
 		select {
 		case <-ctx.Done():
 			result.Error = ctx.Err()
@@ -97,7 +121,7 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 			result.RetryCount = attempt
 			result.RetriedOn = append([]ErrorCategory(nil), retriedOn...)
 			return result
-		case <-time.After(backoff):
+		case <-time.After(wait):
 		}
 
 		// Retry the step
@@ -133,4 +157,31 @@ func retryBackoff(attempt int) time.Duration {
 	// Add jitter: ±25%
 	jitter := time.Duration(float64(backoff) * (0.75 + rand.Float64()*0.5))
 	return jitter
+}
+
+// retryAfter reports how long a failed response asked the client to wait
+// before retrying: its Retry-After header or, on a 429 without one, its
+// RateLimit-Reset header. Either may be a number of seconds or an HTTP date
+// (RFC 9110); a date already past means no wait. ok is false when the response
+// names no usable delay.
+func retryAfter(h http.Header, status int, now time.Time) (wait time.Duration, ok bool) {
+	value := strings.TrimSpace(h.Get("Retry-After"))
+	if value == "" && status == http.StatusTooManyRequests {
+		value = strings.TrimSpace(h.Get("RateLimit-Reset"))
+	}
+	if value == "" {
+		return 0, false
+	}
+	if strings.Trim(value, "0123456789") == "" {
+		secs, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || secs > int64(math.MaxInt64/time.Second) {
+			return time.Duration(math.MaxInt64), true
+		}
+		return time.Duration(secs) * time.Second, true
+	}
+	at, err := http.ParseTime(value)
+	if err != nil {
+		return 0, false
+	}
+	return max(at.Sub(now), 0), true
 }
