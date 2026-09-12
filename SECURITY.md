@@ -37,6 +37,11 @@ credited in the advisory and release notes unless they ask otherwise.
   default route's auth headers, and step outputs, so an external harness can pick up where a run
   left off. The file is written with mode `0600`, including when it replaces an existing file.
   Never commit these files, attach them to issues, or leave them in a shared location.
+- **Lua transforms have limited reach, but they are not a sandbox.** A template's transform cannot
+  use `io`, `os`, or `package`, and it cannot load or run code from files or strings: `dofile`,
+  `loadfile`, `load`, `loadstring`, and `require` are removed. It still runs inside the `aat` process
+  with no memory limit, and its 5-second timeout does not interrupt a long call into a library
+  function. Review the transforms in templates you did not write, such as an integration kit's.
 - **`aat mcp serve --http` has no authentication.** The HTTP transport listens on `127.0.0.1`
   unless `--host` (or the `AAT_HOST` environment variable) says otherwise, and accepts any request
   that reaches it. Bind another interface only on a machine that untrusted networks cannot reach,

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"math/rand"
@@ -34,19 +33,23 @@ var runBatchCmd = &cobra.Command{
 Results are saved under a single batch directory for correlation.
 
 Without arguments, runs all plans from configured plan directories.
-With a relative path, filters to plans under that subdirectory.
-With an absolute path, treats it as a standalone plan directory.`,
+With a relative argument, runs the plans it names within them: a directory
+(every plan under it) or one plan, with or without its extension. Whole path
+segments are compared, so "orders" does not select "orders-legacy".
+With an absolute path, treats it as a standalone plan directory.
+A batch that finds no plans exits 2.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
 		changed := func(name string) bool { return cmd.Flags().Changed(name) }
 		getString := func(name string) string { v, _ := cmd.Flags().GetString(name); return v }
+		jsonFlag, _ := cmd.Flags().GetBool("json")
 
 		overrides := buildProjectOverrides(changed, getString)
 		resolved, err := config.ResolveProjectPaths(overrides)
 		if err != nil {
-			return &exitError{Code: exitCodeInfra, Err: err}
+			return batchSetupFailure(jsonFlag, err)
 		}
 
 		var filterPath string
@@ -54,7 +57,6 @@ With an absolute path, treats it as a standalone plan directory.`,
 			filterPath = args[0]
 		}
 
-		jsonFlag, _ := cmd.Flags().GetBool("json")
 		quiet, _ := cmd.Flags().GetBool("quiet")
 		overrideFlags, _ := cmd.Flags().GetStringSlice("override")
 		envOverlay, _ := cmd.Flags().GetString("overlay")
@@ -73,19 +75,11 @@ With an absolute path, treats it as a standalone plan directory.`,
 		varFlags, _ := cmd.Flags().GetStringArray("var")
 		vars, err := config.ParseVars(varFlags)
 		if err != nil {
-			return &exitError{Code: 2, Err: err}
+			return batchSetupFailure(jsonFlag, err)
 		}
-		envName := resolveEnvName(cmd)
-
-		if envName == "" {
-			overlayEnv, overlaySrc, err := resolveOverlayEnvName(envOverlay, noAutoOverrides)
-			if err != nil {
-				return &exitError{Code: exitCodeInfra, Err: fmt.Errorf("resolving overlay environment: %w", err)}
-			}
-			if overlayEnv != "" {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "aat: using environment %q from overlay %s\n", overlayEnv, overlaySrc)
-				envName = overlayEnv
-			}
+		envName, err := selectEnvName(cmd, resolved, envOverlay, noAutoOverrides)
+		if err != nil {
+			return batchSetupFailure(jsonFlag, err)
 		}
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
@@ -93,7 +87,7 @@ With an absolute path, treats it as a standalone plan directory.`,
 		ba := &batchArgs{
 			runArgs: runArgs{
 				EnvPath:         resolved.EnvPath,
-				EnvName:         resolveEnvNameWithDefault(envName, resolved.DefaultEnvName),
+				EnvName:         envName,
 				GraphPath:       resolved.GraphPath,
 				TemplatesPath:   resolved.TemplatesPath,
 				OutputDir:       outputDir,
@@ -155,10 +149,19 @@ type batchArgs struct {
 // BatchSummary is the machine-readable JSON output for batch CI/CD pipelines.
 type BatchSummary struct {
 	Outcome     string           `json:"outcome"`
-	BatchID     string           `json:"batchId"`
+	Error       string           `json:"error,omitempty"` // why the batch stopped before running its plans
+	BatchID     string           `json:"batch_id,omitempty"`
 	Runs        []BatchRunResult `json:"runs"`
 	Summary     BatchStats       `json:"summary"`
 	ArchivePath string           `json:"archive_path,omitempty"`
+}
+
+// batchSetupFailure is runSetupFailure for aat run batch.
+func batchSetupFailure(jsonOut bool, err error) error {
+	if jsonOut {
+		writeJSON(&BatchSummary{Outcome: "error", Error: err.Error(), Runs: []BatchRunResult{}})
+	}
+	return &exitError{Code: exitCodeInfra, Err: err}
 }
 
 // BatchRunResult is a per-plan entry in the batch JSON summary.
@@ -225,19 +228,12 @@ func executeBatch(ba *batchArgs) int {
 
 	if ba.JSON {
 		if res.summary != nil {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(res.summary)
+			writeJSON(res.summary)
 		} else {
-			s := &BatchSummary{
-				Outcome: "error",
-			}
+			writeJSON(&BatchSummary{Outcome: "error", Error: errString(res.err), Runs: []BatchRunResult{}})
 			if res.err != nil {
-				s.Runs = []BatchRunResult{{PlanName: "", Outcome: "error", Error: res.err.Error()}}
+				fmt.Fprintf(os.Stderr, "aat: %s\n", res.err)
 			}
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(s)
 		}
 		return batchExitCode(res)
 	}
@@ -396,16 +392,6 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	plans, source, err := discoverBatchPlans(args.PlanDirs, args.FilterPath)
 	if err != nil {
 		return &batchResult{setupErr: true, err: err}
-	}
-
-	if len(plans) == 0 {
-		logf("aat: no plans found\n")
-		return &batchResult{
-			summary: &BatchSummary{
-				Outcome: "passed",
-				Summary: BatchStats{},
-			},
-		}
 	}
 
 	// 2. Build the run matrix (plans × permutations)
@@ -1038,13 +1024,24 @@ func deduplicateSpecs(rctx *runContext, specs []batchRunSpec) (*dedupResult, err
 	return result, nil
 }
 
-// discoverBatchPlans finds plans based on the filter path.
-// Returns the plan entries, a source description, and any error.
+// discoverBatchPlans finds plans based on the filter path. It returns the plan
+// entries and a source description. Finding no plans is an error, so a
+// mistyped filter or an empty plan directory fails the batch instead of
+// passing with nothing run.
 func discoverBatchPlans(planDirs []string, filterPath string) ([]config.PlanEntry, string, error) {
 	if filterPath != "" && filepath.IsAbs(filterPath) {
 		// Absolute path: treat as a standalone plan directory
+		if info, err := os.Stat(filterPath); err != nil || !info.IsDir() {
+			return nil, "", fmt.Errorf("plan directory not found: %s", filterPath)
+		}
 		entries, err := config.ListPlans([]string{filterPath})
-		return entries, filterPath, err
+		if err != nil {
+			return nil, "", err
+		}
+		if len(entries) == 0 {
+			return nil, "", fmt.Errorf("no plans in %s", filterPath)
+		}
+		return entries, filterPath, nil
 	}
 
 	if len(planDirs) == 0 {
@@ -1057,17 +1054,38 @@ func discoverBatchPlans(planDirs []string, filterPath string) ([]config.PlanEntr
 	}
 
 	if filterPath == "" {
+		if len(entries) == 0 {
+			return nil, "", fmt.Errorf("no plans in the plan directories (%s)", strings.Join(planDirs, ", "))
+		}
 		return entries, "all", nil
 	}
 
-	// Filter by relative prefix
 	var filtered []config.PlanEntry
 	for _, e := range entries {
-		if strings.HasPrefix(e.Name, filterPath) {
+		if matchesBatchFilter(e.Name, filterPath) {
 			filtered = append(filtered, e)
 		}
 	}
+	if len(filtered) == 0 {
+		return nil, "", fmt.Errorf("no plans match %q in the plan directories (%s)", filterPath, strings.Join(planDirs, ", "))
+	}
 	return filtered, filterPath, nil
+}
+
+// matchesBatchFilter reports whether a relative batch filter selects the plan
+// with the given name (its path within a plan directory): the filter names the
+// plan itself, with or without its extension, or a directory that contains
+// it. Whole path segments are compared, so smoke selects smoke.yaml but not
+// smoke-eu.yaml.
+func matchesBatchFilter(name, filter string) bool {
+	name = filepath.ToSlash(name)
+	filter = filepath.ToSlash(filepath.Clean(filter))
+	if filter == "." {
+		return true
+	}
+	return name == filter ||
+		strings.TrimSuffix(name, filepath.Ext(name)) == filter ||
+		strings.HasPrefix(name, filter+"/")
 }
 
 // planBaseName returns the plan name without extension for display.

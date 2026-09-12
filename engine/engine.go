@@ -655,10 +655,12 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		}
 	}
 
-	// Overlay value overrides win over plan/graph-resolved values.
+	// Overlay value overrides win over plan/graph-resolved values. Each replaces
+	// the input's resolution record, so the archive shows what was sent.
 	overlayValues, _ := e.router.ResolveValueOverride(node.Name)
 	for k, v := range overlayValues {
 		inputs[k] = v
+		resolutions = recordOverrideValue(resolutions, k, v)
 	}
 
 	// Store resolved inputs so later steps can reference them via fromInput

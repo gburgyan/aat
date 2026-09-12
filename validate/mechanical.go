@@ -190,7 +190,7 @@ func checkFieldEquals(body []byte, a MechanicalAssertion) AssertionResult {
 		return ar
 	}
 
-	if valuesEqual(r, a.Value) {
+	if ValuesEqual(r, a.Value) {
 		ar.Passed = true
 		ar.Message = fmt.Sprintf("field %q equals %v", a.Path, a.Value)
 	} else {
@@ -239,8 +239,8 @@ func checkPredicate(body []byte, a MechanicalAssertion, predicateEval PredicateE
 	return ar
 }
 
-// valuesEqual compares a gjson.Result with an expected value, handling numeric coercion.
-func valuesEqual(r gjson.Result, expected any) bool {
+// ValuesEqual compares a gjson.Result with an expected value, handling numeric coercion.
+func ValuesEqual(r gjson.Result, expected any) bool {
 	switch e := expected.(type) {
 	case string:
 		return r.Type == gjson.String && r.Str == e

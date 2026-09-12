@@ -292,12 +292,12 @@ Archive: /path/to/shop/_output/runs/batch-20260911-123658-ba22ca32
 aat run batch --layer-group shipping-standard,shipping-express --layer-group basket-gear,basket-apparel --json
 ```
 
-Produces a machine-readable `BatchSummary` to stdout (implies `--quiet`). Each run entry includes `permutation`, `layers`, `skipped`, and `duplicate_of` fields (the `(base)` permutation with no `--layer` flags has no `layers`). A run's `duration_ms` is its wall-clock time, retry waits included; the summary's is the whole batch's. The batch ID key is `batchId`, while the other keys are snake_case. Trimmed to one executed and one skipped run:
+Produces a machine-readable `BatchSummary` to stdout (implies `--quiet`). Each run entry includes `permutation`, `layers`, `skipped`, and `duplicate_of` fields (the `(base)` permutation with no `--layer` flags has no `layers`). A run's `duration_ms` is its wall-clock time, retry waits included; the summary's is the whole batch's. Trimmed to one executed and one skipped run:
 
 ```json
 {
   "outcome": "passed",
-  "batchId": "batch-20260911-123725-0fe7aa4c",
+  "batch_id": "batch-20260911-123725-0fe7aa4c",
   "runs": [
     {
       "plan_name": "full-lifecycle",

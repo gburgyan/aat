@@ -9,7 +9,7 @@ This example uses the public [Swagger Petstore API](https://petstore.swagger.io/
 - `aat`: see [Install](https://gburgyan.github.io/aat/install/) for Homebrew, release archives, Docker, and `go install`.
 - Internet access (the Petstore API is public)
 
-Until v0.1.0 is released, build `aat` from source. From the repository root (Go 1.25.7 or later, and Node.js for the web UI):
+In a clone of this repository you can also build `aat` from source. From the repository root (Go 1.25.7 or later, and Node.js for the web UI):
 
 ```bash
 make build   # ./aat and ./aat-sandbox with the web UI; `make cli` builds ./aat alone, without Node.js

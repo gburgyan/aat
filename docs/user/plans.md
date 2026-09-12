@@ -122,7 +122,7 @@ overrides:
     confirmOrder.shippingAddress: "123 Main St"
 ```
 
-Override values replace a literal, pool, or injected value that the workflow template or graph provides for that input. They are applied after composition, so they take effect on the final composed plan. An override on an input that the template wires with `from`, `fromSelection`, or `fromInput` (including a resolved `AUTOWIRE`) currently has no effect: the reference still wins, and nothing reports it. To send a literal there, change the workflow template. A key whose step ID is not in the composed plan is ignored the same way, so match keys to the composed plan's step IDs — addon steps carry an `inc0_`-style prefix (see [Workflows: Step ID Prefixing](workflows.md#step-id-prefixing)).
+Override values replace whatever the workflow template or graph provides for that input: a literal, a pool, an injected value, or a reference. They are applied after composition, so they take effect on the final composed plan. An override on an input that the template wires with `from`, `fromSelection`, or `fromInput` (including a resolved `AUTOWIRE`) removes that wiring, so the step sends the override's value. Keys name the composed plan's step IDs, and addon steps carry an `inc0_`-style prefix (see [Workflows: Step ID Prefixing](workflows.md#step-id-prefixing)). An override (value, selection, or assertion) for a step that is not in the composed plan is an error that lists the plan's steps.
 
 ### Selection Overrides
 
@@ -683,7 +683,7 @@ execution:
 
 A cleanup step has just two fields: `node` and `runOn`. There is no `values:` block — inputs are filled by **output-name matching**: for each input the node declares, AAT looks for an output of the same name, first on the step that registered the resource, then on the most recent executed step that has one. `cancelOrder` with an `orderId` input picks up `orderId` from the `createOrder` step. Name your graph outputs to match the inputs of their teardown nodes and this needs no wiring at all.
 
-**Ordering.** A graph-level `cleanup:` pairing (see [API Graphs: Cleanup](graphs.md#cleanup)) runs once for each step that created a resource, from a last-in-first-out stack, so the most recently created resource is released first and nothing is sent for a resource that was never created. Listing a paired node here, as recipes and `aat prompt` plans do, does not run it a second time or change that order; the listed step's `runOn` decides whether those cleanups run. Cleanup steps for other nodes, such as `sendNotification` above, run first, in declaration order.
+**Ordering.** A graph-level `cleanup:` pairing (see [API Graphs: Cleanup](graphs.md#cleanup)) runs once for each step that created a resource, from a last-in-first-out stack, so the most recently created resource is released first and nothing is sent for a resource that was never created. Listing a paired node here, as recipes and `aat prompt` plans do, does not run it a second time or change that order; the listed step's `runOn` decides whether those cleanups run. If the plan lists that node more than once, they run when any listing's `runOn` matches the outcome. Cleanup steps for other nodes, such as `sendNotification` above, run first, in declaration order.
 
 Cleanup results are recorded in the archive and in the `cleanup` array of `--json` output, and appear under a `cleanup:` block in the console. A cleanup failure never changes the run outcome. See [Running Tests: Cleanup](running.md#cleanup) for the execution-time details.
 
@@ -710,16 +710,16 @@ Plan `auth` takes the same form as an environment's `auth` section: the types ar
 
 Plan `auth` replaces the environment's auth for the whole run, including overlay auth, and override entries that declare no `auth` of their own inherit it. Auth priority, lowest to highest: `env.yaml` `auth`, `.aat-overrides.yaml` `auth`, the `--overlay` file's `auth`, plan `auth`.
 
-Headers merge in this order, later sources replacing earlier ones with the same name:
+Headers merge in this order, later sources replacing earlier ones with the same name (in any case):
 
 1. Environment `headers`
 2. Plan `headers`
-3. The auth credential (`Authorization`, or the API key header)
-4. `.aat-overrides.yaml` `headers`
-5. `--overlay` file `headers`
-6. Template `request.headers`
+3. Template `request.headers`
+4. The auth credential (`Authorization`, or the API key header)
+5. `.aat-overrides.yaml` `headers`
+6. `--overlay` file `headers`
 
-So a plan header cannot replace the credential, but an overlay header can. Template headers currently replace everything before them, including the credential; see [Environments: Custom Headers](environments.md#custom-headers) for that caveat and for nodes routed by an override.
+So neither a plan header nor a template header can replace the credential, and an overlay header replaces everything before it. See [Environments: Custom Headers](environments.md#custom-headers) for nodes routed by an override.
 
 ## Layers
 
@@ -999,7 +999,7 @@ selection:
 # Optional — overrides applied after composition
 overrides:
   values:                            # stepId.inputName → literal value
-    stepId.inputName: value          #   no effect on an input the template wires with from
+    stepId.inputName: value          #   replaces the input's wiring; stepId must be a step of the composed plan
   selections:                        # stepId.selectionName → strategy override
     stepId.selectionName:
       strategy: min                  # first, last, index, random, min, max, match

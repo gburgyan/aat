@@ -2,6 +2,8 @@ module github.com/gburgyan/aat
 
 go 1.25.7
 
+retract [v0.0.1, v0.0.4] // Published before the first release; use v0.1.0 or later.
+
 require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/mark3labs/mcp-go v0.43.2

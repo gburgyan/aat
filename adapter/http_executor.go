@@ -39,7 +39,7 @@ func NewHTTPExecutorWithClient(baseURL string, client *http.Client) *HTTPExecuto
 // the request's relative Path, copies headers, and respects the context for
 // cancellation and timeouts.
 func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, error) {
-	fullURL, err := joinURL(e.BaseURL, req.Path)
+	fullURL, err := JoinURL(e.BaseURL, req.Path)
 	if err != nil {
 		return nil, fmt.Errorf("building URL: %w", err)
 	}
@@ -76,10 +76,12 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 	}, nil
 }
 
-// joinURL combines a base URL with a relative path, preserving query parameters
+// JoinURL combines a base URL with a relative path, preserving query parameters
 // from the path. Unlike url.ResolveReference, this always appends the path to
 // the base URL's existing path (e.g. base="/v2" + path="/pet" → "/v2/pet").
-func joinURL(base, relPath string) (string, error) {
+// Percent-encoding in the path is kept, so an encoded "/" (%2F) inside a path
+// segment stays inside it.
+func JoinURL(base, relPath string) (string, error) {
 	baseURL, err := url.Parse(base)
 	if err != nil {
 		return "", fmt.Errorf("parsing base URL %q: %w", base, err)
@@ -90,13 +92,20 @@ func joinURL(base, relPath string) (string, error) {
 		return "", fmt.Errorf("parsing path %q: %w", relPath, err)
 	}
 
-	// Concatenate paths: strip trailing slash from base, ensure leading slash on path.
-	bp := strings.TrimRight(baseURL.Path, "/")
-	rp := pathURL.Path
+	// Concatenate the encoded paths: strip the trailing slash from the base and
+	// ensure a leading slash on the path.
+	bp := strings.TrimRight(baseURL.EscapedPath(), "/")
+	rp := pathURL.EscapedPath()
 	if rp != "" && !strings.HasPrefix(rp, "/") {
 		rp = "/" + rp
 	}
-	baseURL.Path = bp + rp
+	joined := bp + rp
+	decoded, err := url.PathUnescape(joined)
+	if err != nil {
+		return "", fmt.Errorf("parsing path %q: %w", relPath, err)
+	}
+	baseURL.Path = decoded
+	baseURL.RawPath = joined
 
 	// Merge query parameters: path's query wins if present, otherwise keep base's.
 	if pathURL.RawQuery != "" {

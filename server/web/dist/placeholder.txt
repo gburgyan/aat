@@ -1,0 +1,2 @@
+Vite builds the web UI into app/ in this directory, which git ignores.
+This tracked file keeps `//go:embed web/dist` in server/embed.go compiling before a frontend build.

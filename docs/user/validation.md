@@ -247,7 +247,8 @@ Workflows:             OK (4 files, 2 templates)
 | Code | Meaning |
 |------|---------|
 | `0` | Validation passed (no errors; warnings allowed unless `--strict`) |
-| `1` | Validation failed (errors found, or warnings with `--strict`) |
+| `1` | Validation failed (errors found, including a manifest that fails to load, or warnings with `--strict`) |
+| `2` | Validation could not run: an unknown flag or argument, a bad `--var`, no manifest found, or no `--graph` for `aat validate graph`, `plan`, or `workflow` |
 
 ## Common Errors
 

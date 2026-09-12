@@ -204,7 +204,7 @@ The web server exposes a REST API that you can use programmatically.
 | `GET` | `/api/traces/{id}` | Get trace detail |
 | `GET` | `/api/visualizers/{id}` | Get visualizer HTML file |
 
-The naming, export, and import routes are described in [Archives](archives.md).
+The naming, export, and import routes are described in [Archives](archives.md). A run, batch, or trace `{id}` must be a single directory name: any other ID answers `404`, and a rename moves only run and batch directories.
 
 ## Development Mode
 

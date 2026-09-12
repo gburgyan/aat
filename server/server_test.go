@@ -102,7 +102,17 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 
 // --- static serving & SPA fallback ---
 
+// skipWithoutWebAssets skips a test that serves the web UI when the frontend
+// bundle is not embedded, as in a plain `go test ./...` without `make frontend`.
+func skipWithoutWebAssets(t *testing.T) {
+	t.Helper()
+	if !HasWebAssets() {
+		t.Skip("frontend bundle not embedded; run `make frontend` (make test does) to include this test")
+	}
+}
+
 func TestStaticFileServing(t *testing.T) {
+	skipWithoutWebAssets(t)
 	s := newTestServer(t.TempDir())
 	rec := serveRequest(s, "GET", "/")
 
@@ -111,6 +121,7 @@ func TestStaticFileServing(t *testing.T) {
 }
 
 func TestSPAFallback(t *testing.T) {
+	skipWithoutWebAssets(t)
 	s := newTestServer(t.TempDir())
 	rec := serveRequest(s, "GET", "/runs/some-id")
 

@@ -16,6 +16,7 @@ import (
 var planCmd = &cobra.Command{
 	Use:   "plan",
 	Short: "Plan inspection commands",
+	RunE:  groupRunE,
 }
 
 // planListCmd is the Cobra command for listing saved plans.
@@ -23,6 +24,7 @@ var planListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List saved plans from the plans directory",
 	Long:  "List saved plans from the configured plans directory, showing name, goal, and step count.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

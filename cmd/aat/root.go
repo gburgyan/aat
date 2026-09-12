@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/gburgyan/aat/internal/version"
 	"github.com/spf13/cobra"
@@ -52,13 +53,46 @@ func main() {
 	rootCmd.SilenceErrors = true
 	if err := rootCmd.Execute(); err != nil {
 		var exitErr *exitError
-		if errors.As(err, &exitErr) {
-			if exitErr.Code != 0 && exitErr.Err != nil {
-				fmt.Fprintf(os.Stderr, "aat: %s\n", exitErr.Err)
-			}
-			os.Exit(exitErr.Code)
+		if !errors.As(err, &exitErr) || (exitErr.Code != 0 && exitErr.Err != nil) {
+			fmt.Fprintf(os.Stderr, "aat: %s\n", err)
 		}
-		fmt.Fprintf(os.Stderr, "aat: %s\n", err)
-		os.Exit(1)
+		os.Exit(exitCodeFor(err))
 	}
+}
+
+// exitCodeFor maps the error a command returned to the process exit code. An
+// exitError carries its own code: 1 when a test or validation found a failure,
+// 130 when a run was aborted. Any other error means aat could not do what was
+// asked (a bad flag or argument, an unknown subcommand, a project, environment,
+// or setup error) and exits 2, so CI can tell a broken job from a failing test.
+func exitCodeFor(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exitError
+	if errors.As(err, &exitErr) {
+		return exitErr.Code
+	}
+	return exitCodeInfra
+}
+
+// groupRunE runs a command that only groups subcommands, such as aat run.
+// Cobra shows help and exits 0 when such a command gets an argument it cannot
+// match, so a mistyped subcommand (aat run bach) would pass in CI; this
+// rejects it instead.
+func groupRunE(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return cmd.Help()
+	}
+	cmd.SilenceUsage = true
+	msg := fmt.Sprintf("unknown command %q for %q", args[0], cmd.CommandPath())
+	// Cobra applies its default suggestion distance only on the root command;
+	// without it, only prefixes (serv for serve) are suggested, not typos.
+	if cmd.SuggestionsMinimumDistance <= 0 {
+		cmd.SuggestionsMinimumDistance = 2
+	}
+	if suggestions := cmd.SuggestionsFor(args[0]); len(suggestions) > 0 {
+		msg += "\n\nDid you mean this?\n\t" + strings.Join(suggestions, "\n\t")
+	}
+	return errors.New(msg)
 }

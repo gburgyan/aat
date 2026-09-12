@@ -57,7 +57,7 @@ Each step record holds:
 
 | Field | Contents |
 |-------|----------|
-| `stepId`, `node`, `startTime`, `duration_ms` | Which step ran, and when: a retried step's start and duration cover every attempt and the waits between them |
+| `stepId`, `node`, `startTime`, `durationMs` | Which step ran, and when: a retried step's start and duration cover every attempt and the waits between them. Archives written before 0.1.0 name the duration `duration_ms`; AAT reads both |
 | `inputs` | The resolved input values |
 | `request` | Method, full URL, headers, and body. When an override routed the step elsewhere, `originalUrl` holds the URL it would have used |
 | `response` | Status, headers, and body |
@@ -149,9 +149,9 @@ Imported run "nightly-run-3" → /path/to/shop/_output/runs/nightly-run-3
 
 Without `--name`, the web UI, the API, and the CLI derive the directory name from the file name: the `.aar`/`.aab` extension is dropped, every character other than letters, digits, `.`, `_`, and `-` becomes `-`, repeated dashes collapse, and leading and trailing dashes go. A result that starts with `run-` or `batch-` gets a `!` prefix, so `run-20260910-225958-d819f460.aar` imports as `!run-20260910-225958-d819f460`. An archive imported without `--name` is therefore always a [named run](#naming-and-saving-runs) that `aat run clean` never deletes.
 
-Known issue: `--name` is used exactly as given, without that clean-up. A name containing `../` can place the import outside the archive directory, and a name starting with `run-` or `batch-` looks auto-generated to `aat run clean`. Pass a plain name.
+`--name` must be a single directory name, without path separators, and a name that starts with `run-` or `batch-` gets the same `!` prefix.
 
-An import never overwrites or merges. If the target directory exists, it fails (exit code `1` from the CLI):
+An import never overwrites or merges. If the target directory exists, it fails (exit code `2` from the CLI):
 
 ```
 aat: import: directory "nightly-run-3" already exists

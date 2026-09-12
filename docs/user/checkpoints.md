@@ -158,7 +158,7 @@ Without `--json`, stdout carries only the state object. Progress, the summary li
 aat run plan smoke --stop-after checkout --dump-state - --quiet | jq -r '.values["checkout.orderId"]'
 ```
 
-With `--json`, stdout carries the usual JSON summary (see [CI/CD Integration](ci-cd.md)) with the dump nested under `state`, so a wrapping harness reads one object. Trimmed:
+With `--json`, stdout carries the usual JSON summary (see [CI/CD Integration](ci-cd.md)) with the dump nested under `state`, camelCase keys and all, so a wrapping harness reads one object in the dump file's format. Trimmed:
 
 ```
 aat run plan smoke --stop-after paymentCharge --json --dump-state -

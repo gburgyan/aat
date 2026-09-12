@@ -303,8 +303,13 @@ func validateErrorDetectionRule(rule ErrorDetectionRule) []string {
 	} else if !validErrorDetectionRules[rule.Rule] {
 		errs = append(errs, fmt.Sprintf("unknown rule %q (must be exists, non-empty, or equals)", rule.Rule))
 	}
-	if rule.Rule == "equals" && rule.Value == nil {
-		errs = append(errs, "equals rule requires a value")
+	if rule.Rule == "equals" {
+		switch rule.Value.(type) {
+		case nil:
+			errs = append(errs, "equals rule requires a value")
+		case map[string]any, []any:
+			errs = append(errs, "equals value must be a string, number, or boolean")
+		}
 	}
 	if rule.Details != nil {
 		if rule.Details.Message != "" {

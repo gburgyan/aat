@@ -19,7 +19,7 @@ aat run plan full-lifecycle
 - **[MCP Server](mcp-server.md)** — give Claude Code or another MCP client your graph and the tools to write and run tests
 - **[Share your API with integrators](integration-kit.md)** — package part of the project your tests use, so your integrators' AI tools learn the API from it
 
-Before v0.1.0 is released, build from source: see [Install](install.md).
+Install with Homebrew, a release archive, Docker, or `go install`, or build from source: see [Install](install.md).
 
 ## Getting Started
 

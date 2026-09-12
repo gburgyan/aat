@@ -173,32 +173,3 @@ func TestValidationResult(t *testing.T) {
 		assert.Nil(t, vr)
 	})
 }
-
-func TestEnvironmentConfig(t *testing.T) {
-	t.Run("GetValue found", func(t *testing.T) {
-		cfg := &EnvironmentConfig{
-			Values: map[string]string{
-				"auth.token": "abc123",
-			},
-		}
-		v, ok := cfg.GetValue("auth.token")
-		assert.True(t, ok)
-		assert.Equal(t, "abc123", v)
-	})
-
-	t.Run("GetValue not found", func(t *testing.T) {
-		cfg := &EnvironmentConfig{
-			Values: map[string]string{},
-		}
-		v, ok := cfg.GetValue("missing")
-		assert.False(t, ok)
-		assert.Equal(t, "", v)
-	})
-
-	t.Run("GetValue nil map", func(t *testing.T) {
-		cfg := &EnvironmentConfig{}
-		v, ok := cfg.GetValue("anything")
-		assert.False(t, ok)
-		assert.Equal(t, "", v)
-	})
-}

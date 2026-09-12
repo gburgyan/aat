@@ -182,8 +182,6 @@ LLMs are optional and authoring-time only: `aat prompt` can draft a plan, and th
 
 ## Install
 
-> **Before v0.1.0:** the release archives, Homebrew cask, and Docker image below are published with v0.1.0, which is not out yet, and `go install …@latest` still installs v0.0.4, which has no `aat-sandbox`. Until then, [build from source](#from-source).
-
 Homebrew (macOS) installs `aat` and `aat-sandbox`:
 
 ```bash

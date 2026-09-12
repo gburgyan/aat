@@ -81,6 +81,11 @@ func (s *Server) handleGeneratePlan(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: prompt"), nil
 	}
+	if saveAs, _ := req.RequireString("save_as"); saveAs != "" {
+		if err := checkPlanName(saveAs); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+	}
 
 	if s.ctx.Environment == nil {
 		return mcp.NewToolResultError("no environment configured — set the `environment` field in aat-project.yaml to enable plan generation"), nil
@@ -258,6 +263,9 @@ func (s *Server) handleLoadPlan(_ context.Context, req mcp.CallToolRequest) (*mc
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: name"), nil
 	}
+	if err := checkPlanName(name); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	if len(s.ctx.PlanDirs) == 0 {
 		return mcp.NewToolResultError("plans directory not configured — set the `plans` field in aat-project.yaml"), nil
@@ -308,6 +316,9 @@ func (s *Server) handleSavePlan(_ context.Context, req mcp.CallToolRequest) (*mc
 	name, err := req.RequireString("name")
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: name"), nil
+	}
+	if err := checkPlanName(name); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	yamlStr, err := req.RequireString("yaml")
 	if err != nil {

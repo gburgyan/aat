@@ -29,7 +29,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
-          path: server/web/dist/
+          path: server/web/dist/app/
           retention-days: 1
 
   test:
@@ -45,7 +45,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: frontend-dist
-          path: server/web/dist/
+          path: server/web/dist/app/
 
       - name: Run tests
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
@@ -93,7 +93,7 @@ jobs:
           go-version-file: go.mod
 
       # No frontend artifact: the job never starts `aat web`, and the tracked
-      # server/web/dist placeholder satisfies the embed.
+      # server/web/dist/placeholder.txt satisfies the embed.
       - name: Run examples/shop against the sandbox
         run: make example-shop
 
@@ -141,7 +141,7 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: frontend-dist
-          path: server/web/dist/
+          path: server/web/dist/app/
 
       - name: Build binary (${{ matrix.goos }}/${{ matrix.goarch }})
         env:

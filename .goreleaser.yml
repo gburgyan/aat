@@ -48,6 +48,8 @@ archives:
 checksum:
   name_template: checksums.txt
 
+# The release workflow passes the tag's CHANGELOG.md section with --release-notes,
+# which skips this generated changelog; only local and snapshot runs use it.
 changelog:
   sort: asc
   filters:

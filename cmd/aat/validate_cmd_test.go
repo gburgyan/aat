@@ -25,7 +25,7 @@ func TestValidate_NoManifestFound(t *testing.T) {
 
 	var buf bytes.Buffer
 	code := validateCommand(&validateArgs{}, &buf)
-	assert.Equal(t, 1, code)
+	assert.Equal(t, 2, code)
 	assert.Contains(t, buf.String(), "FAILED")
 	assert.Contains(t, buf.String(), "no manifest found")
 }
@@ -45,7 +45,7 @@ func TestValidate_ExplicitManifestNotFound(t *testing.T) {
 	code := validateCommand(&validateArgs{
 		ManifestPath: "/nonexistent/aat-project.yaml",
 	}, &buf)
-	assert.Equal(t, 1, code)
+	assert.Equal(t, 2, code)
 	assert.Contains(t, buf.String(), "FAILED")
 }
 

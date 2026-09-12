@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/validate"
 	"github.com/tidwall/gjson"
 )
 
@@ -94,7 +95,9 @@ func ruleTriggered(rule graph.ErrorDetectionRule, body []byte) bool {
 		if !result.Exists() {
 			return false
 		}
-		return result.Value() == rule.Value
+		// Numbers compare by value whatever their Go type, so a YAML integer
+		// such as 0 matches a JSON 0; strings and booleans compare strictly.
+		return validate.ValuesEqual(result, rule.Value)
 
 	default:
 		return false

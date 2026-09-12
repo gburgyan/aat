@@ -62,7 +62,7 @@ func checkExternalVars(mef *MultiEnvironmentFile, vars map[string]string) error 
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)
-		return fmt.Errorf("unknown var(s) %s: not declared or referenced in the environment file", strings.Join(unknown, ", "))
+		return unusableVarsError(fmt.Sprintf("unknown var(s) %s: not declared or referenced in the environment file", strings.Join(unknown, ", ")))
 	}
 	return nil
 }

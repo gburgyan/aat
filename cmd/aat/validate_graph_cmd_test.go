@@ -8,7 +8,7 @@ import (
 
 func TestGraphValidate_MissingGraphFlag(t *testing.T) {
 	code := graphValidateCommand(&graphValidateArgs{})
-	assert.Equal(t, 1, code)
+	assert.Equal(t, 2, code)
 }
 
 func TestGraphValidate_InvalidGraphPath(t *testing.T) {

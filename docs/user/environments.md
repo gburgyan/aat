@@ -235,8 +235,10 @@ When using a multi-environment file, the environment name is resolved from:
 1. **`--env` flag** (highest priority)
 2. **`AAT_ENV_NAME` environment variable**
 3. **`environment:` in an overlay file** — an explicit `--overlay` file first, then an auto-discovered `.aat-overrides.yaml` (see [Selecting the Environment](#selecting-the-environment))
-4. **`defaultEnvironment` in the project manifest**
+4. **`defaultEnvironment` in the project manifest**, for the environment file the manifest names (not for one given with `--env-config`)
 5. Error listing available environments
+
+A single-environment file has no names to choose from. `--env` is an error for it, and the other sources are ignored, so `AAT_ENV_NAME` or a manifest's `defaultEnvironment` does not stop `--env-config` from loading one.
 
 ### Listing Environments
 
@@ -382,18 +384,18 @@ headers:
   X-Request-Source: automated-testing
 ```
 
-Header merge order (later values override earlier ones for the same key):
+Header merge order. A later value replaces an earlier one with the same name, whatever the case of the name:
 
 1. **Environment headers** — this `headers` section
 2. **Plan headers** — the plan's top-level `headers` (see [Plans](plans.md#plan-level-auth-and-headers))
-3. **Auth credential** — `Authorization: Bearer …`, or the API key header, from the effective auth
-4. **`.aat-overrides.yaml` headers** — its top-level `headers`
-5. **`--overlay` headers** — the overlay file's top-level `headers`
-6. **Template headers** — per-template `request.headers` (see [Templates](templates.md#header-merge-order))
+3. **Template headers** — per-template `request.headers` (see [Templates](templates.md#header-merge-order))
+4. **Auth credential** — `Authorization: Bearer …`, or the API key header, from the effective auth
+5. **`.aat-overrides.yaml` headers** — its top-level `headers`
+6. **`--overlay` headers** — the overlay file's top-level `headers`
 
-A plan header therefore cannot replace the credential, while an overlay header can. Template headers are applied last and currently replace everything before them, the credential included; this is a known issue, so keep `Authorization`, API key headers, and overlay-managed headers out of templates.
+A plan or template header therefore cannot replace the credential, and an overlay header replaces everything before it.
 
-A node matched by an override that routes it (one that sets `baseUrl`, `auth`, `headers`, or `pathRewrite`, or a `--override` flag) starts from headers 1–5, drops the inherited credential if the override declares its own `auth`, applies the override's `headers`, and then sets the credential of its effective auth again. Template headers still come last.
+A node matched by an override that routes it (one that sets `baseUrl`, `auth`, `headers`, or `pathRewrite`, or a `--override` flag) takes the same environment, plan, and template headers. If the override declares its own `auth`, the inherited credential is dropped. Then come the override's `headers`, the credential of its effective auth, and the overlay headers, in that order. A template header cannot replace the override's headers either.
 
 ## Values
 
@@ -613,7 +615,7 @@ overrides:
 
 Semantics:
 
-- `values:` merge into the resolved inputs map at step execution time, overwriting plan-supplied values. Precedence: overlay values > plan step values > graph defaults. They are used exactly as written: `{{...}}` expressions such as `{{today}}` are not evaluated, and the input's graph type is not applied.
+- `values:` merge into the resolved inputs map at step execution time, overwriting plan-supplied values. Precedence: overlay values > plan step values > graph defaults. They are used exactly as written: `{{...}}` expressions such as `{{today}}` are not evaluated, and the input's graph type is not applied. The archive records each one as the input's resolution, with the source `override_value`, so the decision trail shows the value that was sent.
 - `expectFailure:` applies to matched steps only when the plan step doesn't already declare its own `expectFailure`. Status codes must all be `>= 400`.
 - Match precedence: exact matches win over glob matches on key conflicts, and later registrations overwrite earlier ones (`env.yaml` → `.aat-overrides.yaml` → `--overlay` → `--override`). For `expectFailure`, the last exact match wins; if no exact match, the last glob match wins.
 
@@ -689,7 +691,7 @@ Environment-name priority (highest to lowest):
 2. `AAT_ENV_NAME` environment variable
 3. `--overlay` file `environment:` — explicit overlay
 4. `.aat-overrides.yaml` `environment:` — auto-discovered overlay
-5. `defaultEnvironment` from the project manifest
+5. `defaultEnvironment` from the project manifest, when the run uses the environment file the manifest names
 
 Explicit CLI choices always win, so the overlay's `environment:` behaves as a smart default — it kicks in when no env is specified, and is silently deferred when one is. Combine with `--no-auto-overrides` to skip auto-discovery entirely.
 

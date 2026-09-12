@@ -13,7 +13,7 @@ import (
 func TestWorkflowValidate_MissingGraphFlag(t *testing.T) {
 	var buf bytes.Buffer
 	code := workflowValidateCommand(&workflowValidateArgs{}, &buf)
-	assert.Equal(t, 1, code)
+	assert.Equal(t, 2, code)
 }
 
 func TestWorkflowValidate_NoWorkflows(t *testing.T) {

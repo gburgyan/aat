@@ -72,7 +72,7 @@ type planValidateArgs struct {
 func planValidateCommand(args *planValidateArgs) int {
 	if args.GraphPath == "" {
 		fmt.Fprintln(os.Stderr, "aat validate plan: --graph is required")
-		return 1
+		return exitCodeInfra
 	}
 
 	// Load graph.

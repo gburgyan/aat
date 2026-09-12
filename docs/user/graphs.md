@@ -291,7 +291,7 @@ nodes:
 |------|----------|
 | `exists` | Error if the path exists in the response (non-nil) |
 | `non-empty` | Error if the path holds a non-empty string, array, or object, or any number or boolean |
-| `equals` | Error if the value at the path equals the specified `value`. Use a string or boolean: a whole-number `value` such as `0` never matches today, because the YAML integer and the JSON number are compared as different types |
+| `equals` | Error if the value at the path equals the specified `value`, which must be a string, a number, or a boolean. Numbers compare by value (`0` matches `0` and `0.0`), and a string never matches a number |
 
 ### Detail Mapping
 

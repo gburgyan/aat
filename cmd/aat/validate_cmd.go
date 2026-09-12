@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -25,6 +26,7 @@ var validateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate the current AAT project",
 	Long:  "Validate the AAT project: manifest, environments, domain, visualizers, graph, OAS specs, templates, workflows, layers, and plans. Unknown keys in any project file are errors.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
@@ -33,7 +35,7 @@ var validateCmd = &cobra.Command{
 		varFlags, _ := cmd.Flags().GetStringArray("var")
 		vars, err := config.ParseVars(varFlags)
 		if err != nil {
-			return &exitError{Code: 1, Err: err}
+			return err
 		}
 
 		va := &validateArgs{
@@ -71,7 +73,9 @@ type sectionResult struct {
 	Errors []string
 }
 
-// validateCommand runs full project validation. Returns 0 on success, 1 on failure.
+// validateCommand runs full project validation. It returns 0 when the project
+// is valid, 1 when validation finds a problem (including a manifest that fails
+// to load), and 2 when there is no manifest to validate.
 func validateCommand(args *validateArgs, out io.Writer) int {
 	var sections []sectionResult
 
@@ -93,6 +97,9 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 			Errors: []string{errMsg},
 		})
 		printSections(out, sections)
+		if err == nil || errors.Is(err, config.ErrManifestNotFound) {
+			return exitCodeInfra
+		}
 		return 1
 	}
 
@@ -164,9 +171,13 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 
 	// 2. Files that stand alone: environment, domain, visualizers
 	if m.EnvPath != "" {
-		envSection := validateEnvironmentFile(m.EnvPath, m.DefaultEnvironment, args.Vars)
-		if envSection != nil {
-			sections = append(sections, *envSection)
+		envSection, unusableVars := validateEnvironmentFile(m.EnvPath, m.DefaultEnvironment, args.Vars)
+		sections = append(sections, *envSection)
+		// A --var the environment file cannot use is a mistake in the
+		// invocation, like a missing manifest: report it and stop.
+		if unusableVars {
+			printSections(out, sections)
+			return exitCodeInfra
 		}
 	}
 	if m.DomainPath != "" {
@@ -617,16 +628,17 @@ func printSections(out io.Writer, sections []sectionResult) {
 
 // validateEnvironmentFile validates the environment file. For multi-env files,
 // it attempts to load each non-abstract environment to verify extends chains,
-// variable substitution, and structural validity. Returns nil if validation passes
-// or a sectionResult describing the outcome.
-func validateEnvironmentFile(envPath, defaultEnv string, vars map[string]string) *sectionResult {
+// variable substitution, and structural validity. It returns the section
+// describing the outcome, and whether the failure includes a --var the file
+// cannot use: a problem with the invocation rather than with the project.
+func validateEnvironmentFile(envPath, defaultEnv string, vars map[string]string) (*sectionResult, bool) {
 	isMulti, err := config.IsMultiEnvFile(envPath)
 	if err != nil {
 		return &sectionResult{
 			Name:   "Environment",
 			Status: "FAILED",
 			Errors: []string{fmt.Sprintf("reading environment file: %s", err)},
-		}
+		}, false
 	}
 
 	if !isMulti {
@@ -637,13 +649,13 @@ func validateEnvironmentFile(envPath, defaultEnv string, vars map[string]string)
 				Name:   "Environment",
 				Status: "FAILED",
 				Errors: []string{err.Error()},
-			}
+			}, errors.Is(err, config.ErrUnusableVars)
 		}
 		return &sectionResult{
 			Name:   "Environment",
 			Status: "OK",
 			Detail: "(single environment)",
-		}
+		}, false
 	}
 
 	// Multi-env file — validate all non-abstract environments
@@ -653,13 +665,15 @@ func validateEnvironmentFile(envPath, defaultEnv string, vars map[string]string)
 			Name:   "Environment",
 			Status: "FAILED",
 			Errors: []string{fmt.Sprintf("listing environments: %s", err)},
-		}
+		}, false
 	}
 
 	var envErrors []string
+	unusableVars := false
 	for _, name := range names {
 		if _, err := config.LoadNamedEnvironmentWithVars(envPath, name, vars); err != nil {
 			envErrors = append(envErrors, fmt.Sprintf("%s: %s", name, err))
+			unusableVars = unusableVars || errors.Is(err, config.ErrUnusableVars)
 		}
 	}
 
@@ -682,12 +696,12 @@ func validateEnvironmentFile(envPath, defaultEnv string, vars map[string]string)
 			Name:   "Environment",
 			Status: "FAILED",
 			Errors: envErrors,
-		}
+		}, unusableVars
 	}
 
 	return &sectionResult{
 		Name:   "Environment",
 		Status: "OK",
 		Detail: fmt.Sprintf("(%s: %s)", pluralize(len(names), "environment"), strings.Join(names, ", ")),
-	}
+	}, false
 }

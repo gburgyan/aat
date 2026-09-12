@@ -4,7 +4,8 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 export default defineConfig({
   plugins: [svelte()],
   build: {
-    outDir: "dist",
+    // dist/placeholder.txt is tracked for go:embed; the bundle goes beside it.
+    outDir: "dist/app",
     emptyOutDir: true,
   },
   server: {

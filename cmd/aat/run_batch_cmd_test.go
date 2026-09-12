@@ -34,19 +34,46 @@ func TestDiscoverBatchPlans_AllPlans(t *testing.T) {
 	assert.Equal(t, "beta.yaml", entries[1].Name)
 }
 
-func TestDiscoverBatchPlans_FilterByPrefix(t *testing.T) {
+func TestDiscoverBatchPlans_FilterByDirectory(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "booking"), 0755))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "booking-legacy"), 0755))
 	writeFile(t, filepath.Join(dir, "booking", "one-way.yaml"), "execution:\n  steps: []\n")
 	writeFile(t, filepath.Join(dir, "booking", "round-trip.yaml"), "execution:\n  steps: []\n")
+	writeFile(t, filepath.Join(dir, "booking-legacy", "one-way.yaml"), "execution:\n  steps: []\n")
+	writeFile(t, filepath.Join(dir, "bookings.yaml"), "execution:\n  steps: []\n")
 	writeFile(t, filepath.Join(dir, "search.yaml"), "execution:\n  steps: []\n")
 
-	entries, source, err := discoverBatchPlans([]string{dir}, "booking")
-	require.NoError(t, err)
-	assert.Equal(t, "booking", source)
-	assert.Len(t, entries, 2)
-	for _, e := range entries {
-		assert.Contains(t, e.Name, "booking")
+	for _, filter := range []string{"booking", "booking/", "./booking"} {
+		entries, source, err := discoverBatchPlans([]string{dir}, filter)
+		require.NoError(t, err, filter)
+		assert.Equal(t, filter, source)
+		var names []string
+		for _, e := range entries {
+			names = append(names, filepath.ToSlash(e.Name))
+		}
+		assert.Equal(t, []string{"booking/one-way.yaml", "booking/round-trip.yaml"}, names, filter)
+	}
+}
+
+func TestMatchesBatchFilter(t *testing.T) {
+	tests := []struct {
+		name, filter string
+		want         bool
+	}{
+		{"smoke.yaml", "smoke", true},
+		{"smoke.yaml", "smoke.yaml", true},
+		{"smoke-eu.yaml", "smoke", false},
+		{"negative/state-machine.yaml", "negative", true},
+		{"negative/state-machine.yaml", "negative/", true},
+		{"negative/state-machine.yaml", "negative/state-machine", true},
+		{"negative/state-machine.yaml", "state-machine", false},
+		{"negative-old/state-machine.yaml", "negative", false},
+		{"a/b/c.yml", "a/b", true},
+		{"a/b/c.yml", ".", true},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, matchesBatchFilter(tt.name, tt.filter), "%s with filter %s", tt.name, tt.filter)
 	}
 }
 
@@ -60,6 +87,12 @@ func TestDiscoverBatchPlans_AbsolutePath(t *testing.T) {
 	assert.Len(t, entries, 1)
 }
 
+func TestDiscoverBatchPlans_AbsolutePathMissing(t *testing.T) {
+	_, _, err := discoverBatchPlans(nil, filepath.Join(t.TempDir(), "missing"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "plan directory not found")
+}
+
 func TestDiscoverBatchPlans_NoPlanDirs(t *testing.T) {
 	_, _, err := discoverBatchPlans(nil, "")
 	require.Error(t, err)
@@ -68,20 +101,18 @@ func TestDiscoverBatchPlans_NoPlanDirs(t *testing.T) {
 
 func TestDiscoverBatchPlans_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
-	entries, source, err := discoverBatchPlans([]string{dir}, "")
-	require.NoError(t, err)
-	assert.Equal(t, "all", source)
-	assert.Empty(t, entries)
+	_, _, err := discoverBatchPlans([]string{dir}, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no plans in the plan directories")
 }
 
 func TestDiscoverBatchPlans_FilterNoMatch(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "search.yaml"), "execution:\n  steps: []\n")
 
-	entries, source, err := discoverBatchPlans([]string{dir}, "booking")
-	require.NoError(t, err)
-	assert.Equal(t, "booking", source)
-	assert.Empty(t, entries)
+	_, _, err := discoverBatchPlans([]string{dir}, "booking")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `no plans match "booking"`)
 }
 
 // --- planBaseName tests ---
@@ -171,11 +202,11 @@ func TestBatchCommand_NoPlans(t *testing.T) {
 		PlanDirs: []string{planDir},
 	}, &buf)
 
-	require.NotNil(t, res.summary)
-	assert.Equal(t, "passed", res.summary.Outcome)
-	assert.Empty(t, res.summary.Runs)
-	assert.Equal(t, 0, res.summary.Summary.TotalPlans)
-	assert.Contains(t, buf.String(), "no plans found")
+	assert.True(t, res.setupErr)
+	assert.Nil(t, res.summary)
+	require.Error(t, res.err)
+	assert.Contains(t, res.err.Error(), "no plans in the plan directories")
+	assert.Equal(t, 2, batchExitCode(res))
 }
 
 func TestBatchCommand_SinglePlan_Passed(t *testing.T) {

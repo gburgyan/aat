@@ -36,6 +36,9 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	if err != nil {
 		return mcp.NewToolResultError("missing required parameter: name"), nil
 	}
+	if err := checkPlanName(name); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
 
 	// Guard: required configuration
 	if len(s.ctx.PlanDirs) == 0 && s.ctx.WorkflowsDir == "" {
@@ -112,9 +115,9 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	// Create executor and environment config
 	executor := adapter.NewHTTPExecutor(apiConfig.BaseURL)
 	envConfig := &adapter.EnvironmentConfig{
-		BaseURL: apiConfig.BaseURL,
-		Headers: apiConfig.Headers,
-		Values:  apiConfig.Values,
+		BaseURL:   apiConfig.BaseURL,
+		Headers:   apiConfig.Headers,
+		Protected: apiConfig.Protected,
 	}
 	router := engine.NewExecutorRouter(executor, envConfig)
 
@@ -122,9 +125,9 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	if len(s.ctx.Environment.Overrides) > 0 {
 		var resolvedOverrides []config.ResolvedOverride
 		if planOverridesAuth || s.ctx.AuthProvider == nil {
-			resolvedOverrides, err = s.ctx.Environment.BuildOverrideConfigsWithAuth(ctx, apiConfig.Headers, effectiveAuth)
+			resolvedOverrides, err = s.ctx.Environment.BuildOverrideConfigsWithAuth(ctx, apiConfig, effectiveAuth)
 		} else {
-			resolvedOverrides, err = s.ctx.Environment.BuildOverrideConfigsWithProvider(ctx, apiConfig.Headers, s.ctx.AuthProvider)
+			resolvedOverrides, err = s.ctx.Environment.BuildOverrideConfigsWithProvider(ctx, apiConfig, s.ctx.AuthProvider)
 		}
 		if err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("building overrides: %v", err)), nil

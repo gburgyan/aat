@@ -11,21 +11,21 @@ import (
 var webAssets embed.FS
 
 // HasWebAssets reports whether the compiled frontend bundle is embedded in
-// this binary. A plain `go install` build embeds only the tracked index.html;
-// the hashed JS/CSS bundle under web/dist/assets is produced by `make build`
-// and by the release pipeline.
+// this binary. Vite builds the bundle into web/dist/app, which git ignores, for
+// `make build` and the release pipeline. A plain `go install` build embeds only
+// the tracked web/dist/placeholder.txt.
 func HasWebAssets() bool {
-	entries, err := fs.ReadDir(webAssets, "web/dist/assets")
+	entries, err := fs.ReadDir(webAssets, "web/dist/app/assets")
 	return err == nil && len(entries) > 0
 }
 
 // spaFileServer returns an http.Handler that serves static files from the
-// embedded web/dist directory. Unknown paths fall back to index.html so that
+// embedded web/dist/app bundle. Unknown paths fall back to index.html so that
 // client-side routing works (SPA behavior).
 func spaFileServer() http.Handler {
-	sub, err := fs.Sub(webAssets, "web/dist")
+	sub, err := fs.Sub(webAssets, "web/dist/app")
 	if err != nil {
-		panic("server: embedded web/dist not found: " + err.Error())
+		panic("server: embedded web/dist/app not found: " + err.Error())
 	}
 
 	fileServer := http.FileServer(http.FS(sub))

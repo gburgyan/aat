@@ -130,7 +130,8 @@ def convert_step(step, index, run_id, cleanup=False):
     step_id = step.get("stepId") or step.get("node", f"step-{index}")
     node = step.get("node", "unknown")
     name = f"[cleanup] {step_id}" if cleanup else step_id
-    duration_s = step.get("duration_ms", 0) / 1000.0
+    # Archives written before AAT 0.1.0 name the duration duration_ms.
+    duration_s = step.get("durationMs", step.get("duration_ms", 0)) / 1000.0
 
     tc = ET.Element("testcase")
     tc.set("name", name)

@@ -28,6 +28,7 @@ var webCmd = &cobra.Command{
 	Use:   "web",
 	Short: "Start the AAT web UI server",
 	Long:  "Start a local web server for browsing run archives and test results.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

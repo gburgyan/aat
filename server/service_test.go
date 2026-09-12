@@ -2030,17 +2030,6 @@ func TestIsBatchDir(t *testing.T) {
 	assert.True(t, isBatchDir(batchDir))
 }
 
-func TestValidateDirName(t *testing.T) {
-	assert.NoError(t, validateDirName("my-run"))
-	assert.NoError(t, validateDirName("flight-booking"))
-	assert.NoError(t, validateDirName(""))
-	assert.Error(t, validateDirName("path/with/slash"))
-	assert.Error(t, validateDirName("path\\with\\backslash"))
-	assert.Error(t, validateDirName("null\x00byte"))
-	assert.Error(t, validateDirName("."))
-	assert.Error(t, validateDirName(".."))
-}
-
 // --- RenameRun / UnnameRun ---
 
 func TestRenameRun_CustomName(t *testing.T) {

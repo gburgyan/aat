@@ -82,6 +82,9 @@ func (s *TraceService) GetTrace(id string) (*TraceDetail, error) {
 // loadTrace reads a plan trace by trace ID. Returns ErrTraceNotFound if the
 // trace directory or file doesn't exist.
 func (s *TraceService) loadTrace(id string) (*intent.PlanTrace, error) {
+	if err := checkRef("trace", id, ErrTraceNotFound); err != nil {
+		return nil, err
+	}
 	tracePath := filepath.Join(s.tracesDir, id, "plan-trace.json")
 	data, err := os.ReadFile(tracePath)
 	if err != nil {

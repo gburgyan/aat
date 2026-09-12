@@ -25,9 +25,9 @@ traces/
 *.db-shm
 *.db-wal
 
-# Frontend
+# Frontend: Vite builds into dist/app; dist/placeholder.txt is tracked
 server/web/node_modules/
-server/web/dist/assets/
+server/web/dist/app/
 
 # Docs site (MkDocs build output and its virtualenv)
 site/
@@ -59,7 +59,7 @@ environments/
 /demos/out/
 
 # goreleaser output
-dist/
+/dist/
 
 # Local planning notes
 /LAUNCH-PLAN.md

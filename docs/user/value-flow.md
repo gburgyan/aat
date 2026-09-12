@@ -19,6 +19,10 @@ When the engine resolves an input for a step, it checks these sources in order a
 
 Priorities 5 and 6 are merged during plan instantiation — graph defaults (including value pools) are copied into the plan's step values before execution, so the engine sees them at priority 5. Layers (when applied) override graph defaults at the same level. This means a well-designed graph with pools on configurable inputs can handle most values automatically — plans only need to specify values that the test requires to be specific.
 
+Two kinds of override sit outside this chain:
+- A recipe's `overrides.values` rewrite the composed plan before it runs, replacing an input's literal or its wiring, so the engine sees them at priority 5.
+- Override `values:` from `env.yaml` `overrides:`, `.aat-overrides.yaml`, or an `--overlay` file apply after resolution and win over everything. The archive records them with the source `override_value`.
+
 The explicit-absence marker `{}` short-circuits this chain for an optional input: it tells the engine to skip the input entirely, bypassing graph defaults and auto-wiring. On a required input, a plain literal graph default still applies, and without one the step fails.
 
 ## Literal Values

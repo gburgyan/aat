@@ -15,7 +15,7 @@ build: frontend sandbox
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
 # The aat binary without rebuilding the web UI. It embeds whatever
-# server/web/dist holds, so from a clean checkout everything but `aat web` works.
+# server/web/dist/app holds, so from a clean checkout everything but `aat web` works.
 cli:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) $(CMD)
 
@@ -67,8 +67,8 @@ docs: $(DOCS_VENV)/.installed
 docs-serve: $(DOCS_VENV)/.installed
 	$(DOCS_VENV)/bin/mkdocs serve
 
-# Removes build output only: server/web/dist/index.html is tracked (it satisfies
-# the go:embed pattern when no frontend has been built), so only assets go.
+# Removes build output only. The frontend bundle is server/web/dist/app; the
+# tracked server/web/dist/placeholder.txt stays, so go:embed still compiles.
 clean:
 	rm -f $(BINARY) $(SANDBOX)
-	rm -rf server/web/dist/assets server/web/node_modules site
+	rm -rf server/web/dist/app server/web/node_modules site

@@ -25,7 +25,7 @@ Generated documentation: api.md
 
 When `--graph` or `--domain` is omitted, the path comes from the project manifest, found through the standard [resolution chain](project-setup.md#resolution-priority). There is no `--manifest` flag. A manifest that names a domain file adds examples without `--domain`. `--node-docs` and `--output` are relative to the working directory, not to the manifest.
 
-Errors exit with code `1`: no graph from either a flag or a manifest (`--graph is required`), a graph or domain file that fails to load, `--split` with `--output -` (`--split is incompatible with --output "-"`), or an output path that cannot be written.
+Errors exit with code `2`: no graph from either a flag or a manifest (`--graph is required`), a graph or domain file that fails to load, `--split` with `--output -` (`--split is incompatible with --output "-"`), or an output path that cannot be written.
 
 ## Single-File Output
 

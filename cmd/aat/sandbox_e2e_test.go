@@ -94,6 +94,46 @@ func TestShopExample(t *testing.T) {
 		assert.Equal(t, 402, stepByNode(t, res.summary, "paymentCharge").Status)
 	})
 
+	t.Run("escaped request values", func(t *testing.T) {
+		t.Parallel()
+		p := newShopProject(t)
+
+		// Quotes, a backslash, a newline, and URL-special characters reach the
+		// API unchanged, and the body stays valid JSON under strict OAS checks.
+		const notes = "Leave at \"door\" #2 \\ back\nring twice & wait?"
+		overlay := filepath.Join(p.dir, "notes.yaml")
+		require.NoError(t, os.WriteFile(overlay, []byte(fmt.Sprintf("overrides:\n  - match: checkoutCart\n    values:\n      notes: %q\n", notes)), 0o644))
+
+		args := p.runArgs(t, "us")
+		args.PlanPath = p.plan(t, "smoke")
+		args.EnvOverlay = overlay
+		args.OASValidateMode = "strict"
+		res := runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		require.Equal(t, engine.OutcomePassed, res.outcome)
+
+		data, err := os.ReadFile(res.archivePath)
+		require.NoError(t, err)
+		var archived struct {
+			Steps []struct {
+				Node    string `json:"node"`
+				Request struct {
+					Body json.RawMessage `json:"body"`
+				} `json:"request"`
+			} `json:"steps"`
+		}
+		require.NoError(t, json.Unmarshal(data, &archived))
+		for _, step := range archived.Steps {
+			if step.Node == "checkoutCart" {
+				var body map[string]any
+				require.NoError(t, json.Unmarshal(step.Request.Body, &body), "the request body is valid JSON")
+				assert.Equal(t, notes, body["notes"])
+				return
+			}
+		}
+		t.Fatal("the archive has no checkoutCart step")
+	})
+
 	t.Run("archive redaction", func(t *testing.T) {
 		t.Parallel()
 		p := newShopProject(t)

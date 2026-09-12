@@ -17,6 +17,7 @@ import (
 var docsCmd = &cobra.Command{
 	Use:   "docs",
 	Short: "Documentation generation commands",
+	RunE:  groupRunE,
 }
 
 // docsGenerateCmd is the Cobra command for generating documentation.
@@ -24,6 +25,7 @@ var docsGenerateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate Markdown documentation from a graph definition",
 	Long:  "Generate Markdown + Mermaid documentation from graph definitions, optionally enriched with domain knowledge.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

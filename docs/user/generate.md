@@ -20,7 +20,7 @@ Generated 17 nodes, 17 templates written to templates/
 | `--output-graph` | path | `graph.yaml` | Graph file to write; `-` prints the graph to stdout instead |
 | `--output-templates` | path | `templates` | Directory for the templates, created if missing. With `--output-graph -`, templates are written only when this flag is given |
 
-Paths are relative to the working directory. `aat generate` does not look for or read a project manifest. Warnings go to stderr, and a failure (a missing `--oas`, an unreadable spec, a spec with no operations that have an `operationId`) exits with code `1`.
+Paths are relative to the working directory. `aat generate` does not look for or read a project manifest. Warnings go to stderr, and a failure (a missing `--oas`, an unreadable spec, a spec with no operations that have an `operationId`) exits with code `2`.
 
 The spec must be OpenAPI 3.0 or 3.1. A Swagger 2.0 file fails with `supplied spec is a different version (oas2)`; convert it to OpenAPI 3 first.
 

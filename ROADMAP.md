@@ -2,7 +2,7 @@
 
 ## Status
 
-AAT is heading for its first public release, v0.1.0. It was built and proven against a 74-node
+AAT's first public release is v0.1.0. It was built and proven against a 74-node
 airline API, so the core loop — graph, templates, plans, engine, archives, web UI, MCP server — has
 carried real traffic. It is maintained by one person.
 

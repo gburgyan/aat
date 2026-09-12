@@ -90,9 +90,9 @@ func (r *ExecutorRouter) AddResolvedOverride(ov config.ResolvedOverride) {
 	if ov.Routes {
 		exec := adapter.NewHTTPExecutor(ov.APIConfig.BaseURL)
 		cfg := &adapter.EnvironmentConfig{
-			BaseURL: ov.APIConfig.BaseURL,
-			Headers: ov.APIConfig.Headers,
-			Values:  ov.APIConfig.Values,
+			BaseURL:   ov.APIConfig.BaseURL,
+			Headers:   ov.APIConfig.Headers,
+			Protected: ov.APIConfig.Protected,
 		}
 		var rewrite *adapter.PathRewrite
 		if ov.PathRewrite != nil {

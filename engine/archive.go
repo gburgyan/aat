@@ -123,7 +123,7 @@ func convertRequest(req *adapter.Request, actualBaseURL, defaultBaseURL, origina
 	if effectiveBase == "" {
 		effectiveBase = defaultBaseURL
 	}
-	actualURL := effectiveBase + req.Path
+	actualURL := joinArchivedURL(effectiveBase, req.Path)
 
 	rec := &archive.RequestRecord{
 		Method:  req.Method,
@@ -137,12 +137,21 @@ func convertRequest(req *adapter.Request, actualBaseURL, defaultBaseURL, origina
 	if originalPath != "" {
 		origPath = originalPath
 	}
-	originalURL := defaultBaseURL + origPath
+	originalURL := joinArchivedURL(defaultBaseURL, origPath)
 	if originalURL != actualURL {
 		rec.OriginalURL = originalURL
 	}
 
 	return rec
+}
+
+// joinArchivedURL returns the URL a request for path on base goes to, joined
+// as the executor joins it; a pair that does not parse is recorded as written.
+func joinArchivedURL(base, path string) string {
+	if joined, err := adapter.JoinURL(base, path); err == nil {
+		return joined
+	}
+	return base + path
 }
 
 func convertResponse(resp *adapter.Response) *archive.ResponseRecord {

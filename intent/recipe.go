@@ -62,8 +62,13 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...
 
 	skeleton := tpl
 
-	// 4. Convert overrides to TargetedResponse.
+	// 4. Convert overrides to TargetedResponse. Every override must name a step
+	// of the composed plan: the LLM path skips unknown keys, but a recipe's
+	// overrides are written by a person, and a key that does nothing is a typo.
 	targeted := recipeOverridesToTargetedResponse(recipe.Overrides)
+	if err := checkOverrideSteps(skeleton, targeted); err != nil {
+		return nil, fmt.Errorf("reconstitute: %w", err)
+	}
 	unfedSet := unfedInputSet(skeleton, g)
 
 	// Recipe overrides are explicit user intent — always allow them
@@ -74,8 +79,10 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...
 		unfedSet[key] = true
 	}
 
-	// 5. Apply targeted response.
+	// 5. Apply targeted response, then drop the wiring of every input a value
+	// override sets, so the step sends the override.
 	applyTargetedResponse(skeleton, targeted, unfedSet)
+	replaceWiring(skeleton, targeted.Values)
 
 	// 6. PostProcess.
 	PostProcess(skeleton, g, &ws, recipe.Metadata.Prompt)

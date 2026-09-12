@@ -135,7 +135,6 @@ func TestSubstitutePlaceholders(t *testing.T) {
 		name    string
 		tmpl    string
 		inputs  map[string]any
-		config  *EnvironmentConfig
 		want    string
 		wantErr string
 	}{
@@ -152,18 +151,10 @@ func TestSubstitutePlaceholders(t *testing.T) {
 			want:   "JFK to LAX",
 		},
 		{
-			name:   "config values fallback",
-			tmpl:   "Bearer {{auth.token}}",
-			inputs: map[string]any{},
-			config: &EnvironmentConfig{Values: map[string]string{"auth.token": "abc123"}},
-			want:   "Bearer abc123",
-		},
-		{
-			name:   "input takes precedence over config",
-			tmpl:   "{{key}}",
-			inputs: map[string]any{"key": "from-input"},
-			config: &EnvironmentConfig{Values: map[string]string{"key": "from-config"}},
-			want:   "from-input",
+			name:    "a placeholder that is not an input is unresolved",
+			tmpl:    "Bearer {{auth.token}}",
+			inputs:  map[string]any{},
+			wantErr: "unresolved placeholders: auth.token",
 		},
 		{
 			name:    "unresolved placeholder",
@@ -202,10 +193,9 @@ func TestSubstitutePlaceholders(t *testing.T) {
 			want:   "active=true",
 		},
 		{
-			name:   "nil config with all inputs present",
+			name:   "all inputs present",
 			tmpl:   "{{key}}",
 			inputs: map[string]any{"key": "value"},
-			config: nil,
 			want:   "value",
 		},
 		{
@@ -218,7 +208,7 @@ func TestSubstitutePlaceholders(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := substitutePlaceholders(tt.tmpl, tt.inputs, tt.config)
+			got, err := substitutePlaceholders(tt.tmpl, tt.inputs, renderRaw)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -296,7 +286,7 @@ func TestExpandIterationBlocks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := expandIterationBlocks(tt.tmpl, tt.inputs)
+			got, err := substitutePlaceholders(tt.tmpl, tt.inputs, renderRaw)
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)
@@ -520,7 +510,7 @@ func TestCompoundConditional_SearchModifiers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result, err := substitutePlaceholders(body, tt.inputs, nil)
+			result, err := substitutePlaceholders(body, tt.inputs, renderRaw)
 			require.NoError(t, err)
 
 			var parsed map[string]any
@@ -542,7 +532,7 @@ func TestFormatValue(t *testing.T) {
 		{"int", 42, "42"},
 		{"bool", true, "true"},
 		{"array", []any{"a", "b"}, `["a","b"]`},
-		{"nil", nil, "<nil>"},
+		{"nil", nil, ""},
 	}
 
 	for _, tt := range tests {
@@ -576,7 +566,7 @@ func TestIterationIntegration_PriceOfferByRef(t *testing.T) {
 		"productIds": []any{"p0", "p1", "p2"},
 	}
 
-	result, err := substitutePlaceholders(body, inputs, nil)
+	result, err := substitutePlaceholders(body, inputs, renderRaw)
 	require.NoError(t, err)
 
 	// Verify valid JSON
@@ -635,7 +625,7 @@ func TestIterationIntegration_PriceOfferByRef_RoundTrip(t *testing.T) {
 		"returnProductIds": []any{"r0", "r1", "r2"},
 	}
 
-	result, err := substitutePlaceholders(body, inputs, nil)
+	result, err := substitutePlaceholders(body, inputs, renderRaw)
 	require.NoError(t, err)
 
 	// Verify valid JSON
@@ -702,7 +692,7 @@ func TestIterationIntegration_PriceOfferByRef_OneWayNoReturn(t *testing.T) {
 		"productIds": []any{"p0", "p1", "p2"},
 	}
 
-	result, err := substitutePlaceholders(body, inputs, nil)
+	result, err := substitutePlaceholders(body, inputs, renderRaw)
 	require.NoError(t, err)
 
 	// Verify valid JSON

@@ -76,7 +76,7 @@ type graphValidateArgs struct {
 func graphValidateCommand(args *graphValidateArgs) int {
 	if args.GraphPath == "" {
 		fmt.Fprintln(os.Stderr, "aat validate graph: --graph is required")
-		return 1
+		return exitCodeInfra
 	}
 
 	hasError := false

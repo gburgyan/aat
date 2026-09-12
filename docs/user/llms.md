@@ -682,7 +682,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
   "stepId": "string",
   "node": "string",
   "startTime": "RFC3339",
-  "duration_ms": 0,
+  "durationMs": 0,
   "inputs": { "paramName": "resolvedValue" },
   "request": {
     "method": "POST",

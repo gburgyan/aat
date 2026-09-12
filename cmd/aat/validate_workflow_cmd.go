@@ -68,7 +68,7 @@ type workflowValidateArgs struct {
 func workflowValidateCommand(args *workflowValidateArgs, out io.Writer) int {
 	if args.GraphPath == "" {
 		fmt.Fprintln(os.Stderr, "aat validate workflow: --graph is required")
-		return 1
+		return exitCodeInfra
 	}
 
 	g, err := graph.ParseFile(args.GraphPath)

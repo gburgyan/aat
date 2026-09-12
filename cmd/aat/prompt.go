@@ -98,23 +98,15 @@ var promptCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		envName := resolveEnvName(cmd)
-
-		if envName == "" {
-			overlayEnv, overlaySrc, err := resolveOverlayEnvName("", noAutoOverrides)
-			if err != nil {
-				return fmt.Errorf("resolving overlay environment: %w", err)
-			}
-			if overlayEnv != "" {
-				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "aat: using environment %q from overlay %s\n", overlayEnv, overlaySrc)
-				envName = overlayEnv
-			}
+		envName, err := selectEnvName(cmd, resolved, "", noAutoOverrides)
+		if err != nil {
+			return err
 		}
 
 		pa := &promptArgs{
 			Prompt:            promptText,
 			EnvPath:           resolved.EnvPath,
-			EnvName:           resolveEnvNameWithDefault(envName, resolved.DefaultEnvName),
+			EnvName:           envName,
 			GraphPath:         resolved.GraphPath,
 			TemplatesPath:     resolved.TemplatesPath,
 			DomainPath:        resolved.DomainPath,
@@ -228,13 +220,6 @@ func promptCommand(ctx context.Context, args *promptArgs, reader io.Reader) erro
 	}
 	apiConfig := env.BuildAPIConfigFromToken(token, initialAuth, nil)
 	fmt.Printf("aat: authenticated via %s\n", initialAuth.Type)
-
-	// 5b. Merge overlay-level headers into apiConfig (applied to all requests).
-	if autoOverlay != nil && len(autoOverlay.Headers) > 0 {
-		for k, v := range autoOverlay.Headers {
-			apiConfig.Headers[k] = v
-		}
-	}
 
 	// 4. Load graph
 	g, err := graph.ParseFile(args.GraphPath)
@@ -383,6 +368,11 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 		}
 		apiConfig = env.BuildAPIConfigFromToken(token, authProvider.Config(), p.Headers)
 	}
+	// Overlay headers apply last, on every route, including after a rebuild for
+	// the plan's auth or headers above.
+	if autoOverlay != nil {
+		apiConfig.AddOverlayHeaders(autoOverlay.Headers)
+	}
 
 	// Load templates
 	registry := adapter.NewRegistry()
@@ -395,18 +385,18 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	// Create executor and environment config
 	executor := adapter.NewHTTPExecutor(apiConfig.BaseURL)
 	envConfig := &adapter.EnvironmentConfig{
-		BaseURL: apiConfig.BaseURL,
-		Headers: apiConfig.Headers,
-		Values:  apiConfig.Values,
+		BaseURL:   apiConfig.BaseURL,
+		Headers:   apiConfig.Headers,
+		Protected: apiConfig.Protected,
 	}
 	router := engine.NewExecutorRouter(executor, envConfig)
 
 	// Apply env-file overrides, then auto-discovered .aat-overrides.yaml entries
 	// (later registrations win), inheriting the effective auth via the provider.
-	if err := addHostOverrides(ctx, router, env.APIBaseURL, env.Overrides, apiConfig.Headers, effectiveProvider); err != nil {
+	if err := addHostOverrides(ctx, router, env.APIBaseURL, env.Overrides, apiConfig, effectiveProvider); err != nil {
 		return fmt.Errorf("building overrides: %w", err)
 	}
-	if err := addHostOverrides(ctx, router, env.APIBaseURL, overlayOverrides(autoOverlay), apiConfig.Headers, effectiveProvider); err != nil {
+	if err := addHostOverrides(ctx, router, env.APIBaseURL, overlayOverrides(autoOverlay), apiConfig, effectiveProvider); err != nil {
 		return fmt.Errorf("building auto-overrides: %w", err)
 	}
 
@@ -466,7 +456,7 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 
 	// Exit code
 	if result.Outcome != engine.OutcomePassed {
-		return fmt.Errorf("%s", outcomeMessage(result))
+		return &exitError{Code: outcomeExitCode(result.Outcome), Err: fmt.Errorf("%s", outcomeMessage(result))}
 	}
 	return nil
 }

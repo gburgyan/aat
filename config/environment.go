@@ -9,9 +9,9 @@ import (
 // SecretRef holds a reference to a secret value, resolved either from an
 // environment variable or a literal value.
 type SecretRef struct {
-	Source string `yaml:"source"`          // "env" or "literal"
-	Var    string `yaml:"var,omitempty"`   // environment variable name (when source=env)
-	Value  string `yaml:"value,omitempty"` // literal value (when source=literal)
+	Source string `yaml:"source" json:"source"`                   // "env" or "literal"
+	Var    string `yaml:"var,omitempty" json:"var,omitempty"`     // environment variable name (when source=env)
+	Value  string `yaml:"value,omitempty" json:"value,omitempty"` // literal value (when source=literal)
 }
 
 // Resolve returns the secret value by resolving the reference.
@@ -37,12 +37,12 @@ func (s SecretRef) IsSet() bool {
 
 // AuthConfig describes how to authenticate against the API.
 type AuthConfig struct {
-	Type        string               `yaml:"type"`                  // oauth2, apikey, bearer, none
-	TokenURL    string               `yaml:"tokenUrl,omitempty"`    // token endpoint for oauth2
-	HeaderName  string               `yaml:"headerName,omitempty"`  // custom header name for apikey
-	GrantType   string               `yaml:"grantType,omitempty"`   // oauth2 grant_type (default: "password")
-	ExtraParams map[string]string    `yaml:"extraParams,omitempty"` // extra form params for oauth2 token request
-	Credentials map[string]SecretRef `yaml:"credentials,omitempty"` // named credential fields
+	Type        string               `yaml:"type" json:"type"`                                   // oauth2, apikey, bearer, none
+	TokenURL    string               `yaml:"tokenUrl,omitempty" json:"tokenUrl,omitempty"`       // token endpoint for oauth2
+	HeaderName  string               `yaml:"headerName,omitempty" json:"headerName,omitempty"`   // custom header name for apikey
+	GrantType   string               `yaml:"grantType,omitempty" json:"grantType,omitempty"`     // oauth2 grant_type (default: "password")
+	ExtraParams map[string]string    `yaml:"extraParams,omitempty" json:"extraParams,omitempty"` // extra form params for oauth2 token request
+	Credentials map[string]SecretRef `yaml:"credentials,omitempty" json:"credentials,omitempty"` // named credential fields
 }
 
 // LLMConfig holds LLM provider configuration.
@@ -111,14 +111,15 @@ type Environment struct {
 // BuildOverrideConfigs authenticates and resolves each HostOverride into a
 // ResolvedOverride with merged headers. Overrides that omit Auth inherit the
 // top-level auth; overrides that omit BaseURL inherit the top-level apiBaseUrl.
-func (env *Environment) BuildOverrideConfigs(ctx context.Context, baseHeaders map[string]string) ([]ResolvedOverride, error) {
-	return env.BuildOverrideConfigsWithAuth(ctx, baseHeaders, env.Auth)
+// base is the default route the overrides start from (nil for no headers).
+func (env *Environment) BuildOverrideConfigs(ctx context.Context, base *APIConfig) ([]ResolvedOverride, error) {
+	return env.BuildOverrideConfigsWithAuth(ctx, base, env.Auth)
 }
 
 // BuildOverrideConfigsWithAuth is like BuildOverrideConfigs but overrides that
 // omit their own auth inherit defaultAuth instead of the environment auth.
 // This is used when a plan provides its own auth that should cascade to overrides.
-func (env *Environment) BuildOverrideConfigsWithAuth(ctx context.Context, baseHeaders map[string]string, defaultAuth AuthConfig) ([]ResolvedOverride, error) {
+func (env *Environment) BuildOverrideConfigsWithAuth(ctx context.Context, base *APIConfig, defaultAuth AuthConfig) ([]ResolvedOverride, error) {
 	if len(env.Overrides) == 0 {
 		return nil, nil
 	}
@@ -137,7 +138,7 @@ func (env *Environment) BuildOverrideConfigsWithAuth(ctx context.Context, baseHe
 			return nil, fmt.Errorf("authenticating override %d (%s): %w", i, ov.Match, err)
 		}
 
-		resolved = append(resolved, env.resolveOverride(ov, overrideHeaders(baseHeaders, ov, defaultAuth, auth, token)))
+		resolved = append(resolved, env.resolveOverride(ov, overrideRoute(base, ov, defaultAuth, auth, token)))
 	}
 
 	return resolved, nil
@@ -150,61 +151,58 @@ func (ov HostOverride) routes() bool {
 	return ov.BaseURL != "" || ov.Auth != nil || len(ov.Headers) > 0 || ov.PathRewrite != nil
 }
 
-// resolveOverride assembles a ResolvedOverride from an override and its merged
-// headers. An empty BaseURL inherits the environment's apiBaseUrl.
-func (env *Environment) resolveOverride(ov HostOverride, headers map[string]string) ResolvedOverride {
-	baseURL := ov.BaseURL
-	if baseURL == "" {
-		baseURL = env.APIBaseURL
+// resolveOverride assembles a ResolvedOverride from an override and the headers
+// of its route. An empty BaseURL inherits the environment's apiBaseUrl.
+func (env *Environment) resolveOverride(ov HostOverride, route APIConfig) ResolvedOverride {
+	route.BaseURL = ov.BaseURL
+	if route.BaseURL == "" {
+		route.BaseURL = env.APIBaseURL
 	}
 	return ResolvedOverride{
-		Pattern: ov.Match,
-		Routes:  ov.routes(),
-		APIConfig: APIConfig{
-			BaseURL: baseURL,
-			Headers: headers,
-			Values:  make(map[string]string),
-		},
+		Pattern:       ov.Match,
+		Routes:        ov.routes(),
+		APIConfig:     route,
 		PathRewrite:   ov.PathRewrite,
 		Values:        ov.Values,
 		ExpectFailure: ov.ExpectFailure,
 	}
 }
 
-// overrideHeaders merges the request headers for an override: the base headers,
-// then the override's own headers, then the credential of the effective auth.
-// When the override declares its own auth, the credential inherited from the
-// base headers is removed first so it never reaches the override's host.
-func overrideHeaders(baseHeaders map[string]string, ov HostOverride, inherited, auth AuthConfig, token *OAuthToken) map[string]string {
-	headers := make(map[string]string, len(baseHeaders)+len(ov.Headers)+1)
-	for k, v := range baseHeaders {
-		headers[k] = v
+// overrideRoute merges the headers of an override's route, in order: the base
+// route's headers, the override's own headers, the credential of the effective
+// auth, and the base route's overlay headers, which apply on every route. When
+// the override declares its own auth, the credential inherited from the base
+// route is removed first so it never reaches the override's host. The
+// override's headers, its credential, and the overlay headers are protected
+// from template headers.
+func overrideRoute(base *APIConfig, ov HostOverride, inherited, auth AuthConfig, token *OAuthToken) APIConfig {
+	route := APIConfig{Headers: map[string]string{}}
+	if base != nil {
+		for k, v := range base.Headers {
+			route.Headers[k] = v
+		}
 	}
 	if ov.Auth != nil {
-		delete(headers, "Authorization")
+		deleteHeader(route.Headers, "Authorization")
 		if inherited.Type == "apikey" && inherited.HeaderName != "" {
-			delete(headers, inherited.HeaderName)
+			deleteHeader(route.Headers, inherited.HeaderName)
 		}
 	}
-	for k, v := range ov.Headers {
-		headers[k] = v
+	route.addProtected(ov.Headers)
+	if name, value, ok := credentialHeader(auth, token); ok {
+		route.addProtected(map[string]string{name: value})
 	}
-	if token != nil {
-		switch auth.Type {
-		case "apikey":
-			headers[auth.HeaderName] = token.AccessToken
-		default:
-			headers["Authorization"] = "Bearer " + token.AccessToken
-		}
+	if base != nil {
+		route.AddOverlayHeaders(base.Overlay)
 	}
-	return headers
+	return route
 }
 
 // BuildOverrideConfigsWithProvider is like BuildOverrideConfigsWithAuth but uses
 // an AuthProvider for overrides that inherit the default auth, avoiding redundant
 // token requests. Overrides with their own explicit Auth still call Authenticate
 // directly.
-func (env *Environment) BuildOverrideConfigsWithProvider(ctx context.Context, baseHeaders map[string]string, provider *AuthProvider) ([]ResolvedOverride, error) {
+func (env *Environment) BuildOverrideConfigsWithProvider(ctx context.Context, base *APIConfig, provider *AuthProvider) ([]ResolvedOverride, error) {
 	if len(env.Overrides) == 0 {
 		return nil, nil
 	}
@@ -228,7 +226,7 @@ func (env *Environment) BuildOverrideConfigsWithProvider(ctx context.Context, ba
 			return nil, fmt.Errorf("authenticating override %d (%s): %w", i, ov.Match, err)
 		}
 
-		resolved = append(resolved, env.resolveOverride(ov, overrideHeaders(baseHeaders, ov, inherited, auth, token)))
+		resolved = append(resolved, env.resolveOverride(ov, overrideRoute(base, ov, inherited, auth, token)))
 	}
 
 	return resolved, nil
@@ -328,11 +326,19 @@ type MultiEnvironmentFile struct {
 	Environments map[string]EnvironmentPartial `yaml:"environments"`
 }
 
-// APIConfig is a flat output structure for bridging to adapter.EnvironmentConfig.
+// APIConfig is the base URL and headers of one route (the default route, or an
+// override's), for bridging to adapter.EnvironmentConfig.
 type APIConfig struct {
 	BaseURL string
+	// Headers is every header the route sends before a request template adds
+	// its own.
 	Headers map[string]string
-	Values  map[string]string
+	// Protected is the part of Headers a request template may not replace: the
+	// credential, an override's own headers, and overlay headers.
+	Protected map[string]string
+	// Overlay is the part of Headers that .aat-overrides.yaml and --overlay set.
+	// The routes of overrides apply it last, as the default route does.
+	Overlay map[string]string
 }
 
 // BuildAPIConfig authenticates and returns a flat APIConfig ready for use.
@@ -357,31 +363,22 @@ func (env *Environment) BuildAPIConfigFromAuth(ctx context.Context, auth AuthCon
 // Header merge order: env headers → extraHeaders → auth headers.
 // extraHeaders may be nil. token may be nil (e.g., auth type "none").
 func (env *Environment) BuildAPIConfigFromToken(token *OAuthToken, auth AuthConfig, extraHeaders map[string]string) *APIConfig {
-	headers := make(map[string]string)
+	cfg := &APIConfig{BaseURL: env.APIBaseURL, Headers: make(map[string]string)}
 
 	// 1. Environment static headers (base)
 	for k, v := range env.Headers {
-		headers[k] = v
+		cfg.Headers = withHeader(cfg.Headers, k, v)
 	}
 
 	// 2. Extra headers (e.g., plan-level headers) override env headers
 	for k, v := range extraHeaders {
-		headers[k] = v
+		cfg.Headers = withHeader(cfg.Headers, k, v)
 	}
 
-	// 3. Auth headers override everything
-	if token != nil {
-		switch auth.Type {
-		case "apikey":
-			headers[auth.HeaderName] = token.AccessToken
-		default:
-			headers["Authorization"] = "Bearer " + token.AccessToken
-		}
+	// 3. The credential overrides both, and request templates cannot replace it
+	if name, value, ok := credentialHeader(auth, token); ok {
+		cfg.addProtected(map[string]string{name: value})
 	}
 
-	return &APIConfig{
-		BaseURL: env.APIBaseURL,
-		Headers: headers,
-		Values:  make(map[string]string),
-	}
+	return cfg
 }

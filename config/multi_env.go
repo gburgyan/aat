@@ -42,7 +42,7 @@ func LoadNamedEnvironmentWithVars(path, envName string, vars map[string]string) 
 		return nil, fmt.Errorf("env file is single-environment format; --env is not applicable")
 	}
 	if len(vars) > 0 {
-		return nil, fmt.Errorf("env file is single-environment format; --var applies only to multi-environment files")
+		return nil, unusableVarsError("env file is single-environment format; --var applies only to multi-environment files")
 	}
 	return loadLegacyEnv(path, data)
 }

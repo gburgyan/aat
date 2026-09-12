@@ -35,7 +35,7 @@ type StepRecord struct {
 	StepID            string                   `json:"stepId,omitempty" redact:"-"`
 	Node              string                   `json:"node" redact:"-"`
 	StartTime         time.Time                `json:"startTime,omitempty"`
-	DurationMs        int64                    `json:"duration_ms"`
+	DurationMs        int64                    `json:"durationMs"`
 	Inputs            map[string]any           `json:"inputs"`
 	Request           *RequestRecord           `json:"request,omitempty"`
 	Response          *ResponseRecord          `json:"response,omitempty"`

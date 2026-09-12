@@ -9,6 +9,10 @@ import (
 	"strings"
 )
 
+// ErrManifestNotFound reports that a manifest named explicitly (--manifest)
+// does not exist.
+var ErrManifestNotFound = errors.New("manifest not found")
+
 // ProjectPaths holds resolved file paths for a project's artifacts.
 // Empty string means "not resolved from any source."
 type ProjectPaths struct {
@@ -79,7 +83,7 @@ func ResolveProjectPaths(overrides ProjectPaths) (*ProjectPaths, error) {
 		case err != nil:
 			manifestErr = err
 		case !loaded:
-			manifestErr = fmt.Errorf("manifest not found: %s", resolveManifestPath(overrides.ExplicitManifest))
+			manifestErr = fmt.Errorf("%w: %s", ErrManifestNotFound, resolveManifestPath(overrides.ExplicitManifest))
 		default:
 			manifestErr = nil
 		}

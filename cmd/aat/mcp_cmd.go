@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -21,6 +22,7 @@ import (
 var mcpCmd = &cobra.Command{
 	Use:   "mcp",
 	Short: "MCP server commands",
+	RunE:  groupRunE,
 }
 
 // mcpServeCmd is the Cobra command for starting the MCP server.
@@ -28,6 +30,7 @@ var mcpServeCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Start the MCP server on stdio or HTTP",
 	Long:  "Start the Model Context Protocol server for IDE-based AI tools.\nUse --http to serve over Streamable HTTP instead of stdio.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 
@@ -59,19 +62,20 @@ var mcpServeCmd = &cobra.Command{
 			persona = mcp.PersonaRemoteIntegration
 		}
 
-		// Find manifest: explicit flag > resolver
+		// Find manifest: explicit flag > resolver. An MCP client shows only that
+		// the server exited, so every reason it cannot start is in the error.
 		var manifestPath string
 		if manifestFlag != "" {
 			manifestPath = manifestFlag
 		} else {
 			resolved, err := config.ResolveProjectPaths(config.ProjectPaths{})
-			if err == nil && resolved.ManifestPath != "" {
-				manifestPath = resolved.ManifestPath
-			} else {
-				fmt.Fprintln(os.Stderr, "aat mcp serve: aat-project.yaml not found")
-				fmt.Fprintln(os.Stderr, "hint: create aat-project.yaml or pass --manifest")
-				return &exitError{Code: 1}
+			if err != nil {
+				return err
 			}
+			if resolved.ManifestPath == "" {
+				return errors.New("no manifest found (checked AAT_PROJECT, CWD walk-up, and user config): create aat-project.yaml or pass --manifest")
+			}
+			manifestPath = resolved.ManifestPath
 		}
 
 		// Load manifest

@@ -527,6 +527,11 @@ func (s *Server) formatNoArchiveFallback(nodeName string, node *graph.Node) stri
 
 // loadArchive loads an archive from the archive directory by run ID.
 func loadArchive(archiveDir, runID string) (*archive.Archive, error) {
+	// A run ID is a directory name; anything else could read a file outside the
+	// archive directory.
+	if err := archive.CheckDirName(runID); err != nil {
+		return nil, fmt.Errorf("archive %q not found: %v", runID, err)
+	}
 	archivePath := filepath.Join(archiveDir, runID, "archive.json")
 	// A run inside a batch lives at batch-*/<runID>/archive.json.
 	if _, err := os.Stat(archivePath); errors.Is(err, os.ErrNotExist) && !strings.ContainsAny(runID, `/\*?[`) {

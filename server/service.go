@@ -279,6 +279,9 @@ func (s *diskArchiveService) loadArchive(id string) (*archive.Archive, error) {
 // if the run is found inside a batch directory. Returns ("", ErrRunNotFound)
 // if not found anywhere.
 func (s *diskArchiveService) loadArchiveWithContext(id string) (*archive.Archive, string, error) {
+	if err := checkRef("run", id, ErrRunNotFound); err != nil {
+		return nil, "", err
+	}
 	// First, try standalone run directory.
 	archivePath := filepath.Join(s.archiveDir, id, "archive.json")
 	a, err := archive.Read(archivePath)
@@ -386,6 +389,9 @@ func (s *diskArchiveService) GetBatch(id string) (*BatchDetail, error) {
 // loadBatchArchive reads a batch archive by batch ID. Returns ErrBatchNotFound
 // if the batch directory or batch.json doesn't exist.
 func (s *diskArchiveService) loadBatchArchive(id string) (*archive.BatchArchive, error) {
+	if err := checkRef("batch", id, ErrBatchNotFound); err != nil {
+		return nil, err
+	}
 	batchPath := filepath.Join(s.archiveDir, id, "batch.json")
 	b, err := archive.ReadBatch(batchPath)
 	if err != nil {
@@ -546,6 +552,9 @@ func (s *diskArchiveService) ExportRun(id string, w io.Writer) (string, error) {
 
 // ExportBatch streams the batch directory as a zip to w and returns the suggested filename.
 func (s *diskArchiveService) ExportBatch(id string, w io.Writer) (string, error) {
+	if err := checkRef("batch", id, ErrBatchNotFound); err != nil {
+		return "", err
+	}
 	dir := filepath.Join(s.archiveDir, id)
 	if !isBatchDir(dir) {
 		return "", fmt.Errorf("batch %q: %w", id, ErrBatchNotFound)
@@ -575,6 +584,9 @@ func (s *diskArchiveService) ImportArchive(data io.ReaderAt, size int64, filenam
 
 // resolveRunDir returns the filesystem path to a run directory (standalone or batch member).
 func (s *diskArchiveService) resolveRunDir(id string) (string, error) {
+	if err := checkRef("run", id, ErrRunNotFound); err != nil {
+		return "", err
+	}
 	// Try standalone.
 	dir := filepath.Join(s.archiveDir, id)
 	if isRunDir(dir) {
@@ -605,13 +617,8 @@ func (s *diskArchiveService) resolveRunDir(id string) (string, error) {
 // --- naming helpers ---
 
 // isNamed returns true if the directory name represents a named/saved run or batch.
-// A directory is named if it doesn't match the auto-generated run-/batch- prefix pattern,
-// or if it starts with "!".
 func isNamed(dirName string) bool {
-	if strings.HasPrefix(dirName, "!") {
-		return true
-	}
-	return !autoGenPrefixRe.MatchString(dirName)
+	return archive.IsNamed(dirName)
 }
 
 // displayName returns the display name for a directory.
@@ -665,12 +672,8 @@ func (s *diskArchiveService) UnnameBatch(currentRef string) (string, error) {
 
 // renameDir handles the common rename logic for runs and batches.
 func (s *diskArchiveService) renameDir(currentRef, newName, metadataFile string) (string, error) {
-	oldPath := filepath.Join(s.archiveDir, currentRef)
-	if _, err := os.Stat(oldPath); err != nil {
-		return "", fmt.Errorf("directory %q: %w", currentRef, ErrRunNotFound)
-	}
-
-	if err := validateDirName(newName); err != nil {
+	oldPath, err := s.renameSource(currentRef, metadataFile)
+	if err != nil {
 		return "", err
 	}
 
@@ -683,11 +686,8 @@ func (s *diskArchiveService) renameDir(currentRef, newName, metadataFile string)
 			return "", err
 		}
 		newDirName = "!" + origID
-	} else if autoGenPrefixRe.MatchString(newName) {
-		// Name starts with run- or batch-: prefix with !
-		newDirName = "!" + newName
-	} else {
-		newDirName = newName
+	} else if newDirName, err = archive.SavedName(newName); err != nil {
+		return "", err
 	}
 
 	// Check for collision.
@@ -708,9 +708,9 @@ func (s *diskArchiveService) renameDir(currentRef, newName, metadataFile string)
 
 // unnameDir restores a directory to its original auto-generated name.
 func (s *diskArchiveService) unnameDir(currentRef, metadataFile string) (string, error) {
-	oldPath := filepath.Join(s.archiveDir, currentRef)
-	if _, err := os.Stat(oldPath); err != nil {
-		return "", fmt.Errorf("directory %q: %w", currentRef, ErrRunNotFound)
+	oldPath, err := s.renameSource(currentRef, metadataFile)
+	if err != nil {
+		return "", err
 	}
 
 	origID, err := s.getOriginalID(currentRef, metadataFile)
@@ -750,18 +750,19 @@ func (s *diskArchiveService) getOriginalID(dirName, metadataFile string) (string
 	return a.Metadata.RunID, nil
 }
 
-// validateDirName checks that a name is safe for use as a directory name.
-func validateDirName(name string) error {
-	if strings.ContainsAny(name, "/\\") {
-		return fmt.Errorf("name must not contain path separators")
+// renameSource returns the path of the run or batch directory currentRef. The
+// directory must hold metadataFile (archive.json or batch.json), so a rename
+// moves only runs and batches, never another directory in the archive
+// directory.
+func (s *diskArchiveService) renameSource(currentRef, metadataFile string) (string, error) {
+	if err := checkRef("directory", currentRef, ErrRunNotFound); err != nil {
+		return "", err
 	}
-	if strings.Contains(name, "\x00") {
-		return fmt.Errorf("name must not contain null bytes")
+	dir := filepath.Join(s.archiveDir, currentRef)
+	if _, err := os.Stat(filepath.Join(dir, metadataFile)); err != nil {
+		return "", fmt.Errorf("directory %q: %w", currentRef, ErrRunNotFound)
 	}
-	if name == "." || name == ".." {
-		return fmt.Errorf("name must not be %q", name)
-	}
-	return nil
+	return dir, nil
 }
 
 // --- summary helpers ---

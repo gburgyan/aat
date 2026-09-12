@@ -12,12 +12,14 @@ import (
 var envCmd = &cobra.Command{
 	Use:   "env",
 	Short: "Environment management commands",
+	RunE:  groupRunE,
 }
 
 var envListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List available environments",
 	Long:  "List all selectable environments defined in a multi-environment YAML file.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

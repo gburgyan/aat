@@ -8,7 +8,7 @@ import (
 
 func TestPlanValidate_MissingGraphFlag(t *testing.T) {
 	code := planValidateCommand(&planValidateArgs{})
-	assert.Equal(t, 1, code)
+	assert.Equal(t, 2, code)
 }
 
 func TestPlanValidate_SinglePlan_Valid(t *testing.T) {

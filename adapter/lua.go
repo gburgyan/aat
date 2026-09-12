@@ -35,12 +35,11 @@ func runTransformWithLog(script string, outputs map[string]any, responseBody str
 	ls := lua.NewState(lua.Options{SkipOpenLibs: true})
 	defer ls.Close()
 
-	// Open only safe libraries (no io, os, debug, coroutine).
+	// Open only safe libraries (no io, os, debug, coroutine, or package).
 	for _, pair := range []struct {
 		name string
 		fn   lua.LGFunction
 	}{
-		{lua.LoadLibName, lua.OpenPackage}, // for require() basics
 		{lua.BaseLibName, lua.OpenBase},
 		{lua.TabLibName, lua.OpenTable},
 		{lua.StringLibName, lua.OpenString},
@@ -49,6 +48,18 @@ func runTransformWithLog(script string, outputs map[string]any, responseBody str
 		ls.Push(ls.NewFunction(pair.fn))
 		ls.Push(lua.LString(pair.name))
 		ls.Call(1, 0)
+	}
+
+	// The base library can still load code from files and strings and reach the
+	// host process; remove those functions. A kit's templates run on its users'
+	// machines, and dofile() or loadfile() without an argument reads stdin, which
+	// under aat mcp serve is the MCP protocol stream.
+	for _, name := range []string{
+		"dofile", "loadfile", "load", "loadstring", "require", "module", // load code
+		"getfenv", "setfenv", // change function environments
+		"collectgarbage", "newproxy", "_printregs", // act on the host process
+	} {
+		ls.SetGlobal(name, lua.LNil)
 	}
 
 	// Replace print, which the base library points at stdout.

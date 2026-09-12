@@ -15,6 +15,7 @@ var generateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate graph and templates from an OAS spec",
 	Long:  "Scaffold a graph definition and request templates from an OpenAPI specification.",
+	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 

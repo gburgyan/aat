@@ -8,10 +8,10 @@ AAT is designed for automated pipelines: deterministic exit codes, machine-reada
 |------|---------|-------------------|
 | `0` | Passed | All steps and assertions succeeded; also a `--stop-after` checkpoint (`stopped`) |
 | `1` | Failed | One or more assertions failed; a step returned an unexpected status code |
-| `2` | Error | Invalid plan file, missing environment config, network failure, authentication error |
+| `2` | Error | An unknown flag or subcommand, a manifest or environment file that cannot be loaded, a bad `--var`, a batch that finds no plans, an invalid plan file, a network failure, an authentication error |
 | `130` | Aborted | The process received `SIGINT` (Ctrl+C) or `SIGTERM` — a cancelled CI job, a timeout wrapper, a runner shutting down. Cleanup still runs and a partial archive is written |
 
-For batch runs, the exit code reflects the worst outcome across all plans: if any plan was aborted, exit code is `130`; if any plan errors, exit code is `2`; if any plan fails (but none error), exit code is `1`; only if all plans pass is the exit code `0`.
+For batch runs, the exit code reflects the worst outcome across all plans: if any plan was aborted, exit code is `130`; if any plan errors, exit code is `2`; if any plan fails (but none error), exit code is `1`; only if all plans pass is the exit code `0`. Every `aat` command uses these codes; [Exit Codes](running.md#exit-codes) lists what each command returns.
 
 ## JSON Output
 
@@ -157,7 +157,7 @@ aat run batch --json
 | Field | Type | Description |
 |-------|------|-------------|
 | `outcome` | string | `"passed"`, `"failed"`, `"error"`, `"aborted"`, or `"skipped"` (a duplicate permutation) |
-| `batchId` | string | Batch run identifier (camelCase, unlike the other keys) |
+| `batch_id` | string | Batch run identifier; absent when the batch stopped before it started |
 | `runs` | array | Per-plan results (see BatchRunResult below) |
 | `summary` | object | Aggregate: `total_plans`, `passed_plans`, `failed_plans`, `error_plans`, `duration_ms`; plus `aborted_plans` and `skipped_plans` when non-zero |
 | `archive_path` | string | Path to the batch archive directory |
@@ -185,7 +185,7 @@ aat run batch --json
 ```json
 {
   "outcome": "failed",
-  "batchId": "batch-20260223-150000-e5f6a7b8",
+  "batch_id": "batch-20260223-150000-e5f6a7b8",
   "runs": [
     {
       "plan_name": "smoke-test",
@@ -298,8 +298,6 @@ jobs:
 ```
 
 Release archives are named `aat_<os>_<arch>.tar.gz` (`aat_linux_arm64`, `aat_darwin_arm64`, and so on; Windows ships as `.zip`), so the URL above always fetches the latest release for the runner's platform. Pin a specific version by replacing `latest/download` with `download/vX.Y.Z` when you want reproducible pipelines.
-
-> **Note:** version-less archive names start with v0.1.0, which has not shipped yet, so this URL does not resolve until then. Until then, build the CLI in the job instead: check out AAT, set up Go 1.25+ (`actions/setup-go`), and run `make cli`, which needs no Node because CI does not use the web UI. See [Install](install.md).
 
 Other CI systems follow the same pattern: install the binary, validate, run tests with `--json`, and upload the archive directory as an artifact. The exit codes and JSON output are CI-system-agnostic.
 

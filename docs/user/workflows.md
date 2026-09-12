@@ -425,7 +425,7 @@ The pipeline scans all `from` references and ensures corresponding `dependsOn` e
 
 ### Step 6: Apply Recipe Overrides
 
-Finally, [recipe overrides](plans.md#value-overrides) are applied — value overrides, selection strategy overrides, and assertion additions. A value override on an input that composition wired with `from` currently has no effect. Post-processing then settles `dependsOn` again, adds the default `status: 2xx` assertion to steps that declare none (unless they expect failure), and adds a cleanup step for each node whose graph entry declares `cleanup:`.
+Finally, [recipe overrides](plans.md#value-overrides) are applied — value overrides, selection strategy overrides, and assertion additions. A value override on an input that composition wired with `from` replaces that wiring, and an override for a step the composed plan does not have is an error. Post-processing then settles `dependsOn` again, adds the default `status: 2xx` assertion to steps that declare none (unless they expect failure), and adds a cleanup step for each node whose graph entry declares `cleanup:`.
 
 The result is a standard `plan.Plan` ready for [execution](running.md).
 
