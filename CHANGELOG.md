@@ -6,11 +6,6 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-09-12
-
-Pacing and retries for rate-limited APIs, cleanup for resources that take more than one call to release, optional
-wiring with `AUTOWIRE?`, and request shapes in `aat generate`.
-
 ### Added
 - `settings.minRequestInterval` paces requests for APIs with rate limits: the starts of any two requests are at
   least that far apart, such as `250ms`. One interval covers everything a command sends, including the plans of
@@ -534,8 +529,7 @@ The first tagged version.
   headers, and OAuth2 token caching.
 - The Petstore example, the user documentation, and the Apache 2.0 license.
 
-[Unreleased]: https://github.com/gburgyan/aat/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/gburgyan/aat/compare/v0.1.0...v0.2.0
+[Unreleased]: https://github.com/gburgyan/aat/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/gburgyan/aat/compare/v0.0.4...v0.1.0
 [0.0.4]: https://github.com/gburgyan/aat/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/gburgyan/aat/compare/v0.0.2...v0.0.3

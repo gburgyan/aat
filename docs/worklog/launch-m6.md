@@ -3,8 +3,9 @@
 ## 2026-09-12 — Plan: primitives and a release before the discovery run
 
 **What:** M6 publishes an AAT project for the Duffel flights API that a coding agent builds in a clean room from
-public sources, running against Duffel's test mode, with no design handed to it. Before the run, AAT ships v0.2.0
-with the primitives such a project is likely to need and the fixes already targeted at M6:
+public sources, running against Duffel's test mode, with no design handed to it. Before the run, AAT gets the
+primitives such a project is likely to need and the fixes already targeted at M6; the release waits until the run
+has validated them (see the A12 entry):
 - request pacing (`settings.minRequestInterval`)
 - `Retry-After` on step retries (F11)
 - cleanup chains (P7)
@@ -37,8 +38,8 @@ The project lives in its own repository, `aat-duffel`, not under `examples/`.
   - Auto memory is off.
   - Reads outside the directory are blocked with `permissions.blockReadsOutsideWorkingDirectories`. Without it,
     read-only shell commands such as `cat` and `ls` read any path without a prompt.
-  - The run was to use the tagged release from Homebrew. The author later chose a frozen source build; see the
-    release entry.
+  - The run was to use the tagged release from Homebrew. The author later chose a local `make` build; see the A12
+    entry.
 - **The docs are the agent's only source for AAT, so the new pages teach with the shop's vocabulary.** Nothing in
   them comes from the rubric.
 
@@ -208,18 +209,17 @@ An addon's `AUTOWIRE?` inputs are never reported as unfed.
   - The offered third-party spec generates 39 nodes with 10 warnings, each a JSON body whose schema is a bare
     `type: object`.
 
-## 2026-09-12 — A12: v0.2.0 prepared
+## 2026-09-12 — A12: pre-run work complete; the release waits for the run
 
-**What:** Every pre-run item is on `m6`: P6, P7, P9, and F11 (Phase 1), then P8, F7, and F26 (Phase 2). The
-changelog's Unreleased section is now 0.2.0.
+**What:** Every pre-run item is on `m6`: P6, P7, P9, and F11 (Phase 1), then P8, F7, and F26 (Phase 2). Their
+changelog entries stay under Unreleased.
 
 **Decisions:**
-- **0.2.0, a minor version.** The release adds a setting and a composition marker. It also changes cleanup step IDs,
-  wiring after addons, and how a list is sent in a URL, all of which a 0.x minor version may change.
-- **The run uses a source build, not the Homebrew release (author).**
-  - The cask lags the branch, and a fix found before the run should not wait for a release.
-  - The build is made at the merge commit once the docs site has deployed, because the agent learns AAT from the site.
-  - It is copied outside the repository, so no later `make` replaces it mid-run, and its `aat --version` is recorded.
+- **No version until the run has validated the changes (author).** A release cut before the run would need another
+  one for whatever the run turns up. The version number and tag come after the run, together with its fixes.
+- **The run uses the local `make` build on `PATH`, not a release (author).** The run records its `aat --version`.
+  The agent learns AAT from the docs site, which deploys from `main`, so these changes need to be on `main` first.
+- **Two `aat generate` corrections moved from Changed to Fixed** in the changelog.
 - **Verification before the pull request:**
   - `make check`, `make docs`, and `make example-shop` pass.
   - The rewiring check (A6) found no changed wiring.
@@ -227,5 +227,4 @@ changelog's Unreleased section is now 0.2.0.
     A7, A8, and A11.
 
 **Open questions:**
-- Whether to tag v0.2.0 before the run (author). The changelog already names it, so its compare link works once
-  the tag exists.
+- The release's version number, decided after the run.
