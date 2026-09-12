@@ -119,6 +119,68 @@ func TestValidate_CleanupUnknownNode(t *testing.T) {
 	assertValidationContains(t, err, "cleanup references unknown node")
 }
 
+func TestValidate_CleanupCycle(t *testing.T) {
+	node := func(name, cleanup string) *Node {
+		return &Node{Name: name, Adapter: name, Cleanup: cleanup}
+	}
+	tests := []struct {
+		name  string
+		nodes []*Node
+		want  []string
+	}{
+		{
+			name:  "two nodes",
+			nodes: []*Node{node("restockItems", "refundPayment"), node("refundPayment", "restockItems")},
+			want:  []string{"cleanup cycle detected: refundPayment → restockItems → refundPayment"},
+		},
+		{
+			name: "three nodes and a chain into them, reported once",
+			nodes: []*Node{
+				node("createOrder", "refundPayment"),
+				node("refundPayment", "restockItems"),
+				node("restockItems", "cancelShipment"),
+				node("cancelShipment", "refundPayment"),
+			},
+			want: []string{"cleanup cycle detected: cancelShipment → refundPayment → restockItems → cancelShipment"},
+		},
+		{
+			name:  "a self-reference is not also a cycle",
+			nodes: []*Node{node("deleteCart", "deleteCart")},
+			want:  nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &Graph{Version: "1.0.0", Nodes: map[string]*Node{}}
+			for _, n := range tt.nodes {
+				g.Nodes[n.Name] = n
+			}
+
+			var ve *ValidationError
+			require.True(t, errors.As(Validate(g), &ve))
+			var cycles []string
+			for _, e := range ve.Errors {
+				if strings.HasPrefix(e, "cleanup cycle detected") {
+					cycles = append(cycles, e)
+				}
+			}
+			assert.Equal(t, tt.want, cycles)
+		})
+	}
+}
+
+func TestValidate_CleanupChainIsValid(t *testing.T) {
+	g := &Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*Node{
+			"createOrder":   {Name: "createOrder", Adapter: "createOrder", Cleanup: "requestRefund"},
+			"requestRefund": {Name: "requestRefund", Adapter: "requestRefund", Cleanup: "confirmRefund"},
+			"confirmRefund": {Name: "confirmRefund", Adapter: "confirmRefund"},
+		},
+	}
+	assert.NoError(t, Validate(g))
+}
+
 func TestValidate_ElementFieldsOnNonArray(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",

@@ -119,7 +119,7 @@ Graph structural validation catches:
 - Constraint violations (min > max, minLength > maxLength)
 - Invalid gjson extraction paths on outputs and elementFields
 - Missing adapter references
-- Cleanup references to unknown or self-referencing nodes
+- Cleanup references to unknown or self-referencing nodes, and cleanup pairings that loop back (`a → b → a`)
 - Error detection rules with missing paths or unknown rule types
 - Condition references to unknown nodes
 - Requires/satisfies token mismatches and cycles

@@ -127,6 +127,9 @@ func Validate(g *Graph) error {
 		}
 	}
 
+	// 5a. Cleanup chains end: following cleanup pairings never loops back
+	errs = append(errs, detectCleanupCycles(g)...)
+
 	// 6. Error detection rules: graph-level
 	for i, rule := range g.ErrorDetection {
 		for _, msg := range validateErrorDetectionRule(rule) {

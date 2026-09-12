@@ -22,6 +22,8 @@ the graph and plan formats may still change before 1.0.
 - `min` and `max` selection compare numbers sent as strings by value: a `sortField` of `"99.10"` sorts below
   `"1000.00"`, so an API that returns prices or totals as decimal strings selects the cheapest element. A
   string that is not a number still fails the selection, naming the element.
+- Graph validation rejects cleanup pairings that loop back, such as a node cleaned up by `b` whose own cleanup is
+  that node again. The error names the cycle once, as `a → b → a`.
 
 ## [0.1.0] - 2026-09-12
 
