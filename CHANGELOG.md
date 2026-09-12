@@ -6,6 +6,11 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-12
+
+Pacing and retries for rate-limited APIs, cleanup for resources that take more than one call to release, optional
+wiring with `AUTOWIRE?`, and request shapes in `aat generate`.
+
 ### Added
 - `settings.minRequestInterval` paces requests for APIs with rate limits: the starts of any two requests are at
   least that far apart, such as `250ms`. One interval covers everything a command sends, including the plans of
@@ -35,13 +40,9 @@ the graph and plan formats may still change before 1.0.
 - Workflow compatibility checks cover base workflows and slot options. A plain `AUTOWIRE` that the base and its slots
   cannot feed is a warning that names any addon producing the output. `AUTOWIRE?` on a required input with no graph
   default is also a warning. `AUTOWIRE?` in an addon never warns as unfed.
-- `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
-  resolves. It used to write only the spec's file name.
 - `aat generate` no longer replaces an existing graph file or template: it lists them, writes nothing, and exits 2
   unless given `--force`. OperationIds that differ only in case are an error, since their templates would be one
   file on a case-insensitive file system.
-- `aat generate` types object body properties `object` and inserts them as JSON literals, and no longer writes a
-  node-level `name:` line.
 - A generated template sets `Content-Type` only when it has a body, to that body's media type; before, every operation
   with a request body got `application/json`. `aat generate` warns about what a template leaves to write by hand:
   multipart and other bodies, a body schema with `oneOf`, `anyOf`, or no properties, and a parameter with a
@@ -61,6 +62,12 @@ the graph and plan formats may still change before 1.0.
 - Cleanup step IDs are unique within a run: a node's second cleanup step is `deleteCart_2` in archives and `--json`
   output, as the web UI already named it. Cleanup responses are checked against the graph's error detection rules.
   A flagged response records `responseBodyError` and ends its chain; the run outcome is unchanged.
+
+### Fixed
+- `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
+  resolves. It used to write only the spec's file name.
+- `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,
+  and no longer writes a node-level `name:` line.
 
 ## [0.1.0] - 2026-09-12
 
@@ -527,7 +534,8 @@ The first tagged version.
   headers, and OAuth2 token caching.
 - The Petstore example, the user documentation, and the Apache 2.0 license.
 
-[Unreleased]: https://github.com/gburgyan/aat/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/gburgyan/aat/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/gburgyan/aat/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/gburgyan/aat/compare/v0.0.4...v0.1.0
 [0.0.4]: https://github.com/gburgyan/aat/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/gburgyan/aat/compare/v0.0.2...v0.0.3

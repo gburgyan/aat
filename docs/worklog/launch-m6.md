@@ -37,7 +37,8 @@ The project lives in its own repository, `aat-duffel`, not under `examples/`.
   - Auto memory is off.
   - Reads outside the directory are blocked with `permissions.blockReadsOutsideWorkingDirectories`. Without it,
     read-only shell commands such as `cat` and `ls` read any path without a prompt.
-  - The run uses the tagged release from Homebrew, never a source build.
+  - The run was to use the tagged release from Homebrew. The author later chose a frozen source build; see the
+    release entry.
 - **The docs are the agent's only source for AAT, so the new pages teach with the shop's vocabulary.** Nothing in
   them comes from the rubric.
 
@@ -206,3 +207,25 @@ An addon's `AUTOWIRE?` inputs are never reported as unfed.
   - Neither project puts a list in a template URL or uses a form body, so A10 changes nothing either one sends.
   - The offered third-party spec generates 39 nodes with 10 warnings, each a JSON body whose schema is a bare
     `type: object`.
+
+## 2026-09-12 — A12: v0.2.0 prepared
+
+**What:** Every pre-run item is on `m6`: P6, P7, P9, and F11 (Phase 1), then P8, F7, and F26 (Phase 2). The
+changelog's Unreleased section is now 0.2.0.
+
+**Decisions:**
+- **0.2.0, a minor version.** The release adds a setting and a composition marker. It also changes cleanup step IDs,
+  wiring after addons, and how a list is sent in a URL, all of which a 0.x minor version may change.
+- **The run uses a source build, not the Homebrew release (author).**
+  - The cask lags the branch, and a fix found before the run should not wait for a release.
+  - The build is made at the merge commit once the docs site has deployed, because the agent learns AAT from the site.
+  - It is copied outside the repository, so no later `make` replaces it mid-run, and its `aat --version` is recorded.
+- **Verification before the pull request:**
+  - `make check`, `make docs`, and `make example-shop` pass.
+  - The rewiring check (A6) found no changed wiring.
+  - `aat validate --strict` output for the shop and the private airline project was compared before and after
+    A7, A8, and A11.
+
+**Open questions:**
+- Whether to tag v0.2.0 before the run (author). The changelog already names it, so its compare link works once
+  the tag exists.
