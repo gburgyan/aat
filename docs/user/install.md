@@ -8,7 +8,7 @@ AAT is two binaries:
 | Method | Platforms | `aat` | `aat-sandbox` | Web UI |
 |--------|-----------|-------|---------------|--------|
 | [Release archive](#release-archives) | macOS, Linux, Windows (amd64, arm64) | yes | yes | yes |
-| [Homebrew cask](#homebrew-macos) | macOS | yes | yes | yes |
+| [Homebrew cask](#homebrew) | macOS, Linux | yes | yes | yes |
 | [Docker image](#docker) | linux/amd64, linux/arm64 | yes | no | yes |
 | [`go install`](#go-install) | wherever Go runs | yes | yes | no |
 | [From source](#from-source) | wherever Go and Node.js run | yes | yes | yes |
@@ -55,13 +55,13 @@ Expand-Archive "$env:TEMP\aat.zip" -DestinationPath $dir -Force
 [Environment]::SetEnvironmentVariable('Path', [Environment]::GetEnvironmentVariable('Path', 'User') + ";$dir", 'User')
 ```
 
-## Homebrew (macOS)
+## Homebrew
 
 ```
 brew install gburgyan/tap/aat
 ```
 
-The cask installs both `aat` and `aat-sandbox` and removes the quarantine attribute from them, so the first run does not trip Gatekeeper. The cask is documented for macOS; its Linux support is untested, so on Linux use a release archive, Docker, or `go install`.
+The cask installs both `aat` and `aat-sandbox`, on macOS and on Linux with Homebrew. On macOS it also removes the quarantine attribute from them, so the first run does not trip Gatekeeper.
 
 ## Docker
 

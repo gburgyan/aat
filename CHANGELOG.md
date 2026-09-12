@@ -6,6 +6,10 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+### Changed
+- Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs
+  `aat` and `aat-sandbox` with Homebrew on Linux.
+
 ## [0.1.0] - 2026-09-12
 
 The first release with release archives, a Homebrew cask, and a Docker image. v0.0.1 through v0.0.4 are

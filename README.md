@@ -182,7 +182,7 @@ LLMs are optional and authoring-time only: `aat prompt` can draft a plan, and th
 
 ## Install
 
-Homebrew (macOS) installs `aat` and `aat-sandbox`:
+Homebrew (macOS or Linux) installs `aat` and `aat-sandbox`:
 
 ```bash
 brew install gburgyan/tap/aat

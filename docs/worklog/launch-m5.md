@@ -342,3 +342,22 @@ screenshots in `docs/user/assets`:
 social preview.
 
 **Open questions:** none.
+
+## 2026-09-12 — C6: v0.1.0 released
+
+**What:** PR #1 merged as `6a7a885`, and the author tagged `v0.1.0` on it. Release run 34700054270 published:
+- six archives and `checksums.txt`
+- the tag's CHANGELOG section as the notes, with the install footer
+- the cask in `gburgyan/homebrew-tap`
+- `ghcr.io/gburgyan/aat:0.1.0` and `latest` for amd64 and arm64, which pull without logging in
+
+CI and Docs are green on `main`.
+
+**Decisions:**
+- **The cask is documented for Linux.** In the `homebrew/brew` container on linux/amd64,
+  `brew install gburgyan/tap/aat` installed both binaries at 0.1.0. The install page, the README, and the
+  goreleaser footer now say macOS or Linux. linux/arm64 was not tried.
+- **A tag created in the web UI worked.** It published a release with empty notes before the workflow ran.
+  goreleaser fills in empty notes, so the CHANGELOG section still became the release body.
+
+**Open questions:** the proxy.golang.org request and `gh repo edit` wait on the author's approval.
