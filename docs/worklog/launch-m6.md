@@ -78,3 +78,25 @@ without one, its `RateLimit-Reset` header. A request for more than 60 seconds en
 - **`Retry-After` does not hold the shared pacer.** That would need a key per host or credential, and it would stall
   unrelated runs: the shop sandbox's 503 is about one shipment.
 - **Unchanged:** plan-level `--retries` keeps its fixed two seconds, and cleanup still never retries.
+
+## 2026-09-12 — A4 and A5: cleanup chains
+
+**What:** A cleanup node's own `cleanup:` now runs right after it succeeds, taking its outputs first, so an API that
+releases a resource in two calls is cleaned up completely. Graph validation rejects cleanup pairings that loop back.
+
+**Decisions:**
+- **Depth-first, right after the parent.** The chain finishes before the next resource is released, so a stack of
+  `[deleteCart, requestRefund]` runs `requestRefund`, `confirmRefund`, `deleteCart`.
+- **Chained outputs stay in memory, never in the run state.** Cleanup inputs fall back to the newest step with an
+  output of the same name. A refund's generic `id` stored in the run state could reach an unrelated cleanup. A chained
+  step looks at the cleanup steps before it (nearest first), then the step that registered the chain, then that
+  fallback.
+- **A cleanup step succeeds only without an error, below 400, and with no error detection rule triggered.** Cleanup
+  responses are now checked against the graph's error detection rules; the run outcome still never changes.
+- **Unique cleanup step IDs, seeded with the plan's step IDs.** A node's second cleanup step is `deleteCart_2`, the ID
+  the web server already derived. Seeding from the plan leaves `runCleanup`'s nine callers unchanged. `cleanupFor`
+  links each cleanup step to what it cleans up after; archives and `--json` output only gain a field.
+- **Cycles are rejected at load, and guarded at run time.** `graph.Parse` validates, so no command runs a looping
+  graph; the engine still stops a chain that revisits a node, for graphs built in code.
+- **A listed chained node follows its `runOn`.** Composed plans list direct pairings; a plan that lists a chained node
+  gates that link of the chain rather than running it on its own.

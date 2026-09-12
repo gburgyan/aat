@@ -385,13 +385,16 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 // runCleanup executes cleanup after the main flow. A graph-level cleanup
 // pairing runs from the FILO stack, once for each step that registered it, so
 // the most recently created resource is released first and nothing is sent for
-// a resource that was never created. A plan-level cleanup step
-// (execution.cleanup) whose node is such a pairing for a step in the plan does
-// not run on its own: its runOn decides whether the stack's entries for that
-// node run. Other plan-level cleanup steps run first, in declaration order,
-// honoring runOn (always/success/failure). Cleanup inputs are matched by output
-// name, starting with the step that registered the entry. Cleanup failures are
-// recorded but never change the run outcome.
+// a resource that was never created. A cleanup step that succeeds is followed,
+// depth-first, by its own node's cleanup pairing, if it has one. A plan-level
+// cleanup step (execution.cleanup) whose node is a pairing for a step in the
+// plan, or in the chain of one, does not run on its own: its runOn decides
+// whether that node runs from the stack or the chain. Other plan-level cleanup
+// steps run first, in declaration order, honoring runOn
+// (always/success/failure). Cleanup inputs are matched by output name, starting
+// with the cleanup steps before it in its chain and then the step that
+// registered the entry. Cleanup failures are recorded but never change the run
+// outcome.
 func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *CleanupStack, state *RunState, outcome Outcome) []StepResult {
 	paired := e.pairedCleanupNodes(p)
 	var planEntries []CleanupEntry
@@ -408,10 +411,14 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 			planEntries = append(planEntries, CleanupEntry{NodeName: cs.Node})
 		}
 	}
+	allow := func(node string) bool {
+		return !declared[node] || selected[node]
+	}
 	cleanupStack.Filter(func(entry CleanupEntry) bool {
-		return !declared[entry.NodeName] || selected[entry.NodeName]
+		return allow(entry.NodeName)
 	})
 
+	// total counts the entries that start a cleanup chain; chains add steps.
 	total := len(planEntries) + cleanupStack.Len()
 	if total == 0 {
 		return nil
@@ -430,11 +437,12 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 		defer cancel()
 	}
 
+	run := newCleanupRun(e.planStepIDs(p), allow)
 	results := make([]StepResult, 0, total)
 	for _, entry := range planEntries {
-		results = append(results, e.executeCleanupEntry(cleanupCtx, entry, state))
+		results = append(results, e.runCleanupChain(cleanupCtx, entry, "", nil, state, run)...)
 	}
-	results = append(results, e.runCleanupStack(cleanupCtx, cleanupStack, state)...)
+	results = append(results, e.runCleanupStack(cleanupCtx, cleanupStack, state, run)...)
 
 	if e.Observer != nil {
 		for i, cr := range results {
@@ -444,13 +452,29 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 	return results
 }
 
-// pairedCleanupNodes returns the nodes that are the graph-level cleanup of a
-// step's node in p. Their cleanup runs from the stack, once per resource.
+// planStepIDs returns the IDs of p's main and verification steps, which no
+// cleanup step ID may repeat.
+func (e *Engine) planStepIDs(p *plan.Plan) []string {
+	var ids []string
+	for _, step := range p.Execution.Steps {
+		ids = append(ids, step.StepID())
+	}
+	for _, step := range plan.VerificationSteps(p, e.graph, e.layeredDefaults) {
+		ids = append(ids, step.StepID())
+	}
+	return ids
+}
+
+// pairedCleanupNodes returns the nodes that run from the cleanup stack for p:
+// the graph-level cleanup of each step's node, and every node that cleanup's
+// chain reaches. They run once per resource.
 func (e *Engine) pairedCleanupNodes(p *plan.Plan) map[string]bool {
 	paired := make(map[string]bool)
 	for _, step := range p.Execution.Steps {
-		if node, ok := e.graph.Nodes[step.Node]; ok && node.Cleanup != "" {
+		node, ok := e.graph.Nodes[step.Node]
+		for ok && node.Cleanup != "" && !paired[node.Cleanup] {
 			paired[node.Cleanup] = true
+			node, ok = e.graph.Nodes[node.Cleanup]
 		}
 	}
 	return paired

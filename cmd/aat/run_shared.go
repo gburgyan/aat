@@ -87,6 +87,9 @@ type StepSummary struct {
 	AssertionsFailed int                  `json:"assertions_failed"`
 	FailedAssertions []string             `json:"failed_assertions,omitempty"` // "type: message" per failed assertion
 	DisplayOutputs   []DisplayOutputEntry `json:"display_outputs,omitempty"`
+	// CleanupFor, on a cleanup step, is the ID of the step whose resource it
+	// releases, or of the cleanup step before it in a chain.
+	CleanupFor string `json:"cleanup_for,omitempty"`
 }
 
 // DisplayOutputEntry is a display-tagged output in the JSON summary.
@@ -229,6 +232,7 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		Status:     step.StatusCode,
 		DurationMs: step.Duration.Milliseconds(),
 		Retries:    step.RetryCount,
+		CleanupFor: step.CleanupFor,
 	}
 	for _, c := range step.RetriedOn {
 		ss.RetriedOn = append(ss.RetriedOn, c.String())

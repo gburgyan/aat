@@ -52,6 +52,9 @@ type StepRecord struct {
 	Error             string                   `json:"error,omitempty"`
 	RetryCount        int                      `json:"retryCount,omitempty"`
 	RetriedOn         []string                 `json:"retriedOn,omitempty" redact:"-"` // error category of each retried attempt, in order
+	// CleanupFor, on a cleanup step, is the ID of the step whose resource it
+	// releases, or of the cleanup step before it in a chain.
+	CleanupFor string `json:"cleanupFor,omitempty" redact:"-"`
 }
 
 // DisplayOutputRecord captures an output value tagged for display.

@@ -13,6 +13,10 @@ the graph and plan formats may still change before 1.0.
   too. A value without a unit, such as `250`, is rejected when the environment file loads.
 - Step retries honor the server's `Retry-After` header, and on a 429 without one, `RateLimit-Reset`. A retry waits
   at least as long as the failed response asks, in seconds or until an HTTP date, instead of only the backoff.
+- Cleanup chains: a cleanup node can declare its own `cleanup`. It runs right after that cleanup step succeeds and
+  takes its outputs first, so a resource released in two calls (request, then confirm) is cleaned up completely.
+  Chained outputs stay inside the chain. Archive cleanup records gain `cleanupFor` (`cleanup_for` in `--json`),
+  naming the step each one cleans up after.
 
 ### Changed
 - A step whose failed response asks for a wait longer than 60 seconds stops retrying (`failed_fast`), and the
@@ -24,6 +28,9 @@ the graph and plan formats may still change before 1.0.
   string that is not a number still fails the selection, naming the element.
 - Graph validation rejects cleanup pairings that loop back, such as a node cleaned up by `b` whose own cleanup is
   that node again. The error names the cycle once, as `a → b → a`.
+- Cleanup step IDs are unique within a run: a node's second cleanup step is `deleteCart_2` in archives and `--json`
+  output, as the web UI already named it. Cleanup responses are checked against the graph's error detection rules.
+  A flagged response records `responseBodyError` and ends its chain; the run outcome is unchanged.
 
 ## [0.1.0] - 2026-09-12
 

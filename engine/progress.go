@@ -16,7 +16,9 @@ type ProgressObserver interface {
 	// OnStepComplete is called after a step finishes (success or failure).
 	OnStepComplete(index, total int, result StepResult)
 
-	// OnCleanupStart is called before cleanup execution begins.
+	// OnCleanupStart is called before cleanup execution begins. total counts
+	// the cleanup entries that start a chain; a cleanup chain adds steps, so
+	// OnCleanupStepComplete can report more than total.
 	OnCleanupStart(total int)
 
 	// OnCleanupStepComplete is called after each cleanup step finishes.

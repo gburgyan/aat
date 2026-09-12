@@ -61,6 +61,7 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		TransformScript: s.TransformScript,
 		Error:           errString(s.Error),
 		RetryCount:      s.RetryCount,
+		CleanupFor:      s.CleanupFor,
 	}
 	for _, c := range s.RetriedOn {
 		rec.RetriedOn = append(rec.RetriedOn, c.String())

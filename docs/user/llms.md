@@ -373,6 +373,8 @@ cleanup:
 
 A cleanup step takes only `node` and `runOn`. Its inputs are matched by name against the outputs of the steps that ran, so `cancelOrder`'s `orderId` input takes the `orderId` output of the step that produced one. A node's graph-level `cleanup:` pairing runs even when the plan does not list it.
 
+A cleanup node can have its own `cleanup:`, which makes a chain. The second node runs right after the first succeeds and takes that step's outputs first. That covers a release that takes two calls, such as requesting a refund and then confirming it with the refund's ID. Name the first cleanup node's output after the second one's input.
+
 Cross-ref: [Plans and Recipes](plans.md)
 
 ## Depth and Negative Testing Primitives
@@ -697,6 +699,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
 {
   "stepId": "string",
   "node": "string",
+  "cleanupFor": "string (cleanup steps only: the step whose resource it releases, or the cleanup step before it in a chain)",
   "startTime": "RFC3339",
   "durationMs": 0,
   "inputs": { "paramName": "resolvedValue" },
@@ -900,7 +903,7 @@ In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts
 - **Graph defaults wire the common case; plans wire the rest**: nodes define what an operation accepts and produces, an input's `default: {from: ...}` names the output it usually takes, and plans override or add wiring for a specific test.
 - **Read archives on failure**: when a test fails, read `archive.json` — `steps[].request` and `steps[].response` show the actual HTTP exchange, `steps[].validation` shows which assertions failed, and `steps[].errorClassification` explains what went wrong.
 - **Ordering is declared, not wired**: nodes use `requires`/`satisfies` tokens, not explicit edges. If node B needs node A to have run, give A a token that B requires; the MCP tracing tools and `aat validate` use them. A full plan runs its steps in `dependsOn` order, so list dependencies there (composing a recipe adds them from the tokens); data moves through step values (`from`, selections) and graph defaults, not through tokens.
-- **Cleanup pairing**: if a node creates a resource, set its `cleanup` field to the deletion node. The engine runs the pairing after the plan even when the plan does not list it.
+- **Cleanup pairing**: if a node creates a resource, set its `cleanup` field to the deletion node. The engine runs the pairing after the plan even when the plan does not list it. When releasing the resource takes two calls, give the first cleanup node a `cleanup` of its own. The second node runs right after the first succeeds and takes its outputs.
 - **Template placeholders must match node inputs**: every `{{name}}` in a template should correspond to an input on the linked node; a placeholder that gets no value fails the request.
 - **Keep secrets out of files**: credentials use `source: env` to read OS environment variables (`source: literal` exists for demo values only).
 - **No LLM at run time**: `aat run` and the MCP `execute_plan` tool never call a model; nothing selects values or workflows with an LLM while a plan runs. Only `aat prompt` and the MCP `generate_plan` tool call an LLM, and only to draft a plan.

@@ -231,8 +231,15 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 			} else if step.Response != nil {
 				status = fmt.Sprintf("%d", step.StatusCode)
 			}
+			label := step.StepID
+			if label == "" {
+				label = step.Node
+			}
+			if step.CleanupFor != "" {
+				label += " (for " + step.CleanupFor + ")"
+			}
 			fmt.Fprintf(&b, "- %s: %s (%s)\n",
-				step.Node, status, formatDurationMs(step.Duration.Milliseconds()))
+				label, status, formatDurationMs(step.Duration.Milliseconds()))
 		}
 	}
 

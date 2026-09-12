@@ -173,6 +173,41 @@ nodes:
 
 The engine registers the pairing once the creating step succeeds (a status below 400 with outputs extracted and no [error detection](#error-detection) rule triggered), even if the step's assertions then fail, so a plan need not list it. After the main flow, the plan's own `cleanup:` steps for other nodes run first, in the order listed; then the registered pairings, last created first, once per resource. Cleanup inputs are matched by name against the outputs of the steps that ran (for a registered pairing, the creating step's outputs first), so `cancelOrder.orderId` takes `createOrder`'s `orderId` output, and two `createOrder` steps each cancel their own order. Recipes and `aat prompt` plans list each pairing in the plan's `cleanup:` section; a listed pairing still runs from the registered entries, and its `runOn` decides whether they run.
 
+**Cleanup chains.** A cleanup node can declare a `cleanup` of its own. When a cleanup step succeeds (a status below 400 and no error detection rule triggered), its node's cleanup runs right after it, before the next resource is released. This covers an API that releases a resource in two calls, such as requesting a refund and then confirming it:
+
+```yaml
+nodes:
+  createOrder:
+    adapter: createOrder
+    cleanup: requestRefund
+    outputs:
+      - name: orderId
+        type: string
+
+  requestRefund:
+    adapter: requestRefund
+    cleanup: confirmRefund       # runs after each requestRefund that succeeds
+    inputs:
+      - name: orderId
+        type: string
+    outputs:
+      - name: refundId
+        type: string
+
+  confirmRefund:
+    adapter: confirmRefund
+    inputs:
+      - name: refundId           # named after requestRefund's output
+        type: string
+```
+
+How a chain behaves:
+- **Inputs.** A chained step takes its inputs first from the outputs of the cleanup steps before it in its chain, nearest first, then the same way as any cleanup step.
+- **Isolation.** Those outputs stay inside the chain, so no other cleanup step picks them up.
+- **Failure.** When a cleanup step fails, the rest of its chain is skipped.
+- **Loops.** A chain that loops back to a node it already passed is rejected when the graph loads.
+- **Step IDs and links.** In archives and `--json` output, each cleanup step has its own step ID: `requestRefund` for the first order, `requestRefund_2` for the second. `cleanupFor` (`cleanup_for` in `--json`) names the step whose resource the cleanup releases, or the cleanup step before it in its chain.
+
 ### Tags
 
 Nodes can carry tags for filtering and categorization:

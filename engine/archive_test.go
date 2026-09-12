@@ -44,6 +44,22 @@ func TestToArchive_UnredactableIsAnError(t *testing.T) {
 	assert.Nil(t, a)
 }
 
+func TestToArchive_CleanupFor(t *testing.T) {
+	result := &RunResult{
+		Outcome: OutcomePassed,
+		CleanupResults: []StepResult{
+			{StepID: "requestRefund", Node: "requestRefund", CleanupFor: "createOrder"},
+			{StepID: "confirmRefund", Node: "confirmRefund", CleanupFor: "requestRefund"},
+		},
+	}
+
+	a := mustToArchive(t, result, archive.ArchiveMetadata{}, "", nil)
+
+	require.Len(t, a.Cleanup, 2)
+	assert.Equal(t, "createOrder", a.Cleanup[0].CleanupFor)
+	assert.Equal(t, "requestRefund", a.Cleanup[1].CleanupFor)
+}
+
 func TestToArchive_BasicConversion(t *testing.T) {
 	start := time.Date(2026, 2, 7, 14, 30, 0, 0, time.UTC)
 	result := &RunResult{
