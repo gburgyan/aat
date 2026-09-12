@@ -9,18 +9,21 @@ import (
 	"github.com/gburgyan/aat/plan"
 )
 
-// WorkflowCompatResult captures the results of addon-to-base workflow
-// compatibility checking.
+// WorkflowCompatResult captures the results of workflow compatibility checking.
 //   - Warnings: structural AUTOWIRE inputs that the graph CAN produce but a
 //     specific base workflow doesn't satisfy.
+//   - MarkerWarnings: AUTOWIRE markers in base workflows and their slot options
+//     that the base cannot feed, and AUTOWIRE? markers on required inputs with
+//     no graph default.
 //   - NonProducible: AUTOWIRE inputs whose name doesn't match any output or
 //     elementField in the graph. These indicate either misuse of AUTOWIRE
 //     (should be LLM-filled) or a missing graph elementField.
 //   - Errors: template loading failures (non-fatal).
 type WorkflowCompatResult struct {
-	Warnings      []WorkflowCompatWarning
-	NonProducible []WorkflowNonProducible
-	Errors        []WorkflowCompatError
+	Warnings       []WorkflowCompatWarning
+	MarkerWarnings []WorkflowMarkerWarning
+	NonProducible  []WorkflowNonProducible
+	Errors         []WorkflowCompatError
 }
 
 // WorkflowNonProducible records an addon with AUTOWIRE inputs that no node
@@ -39,15 +42,24 @@ type WorkflowCompatWarning struct {
 	UnfedInputs  []string
 }
 
+// WorkflowMarkerWarning records an AUTOWIRE marker in a workflow template that
+// composition cannot resolve as written.
+type WorkflowMarkerWarning struct {
+	Workflow string // the base workflow, or the workflow whose template holds an AUTOWIRE? marker
+	Step     string // the template step's ID
+	Input    string
+	Message  string
+}
+
 // WorkflowCompatError records a template loading failure for a workflow.
 type WorkflowCompatError struct {
 	Workflow string
 	Err      error
 }
 
-// HasWarnings returns true if any compatibility warnings were found.
+// HasWarnings returns true if any compatibility or marker warnings were found.
 func (r *WorkflowCompatResult) HasWarnings() bool {
-	return len(r.Warnings) > 0
+	return len(r.Warnings) > 0 || len(r.MarkerWarnings) > 0
 }
 
 // HasErrors returns true if any template loading errors occurred.
@@ -73,11 +85,20 @@ func (r *WorkflowCompatResult) Format() string {
 	}
 
 	var sb strings.Builder
-	if r.HasWarnings() {
+	if len(r.Warnings) > 0 {
 		sb.WriteString("Workflow compatibility warnings:\n")
 		for _, w := range r.Warnings {
 			fmt.Fprintf(&sb, "  addon %q + base %q: unfed AUTOWIRE inputs: %s\n",
 				w.Addon, w.BaseWorkflow, strings.Join(w.UnfedInputs, ", "))
+		}
+	}
+	if len(r.MarkerWarnings) > 0 {
+		if sb.Len() > 0 {
+			sb.WriteString("\n")
+		}
+		sb.WriteString("AUTOWIRE marker warnings:\n")
+		for _, w := range r.MarkerWarnings {
+			fmt.Fprintf(&sb, "  workflow %q: %s.%s: %s\n", w.Workflow, w.Step, w.Input, w.Message)
 		}
 	}
 	if r.HasNonProducible() {
@@ -92,19 +113,24 @@ func (r *WorkflowCompatResult) Format() string {
 	return sb.String()
 }
 
-// ValidateWorkflowCompat checks that all addon workflows can have their
-// AUTOWIRE inputs satisfied when composed into compatible base workflows.
+// ValidateWorkflowCompat checks workflow templates for AUTOWIRE markers that
+// composition cannot resolve:
+//   - an addon's AUTOWIRE inputs must be fed in every base it composes into;
+//   - a plain AUTOWIRE in a base or slot option must be fed by the base or its
+//     slots;
+//   - AUTOWIRE? must not mark an input that the node requires and gives no
+//     graph default.
+//
 // Only AUTOWIRE inputs that are "structural" (the graph produces a matching
-// output name or elementField name somewhere) are checked. Value inputs
-// that no node can produce (e.g., email, commentText) are assumed to be
-// LLM-filled and are not flagged.
+// output name or elementField name somewhere) are checked for feeding. Value
+// inputs that no node can produce (e.g., email, commentText) are assumed to be
+// filled by a recipe override or aat prompt and are not flagged.
 //
 // Slots count the way composition uses them: a base's slots are filled before
 // addons are spliced, so an input that every option of a slot produces is fed,
 // and an addon may attach after a node that only a slot option contributes.
 func ValidateWorkflowCompat(g *graph.Graph, graphDir string) *WorkflowCompatResult {
-	bases, addons := partitionWorkflows(g)
-	if len(addons) == 0 || len(bases) == 0 {
+	if len(g.Workflows) == 0 {
 		return &WorkflowCompatResult{}
 	}
 
@@ -141,12 +167,32 @@ func checkWorkflowCompat(g *graph.Graph, templates map[string]*plan.Plan) *Workf
 	result := &WorkflowCompatResult{}
 
 	bases, addons := partitionWorkflows(g)
-	if len(addons) == 0 || len(bases) == 0 {
-		return result
-	}
 
 	// Build the set of names that the graph can produce (outputs + elementFields).
 	producible := buildProducibleNames(g)
+
+	result.MarkerWarnings = checkOptionalMarkers(g, templates)
+	for _, base := range bases {
+		shape, ok := composedShape(g, base, templates)
+		if !ok {
+			continue // base or slot option template failed to load
+		}
+		result.MarkerWarnings = append(result.MarkerWarnings, checkBaseMarkers(g, base, shape, addons, templates, producible)...)
+	}
+	sort.SliceStable(result.MarkerWarnings, func(i, j int) bool {
+		a, b := result.MarkerWarnings[i], result.MarkerWarnings[j]
+		if a.Workflow != b.Workflow {
+			return a.Workflow < b.Workflow
+		}
+		if a.Step != b.Step {
+			return a.Step < b.Step
+		}
+		return a.Input < b.Input
+	})
+
+	if len(addons) == 0 || len(bases) == 0 {
+		return result
+	}
 
 	// For each addon, check compatibility with each base workflow.
 	for _, addon := range addons {
@@ -181,6 +227,11 @@ func checkWorkflowCompat(g *graph.Graph, templates map[string]*plan.Plan) *Workf
 				Addon:  addon.Name,
 				Inputs: nonProducibleInputs,
 			})
+		}
+
+		// An AUTOWIRE? input may stay unset, so it is never unfed.
+		for inputName := range optionalAutowireInputs(addonPlan) {
+			delete(autowireInputs, inputName)
 		}
 
 		if len(autowireInputs) == 0 {
@@ -219,6 +270,124 @@ func checkWorkflowCompat(g *graph.Graph, templates map[string]*plan.Plan) *Workf
 	}
 
 	return result
+}
+
+// checkBaseMarkers reports plain AUTOWIRE markers in a base template, or in one
+// of its slot options, that composition without addons cannot feed: no step of
+// the base produces the output, and no slot does in every option. A marker in a
+// slot option is also fed by that option's own steps. Names that no graph node
+// produces are left to recipe overrides and aat prompt, as for addons.
+func checkBaseMarkers(g *graph.Graph, base graph.Workflow, shape *baseShape, addons []graph.Workflow, templates map[string]*plan.Plan, producible map[string]bool) []WorkflowMarkerWarning {
+	var warnings []WorkflowMarkerWarning
+	check := func(p *plan.Plan, ownOutputs map[string]string) {
+		for _, step := range p.Execution.Steps {
+			for _, name := range autowireMarkerNames(step.Values) {
+				if _, optional := plan.AutowireMarker(step.Values[name]); optional {
+					continue
+				}
+				if !producible[name] || shape.feeds(name) {
+					continue
+				}
+				if _, own := ownOutputs[name]; own {
+					continue
+				}
+				warnings = append(warnings, WorkflowMarkerWarning{
+					Workflow: base.Name,
+					Step:     step.StepID(),
+					Input:    name,
+					Message:  unfedMarkerMessage(g, name, addons, templates),
+				})
+			}
+		}
+	}
+
+	check(shape.base, nil)
+	for i, options := range shape.slots {
+		for j, option := range options {
+			check(option, shape.slotOutputs[i][j])
+		}
+	}
+	return warnings
+}
+
+// unfedMarkerMessage explains an AUTOWIRE that a base cannot feed, naming the
+// addons whose steps produce the output.
+func unfedMarkerMessage(g *graph.Graph, name string, addons []graph.Workflow, templates map[string]*plan.Plan) string {
+	var producers []string
+	for _, addon := range addons {
+		p := templates[addon.Template]
+		if p == nil {
+			continue
+		}
+		if _, ok := buildOutputMap(p, g)[name]; ok {
+			producers = append(producers, fmt.Sprintf("%q", addon.Name))
+		}
+	}
+	if len(producers) == 0 {
+		return "unfed AUTOWIRE: no step of the base or its slots produces it; wire it, or set it in each recipe"
+	}
+	return fmt.Sprintf("unfed AUTOWIRE: only addon %s produces it; use AUTOWIRE? if the input is optional",
+		strings.Join(producers, ", "))
+}
+
+// checkOptionalMarkers reports AUTOWIRE? on an input that its node requires and
+// gives no graph default: when no step feeds it, the step has no value to send.
+// Each template is checked once, under the first workflow that uses it.
+func checkOptionalMarkers(g *graph.Graph, templates map[string]*plan.Plan) []WorkflowMarkerWarning {
+	var warnings []WorkflowMarkerWarning
+	seen := make(map[string]bool)
+	for _, wf := range g.Workflows {
+		p := templates[wf.Template]
+		if p == nil || seen[wf.Template] {
+			continue
+		}
+		seen[wf.Template] = true
+		for _, step := range p.Execution.Steps {
+			node := g.Nodes[step.Node]
+			if node == nil {
+				continue
+			}
+			for _, name := range autowireMarkerNames(step.Values) {
+				if _, optional := plan.AutowireMarker(step.Values[name]); !optional {
+					continue
+				}
+				inp := inputNamed(node, name)
+				if inp == nil || inp.Optional || inp.Default.HasValue() {
+					continue
+				}
+				warnings = append(warnings, WorkflowMarkerWarning{
+					Workflow: wf.Name,
+					Step:     step.StepID(),
+					Input:    name,
+					Message:  "AUTOWIRE? on a required input with no graph default: when nothing feeds it, the step has no value; use AUTOWIRE, or make the input optional",
+				})
+			}
+		}
+	}
+	return warnings
+}
+
+// inputNamed returns node's input called name, or nil.
+func inputNamed(node *graph.Node, name string) *graph.Input {
+	for i := range node.Inputs {
+		if node.Inputs[i].Name == name {
+			return &node.Inputs[i]
+		}
+	}
+	return nil
+}
+
+// autowireMarkerNames returns, sorted, the names of the inputs in values that
+// hold an AUTOWIRE marker.
+func autowireMarkerNames(values map[string]plan.StepValue) []string {
+	var names []string
+	for name, sv := range values {
+		if marker, _ := plan.AutowireMarker(sv); marker {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 // partitionWorkflows splits the graph's workflows into base workflows and
@@ -345,4 +514,26 @@ func collectAutowireInputs(p *plan.Plan) map[string]bool {
 		}
 	}
 	return inputs
+}
+
+// optionalAutowireInputs returns the input names in p whose every marker is
+// AUTOWIRE?. Addon checks never report them as unfed.
+func optionalAutowireInputs(p *plan.Plan) map[string]bool {
+	optional := make(map[string]bool)
+	plain := make(map[string]bool)
+	for _, step := range p.Execution.Steps {
+		for inputName, sv := range step.Values {
+			switch marker, opt := plan.AutowireMarker(sv); {
+			case !marker:
+			case opt:
+				optional[inputName] = true
+			default:
+				plain[inputName] = true
+			}
+		}
+	}
+	for inputName := range plain {
+		delete(optional, inputName)
+	}
+	return optional
 }

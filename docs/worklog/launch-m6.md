@@ -140,3 +140,24 @@ composes a standalone base before validating it, so the base's markers are wired
   the shop and the private airline project. The outputs were compared as sets of lines, because the order of some
   validator messages varies between runs.
 - **One fixture changed.** Its addon input had a marker that no node produces; it now takes a recipe override.
+
+## 2026-09-12 — A8: workflow checks cover base and slot markers
+
+**What:** The workflow compatibility check now warns about two more cases:
+- a plain `AUTOWIRE` in a base or slot option that the base and its slots cannot feed; the warning names any addon
+  that produces the output
+- `AUTOWIRE?` on a required input with no graph default
+
+An addon's `AUTOWIRE?` inputs are never reported as unfed.
+
+**Decisions:**
+- **Warnings, not errors.** They fail `--strict` the same way the existing addon warnings do. A7's plan validation
+  catches the concrete failure: a recipe that leaves the marker unresolved.
+- **Addon outputs never count as feeding a plain base marker.** The base also composes without that addon. Those
+  outputs appear only in the hint.
+- **Names that no node produces are not flagged,** the same rule as for addons. They are values for a recipe
+  override or `aat prompt`.
+- **The check runs when a graph has no addons.** `ValidateWorkflowCompat` used to return early in that case, which
+  would have skipped a base's own markers.
+- **Effect on real projects:** the shop is unchanged. The private airline project gains one warning, for a base
+  marker that no workflow step produces.

@@ -28,6 +28,9 @@ the graph and plan formats may still change before 1.0.
 - A plan that still holds an `AUTOWIRE` marker after composition fails validation, naming the step and input,
   instead of sending the word `AUTOWIRE`. `aat prompt` asks the model for those inputs, and `aat validate plan`
   composes standalone base workflows before validating them.
+- Workflow compatibility checks cover base workflows and slot options. A plain `AUTOWIRE` that the base and its slots
+  cannot feed is a warning that names any addon producing the output. `AUTOWIRE?` on a required input with no graph
+  default is also a warning. `AUTOWIRE?` in an addon never warns as unfed.
 - A step whose failed response asks for a wait longer than 60 seconds stops retrying (`failed_fast`), and the
   error detail says how long the server asked for. Before, the retries went out after the backoff regardless.
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs
