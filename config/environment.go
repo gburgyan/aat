@@ -56,6 +56,10 @@ type LLMConfig struct {
 // RuntimeSettings holds execution-time configuration.
 type RuntimeSettings struct {
 	OASValidation string `yaml:"oasValidation,omitempty"` // "auto" (default), "strict", "off"
+	// MinRequestInterval is the least time between the starts of two requests,
+	// a duration such as "250ms", shared by every run of one invocation. Empty
+	// means requests are not paced. See RequestInterval.
+	MinRequestInterval string `yaml:"minRequestInterval,omitempty"`
 }
 
 // PathRewrite controls URL path rewriting for overrides.

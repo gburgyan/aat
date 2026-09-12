@@ -474,13 +474,34 @@ Execution-time defaults for the engine:
 ```yaml
 settings:
   oasValidation: auto
+  minRequestInterval: 250ms
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `oasValidation` | `auto` | OpenAPI validation mode: `auto`, `strict`, or `off` |
+| `minRequestInterval` | *(none)* | Least time between the starts of two requests, such as `250ms` or `1s`; see [Request Pacing](#request-pacing) |
 
 Retries are not an environment setting: set them per step with `retry:` (see [Plans: Retry](plans.md#retry)) or per run with `--retries` (see [Running Tests: Retries](running.md#retries)).
+
+### Request Pacing
+
+An API with a rate limit rejects requests that arrive too fast, often with `429 Too Many Requests`. `minRequestInterval` spaces the starts of requests at least that far apart, so a run stays under the limit instead of recovering from it:
+
+```yaml
+shared:
+  settings:
+    minRequestInterval: 250ms   # at most four requests a second
+```
+
+- **One interval per command.** Everything one command sends shares it: every plan of `aat run batch`, including plans running side by side with `--parallel`, and every retry, verification step, and cleanup step. `--parallel 4` with `250ms` still sends at most four requests a second.
+- **Every way of running a plan** honors it: `aat run plan`, `aat run batch`, `aat prompt`, and the MCP server's `execute_plan`. The MCP server paces across calls for as long as it runs.
+- **Waits count toward durations.** A step's duration includes the time it waited for its turn, as it includes retry waits.
+- **OAuth2 token requests are not paced.**
+- **The value is a duration with a unit** (`ms`, `s`, `m`):
+  - A bare number such as `250` is rejected when the file loads.
+  - Empty or `0s` turns pacing off.
+  - Like any string in the file, it can come from a var: `minRequestInterval: ${pace}` with `--var pace=1s`.
 
 ### OAS Validation Mode
 
@@ -752,6 +773,7 @@ Overlays are useful for:
 - Bearer requires `credentials.token`
 - Override entries must have a `match` pattern
 - `settings.oasValidation` must be `auto`, `strict`, or `off`
+- `settings.minRequestInterval` must be a duration with a unit, such as `250ms`
 
 **Multi-environment files** — all the above, plus:
 
@@ -815,6 +837,7 @@ llm:                                      # LLM configuration (for aat prompt)
 
 settings:                                 # optional — runtime defaults
   oasValidation: auto                     #   auto, strict, or off (default: auto)
+  minRequestInterval: 250ms               #   least time between request starts (default: none)
 
 notes: "Staging environment for QA"       # optional — freeform notes
 
@@ -863,6 +886,7 @@ shared:                                   # optional — defaults merged into ev
     model: gpt-4
   settings:
     oasValidation: auto
+    minRequestInterval: 250ms
   values:
     region: us-east
 

@@ -44,3 +44,21 @@ The project lives in its own repository, `aat-duffel`, not under `examples/`.
 **Open questions:**
 - Whether the session transcript is published (author).
 - Where the Duffel project's nightly CI lives. Most likely in `aat-duffel`, installing the release.
+
+## 2026-09-12 — A2: request pacing
+
+**What:** `settings.minRequestInterval` spaces the starts of requests. `aat run plan`, `aat run batch`, `aat prompt`,
+and the MCP server's `execute_plan` all honor it.
+
+**Decisions:**
+- **One interval per command, not per host.** A rate limit usually belongs to a credential, and a per-host gate would
+  have to know which overrides share one. Everything a command sends waits for the same pacer: the plans of a parallel
+  batch, plan-level retry attempts, step retries, verification, and cleanup. The MCP server keeps one pacer for as long
+  as it runs.
+- **The engine paces, not the executor router.** `ExecutorRouter.Resolve` returns a concrete executor whose base URL
+  callers read, so a decorating executor would have changed that type. `Engine.send` waits and then executes, at both
+  places the engine sends a request. Cleanup became an engine method to reach it.
+- **The setting is a duration string.** `${var}` substitution rewrites only strings. A bare `250` is rejected rather
+  than read as some unit.
+- **OAuth2 token requests are not paced.** The auth provider sends them outside the engine, once per run context.
+- **Pacing waits count toward step durations,** as retry waits do.

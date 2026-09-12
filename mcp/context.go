@@ -8,6 +8,7 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/domain"
+	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/intent"
@@ -34,6 +35,9 @@ type ServerContext struct {
 	ArchiveDir   string
 	Environment  *config.Environment
 	AuthProvider *config.AuthProvider // cached default auth (nil if no environment)
+	// Pacer spaces execute_plan requests by the environment's
+	// settings.minRequestInterval, across calls (nil = no pacing).
+	Pacer *engine.Pacer
 
 	// Metadata
 	Manifest      *ProjectManifest
@@ -96,6 +100,11 @@ func BuildServerContextWithVars(manifest *ProjectManifest, vars map[string]strin
 		}
 		ctx.Environment = env
 		ctx.AuthProvider = config.NewAuthProvider(env.Auth)
+		interval, err := env.Settings.RequestInterval()
+		if err != nil {
+			return nil, fmt.Errorf("loading environment: settings.minRequestInterval: %w", err)
+		}
+		ctx.Pacer = engine.NewPacer(interval)
 	}
 
 	// Set optional directory paths

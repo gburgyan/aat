@@ -191,6 +191,9 @@ func validateSettings(s *RuntimeSettings) []string {
 	if err := CheckOASValidationMode(s.OASValidation); err != nil {
 		errs = append(errs, fmt.Sprintf("settings.oasValidation: %s", err))
 	}
+	if _, err := s.RequestInterval(); err != nil {
+		errs = append(errs, fmt.Sprintf("settings.minRequestInterval: %s", err))
+	}
 	return errs
 }
 

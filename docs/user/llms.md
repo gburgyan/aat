@@ -230,7 +230,12 @@ auth:
 
 headers:
   Accept: application/json
+
+settings:
+  minRequestInterval: 250ms   # optional: space request starts for a rate-limited API
 ```
+
+`settings.minRequestInterval` needs a unit (`250ms`, `1s`). One interval covers everything a command sends, including every plan of a `--parallel` batch, retries, verification, and cleanup.
 
 That is the single-environment format. A multi-environment file has top-level `shared:` and `environments:` instead, with `extends`, `vars` (`${name}` substitution), and `include`; select one with `--env` or the manifest's `defaultEnvironment`.
 

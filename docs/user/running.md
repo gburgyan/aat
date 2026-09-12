@@ -44,7 +44,7 @@ PASSED (5/5 steps, 354ms)
 Archive: /path/to/shop/_output/runs/run-20260910-231357-eca8e0b3/archive.json
 ```
 
-Each step line shows the step index, the step ID, the HTTP status code, and the duration. The step ID is what `--stop-after` and `dependsOn` take; when it differs from the node and the column has room, the node follows in parentheses (`addProduct (addItem)`), and on a narrow terminal the ID stands alone (`checkout`, whose node is `checkoutCart`). A step's duration runs from its first attempt to the end of its last, so retry waits count, and the outcome line reports the run's wall-clock time. Display outputs defined in the plan appear indented below their step, and cleanup steps follow the main steps.
+Each step line shows the step index, the step ID, the HTTP status code, and the duration. The step ID is what `--stop-after` and `dependsOn` take; when it differs from the node and the column has room, the node follows in parentheses (`addProduct (addItem)`), and on a narrow terminal the ID stands alone (`checkout`, whose node is `checkoutCart`). A step's duration runs from its first attempt to the end of its last, so retry waits count, as does any wait for [request pacing](environments.md#request-pacing), and the outcome line reports the run's wall-clock time. Display outputs defined in the plan appear indented below their step, and cleanup steps follow the main steps.
 
 ## Checkpoints
 
@@ -84,6 +84,8 @@ aat run batch --parallel 4
 ```
 
 In parallel mode, AAT displays a compact progress renderer that tracks all active plans. Sequential mode shows step-by-step output for each plan.
+
+Parallel plans share the environment's [request pacing](environments.md#request-pacing): with `settings.minRequestInterval: 250ms`, `--parallel 4` still starts at most four requests a second.
 
 ### Layer Expansion
 

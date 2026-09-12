@@ -282,11 +282,18 @@ type shopProject struct {
 // overrides of the env.yaml apiHost and payHost vars (see vars).
 func newShopProject(t *testing.T) *shopProject {
 	t.Helper()
+	return newShopProjectWith(t, func(h http.Handler) http.Handler { return h })
+}
+
+// newShopProjectWith is newShopProject with wrap around both sandbox handlers,
+// so a test can observe the requests that reach them.
+func newShopProjectWith(t *testing.T, wrap func(http.Handler) http.Handler) *shopProject {
+	t.Helper()
 
 	srv := shop.New(shop.Options{Latency: 0, Seed: 1})
-	api := httptest.NewServer(srv.APIHandler())
+	api := httptest.NewServer(wrap(srv.APIHandler()))
 	t.Cleanup(api.Close)
-	pay := httptest.NewServer(srv.PaymentsHandler())
+	pay := httptest.NewServer(wrap(srv.PaymentsHandler()))
 	t.Cleanup(pay.Close)
 
 	fsys, err := aat.ShopExampleFS()

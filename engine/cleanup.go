@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
-	"github.com/gburgyan/aat/graph"
 )
 
 // CleanupEntry records a cleanup node to execute and the step that registered it.
@@ -45,41 +44,23 @@ func (s *CleanupStack) Filter(keep func(CleanupEntry) bool) {
 	s.entries = kept
 }
 
-// ExecuteAll runs all cleanup entries in FILO order (last pushed, first executed).
-// Errors are recorded in the StepResult but do not stop subsequent cleanup steps.
-// The requests use ctx as given: Engine.runCleanup passes a context detached
-// from the run's cancellation, with a deadline when the run was aborted.
-func (s *CleanupStack) ExecuteAll(
-	ctx context.Context,
-	g *graph.Graph,
-	registry *adapter.Registry,
-	router *ExecutorRouter,
-	state *RunState,
-) []StepResult {
-	if len(s.entries) == 0 {
+// runCleanupStack runs the stack's entries in FILO order (last pushed, first
+// executed). Errors are recorded in the StepResult but do not stop subsequent
+// cleanup steps. The requests use ctx as given: runCleanup passes a context
+// detached from the run's cancellation, with a deadline when the run was aborted.
+func (e *Engine) runCleanupStack(ctx context.Context, s *CleanupStack, state *RunState) []StepResult {
+	if s.Len() == 0 {
 		return nil
 	}
 
-	results := make([]StepResult, 0, len(s.entries))
-
-	// Execute in reverse order (FILO)
+	results := make([]StepResult, 0, s.Len())
 	for i := len(s.entries) - 1; i >= 0; i-- {
-		entry := s.entries[i]
-		result := executeCleanupEntry(ctx, entry, g, registry, router, state)
-		results = append(results, result)
+		results = append(results, e.executeCleanupEntry(ctx, s.entries[i], state))
 	}
-
 	return results
 }
 
-func executeCleanupEntry(
-	ctx context.Context,
-	entry CleanupEntry,
-	g *graph.Graph,
-	registry *adapter.Registry,
-	router *ExecutorRouter,
-	state *RunState,
-) StepResult {
+func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, state *RunState) StepResult {
 	start := time.Now()
 	// base identifies the cleanup step and when it started, so archives place
 	// it on the run's timeline like any other step.
@@ -92,7 +73,7 @@ func executeCleanupEntry(
 		return sr
 	}
 
-	node, ok := g.Nodes[entry.NodeName]
+	node, ok := e.graph.Nodes[entry.NodeName]
 	if !ok {
 		return failed(nil, fmt.Errorf("cleanup node %q not found in graph", entry.NodeName))
 	}
@@ -120,13 +101,13 @@ func executeCleanupEntry(
 		}
 	}
 
-	adp, err := registry.Get(node.Adapter)
+	adp, err := e.registry.Get(node.Adapter)
 	if err != nil {
 		return failed(inputs, fmt.Errorf("cleanup adapter: %w", err))
 	}
 
 	// Resolve executor/config/rewrite for the cleanup node
-	exec, cfg, rewrite := router.Resolve(entry.NodeName)
+	exec, cfg, rewrite := e.router.Resolve(entry.NodeName)
 	base.ActualBaseURL = exec.BaseURL
 
 	req, err := adp.BuildRequest(inputs, cfg)
@@ -140,7 +121,7 @@ func executeCleanupEntry(
 	}
 	base.Request = req
 
-	resp, err := exec.Execute(ctx, req)
+	resp, err := e.send(ctx, exec, req)
 	if err != nil {
 		return failed(inputs, fmt.Errorf("cleanup execute: %w", err))
 	}

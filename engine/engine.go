@@ -51,6 +51,9 @@ type Engine struct {
 	graphOAS  string         // graph-level default OAS path
 	oasStrict bool           // when true, OAS errors fail the step
 
+	// pacer spaces the starts of requests; nil means no pacing.
+	pacer *Pacer
+
 	// plan is set during Run() for constraint-aware resolution.
 	plan *plan.Plan
 
@@ -429,9 +432,9 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 
 	results := make([]StepResult, 0, total)
 	for _, entry := range planEntries {
-		results = append(results, executeCleanupEntry(cleanupCtx, entry, e.graph, e.registry, e.router, state))
+		results = append(results, e.executeCleanupEntry(cleanupCtx, entry, state))
 	}
-	results = append(results, cleanupStack.ExecuteAll(cleanupCtx, e.graph, e.registry, e.router, state)...)
+	results = append(results, e.runCleanupStack(cleanupCtx, cleanupStack, state)...)
 
 	if e.Observer != nil {
 		for i, cr := range results {
@@ -709,8 +712,8 @@ func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.No
 		req.Body = []byte(step.RawBody)
 	}
 
-	// Execute
-	resp, err := exec.Execute(ctx, req)
+	// Execute, after waiting for the pacer
+	resp, err := e.send(ctx, exec, req)
 	if err != nil {
 		sr := StepResult{
 			StepID:        sid,

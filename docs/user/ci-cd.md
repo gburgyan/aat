@@ -45,7 +45,7 @@ aat run plan smoke-test --json
 | `name` | string | Step ID from the plan (a mutation sibling's generated ID, such as `addItem--zero-quantity`) |
 | `node` | string | Graph node name |
 | `status` | int | HTTP status code (`0` when no response arrived) |
-| `duration_ms` | int | Step duration in milliseconds, from the first attempt to the end of the last, retry waits included |
+| `duration_ms` | int | Step duration in milliseconds, from the first attempt to the end of the last, retry and pacing waits included |
 | `passed` | bool | Whether the step succeeded: no error, a status below 400 (or one its `expectFailure` lists), and no failed assertion |
 | `error` | string | Error message, such as `status 400` (omitted if step passed) |
 | `retries` | int | Number of step-level retries |

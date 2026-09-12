@@ -141,7 +141,8 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 	eng := engine.NewEngine(s.ctx.Graph, s.ctx.Registry, router).
 		WithDomain(s.ctx.KB).
 		WithEnvValues(s.ctx.Environment.Values).
-		WithLayers(layeredDefaults)
+		WithLayers(layeredDefaults).
+		WithPacer(s.ctx.Pacer)
 
 	result := eng.Run(ctx, p)
 

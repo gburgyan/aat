@@ -6,6 +6,12 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+### Added
+- `settings.minRequestInterval` paces requests for APIs with rate limits: the starts of any two requests are at
+  least that far apart, such as `250ms`. One interval covers everything a command sends, including the plans of
+  a parallel batch, retries, verification, and cleanup. `aat prompt` and the MCP server's `execute_plan` honor it
+  too. A value without a unit, such as `250`, is rejected when the environment file loads.
+
 ### Changed
 - Docs: the Homebrew cask is documented for Linux as well as macOS. `brew install gburgyan/tap/aat` installs
   `aat` and `aat-sandbox` with Homebrew on Linux.

@@ -411,11 +411,16 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	// Create engine and run
 	ti := DetectTerminal(os.Stdout)
 	observer := &CLIProgressObserver{out: os.Stdout, term: ti}
+	interval, err := env.Settings.RequestInterval()
+	if err != nil {
+		return fmt.Errorf("settings.minRequestInterval: %w", err)
+	}
 	eng := engine.NewEngine(g, registry, router).
 		WithDomain(kb).
 		WithProgress(observer).
 		WithLayers(layeredDefaults).
-		WithEnvValues(env.Values)
+		WithEnvValues(env.Values).
+		WithPacer(engine.NewPacer(interval))
 
 	// OAS runtime validation
 	oasMode, err := resolveOASMode(args.OASValidateMode, env.Settings.OASValidation)
