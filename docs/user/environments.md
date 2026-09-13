@@ -505,12 +505,12 @@ shared:
 
 ### OAS Validation Mode
 
-When the graph references an OpenAPI spec, every step's request and response is checked against it at runtime. `oasValidation` sets the per-environment default:
+When the graph references an OpenAPI spec, each step's request body, when it is JSON or form-encoded, and its response body are checked against it at runtime. `oasValidation` sets the per-environment default:
 
 | Value | Behavior |
 |-------|----------|
-| `auto` | Validate whenever specs are present; violations are reported as warnings (default) |
-| `strict` | Like `auto`, but a violation in the request or response fails the step (cleanup still runs); `expectFailure` steps are exempt |
+| `auto` | Validate whenever specs are present; violations are reported as warnings (default). A spec that fails to load is a warning |
+| `strict` | Like `auto`, but a violation in the request or response fails the step (cleanup still runs); `expectFailure` steps are exempt. A spec that fails to load stops the run with exit code `2` |
 | `off` | Skip loading specs and validating entirely |
 
 The `--oas-validate` flag on `aat run plan`, `aat run batch`, and `aat prompt` overrides the environment setting for a single invocation (CLI flag > `settings.oasValidation` > `auto`). Any other value is rejected, in the environment file when it loads and on the command line, so a typo such as `stirct` cannot quietly mean `auto`. Turning it `off` in a busy environment saves the spec-loading time; keeping it on surfaces contract drift as `OAS: N warning(s)` markers and an `issues` count in the archive. See [Running Tests: OAS Validation](running.md#oas-validation) and [API Graphs: OAS Validation](graphs.md#oas-validation).

@@ -316,6 +316,42 @@ func TestValidate_RequiredFieldSuppliedByTemplate(t *testing.T) {
 	assert.False(t, missing(v.Validate(g)), "the template supplies name itself")
 }
 
+// TestValidate_HeaderOnlyInputNotReported: an input the template sends only in
+// a request header is not reported as missing from the operation's parameters
+// and request body.
+func TestValidate_HeaderOnlyInputNotReported(t *testing.T) {
+	v := newValidatorWithPetstore(t)
+	g := &graph.Graph{
+		Version: "1.0.0",
+		OAS:     "petstore.yaml",
+		Nodes: map[string]*graph.Node{
+			"createPet": {
+				Name:    "createPet",
+				Adapter: "createPet",
+				OAS:     &graph.OASRef{OperationID: "createPet"},
+				Inputs: []graph.Input{
+					{Name: "name", Type: "string"},
+					{Name: "requestKey", Type: "string", Optional: true},
+				},
+			},
+		},
+	}
+
+	reported := func(result *graph.SpecValidationResult) bool {
+		for _, issue := range result.Issues {
+			if contains(issue.Message, `input "requestKey" not found`) {
+				return true
+			}
+		}
+		return false
+	}
+
+	assert.True(t, reported(v.Validate(g)), "without template knowledge requestKey is not a parameter")
+
+	v.WithHeaderInputs(HeaderInputs{"createPet": {"requestKey": true}})
+	assert.False(t, reported(v.Validate(g)), "the template sends requestKey only in a header")
+}
+
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {

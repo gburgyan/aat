@@ -1,0 +1,47 @@
+openapi: "3.0.3"
+info:
+  title: Refunds
+  version: "1.0.0"
+# A form-encoded operation whose required query parameter and body fields the
+# template writes itself, including bracketed keys.
+paths:
+  /refunds:
+    post:
+      operationId: createRefund
+      parameters:
+        - name: expand
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required:
+                - orderId
+                - channel
+                - metadata
+              properties:
+                orderId:
+                  type: string
+                channel:
+                  type: string
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+      responses:
+        "200":
+          description: The refund
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  refundId:
+                    type: string

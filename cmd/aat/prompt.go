@@ -14,7 +14,6 @@ import (
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
-	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/intent"
 	"github.com/gburgyan/aat/llm"
 	"github.com/gburgyan/aat/plan"
@@ -427,25 +426,13 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	if err != nil {
 		return err
 	}
-	if oasMode != "off" {
-		specPaths := collectOASSpecPaths(g)
-		if len(specPaths) > 0 {
-			graphDir := filepath.Dir(args.GraphPath)
-			oasCache := oas.NewSpecCache()
-			for _, sp := range specPaths {
-				fsPath := sp
-				if !filepath.IsAbs(sp) {
-					fsPath = filepath.Join(graphDir, sp)
-				}
-				if loadErr := oasCache.Load(sp, fsPath); loadErr != nil {
-					fmt.Printf("aat: warning: could not load OAS spec %q: %s\n", sp, loadErr)
-				}
-			}
-			if oasCache.Len() > 0 {
-				eng.WithOASSpecs(oasCache, g.OAS, oasMode == "strict")
-				fmt.Printf("aat: loaded %d OAS spec(s) for runtime validation\n", oasCache.Len())
-			}
-		}
+	oasCache, err := loadOASCache(g, args.GraphPath, oasMode, os.Stderr)
+	if err != nil {
+		return err
+	}
+	if oasCache != nil {
+		eng.WithOASSpecs(oasCache, g.OAS, oasMode == "strict")
+		fmt.Printf("aat: loaded %d OAS spec(s) for runtime validation\n", oasCache.Len())
 	}
 
 	fmt.Printf("aat: executing plan (%d steps)...\n\n", plannedStepCount(p, g, layeredDefaults))

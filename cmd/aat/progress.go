@@ -163,7 +163,30 @@ func stepMarks(result engine.StepResult, color bool) string {
 	if result.OASValidation != nil && result.OASValidation.HasErrors() {
 		marks += "  " + colorize(fmt.Sprintf("OAS: %d warning(s)", result.OASValidation.ErrorCount()), colorYellow, color)
 	}
+	if note := oasSkipNote(result); note != "" {
+		marks += "  " + colorize(note, colorYellow, color)
+	}
 	return marks
+}
+
+// oasSkipNote names the parts of a step that OAS validation left unvalidated,
+// such as a request body type the validator doesn't read.
+func oasSkipNote(result engine.StepResult) string {
+	v := result.OASValidation
+	if v == nil {
+		return ""
+	}
+	request := v.Request != nil && v.Request.Skipped
+	response := v.Response != nil && v.Response.Skipped
+	switch {
+	case request && response:
+		return "OAS: not validated"
+	case request:
+		return "OAS: request not validated"
+	case response:
+		return "OAS: response not validated"
+	}
+	return ""
 }
 
 // oasWarningCount totals the OpenAPI violations across steps.

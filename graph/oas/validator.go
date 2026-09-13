@@ -15,6 +15,7 @@ type Validator struct {
 	specs          map[string]*v3high.Document
 	outputPaths    OutputPaths
 	suppliedFields SuppliedFields
+	headerInputs   HeaderInputs
 }
 
 // OutputPaths maps node name → output name → the GJSON path the node's template
@@ -25,6 +26,10 @@ type OutputPaths map[string]map[string]string
 // SuppliedFields maps node name → the request fields (query parameters, header
 // names, top-level body keys) the node's template always sends itself.
 type SuppliedFields map[string]map[string]bool
+
+// HeaderInputs maps node name → the inputs the node's template sends only in
+// request headers.
+type HeaderInputs map[string]map[string]bool
 
 // NewValidator creates a new OAS validator.
 func NewValidator() *Validator {
@@ -47,6 +52,15 @@ func (v *Validator) WithOutputPaths(paths OutputPaths) *Validator {
 // literal "photoUrls": [] with no graph input behind it.
 func (v *Validator) WithSuppliedFields(fields SuppliedFields) *Validator {
 	v.suppliedFields = fields
+	return v
+}
+
+// WithHeaderInputs makes the unknown-input check accept an input that the
+// node's template sends only in request headers, such as an idempotency key.
+// The template names the header, so the input's name says nothing about the
+// spec, and specs often leave such headers undeclared.
+func (v *Validator) WithHeaderInputs(inputs HeaderInputs) *Validator {
+	v.headerInputs = inputs
 	return v
 }
 
@@ -137,10 +151,11 @@ func (v *Validator) Validate(g *graph.Graph) *graph.SpecValidationResult {
 			continue
 		}
 
-		// Rule 5: graph inputs should exist in OAS parameters or request body
+		// Rule 5: graph inputs should exist in OAS parameters or request body,
+		// unless the template sends them only in headers
 		oasParamNames := collectInputNames(pathItem, op)
 		for _, inp := range node.Inputs {
-			if _, exists := oasParamNames[inp.Name]; !exists {
+			if _, exists := oasParamNames[inp.Name]; !exists && !v.headerInputs[nodeName][inp.Name] {
 				result.Issues = append(result.Issues, graph.SpecValidationIssue{
 					Severity: graph.SpecWarning,
 					Node:     nodeName,
@@ -302,12 +317,20 @@ func schemaHasPath(schema *base.Schema, path string) bool {
 }
 
 func schemaHasSegments(schema *base.Schema, segments []string) bool {
-	if schema == nil || len(segments) == 0 {
+	return schemaHasSegmentsAt(schema, segments, 0)
+}
+
+// schemaHasSegmentsAt is schemaHasSegments for a schema reached through depth
+// composition branches. A branch doesn't consume a segment, so a circular
+// allOf, oneOf, or anyOf could be followed forever; past maxShapeDepth the rest
+// of the path counts as present.
+func schemaHasSegmentsAt(schema *base.Schema, segments []string, depth int) bool {
+	if schema == nil || len(segments) == 0 || depth > maxShapeDepth {
 		return true
 	}
 	for _, group := range [][]*base.SchemaProxy{schema.AllOf, schema.OneOf, schema.AnyOf} {
 		for _, branch := range group {
-			if branch != nil && schemaHasSegments(branch.Schema(), segments) {
+			if branch != nil && schemaHasSegmentsAt(branch.Schema(), segments, depth+1) {
 				return true
 			}
 		}
@@ -318,13 +341,13 @@ func schemaHasSegments(schema *base.Schema, segments []string) bool {
 		if schema.Items == nil || !schema.Items.IsA() || schema.Items.A == nil {
 			return true // no item schema to check against
 		}
-		return schemaHasSegments(schema.Items.A.Schema(), rest)
+		return schemaHasSegmentsAt(schema.Items.A.Schema(), rest, depth)
 	}
 	if schema.Properties == nil {
 		return true // no declared properties to check against
 	}
 	if property := schema.Properties.GetOrZero(segment); property != nil {
-		return schemaHasSegments(property.Schema(), rest)
+		return schemaHasSegmentsAt(property.Schema(), rest, depth)
 	}
 	if extra := schema.AdditionalProperties; extra != nil && ((extra.IsA() && extra.A != nil) || (extra.IsB() && extra.B)) {
 		return true

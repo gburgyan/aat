@@ -23,13 +23,16 @@ func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, no
 	return e.executeStepWithRetry(ctx, step, node, state)
 }
 
-// executeStepWithRetry wraps executeStep with retry logic based on the step's
-// RetryConfig. If no RetryConfig is set, it behaves identically to executeStep.
+// executeStepWithRetry wraps executeStepWith with retry logic based on the
+// step's RetryConfig. If no RetryConfig is set, it runs a single attempt.
 // The result of a retried step is its last attempt's, timed from the start of
 // the first attempt, so its duration includes the failed attempts and the
 // waits between them.
 func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) (result StepResult) {
-	result = e.executeStep(ctx, step, node, state)
+	// Every attempt shares the inputs the first resolved, so a retry resends
+	// the same request.
+	var prepared stepInputs
+	result = e.executeStepWith(ctx, step, node, state, &prepared)
 	firstStart := result.StartTime
 	defer func() {
 		if result.StartTime.After(firstStart) {
@@ -125,7 +128,7 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 		}
 
 		// Retry the step
-		result = e.executeStep(ctx, step, node, state)
+		result = e.executeStepWith(ctx, step, node, state, &prepared)
 		result.RetryCount = attempt
 		result.RetriedOn = append([]ErrorCategory(nil), retriedOn...)
 

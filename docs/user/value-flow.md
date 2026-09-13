@@ -223,6 +223,29 @@ values:
 
 `{{env.KEY}}` checks the OS environment variable `KEY` first, then the `values:` map of the selected environment in env.yaml. An error is raised if neither provides a non-empty value. This works wherever a value is resolved — plan step values, graph input defaults, layer values, and pool entries — but not in request templates: a template placeholder is filled only from step inputs, and env.yaml `values:` do not reach templates. To send an environment value, give the input a default such as `"{{env.postalCode}}"` in the graph and use `{{postalCode}}` in the template.
 
+### Generated Values and Timestamps
+
+```yaml
+values:
+  requestKey: "{{uuid}}"               # a random UUID
+  reference: "order-{{random 8}}"      # 8 random digits and lowercase letters
+  since: "{{unixtime - 1 hours}}"      # Unix seconds, one hour ago
+  cutoff: "{{now + 30 minutes}}"       # a UTC timestamp, such as 2026-02-08T12:30:00Z
+```
+
+| Form | Result |
+|------|--------|
+| `{{uuid}}` | A random version 4 UUID, in lowercase |
+| `{{random N}}` | `N` random characters from `0-9` and `a-z`, with `N` from 1 to 64 |
+| `{{now}}`, `{{now + N unit}}`, `{{now - N unit}}` | The current time in UTC, in RFC 3339 to the second |
+| `{{unixtime}}`, `{{unixtime + N unit}}`, `{{unixtime - N unit}}` | The current time as Unix seconds, an integer |
+
+The unit is `seconds`, `minutes`, `hours`, or `days`, or the singular; a day is 24 hours. `{{today}}` counts days only, so `{{today + 2 hours}}` is an error that suggests `now` or `unixtime`.
+
+- **Each occurrence is its own value.** `"{{random 4}}-{{random 4}}"` has two different halves, and two inputs set to `{{uuid}}` get different UUIDs. To send one generated value twice, set it on one input and read it with `fromResolved` in the same step or `fromInput` in a later step.
+- **A step's values are generated once.** A retried step resends the values its first attempt sent, so an idempotency key stays the same across the attempts. A new run, or a plan-level `--retries` rerun, generates new ones.
+- **Reserved words.** `uuid`, `now`, and `unixtime` always mean these forms, so `{{now}}` can't refer to an input named `now`. `{{random}}` without a length still refers to an input named `random`.
+
 ### Reference Arithmetic
 
 ```yaml

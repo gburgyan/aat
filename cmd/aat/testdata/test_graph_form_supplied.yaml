@@ -1,0 +1,15 @@
+version: "1.0.0"
+oas: oas/form_supplied.yaml
+
+nodes:
+  createRefund:
+    description: "Refund an order through a form-encoded request whose template writes some required fields itself"
+    adapter: createRefund
+    oas:
+      operationId: createRefund
+    inputs:
+      - name: orderId
+        type: string
+    outputs:
+      - name: refundId
+        type: string

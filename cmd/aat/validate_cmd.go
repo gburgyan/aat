@@ -213,7 +213,8 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 	validator := oas.NewValidator()
 	if templateErr == nil {
 		validator.WithOutputPaths(engine.OutputExtractPaths(g, registry)).
-			WithSuppliedFields(engine.TemplateSuppliedFields(g, registry))
+			WithSuppliedFields(engine.TemplateSuppliedFields(g, registry)).
+			WithHeaderInputs(engine.TemplateHeaderInputs(g, registry))
 	}
 	specPaths := validator.CollectSpecPaths(g)
 	if len(specPaths) > 0 {

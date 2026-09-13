@@ -1,6 +1,7 @@
 package oas
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -62,9 +63,39 @@ func (r ScaffoldExtractRule) MarshalYAML() (interface{}, error) {
 // graph file is in. Warnings name the operations it skips and the parts of a
 // request a template leaves to write by hand.
 func Generate(model *v3high.Document, specRef string) (*GenerateResult, error) {
+	return GenerateOperations(model, specRef, GenerateOptions{})
+}
+
+// GenerateOptions narrows what GenerateOperations scaffolds. With no filter
+// set, every operation is generated; otherwise an operation is generated when
+// it matches any of them.
+type GenerateOptions struct {
+	// OperationIDs are the operationIds to generate.
+	OperationIDs []string
+	// PathPrefixes are paths whose operations to generate, matched by whole
+	// segments: /carts matches /carts and /carts/{cartId}, but not /cartsummary.
+	PathPrefixes []string
+}
+
+// GenerateOperations is Generate for the operations opts selects, for a spec
+// too large to scaffold whole. An operationId the spec doesn't have, or a path
+// prefix that matches no path, is an error.
+func GenerateOperations(model *v3high.Document, specRef string, opts GenerateOptions) (*GenerateResult, error) {
 	if model.Paths == nil {
 		return nil, fmt.Errorf("OAS spec has no paths")
 	}
+	for _, prefix := range opts.PathPrefixes {
+		if !strings.HasPrefix(prefix, "/") {
+			return nil, fmt.Errorf("path %q must start with /", prefix)
+		}
+	}
+	filtered := len(opts.OperationIDs) > 0 || len(opts.PathPrefixes) > 0
+	wanted := make(map[string]bool, len(opts.OperationIDs))
+	for _, id := range opts.OperationIDs {
+		wanted[id] = true
+	}
+	var specIDs []string
+	matchedPrefixes := make(map[string]bool)
 
 	result := &GenerateResult{
 		Graph: &graph.Graph{
@@ -75,8 +106,21 @@ func Generate(model *v3high.Document, specRef string) (*GenerateResult, error) {
 	}
 
 	for pathStr, pathItem := range model.Paths.PathItems.FromOldest() {
+		pathMatched := false
+		for _, prefix := range opts.PathPrefixes {
+			if pathUnder(pathStr, prefix) {
+				matchedPrefixes[prefix] = true
+				pathMatched = true
+			}
+		}
 		for _, mo := range PathOperations(pathItem) {
 			op := mo.Operation
+			if op.OperationId != "" {
+				specIDs = append(specIDs, op.OperationId)
+			}
+			if filtered && !pathMatched && !wanted[op.OperationId] {
+				continue
+			}
 			if op.OperationId == "" {
 				result.Warnings = append(result.Warnings,
 					fmt.Sprintf("skipping %s %s: no operationId", mo.Method, pathStr))
@@ -101,11 +145,67 @@ func Generate(model *v3high.Document, specRef string) (*GenerateResult, error) {
 		}
 	}
 
+	if err := unmatchedFilters(opts, specIDs, matchedPrefixes); err != nil {
+		return nil, err
+	}
 	if len(result.Graph.Nodes) == 0 {
 		return nil, fmt.Errorf("no operations with operationId found in spec")
 	}
 
 	return result, nil
+}
+
+// pathUnder reports whether path is prefix or lies under it, by whole segments.
+func pathUnder(path, prefix string) bool {
+	trimmed := strings.TrimSuffix(prefix, "/")
+	return path == prefix || path == trimmed || strings.HasPrefix(path, trimmed+"/")
+}
+
+// unmatchedFilters returns an error naming the operationIds in opts that the
+// spec doesn't have, with the spec's operationIds that resemble each, and the
+// path prefixes that matched no path. It returns nil when every filter matched.
+func unmatchedFilters(opts GenerateOptions, specIDs []string, matchedPrefixes map[string]bool) error {
+	present := make(map[string]bool, len(specIDs))
+	for _, id := range specIDs {
+		present[id] = true
+	}
+	var problems []string
+	for _, id := range opts.OperationIDs {
+		if present[id] {
+			continue
+		}
+		problem := fmt.Sprintf("operationId %q is not in the spec", id)
+		if similar := similarOperationIDs(id, specIDs); len(similar) > 0 {
+			problem += fmt.Sprintf(" (did you mean %s?)", strings.Join(similar, ", "))
+		}
+		problems = append(problems, problem)
+	}
+	for _, prefix := range opts.PathPrefixes {
+		if !matchedPrefixes[prefix] {
+			problems = append(problems, fmt.Sprintf("path %q matches no path in the spec", prefix))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(problems, "; "))
+}
+
+// similarOperationIDs returns up to three of specIDs that contain id, or that id
+// contains, ignoring case.
+func similarOperationIDs(id string, specIDs []string) []string {
+	lower := strings.ToLower(id)
+	var similar []string
+	for _, candidate := range specIDs {
+		c := strings.ToLower(candidate)
+		if strings.Contains(c, lower) || strings.Contains(lower, c) {
+			similar = append(similar, candidate)
+			if len(similar) == 3 {
+				break
+			}
+		}
+	}
+	return similar
 }
 
 // generateNode builds a graph.Node from one OAS operation. The node's name is
@@ -174,7 +274,7 @@ func generateTemplate(method, path string, params []*v3high.Parameter, op *v3hig
 	// Body
 	if body.generated() {
 		if body.kind == bodyForm {
-			tmpl.Request.Body = buildPairs(body.fields(), "", "&")
+			tmpl.Request.Body = buildFormBody(body.fields())
 		} else {
 			tmpl.Request.Body = buildJSONBody(body.fields())
 		}
@@ -218,6 +318,27 @@ func buildPairs(fields []templateField, lead, sep string) string {
 		b.WriteString(render(f))
 	}
 	writeOptional(&b, optional, len(required) > 0, lead, sep, render)
+	return b.String()
+}
+
+// buildFormBody renders a form body: the required fields joined by &, then one
+// {{?name}}&name={{name}}{{/name}} block per optional field. With no required
+// field the body can start with &, which form parsers skip, so each optional
+// field costs one block, where gating the separator on the fields before it
+// would grow with the square of their number.
+func buildFormBody(fields []templateField) string {
+	required, optional := splitRequired(fields)
+	render := func(f templateField) string {
+		return f.name + "={{" + f.name + "}}"
+	}
+	var b strings.Builder
+	for i, f := range required {
+		if i > 0 {
+			b.WriteString("&")
+		}
+		b.WriteString(render(f))
+	}
+	writeOptional(&b, optional, true, "", "&", render)
 	return b.String()
 }
 
@@ -374,8 +495,17 @@ func describeRequestBody(op *v3high.Operation) (requestBody, []string) {
 	}
 	var composed bool
 	body.props, body.required, composed = objectShape(schema)
+	if len(body.props) == 0 && !composed && declaresNoFields(schema) {
+		// A body the spec declares empty, such as a GET's, needs nothing written.
+		return requestBody{}, nil
+	}
 
 	var notes []string
+	if body.kind == bodyForm {
+		if names := objectFormProperties(body.props); len(names) > 0 {
+			notes = append(notes, fmt.Sprintf("the template sends the object form properties %s as JSON text; write them by hand as bracketed pairs, such as %s[key]=value", strings.Join(names, ", "), names[0]))
+		}
+	}
 	switch {
 	case body.kind == bodyMultipart && len(body.props) > 0:
 		notes = append(notes, fmt.Sprintf("the %s body is not generated; its properties are inputs, so write the body by hand", body.mediaType))
@@ -389,6 +519,47 @@ func describeRequestBody(op *v3high.Operation) (requestBody, []string) {
 		notes = append(notes, fmt.Sprintf("the %s body schema declares no properties; write the body by hand", body.mediaType))
 	}
 	return body, notes
+}
+
+// declaresNoFields reports whether a body schema declares that it has no fields:
+// no properties, and additionalProperties: false.
+func declaresNoFields(schema *base.Schema) bool {
+	if schema == nil || (schema.Properties != nil && schema.Properties.Len() > 0) {
+		return false
+	}
+	extra := schema.AdditionalProperties
+	return extra != nil && extra.IsB() && !extra.B
+}
+
+// objectFormProperties returns the names of the form body properties that take
+// an object, or an array of objects, in any of their alternatives. A form body
+// sends those as bracketed keys, which a generated template doesn't write.
+func objectFormProperties(props []schemaProperty) []string {
+	var names []string
+	for _, p := range props {
+		if p.proxy != nil && takesObject([]*base.Schema{p.proxy.Schema()}, 0) {
+			names = append(names, p.name)
+		}
+	}
+	return names
+}
+
+// takesObject reports whether one of schemas, or an alternative it composes, is
+// an object or an array of objects, following arrays to maxShapeDepth.
+func takesObject(schemas []*base.Schema, depth int) bool {
+	if depth > maxShapeDepth {
+		return false
+	}
+	for _, s := range expandSchemas(schemas, 0) {
+		if schemaType(s) == "object" || (s.Properties != nil && s.Properties.Len() > 0) {
+			return true
+		}
+		if schemaType(s) == "array" && s.Items != nil && s.Items.IsA() && s.Items.A != nil &&
+			takesObject([]*base.Schema{s.Items.A.Schema()}, depth+1) {
+			return true
+		}
+	}
+	return false
 }
 
 // collectNodeInputs gathers inputs from an operation's parameters (path-item
@@ -592,7 +763,14 @@ func schemaType(schema *base.Schema) string {
 
 // mapSchemaType converts an OAS JSON Schema type+format to an AAT graph type.
 func mapSchemaType(schema *base.Schema) string {
-	if schema == nil {
+	return mapSchemaTypeAt(schema, 0)
+}
+
+// mapSchemaTypeAt is mapSchemaType for a schema that is the item type of depth
+// enclosing arrays. A circular $ref can make an array its own item type, so
+// past maxShapeDepth the item type is taken as string.
+func mapSchemaTypeAt(schema *base.Schema, depth int) string {
+	if schema == nil || depth > maxShapeDepth {
 		return "string"
 	}
 
@@ -615,7 +793,7 @@ func mapSchemaType(schema *base.Schema) string {
 	case "array":
 		elemType := "string"
 		if schema.Items != nil && schema.Items.IsA() {
-			elemType = mapSchemaType(schema.Items.A.Schema())
+			elemType = mapSchemaTypeAt(schema.Items.A.Schema(), depth+1)
 		}
 		return elemType + "[]"
 	case "object":

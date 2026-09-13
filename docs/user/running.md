@@ -350,15 +350,17 @@ See [Archives](archives.md) for the layout, what is and is not redacted, exporti
 
 ## OAS Validation
 
-When the graph references an OpenAPI spec (a graph-level `oas:` or per-node `oas` references — see [API Graphs: OAS Integration](graphs.md#oas-integration)), AAT validates each step's request and response against the spec as it runs. Violations show up in three places: an `OAS: N warning(s)` marker on the step line and a total after the summary, an `issues` map (`{"oas": N}`) in the `--json` summary and archive summary, and the per-step detail in the archive.
+When the graph references an OpenAPI spec (a graph-level `oas:` or per-node `oas` references — see [API Graphs: OAS Integration](graphs.md#oas-integration)), AAT validates each step's request body, when it is JSON or form-encoded, and its response body against the spec as it runs. Bracketed form keys such as `items[0][sku]` and `tags[]` are read as nested objects and arrays. A request body of another type, or a schema the validator can't compile, is marked as not validated (`OAS: request not validated` on the step line, `skipped` in the archive) and never fails a step. Violations show up in three places: an `OAS: N warning(s)` marker on the step line and a total after the summary, an `issues` map (`{"oas": N}`) in the `--json` summary and archive summary, and the per-step detail in the archive.
 
 The `--oas-validate` flag controls the mode:
 
 | Mode | Behavior |
 |------|----------|
-| `auto` | Default. Validate when specs are present; report violations as warnings |
-| `strict` | Like `auto`, but a request or response that violates the spec fails the step (outcome `failed`, cleanup still runs). Skipped validations and schema compilation warnings never fail a step; `expectFailure` steps are exempt. Use a `schema` assertion instead when only specific steps should be strict (see [Plans: Assertions](plans.md#assertions)) |
+| `auto` | Default. Validate when specs are present; report violations as warnings. A spec that fails to load is a warning on stderr, shown even with `--quiet` and `--json`, and the steps that use it are not validated |
+| `strict` | Like `auto`, but a request or response that violates the spec fails the step (outcome `failed`, cleanup still runs). Skipped validations and schema compilation warnings never fail a step; `expectFailure` steps are exempt. A spec that fails to load stops the run before the first request, with exit code `2`. Use a `schema` assertion instead when only specific steps should be strict (see [Plans: Assertions](plans.md#assertions)) |
 | `off` | Do not load specs or validate |
+
+Each spec loads once per command, and the validator is built only for the operations the graph's nodes name, so a spec with hundreds of operations adds little to startup.
 
 The default comes from `settings.oasValidation` in the environment file; the flag overrides it for one run. See [Environments: Runtime Settings](environments.md#runtime-settings).
 

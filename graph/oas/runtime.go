@@ -2,6 +2,7 @@ package oas
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -13,7 +14,7 @@ import (
 // ValidationResult captures OAS validation for a single step's request and response.
 type ValidationResult struct {
 	OperationID string         // from the node's OAS ref
-	Request     *PayloadResult // nil if request not validated (no body, non-JSON, etc.)
+	Request     *PayloadResult // nil if the request has no body
 	Response    *PayloadResult // nil if response not validated
 	Skipped     bool
 	SkipReason  string
@@ -24,6 +25,11 @@ type PayloadResult struct {
 	Valid               bool
 	Errors              []SchemaError
 	CompilationWarnings []string // messages for schemas that couldn't be compiled (library limitation)
+	// Skipped marks a payload that was not validated: a request body that is
+	// neither JSON nor form-encoded, or a schema that couldn't be compiled.
+	// SkipReason says which.
+	Skipped    bool
+	SkipReason string
 }
 
 // SchemaError is a single OAS validation error.
@@ -33,18 +39,19 @@ type SchemaError struct {
 	HowToFix string // from libopenapi-validator (optional)
 }
 
-// HasErrors returns true if request or response has validation errors.
+// HasErrors returns true if request or response has validation errors. A
+// payload that wasn't validated has none.
 func (r *ValidationResult) HasErrors() bool {
+	return r.ErrorCount() > 0
+}
+
+// HasSkippedPayload reports whether the request or response was left
+// unvalidated, as PayloadResult.Skipped describes.
+func (r *ValidationResult) HasSkippedPayload() bool {
 	if r == nil {
 		return false
 	}
-	if r.Request != nil && !r.Request.Valid {
-		return true
-	}
-	if r.Response != nil && !r.Response.Valid {
-		return true
-	}
-	return false
+	return (r.Request != nil && r.Request.Skipped) || (r.Response != nil && r.Response.Skipped)
 }
 
 // ErrorCount returns the total number of errors across both directions.
@@ -135,10 +142,21 @@ func ValidateStep(
 
 	result := &ValidationResult{OperationID: operationID}
 
-	// Validate request using WithPathItem to bypass path matching
-	if len(reqBody) > 0 && isJSON(reqBody) {
-		_, reqErrs := v.ValidateHttpRequestSyncWithPathItem(httpReq, pathItem, specPath)
-		result.Request = convertValidationErrors(reqErrs)
+	// Validate the request body using WithPathItem to bypass path matching. A
+	// form body goes through the body validator alone: the full request check
+	// would also judge parameters against the stand-in request built above.
+	if len(reqBody) > 0 {
+		contentType := headerValue(reqHeaders, "Content-Type")
+		switch {
+		case isFormContentType(contentType):
+			_, reqErrs := v.GetRequestBodyValidator().ValidateRequestBodyWithPathItem(httpReq, pathItem, specPath)
+			result.Request = convertValidationErrors(reqErrs)
+		case isJSON(reqBody):
+			_, reqErrs := v.ValidateHttpRequestSyncWithPathItem(httpReq, pathItem, specPath)
+			result.Request = convertValidationErrors(reqErrs)
+		default:
+			result.Request = &PayloadResult{Skipped: true, SkipReason: unvalidatedBodyReason(contentType)}
+		}
 	}
 
 	// Validate response using the response body sub-validator with PathItem
@@ -251,11 +269,43 @@ func convertValidationErrors(errs []*valerrors.ValidationError) *PayloadResult {
 		}
 	}
 
-	return &PayloadResult{
+	result := &PayloadResult{
 		Valid:               len(schemaErrors) == 0 && len(compilationWarnings) == 0,
 		Errors:              schemaErrors,
 		CompilationWarnings: compilationWarnings,
 	}
+	if len(schemaErrors) == 0 && len(compilationWarnings) > 0 {
+		result.Skipped = true
+		result.SkipReason = "the schema could not be compiled: " + compilationWarnings[0]
+	}
+	return result
+}
+
+// headerValue returns the value of the header name in headers, matching the
+// name case-insensitively.
+func headerValue(headers map[string]string, name string) string {
+	for key, value := range headers {
+		if strings.EqualFold(key, name) {
+			return value
+		}
+	}
+	return ""
+}
+
+// isFormContentType reports whether a Content-Type is form-encoded.
+func isFormContentType(contentType string) bool {
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	return strings.EqualFold(strings.TrimSpace(mediaType), formMediaType)
+}
+
+// unvalidatedBodyReason explains why a request body with contentType is not
+// validated.
+func unvalidatedBodyReason(contentType string) string {
+	mediaType, _, _ := strings.Cut(contentType, ";")
+	if mediaType = strings.TrimSpace(mediaType); mediaType == "" {
+		return "a request body that is neither JSON nor form-encoded is not validated"
+	}
+	return fmt.Sprintf("%s request bodies are not validated", mediaType)
 }
 
 // isJSON returns true if the data looks like JSON (starts with { or [).

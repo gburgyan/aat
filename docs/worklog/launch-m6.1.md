@@ -151,3 +151,47 @@ The MCP server's `get_sample_response` gains `path` and `shape`.
   `llms.txt` must name an existing page, and every anchor a heading on that page.
 - **Two copies of the primer, for two needs.** `aat docs primer` matches the installed binary, while the site deploys
   from `main`, and the primer says so.
+
+## 2026-09-13 — Large specs, form bodies, and generated values (the first pre-Stripe PR)
+
+**What:** Before the next discovery run, whose API publishes a large OpenAPI spec and takes form-encoded requests, a
+research pass ran that spec and those request shapes through AAT. It found that AAT could not load the spec, and that
+form bodies, idempotency keys, and cleanup broke on the API. This PR fixes the loading, validation, request, and
+expression parts; the cleanup and validation-gap work follows in a second, stacked PR.
+
+**Measurements** (the spec: OpenAPI 3.0, 8,028,700 bytes, 594 operations, 593 form bodies, 622 nullable `anyOf`
+schemas):
+- Before: `aat generate` exited 2 on `infinite circular reference detected`, and `aat run` quietly skipped validation.
+- Loading for runtime validation took 51.6 s, almost all of it compiling every operation's schemas. With the nine
+  operations a small project names, it takes 3.25 s.
+- A response with `null` in a nullable `anyOf` field got 8 errors; it now gets none, and a wrong type still fails.
+- `aat generate` over the whole spec gives 552 warnings instead of 663.
+
+**Decisions:**
+- **Tolerate circular references instead of skipping the check.** libopenapi builds the model anyway, and its renderer
+  and the validator's `$ref` fallback read the cycles it records. Only errors that are all circular references pass;
+  anything else still fails the load. Its logger writes JSON to stdout, so it is discarded.
+- **Build the validator for the graph's operations.** A copy of the model keeps only the path items that hold them.
+  Warm-up keys its cache by schema content, and steps are validated against path items from the full model, so an
+  operation left out still validates on first use.
+- **Add a null alternative when loading, not after.** The validator's 3.0 transform adds `null` to a schema's own
+  `type`, `allOf`, and `enum`, not to `anyOf` or `oneOf`. Appending `{type: "null"}` to those compositions in the YAML
+  tree before the model is built fixes validation, generation, and MCP views at once, for 3.0 documents only.
+- **Our own form decoder.** The library's form support rejects `@`, `:`, and `,` in decoded values and ignores `anyOf`
+  when converting types. The decoder nests bracketed keys, collects `[]` and repeated keys into arrays, and converts
+  values by the schema's alternatives. A body type it doesn't read is recorded as skipped, not as valid.
+- **`strict` fails on a spec that doesn't load,** with exit code 2 before any request; `auto` warns on stderr, which
+  `--quiet` and `--json` no longer hide.
+- **Iteration joins by position, not everywhere.** In a form body or a query string, a block that writes a whole pair
+  joins with `&`, and one whose body starts or ends with `&` is concatenated. Other blocks keep commas, so hand-written
+  `explode: false` lists still work. Only form bodies are trimmed.
+- **Resolve a step's inputs once.** Memoizing only generated values would still let pool picks and dates change
+  between attempts, and a retry that sends a different idempotency key defeats the key.
+- **Generated-value names say their format:** `today` a date, `now` an RFC 3339 time, `unixtime` integer seconds. Offsets
+  name a unit, which leaves `+` and `-` free for later arithmetic. `uuid`, `now`, and `unixtime` become reserved words.
+- **The timeout message names the limit only when it applies:** a `net.Error` timeout after the whole limit passed,
+  with the run's context still live.
+
+**Deferred:** outputs from an expected-failure body (the primer documents two workarounds), a pruned validator beyond
+the graph's operations, expanding maps into bracketed pairs when rendering, and `--tag` for `aat generate`, since the
+spec has no tags.

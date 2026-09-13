@@ -488,7 +488,7 @@ Each entry in `on` and `failOn` is either an **error category** name or an **HTT
 | `client` | Any other 4xx |
 | `auth` | HTTP 401, 403 |
 | `server` | HTTP 500, 501, and any other 5xx not listed under `transient` |
-| `timeout` | Request or context deadline exceeded |
+| `timeout` | No response within aat's 30-second request timeout, or a context deadline exceeded |
 | `network` | DNS and other connection-level errors |
 | `adapter` | Template rendering, input resolution, or output extraction errors |
 | `response_error` | A 2xx response whose body matched the graph's `errorDetection` rules |
@@ -500,6 +500,8 @@ When `on` is omitted, the default retries `transient`, `timeout`, and `server` f
 - **The server can ask for longer.** A retry waits at least as long as the failed response asks, in seconds or until an HTTP date. The request comes from the `Retry-After` header, or on a 429 without one, the `RateLimit-Reset` header.
 - **Past 60 seconds, the retries stop.** The step fails with the action `failed_fast`, and the error classification's detail says how long the server asked for.
 - **Every wait counts toward the step's duration,** and Ctrl+C interrupts it.
+
+**Every attempt sends the same inputs.** A step's values are resolved once, before its first attempt, so a retry resends the same request: a pool pick, a date, or an overlay value doesn't change between attempts. A plan-level `--retries` rerun starts the plan again and resolves them anew.
 
 To keep a rate-limited API from answering 429 in the first place, set [`settings.minRequestInterval`](environments.md#request-pacing).
 

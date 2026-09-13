@@ -39,6 +39,18 @@ the graph and plan formats may still change before 1.0.
   - `llms-full.txt` at the docs site's root holds the whole primer, and `llms.txt` indexes it and the reference pages.
   - `aat docs primer` prints the same primer from the binary, in the version that matches it.
   - The primer links to docs pages by URL, so its links also work outside the site.
+- OAS validation checks form-encoded request bodies (`application/x-www-form-urlencoded`) against the operation's
+  schema. Bracketed keys such as `items[0][sku]=…` and `tags[]=…` are read as nested objects and arrays, and values
+  take the types the schema allows. Before, only JSON request bodies were validated, and a form body was not checked.
+- `{{@index}}` in an iteration block is the element's position, counting from 0, for keys such as
+  `items[{{@index}}][sku]`.
+- `aat generate --operation` and `--path` scaffold only some of a spec's operations: the operationIds named, or the
+  operations under a path, matched by whole segments. An operationId the spec doesn't have is an error that suggests
+  similar ones, and so is a path that matches nothing.
+- Expressions for generated values and timestamps: `{{uuid}}` (a random version 4 UUID), `{{random N}}` (`N` random
+  digits and lowercase letters), `{{now}}` (UTC, RFC 3339), and `{{unixtime}}` (Unix seconds, an integer). `now` and
+  `unixtime` take offsets in seconds, minutes, hours, or days, such as `{{unixtime - 1 hours}}`. Each occurrence
+  generates its own value, and a retried step resends the values its first attempt generated.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
@@ -89,8 +101,56 @@ the graph and plan formats may still change before 1.0.
   - `plans.md` no longer says `{}` skips graph defaults for required inputs.
   - `value-flow.md` says an inline `min` or `max` can use `field` alone, and how ties break.
   - `validation.md` no longer claims plan validation checks assertion types.
+- `--oas-validate strict` stops before the first request, with exit code 2, when a spec the graph references fails to
+  load. Before, the run printed a warning and continued without validating, and `--quiet` and `--json` hid the
+  warning. In `auto` mode the warning now goes to stderr, where `--quiet` and `--json` keep it visible. `aat prompt`
+  behaves the same way.
+- In a form body, or in a path after its `?`, an iteration block whose body writes a whole `key=value` pair joins its
+  copies with `&` instead of commas, so `{{#tags}}tags[]={{.}}{{/tags}}` sends `tags[]=a&tags[]=b`. A block whose body
+  starts or ends with `&` is repeated with nothing between the copies. Blocks elsewhere, including JSON bodies and
+  blocks inside a pair, still join with commas.
+- `aat generate` writes each optional form body field as one conditional block that brings its own `&`, so a body of
+  many optional fields grows with their number rather than its square. A request body the spec declares empty (no
+  properties and `additionalProperties: false`) gets no body and no warning. A form body property that takes an object,
+  or an array of objects, gets a warning to write its keys by hand as bracketed pairs.
+- A run that stops on a step's error names the step, as in `step "addSocks" (addItem): executing HTTP request: …`, so
+  the `aat:` line and the `--json` error say which step failed.
+- A retried step sends the same inputs on every attempt. Its values are resolved once, before the first attempt, so a
+  random pool pick, a `today` date, and an overlay value no longer change between attempts. A plan-level `--retries`
+  rerun still resolves them again.
+- `uuid`, `now`, and `unixtime` are reserved words in expressions, so `{{now}}` no longer refers to an input named
+  `now`. An offset in hours or minutes on `today`, or on a reference, is an error that suggests `now` or `unixtime`.
+- Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
+  `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
+  bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an
+  object after an expected failure.
 
 ### Fixed
+- OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another
+  schema, used to fail with `infinite circular reference detected`, so `aat generate`, `aat validate`, and the MCP
+  server rejected the spec, and `aat run` skipped OAS validation. Large published specs have such cycles. Other
+  errors in a spec still fail it, and libopenapi's log lines no longer reach stdout.
+- Runs with OAS validation start quickly on a spec with hundreds of operations. The validator is built for the
+  operations the graph's nodes name, not for the whole spec, which could take most of a minute before the first
+  request.
+- OAS validation accepts `null` for an OpenAPI 3.0 schema marked `nullable: true` that is built with `anyOf` or
+  `oneOf`, such as a field that holds either an ID or an expanded object. The validator added `null` only to a
+  schema's own `type`, so a response with such a field set to `null` failed with `got null, want object`.
+- A request body that is neither JSON nor form-encoded, or a schema the validator can't compile, is reported as not
+  validated. The archive marks the payload `skipped` with a reason, the step line shows `OAS: request not validated` or
+  `OAS: response not validated`, and a `schema` assertion is skipped with the reason. Before, the step line could read
+  `OAS: 0 warning(s)`, and a `schema` assertion failed with an empty message.
+- A form-encoded body no longer sends the final newline of a `body: |` block, which the server read as part of the last
+  value. Whitespace around the body is removed for form bodies only.
+- The static OAS check no longer reports a required form field or query parameter as missing when the template writes
+  it. The keys of a form-encoded body count as supplied, and a bracketed key such as `metadata[source]` supplies
+  `metadata`.
+- The static OAS check no longer reports an input that the template sends only in request headers, such as an
+  idempotency key, as missing from the operation's parameters and request body. The template names the header, and
+  specs often leave such headers undeclared, so `aat validate --strict` failed on it.
+- A request that times out says so, naming aat's 30-second request timeout, instead of giving only Go's
+  `context deadline exceeded (Client.Timeout exceeded while awaiting headers)`. The limit is named only when the whole
+  limit passed, so a shorter timeout or an interrupted run isn't blamed on it.
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,

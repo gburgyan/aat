@@ -1,7 +1,10 @@
 package plan
 
 import (
+	crand "crypto/rand"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -11,9 +14,10 @@ import (
 
 // ExprContext provides runtime values for expression evaluation.
 type ExprContext struct {
-	Now    time.Time           // anchor for "today" (default: time.Now())
+	Now    time.Time           // anchor for "today", "now", and "unixtime" (default: time.Now())
 	Env    func(string) string // env var lookup (default: os.Getenv)
 	Values map[string]any      // already-resolved inputs for relative refs
+	Random io.Reader           // source for "uuid" and "random N" (default: crypto/rand)
 }
 
 // defaults fills in zero-valued fields with production defaults.
@@ -26,6 +30,9 @@ func (ec ExprContext) defaults() ExprContext {
 	}
 	if ec.Values == nil {
 		ec.Values = make(map[string]any)
+	}
+	if ec.Random == nil {
+		ec.Random = crand.Reader
 	}
 	return ec
 }
@@ -129,25 +136,37 @@ func splitExprSegments(s string) ([]segment, error) {
 type exprKind int
 
 const (
-	exprToday exprKind = iota // "today" optionally with offset
-	exprEnv                   // "env.VAR"
-	exprRef                   // "identifier" optionally with offset
+	exprToday    exprKind = iota // "today" optionally with offset
+	exprEnv                      // "env.VAR"
+	exprRef                      // "identifier" optionally with offset
+	exprUUID                     // "uuid"
+	exprRandom                   // "random N"
+	exprNow                      // "now" optionally with a time offset
+	exprUnixtime                 // "unixtime" optionally with a time offset
 )
 
 // parsedExpr is an intermediate representation of a single expression.
 type parsedExpr struct {
 	kind     exprKind
-	envVar   string // for exprEnv
-	refName  string // for exprRef
-	offset   int    // days offset (positive or negative)
-	hasArith bool   // whether arithmetic was specified
+	envVar   string        // for exprEnv
+	refName  string        // for exprRef
+	offset   int           // days offset (positive or negative)
+	hasArith bool          // whether arithmetic was specified
+	length   int           // for exprRandom
+	duration time.Duration // time offset for exprNow and exprUnixtime
 }
+
+// maxRandomLength is the longest value {{random N}} generates.
+const maxRandomLength = 64
 
 // Regex for expression parsing.
 var (
 	exprEnvRe       = regexp.MustCompile(`^env\.([A-Za-z_][A-Za-z0-9_]*)$`)
 	exprArithRe     = regexp.MustCompile(`^(\S+)\s*([+-])\s*(\d+)\s+days?$`)
 	exprIdentOnlyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	exprClockRe     = regexp.MustCompile(`^(now|unixtime)(?:\s*([+-])\s*(\d+)\s+([A-Za-z]+))?$`)
+	exprRandomRe    = regexp.MustCompile(`^random\s+(\S+)$`)
+	exprOffsetRe    = regexp.MustCompile(`^(\S+)\s*([+-])\s*(\d+)\s+([A-Za-z]+)$`)
 )
 
 func parseExprInner(inner string) (*parsedExpr, error) {
@@ -156,6 +175,39 @@ func parseExprInner(inner string) (*parsedExpr, error) {
 	// env.VAR
 	if m := exprEnvRe.FindStringSubmatch(inner); m != nil {
 		return &parsedExpr{kind: exprEnv, envVar: m[1]}, nil
+	}
+
+	// now and unixtime, optionally +/- N seconds, minutes, hours, or days
+	if m := exprClockRe.FindStringSubmatch(inner); m != nil {
+		pe := &parsedExpr{kind: exprNow}
+		if m[1] == "unixtime" {
+			pe.kind = exprUnixtime
+		}
+		if m[2] != "" {
+			d, err := offsetDuration(m[3], m[4], inner)
+			if err != nil {
+				return nil, err
+			}
+			if m[2] == "-" {
+				d = -d
+			}
+			pe.duration = d
+		}
+		return pe, nil
+	}
+
+	// uuid
+	if inner == "uuid" {
+		return &parsedExpr{kind: exprUUID}, nil
+	}
+
+	// random N
+	if m := exprRandomRe.FindStringSubmatch(inner); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil || n < 1 || n > maxRandomLength {
+			return nil, fmt.Errorf("random takes a length from 1 to %d, not %q, in %q", maxRandomLength, m[1], inner)
+		}
+		return &parsedExpr{kind: exprRandom, length: n}, nil
 	}
 
 	// Arithmetic: <something> +/- N days
@@ -170,6 +222,9 @@ func parseExprInner(inner string) (*parsedExpr, error) {
 		if sign == "-" {
 			offset = -n
 		}
+		if base == "uuid" || base == "random" {
+			return nil, fmt.Errorf("%s takes no offset, in %q", base, inner)
+		}
 		if base == "today" {
 			return &parsedExpr{kind: exprToday, offset: offset, hasArith: true}, nil
 		}
@@ -177,6 +232,19 @@ func parseExprInner(inner string) (*parsedExpr, error) {
 			return &parsedExpr{kind: exprRef, refName: base, offset: offset, hasArith: true}, nil
 		}
 		return nil, fmt.Errorf("invalid expression base %q in %q", base, inner)
+	}
+
+	// An offset in a unit other than days, on a base that counts days or on a
+	// generated value
+	if m := exprOffsetRe.FindStringSubmatch(inner); m != nil {
+		base := m[1]
+		if base == "uuid" || base == "random" {
+			return nil, fmt.Errorf("%s takes no offset, in %q", base, inner)
+		}
+		if base == "today" || exprIdentOnlyRe.MatchString(base) {
+			return nil, fmt.Errorf("%s counts days, in %q; for a time use {{now %s %s %s}} or {{unixtime %s %s %s}}",
+				base, inner, m[2], m[3], m[4], m[2], m[3], m[4])
+		}
 	}
 
 	// Plain "today"
@@ -210,9 +278,24 @@ func evalOneExpr(inner string, ctx ExprContext) (any, error) {
 		}
 		return val, nil
 
+	case exprUUID:
+		return newUUID(ctx.Random)
+
+	case exprRandom:
+		return randomString(ctx.Random, pe.length)
+
+	case exprNow:
+		return ctx.Now.Add(pe.duration).UTC().Format(time.RFC3339), nil
+
+	case exprUnixtime:
+		return ctx.Now.Add(pe.duration).Unix(), nil
+
 	case exprRef:
 		raw, ok := ctx.Values[pe.refName]
 		if !ok {
+			if pe.refName == "random" {
+				return nil, fmt.Errorf("reference %q not found in resolved values; for a random value write {{random N}}", pe.refName)
+			}
 			return nil, fmt.Errorf("reference %q not found in resolved values", pe.refName)
 		}
 		if !pe.hasArith {
@@ -234,4 +317,67 @@ func evalOneExpr(inner string, ctx ExprContext) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown expression kind %d", pe.kind)
 	}
+}
+
+// offsetDuration converts an offset of number units, as written in expression
+// inner, to a duration. A day is 24 hours.
+func offsetDuration(number, unit, inner string) (time.Duration, error) {
+	n, err := strconv.ParseInt(number, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid offset in expression %q: %w", inner, err)
+	}
+	var per time.Duration
+	switch strings.TrimSuffix(strings.ToLower(unit), "s") {
+	case "second":
+		per = time.Second
+	case "minute":
+		per = time.Minute
+	case "hour":
+		per = time.Hour
+	case "day":
+		per = 24 * time.Hour
+	default:
+		return 0, fmt.Errorf("unknown time unit %q in expression %q; use seconds, minutes, hours, or days", unit, inner)
+	}
+	if n > int64(math.MaxInt64/per) {
+		return 0, fmt.Errorf("offset too large in expression %q", inner)
+	}
+	return time.Duration(n) * per, nil
+}
+
+// newUUID returns a random version 4 UUID, in lowercase, built from bytes read
+// from r.
+func newUUID(r io.Reader) (string, error) {
+	var b [16]byte
+	if _, err := io.ReadFull(r, b[:]); err != nil {
+		return "", fmt.Errorf("generating uuid: %w", err)
+	}
+	b[6] = b[6]&0x0f | 0x40 // version 4
+	b[8] = b[8]&0x3f | 0x80 // RFC 4122 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// randomAlphabet is what {{random N}} draws from: digits and lowercase letters,
+// which need no escaping in a path, query, header, or JSON string, and stay
+// distinct where case is ignored.
+const randomAlphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+// randomString returns n characters drawn uniformly from randomAlphabet, using
+// bytes read from r. A byte of 252 or more is skipped, since 252 is the largest
+// multiple of 36 below 256, so every character is equally likely.
+func randomString(r io.Reader, n int) (string, error) {
+	out := make([]byte, 0, n)
+	buf := make([]byte, n)
+	for len(out) < n {
+		chunk := buf[:n-len(out)]
+		if _, err := io.ReadFull(r, chunk); err != nil {
+			return "", fmt.Errorf("generating random value: %w", err)
+		}
+		for _, c := range chunk {
+			if c < 252 {
+				out = append(out, randomAlphabet[c%36])
+			}
+		}
+	}
+	return string(out), nil
 }

@@ -1,0 +1,17 @@
+version: "1.0.0"
+oas: oas/circular.yaml
+
+nodes:
+  getOrder:
+    description: "Get an order, whose schema refers back to itself through its last payment"
+    adapter: getOrder
+    oas:
+      operationId: getOrder
+    inputs:
+      - name: orderId
+        type: string
+    outputs:
+      - name: orderId
+        type: string
+      - name: status
+        type: string

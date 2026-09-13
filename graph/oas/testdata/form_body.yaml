@@ -1,0 +1,103 @@
+openapi: "3.0.3"
+info:
+  title: Refunds
+  version: "1.0.0"
+# A form-encoded request body with the shapes form APIs use: nested objects and
+# arrays of objects in bracketed keys, fields that take a number or an empty
+# string, an object or an empty string, and an array written as one
+# comma-separated value.
+paths:
+  /refunds:
+    post:
+      operationId: createRefund
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            encoding:
+              metadata:
+                style: deepObject
+                explode: true
+              items:
+                style: deepObject
+                explode: true
+              shipping:
+                style: deepObject
+                explode: true
+              reasons:
+                style: form
+                explode: false
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - orderId
+                - amount
+              properties:
+                orderId:
+                  type: string
+                amount:
+                  type: integer
+                partial:
+                  type: boolean
+                rate:
+                  type: number
+                email:
+                  type: string
+                note:
+                  anyOf:
+                    - type: integer
+                    - type: string
+                      enum:
+                        - ""
+                metadata:
+                  type: object
+                  additionalProperties:
+                    type: string
+                items:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - sku
+                    properties:
+                      sku:
+                        type: string
+                      quantity:
+                        type: integer
+                shipping:
+                  anyOf:
+                    - type: object
+                      properties:
+                        city:
+                          type: string
+                    - type: string
+                      enum:
+                        - ""
+                expand:
+                  type: array
+                  items:
+                    type: string
+                reasons:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        "200":
+          description: The refund
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  refundId:
+                    type: string
+        default:
+          description: An error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: object

@@ -32,6 +32,37 @@ func TestGraphValidate_WithOAS_Valid(t *testing.T) {
 	assert.Equal(t, 0, code)
 }
 
+func TestGraphValidate_WithCircularOAS(t *testing.T) {
+	code := graphValidateCommand(&graphValidateArgs{
+		GraphPath: "testdata/test_graph_with_circular_oas.yaml",
+	})
+	assert.Equal(t, 0, code)
+}
+
+// TestGraphValidate_FormTemplateSuppliesRequiredField checks that required form
+// fields and a required query parameter that the template writes itself,
+// bracketed keys included, are not reported as missing.
+func TestGraphValidate_FormTemplateSuppliesRequiredField(t *testing.T) {
+	code := graphValidateCommand(&graphValidateArgs{
+		GraphPath:     "testdata/test_graph_form_supplied.yaml",
+		TemplatesPath: "testdata/templates_form",
+		Strict:        true,
+	})
+	assert.Equal(t, 0, code)
+}
+
+// TestGraphValidate_HeaderOnlyInputNotInSpec checks that an input the template
+// sends only in a header the spec doesn't declare, an idempotency key, passes
+// --strict.
+func TestGraphValidate_HeaderOnlyInputNotInSpec(t *testing.T) {
+	code := graphValidateCommand(&graphValidateArgs{
+		GraphPath:     "testdata/test_graph_header_input.yaml",
+		TemplatesPath: "testdata/templates_header",
+		Strict:        true,
+	})
+	assert.Equal(t, 0, code)
+}
+
 func TestGraphValidate_WithOAS_Errors(t *testing.T) {
 	code := graphValidateCommand(&graphValidateArgs{
 		GraphPath: "testdata/test_graph_oas_bad_op.yaml",
