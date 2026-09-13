@@ -10,6 +10,7 @@ import (
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/internal/httpstatus"
+	"github.com/gburgyan/aat/internal/predicate"
 )
 
 // RetryCategories lists the error category names accepted in retry.on and
@@ -87,7 +88,7 @@ func validateAssertions(prefix string, assertions *Assertions) []string {
 		case !IsAssertionType(ma.Type):
 			errs = append(errs, fmt.Sprintf("%s: assertion %d has unknown type %q (use %s)", prefix, j, ma.Type, strings.Join(AssertionTypes(), ", ")))
 		case ma.Type == "predicate" && ma.Expr != "":
-			if err := ValidatePredicate(ma.Expr); err != nil {
+			if err := predicate.Validate(ma.Expr); err != nil {
 				errs = append(errs, fmt.Sprintf("%s: invalid predicate assertion %d: %v", prefix, j, err))
 			} else if err := ValidatePredicateExprs(ma.Expr); err != nil {
 				errs = append(errs, fmt.Sprintf("%s: invalid expression in predicate assertion %d: %v", prefix, j, err))
@@ -485,7 +486,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 				errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for selection %q", i, sid, strategy, selName))
 			}
 			if sel.Filter != "" {
-				if err := ValidatePredicate(sel.Filter); err != nil {
+				if err := predicate.Validate(sel.Filter); err != nil {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for selection %q: %v", i, sid, selName, err))
 				}
 			}
@@ -513,7 +514,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 				if refErr == nil {
 					if outs, ok := outputsByNode[srcGraphNode]; ok {
 						if out, outExists := outs[srcField]; outExists && len(out.ElementFields) > 0 {
-							for _, field := range PredicateFields(sel.Filter) {
+							for _, field := range predicate.Fields(sel.Filter) {
 								found := false
 								for _, ef := range out.ElementFields {
 									if ef.Name == field {
@@ -541,7 +542,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 					errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for %q", i, sid, sel.Strategy, name))
 				}
 				if sel.Filter != "" {
-					if err := ValidatePredicate(sel.Filter); err != nil {
+					if err := predicate.Validate(sel.Filter); err != nil {
 						errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for %q: %v", i, sid, name, err))
 					}
 				}
@@ -561,7 +562,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 				}
 			}
 			if sv.Constraint != "" {
-				if err := ValidatePredicate(sv.Constraint); err != nil {
+				if err := predicate.Validate(sv.Constraint); err != nil {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, sid, name, err))
 				}
 			}

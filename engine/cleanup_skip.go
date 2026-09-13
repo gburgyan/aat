@@ -7,7 +7,7 @@ import (
 	"strconv"
 
 	"github.com/gburgyan/aat/graph"
-	"github.com/gburgyan/aat/plan"
+	"github.com/gburgyan/aat/internal/predicate"
 )
 
 // resolveCleanupInputs resolves a cleanup node's inputs by output name: first
@@ -73,7 +73,7 @@ func (e *Engine) cleanupSkip(entry CleanupEntry, cleanupFor string, ancestors []
 	if pairing.When == "" {
 		return nil, ""
 	}
-	holds, err := plan.EvalPredicate(pairing.When, conditionOutputs(entry, ancestors, state))
+	holds, err := predicate.Eval(pairing.When, conditionOutputs(entry, ancestors, state))
 	if err != nil {
 		return nil, fmt.Sprintf("when %s: %v", pairing.When, err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/internal/predicate"
 	"github.com/gburgyan/aat/plan"
 	"github.com/tidwall/gjson"
 )
@@ -657,7 +658,7 @@ func checkConstraint(constraint string, candidate any, resolvedInputs map[string
 		ctx[k] = v
 	}
 	ctx["value"] = candidate
-	return plan.EvalPredicate(constraint, ctx)
+	return predicate.Eval(constraint, ctx)
 }
 
 // resolveWithFallback tries the StepValue default (with expression evaluation

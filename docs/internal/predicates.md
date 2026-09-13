@@ -1,18 +1,29 @@
 # Predicate Expressions
 
-The `plan` package includes a self-contained predicate expression parser and evaluator. Predicates are boolean expressions evaluated against a `map[string]any` context — used for array filtering (Task 7), constraint checking, and mechanical assertions (Task 9).
+The `internal/predicate` package is a self-contained predicate expression parser and evaluator. Predicates are boolean expressions evaluated against a `map[string]any` context — used for array filtering, constraint checking, mechanical assertions, and cleanup `when` conditions. It is a foundation package with no aat imports, so `graph` can check a cleanup pairing's `when` while it validates a graph.
 
 ## API
 
 ```go
 // Parse + evaluate. Returns true/false or error.
-plan.EvalPredicate(expr string, context map[string]any) (bool, error)
+predicate.Eval(expr string, context map[string]any) (bool, error)
+
+// Parse once, evaluate against many contexts.
+p, err := predicate.Parse(expr)
+ok, err := p.Eval(context)
 
 // Parse-only syntax check. No context needed.
-plan.ValidatePredicate(expr string) error
+predicate.Validate(expr string) error
+
+// The field names an expression reads, and its quoted string literals.
+predicate.Fields(expr string) []string
+predicate.Literals(expr string) ([]string, error)
+
+// Evaluate after replacing each string literal expand returns a value for.
+predicate.EvalExpanding(expr string, context map[string]any, expand func(literal string) (any, bool, error)) (bool, error)
 ```
 
-`ValidatePredicate` is called during `Validate()` for plan-time syntax checking. `EvalPredicate` is called at runtime by the engine.
+`plan.Validate()` and `graph.Validate()` call `Validate` for syntax checking, and the engine calls `Eval` and `Parse` at run time. `plan.EvalPredicateWithExprs` builds on `EvalExpanding` to expand `{{…}}` expressions in an assertion's quoted strings.
 
 ## Grammar
 
@@ -38,7 +49,7 @@ arrayLiteral = "[" ( expression ( "," expression )* )? "]"
 | Kind | Examples | Notes |
 |------|----------|-------|
 | Number | `500`, `3.14`, `-10` | Parsed as float64 |
-| String | `'economy'`, `'AA'` | Single-quoted only |
+| String | `'economy'`, `"AA"` | Single- or double-quoted |
 | Bool | `true`, `false` | Keywords |
 | Ident | `carrier`, `price.amount` | Dots included in token |
 | Operator | `==`, `!=`, `<`, `>`, `<=`, `>=`, `&&`, `\|\|`, `!` | |
@@ -100,22 +111,25 @@ The evaluator returns errors (never panics) for:
 
 ## Where Predicates Are Used
 
-### Plan Validation (compile-time)
+### Validation (compile-time)
 
-`Validate()` calls `ValidatePredicate()` to check syntax for:
+`plan.Validate()` calls `predicate.Validate()` to check syntax for:
 
-1. **`step.Values[name].Select.Filter`** — array filtering expressions
+1. **`step.Values[name].Select.Filter`** and named selection filters — array filtering expressions
 2. **`step.Values[name].Constraint`** — value constraint expressions
 3. **`step.Assertions.Mechanical[].Expr`** — predicate assertions (when `Type == "predicate"`)
 
-### Runtime (downstream tasks)
+`graph.Validate()`, which runs whenever a graph loads, checks each cleanup pairing's `when`: it parses, and `predicate.Fields` names only outputs of the node that declares it.
 
-| Consumer | Task | How |
-|----------|------|-----|
-| Array selection `filter` strategy | Task 7 | `EvalPredicate(filter, elementAsMap)` for each array element |
-| Array selection `match` strategy | Task 7 | Same mechanism, different strategy wrapper |
-| Constraint checking | Task 7+ | `EvalPredicate(constraint, {"value": v})` |
-| Mechanical predicate assertions | Task 9 | `EvalPredicate(expr, responseOutputs)` |
+### Runtime
+
+| Consumer | How |
+|----------|-----|
+| Array selection `filter` strategy | `predicate.Parse(filter)` once, then `Eval(elementAsMap)` for each array element |
+| Array selection `match` strategy | Same, counting every matching element |
+| Constraint checking | `predicate.Eval(constraint, {"value": v, ...earlier inputs})` |
+| Mechanical predicate assertions | `plan.EvalPredicateWithExprs(expr, responseOutputs, ectx)`, which expands `{{…}}` in quoted strings |
+| Cleanup `when` | `predicate.Eval(when, outputsOfTheRegisteringStep)` |
 
 ## Example Expressions
 
@@ -141,8 +155,8 @@ response.price.currency == 'USD'
 
 ## Implementation Notes
 
-- Source: `plan/predicate.go` (~290 lines)
-- Tests: `plan/predicate_test.go` (~350 lines, ~55 test cases)
+- Source: `internal/predicate/predicate.go`; `plan/predicate_exprs.go` adds the `{{…}}` expansion
+- Tests: `internal/predicate/predicate_test.go`
 - No external dependencies — pure Go, no regex
 - Tokenizer scans all tokens at once, parser consumes the token slice
 - AST is five node types implementing a `node` interface

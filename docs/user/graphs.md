@@ -253,7 +253,7 @@ A skipped cleanup sends nothing, so its chain doesn't run either. Where skips ap
 - **Archive:** `cleanupSkipped`, and `cleanup_skipped` in `--json`.
 - **[`aat run show`](archives.md#inspecting-a-run-from-the-cli):** under `cleanup skipped:`.
 
-`aat validate` checks that `releasedBy` names other existing nodes, each once. It also checks that `when` parses and names outputs of the node that declares it.
+Loading the graph checks that `releasedBy` names other existing nodes, each once, and that `when` parses and names outputs of the node that declares it. So `aat validate`, `aat run`, and the MCP server all report a bad pairing.
 
 List in `releasedBy` only nodes whose success always ends the resource. If an API reports a failed release in a successful response, give that node an [error detection](#error-detection) rule, so the failure doesn't count as a release.
 

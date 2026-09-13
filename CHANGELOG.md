@@ -26,7 +26,8 @@ the graph and plan formats may still change before 1.0.
   - A skipped cleanup's chain doesn't run. Skips print as `skipped:` lines under `cleanup:`, and are recorded in the
     archive's `cleanupSkipped`, in `cleanup_skipped` in `--json`, in a `cleanup skipped:` table in `aat run show`,
     and in the MCP server's `inspect_archive`.
-  - `aat validate` checks that `releasedBy` names other nodes and that `when` parses and names the node's outputs.
+  - Loading a graph checks that `releasedBy` names other nodes and that `when` parses and names the node's outputs,
+    so `aat validate`, `aat run`, and the MCP server all reject a bad pairing.
     `aat docs generate` adds When and Released By columns when a pairing uses them.
 - A `min` or `max` selection whose candidates tie prints a warning under its step, as in
   `warning: selection "cheapest": 3 of 8 elements from listProducts.products tie for min price at 19.99; picked index 0`.
@@ -181,7 +182,7 @@ the graph and plan formats may still change before 1.0.
 - An optional input that takes `from:` an output the earlier step didn't return is left out, as `AUTOWIRE?` leaves one
   unset, instead of failing the step. Its resolution records `optional_skip`. A required input still fails, and
   `aat validate --strict` warns when a required input takes `from:` an optional output, in a graph default or in a plan
-  or workflow file.
+  or workflow file. The MCP server's `validate_plan` and `save_plan` list the warnings for a plan file.
 - Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
   `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
   bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an

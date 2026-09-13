@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gburgyan/aat/internal/predicate"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -105,13 +106,17 @@ func tieError(result *selectionResult, onTie, strategy, field string) error {
 // applyFilter evaluates a predicate expression against each element, keeping
 // those where the predicate returns true.
 func applyFilter(arr []any, expr string) ([]any, error) {
+	pred, err := predicate.Parse(expr)
+	if err != nil {
+		return nil, fmt.Errorf("evaluating filter: %w", err)
+	}
 	var result []any
 	for _, elem := range arr {
 		m, err := elementToMap(elem)
 		if err != nil {
 			return nil, fmt.Errorf("converting element for filter: %w", err)
 		}
-		match, err := plan.EvalPredicate(expr, m)
+		match, err := pred.Eval(m)
 		if err != nil {
 			return nil, fmt.Errorf("evaluating filter: %w", err)
 		}
@@ -130,12 +135,16 @@ func applyFilter(arr []any, expr string) ([]any, error) {
 // can't be evaluated against is not counted, so the choice fails only as it did
 // before counting.
 func selectMatch(arr []any, expr string) (any, int, int, error) {
+	pred, err := predicate.Parse(expr)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("evaluating match predicate: %w", err)
+	}
 	first, matches := -1, 0
 	for i, elem := range arr {
 		m, err := elementToMap(elem)
 		if err == nil {
 			var match bool
-			match, err = plan.EvalPredicate(expr, m)
+			match, err = pred.Eval(m)
 			if err == nil && match {
 				if first < 0 {
 					first = i

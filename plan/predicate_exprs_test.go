@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/gburgyan/aat/internal/predicate"
 )
 
 func TestEvalPredicateWithExprs(t *testing.T) {
@@ -40,9 +42,9 @@ func TestEvalPredicateWithExprs(t *testing.T) {
 		})
 	}
 
-	literal, err := EvalPredicate(`deliveryDate == "{{today + 3 days}}"`, map[string]any{"deliveryDate": "2026-09-16"})
+	literal, err := predicate.Eval(`deliveryDate == "{{today + 3 days}}"`, map[string]any{"deliveryDate": "2026-09-16"})
 	require.NoError(t, err)
-	assert.False(t, literal, "EvalPredicate keeps the literal as text")
+	assert.False(t, literal, "predicate.Eval keeps the literal as text")
 }
 
 func TestValidatePredicateExprs(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/internal/predicate"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -543,7 +544,7 @@ func sanitizeAssertions(assertions []TargetedAssertion) []plan.MechanicalAsserti
 				}
 			}
 			// Validate the predicate expression can be parsed.
-			if err := plan.ValidatePredicate(a.Expr); err != nil {
+			if err := predicate.Validate(a.Expr); err != nil {
 				continue
 			}
 
@@ -769,7 +770,7 @@ func validateSelectionFilters(resp *TargetedResponse, selectionContexts []Select
 		if sel.Filter == "" {
 			continue
 		}
-		if err := plan.ValidatePredicate(sel.Filter); err != nil {
+		if err := predicate.Validate(sel.Filter); err != nil {
 			issues = append(issues, TargetedValidationIssue{
 				Key:     key,
 				Kind:    "invalid_filter_syntax",
@@ -780,7 +781,7 @@ func validateSelectionFilters(resp *TargetedResponse, selectionContexts []Select
 
 		// Check filter field references are in element fields.
 		if fields, ok := selectionFields[key]; ok && len(fields) > 0 {
-			filterFields := plan.PredicateFields(sel.Filter)
+			filterFields := predicate.Fields(sel.Filter)
 			for _, ff := range filterFields {
 				if !fields[ff] {
 					var available []string

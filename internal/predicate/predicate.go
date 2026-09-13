@@ -1,4 +1,9 @@
-package plan
+// Package predicate parses and evaluates predicate expressions: boolean
+// expressions over a map of fields, such as `status == "open" && total > 100`.
+// Selection filters, value constraints, predicate assertions, and cleanup when
+// conditions are predicates. It imports no other aat package, so any package,
+// graph included, can check one.
+package predicate
 
 import (
 	"fmt"
@@ -7,55 +12,71 @@ import (
 	"unicode"
 )
 
-// EvalPredicate parses and evaluates a predicate expression against a context map.
-// It returns true/false or an error if the expression is invalid or evaluation fails.
-func EvalPredicate(expr string, context map[string]any) (bool, error) {
-	tokens, err := tokenize(expr)
-	if err != nil {
-		return false, fmt.Errorf("tokenize: %w", err)
-	}
-	return evalTokens(tokens, context)
+// Predicate is a parsed predicate expression, which can be evaluated against
+// many sets of fields without parsing it again.
+type Predicate struct {
+	root node
 }
 
-// EvalPredicateWithExprs evaluates a predicate like EvalPredicate, after
-// expanding each quoted string literal that holds a {{…}} expression with ectx,
-// so an assertion can compare a field with a computed value, as in
-// `deliveryDate == "{{today + 3 days}}"`. A literal whose expression evaluates
-// to a number or a boolean becomes that value. Selection filters and cleanup
-// conditions use EvalPredicate, where such a literal stays text.
-func EvalPredicateWithExprs(expr string, context map[string]any, ectx ExprContext) (bool, error) {
+// Parse parses expr.
+func Parse(expr string) (*Predicate, error) {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return nil, fmt.Errorf("tokenize: %w", err)
+	}
+	return parseTokens(tokens)
+}
+
+// Eval evaluates the predicate against fields. It returns an error when a field
+// it names is missing, when two operands don't compare, or when the result isn't
+// a boolean.
+func (p *Predicate) Eval(fields map[string]any) (bool, error) {
+	result, err := eval(p.root, fields)
+	if err != nil {
+		return false, err
+	}
+	b, ok := result.(bool)
+	if !ok {
+		return false, fmt.Errorf("expression result is %T, not bool", result)
+	}
+	return b, nil
+}
+
+// Eval parses expr and evaluates it against fields (see Predicate.Eval).
+func Eval(expr string, fields map[string]any) (bool, error) {
+	p, err := Parse(expr)
+	if err != nil {
+		return false, err
+	}
+	return p.Eval(fields)
+}
+
+// EvalExpanding evaluates expr against fields like Eval, after passing each
+// quoted string literal to expand. A literal that expand replaces takes the
+// value it returns: a number or a boolean as that value, and anything else as
+// text. An error from expand is returned as it is.
+func EvalExpanding(expr string, fields map[string]any, expand func(literal string) (any, bool, error)) (bool, error) {
 	tokens, err := tokenize(expr)
 	if err != nil {
 		return false, fmt.Errorf("tokenize: %w", err)
 	}
 	for i, tok := range tokens {
-		if tok.kind != tokenString || !ContainsExpr(tok.value) {
+		if tok.kind != tokenString {
 			continue
 		}
-		v, err := EvalExpr(tok.value, ectx)
+		v, replaced, err := expand(tok.value)
 		if err != nil {
-			return false, fmt.Errorf("evaluating %q: %w", tok.value, err)
+			return false, err
 		}
-		tokens[i] = literalToken(v)
+		if replaced {
+			tokens[i] = literalToken(v)
+		}
 	}
-	return evalTokens(tokens, context)
-}
-
-// ValidatePredicateExprs checks the syntax of the {{…}} expressions in a
-// predicate's quoted string literals, without evaluating them.
-func ValidatePredicateExprs(expr string) error {
-	tokens, err := tokenize(expr)
+	p, err := parseTokens(tokens)
 	if err != nil {
-		return fmt.Errorf("tokenize: %w", err)
+		return false, err
 	}
-	for _, tok := range tokens {
-		if tok.kind == tokenString && ContainsExpr(tok.value) {
-			if err := ValidateExpr(tok.value); err != nil {
-				return fmt.Errorf("%q: %w", tok.value, err)
-			}
-		}
-	}
-	return nil
+	return p.Eval(fields)
 }
 
 // literalToken is the predicate token for an expanded value: a number, a
@@ -75,47 +96,28 @@ func literalToken(v any) token {
 	}
 }
 
-// evalTokens parses a tokenized predicate and evaluates it against context.
-func evalTokens(tokens []token, context map[string]any) (bool, error) {
+// parseTokens parses a tokenized predicate, all of it.
+func parseTokens(tokens []token) (*Predicate, error) {
 	p := &parser{tokens: tokens}
-	node, err := p.parseExpression()
+	root, err := p.parseExpression()
 	if err != nil {
-		return false, fmt.Errorf("parse: %w", err)
+		return nil, fmt.Errorf("parse: %w", err)
 	}
 	if p.peek().kind != tokenEOF {
-		return false, fmt.Errorf("parse: unexpected token %q after expression", p.peek().value)
+		return nil, fmt.Errorf("parse: unexpected token %q after expression", p.peek().value)
 	}
-	result, err := eval(node, context)
-	if err != nil {
-		return false, err
-	}
-	b, ok := result.(bool)
-	if !ok {
-		return false, fmt.Errorf("expression result is %T, not bool", result)
-	}
-	return b, nil
+	return &Predicate{root: root}, nil
 }
 
-// ValidatePredicate checks that an expression can be parsed without evaluating it.
-func ValidatePredicate(expr string) error {
-	tokens, err := tokenize(expr)
-	if err != nil {
-		return fmt.Errorf("tokenize: %w", err)
-	}
-	p := &parser{tokens: tokens}
-	if _, err := p.parseExpression(); err != nil {
-		return fmt.Errorf("parse: %w", err)
-	}
-	if p.peek().kind != tokenEOF {
-		return fmt.Errorf("parse: unexpected token %q after expression", p.peek().value)
-	}
-	return nil
+// Validate checks that expr parses, without evaluating it.
+func Validate(expr string) error {
+	_, err := Parse(expr)
+	return err
 }
 
-// PredicateFields extracts all identifier (field) names referenced in a
-// predicate expression. Returns nil on parse error (caller should use
-// ValidatePredicate separately for syntax checking).
-func PredicateFields(expr string) []string {
+// Fields returns the field names expr reads, each once, in the order they
+// appear, or nil when expr doesn't tokenize (Validate reports why).
+func Fields(expr string) []string {
 	tokens, err := tokenize(expr)
 	if err != nil {
 		return nil
@@ -129,6 +131,21 @@ func PredicateFields(expr string) []string {
 		}
 	}
 	return fields
+}
+
+// Literals returns the text of expr's quoted string literals, in order.
+func Literals(expr string) ([]string, error) {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return nil, fmt.Errorf("tokenize: %w", err)
+	}
+	var literals []string
+	for _, tok := range tokens {
+		if tok.kind == tokenString {
+			literals = append(literals, tok.value)
+		}
+	}
+	return literals, nil
 }
 
 // --- Token types ---

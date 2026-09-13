@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/gburgyan/aat/internal/predicate"
 	"github.com/gburgyan/aat/internal/yamlx"
 	"gopkg.in/yaml.v3"
 )
@@ -92,9 +93,9 @@ func (c CleanupPairing) MarshalYAML() (interface{}, error) {
 }
 
 // validateCleanupPairings checks the parts of each cleanup pairing beyond its
-// node: when and releasedBy need a node, and releasedBy names other existing
-// nodes, each once. Validate checks the node itself, and the plan package checks
-// the when condition, since it owns predicates.
+// node: when and releasedBy need a node, releasedBy names other existing nodes,
+// each once, and when parses and names only outputs of the node that declares
+// it (see cleanupWhenErrors). Validate checks the node itself.
 func validateCleanupPairings(g *Graph) []string {
 	var errs []string
 	for _, name := range sortedKeys(g.Nodes) {
@@ -105,6 +106,9 @@ func validateCleanupPairings(g *Graph) []string {
 			}
 			continue
 		}
+		if c.When != "" {
+			errs = append(errs, cleanupWhenErrors(name, g.Nodes[name])...)
+		}
 		for i, released := range c.ReleasedBy {
 			switch {
 			case released == name:
@@ -114,6 +118,24 @@ func validateCleanupPairings(g *Graph) []string {
 			case slices.Contains(c.ReleasedBy[:i], released):
 				errs = append(errs, fmt.Sprintf("node %q: cleanup releasedBy lists %q more than once", name, released))
 			}
+		}
+	}
+	return errs
+}
+
+// cleanupWhenErrors checks a node's cleanup when condition, which reads the
+// outputs of the node's step: it parses, and every field it names is one of the
+// node's outputs.
+func cleanupWhenErrors(name string, node *Node) []string {
+	when := node.Cleanup.When
+	if err := predicate.Validate(when); err != nil {
+		return []string{fmt.Sprintf("node %q: cleanup when %q: %v", name, when, err)}
+	}
+	var errs []string
+	for _, field := range predicate.Fields(when) {
+		root, _, _ := strings.Cut(field, ".")
+		if !slices.ContainsFunc(node.Outputs, func(out Output) bool { return out.Name == root }) {
+			errs = append(errs, fmt.Sprintf("node %q: cleanup when %q names %q, which is not an output of %q", name, when, root, name))
 		}
 	}
 	return errs

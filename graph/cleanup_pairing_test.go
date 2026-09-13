@@ -90,6 +90,29 @@ func TestValidate_CleanupReleasedBy(t *testing.T) {
 	assert.Contains(t, msg, `node "getPayment": cleanup sets when or releasedBy but no node`)
 }
 
+func TestValidate_CleanupWhen(t *testing.T) {
+	g := &Graph{Version: "1.0.0", Nodes: map[string]*Node{
+		"createPayment": {
+			Name: "createPayment", Adapter: "createPayment",
+			Cleanup: CleanupPairing{Node: "voidPayment", When: `status == "authorized" && amount.value > 0`},
+			Outputs: []Output{{Name: "status", Type: "string"}, {Name: "amount", Type: "money"}},
+		},
+		"createOrder": {
+			Name: "createOrder", Adapter: "createOrder",
+			Cleanup: CleanupPairing{Node: "voidPayment", When: `state == "open"`},
+			Outputs: []Output{{Name: "status", Type: "string"}},
+		},
+		"createCart":  {Name: "createCart", Adapter: "createCart", Cleanup: CleanupPairing{Node: "voidPayment", When: `status ==`}},
+		"voidPayment": {Name: "voidPayment", Adapter: "voidPayment"},
+	}}
+
+	var verr *ValidationError
+	require.ErrorAs(t, Validate(g), &verr)
+	require.Len(t, verr.Errors, 2, "%v", verr.Errors)
+	assert.Contains(t, verr.Errors[0], `node "createCart": cleanup when "status ==": parse:`)
+	assert.Equal(t, `node "createOrder": cleanup when "state == \"open\"" names "state", which is not an output of "createOrder"`, verr.Errors[1])
+}
+
 func TestGenerateDocs_CleanupConditionColumns(t *testing.T) {
 	g := &Graph{Version: "1.0.0", Nodes: map[string]*Node{
 		"createCart": {Name: "createCart", Cleanup: CleanupPairing{Node: "deleteCart"}},
