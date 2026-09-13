@@ -29,6 +29,9 @@ type TemplateRequest struct {
 	Path    string            `yaml:"path"`
 	Headers map[string]string `yaml:"headers,omitempty"`
 	Body    string            `yaml:"body,omitempty"`
+	// Form is a form-encoded body written as a mapping (see FormFields). It is
+	// nil when the template has none; a request has a Body or a Form.
+	Form FormFields `yaml:"form,omitempty"`
 }
 
 // TemplateResponse defines how outputs are extracted from the response.
@@ -140,6 +143,15 @@ func ParseTemplate(data []byte) (*Template, error) {
 		return nil, fmt.Errorf("unsupported protocol %q (only \"http\" is supported)", t.Protocol)
 	}
 
+	if t.Request.Form != nil {
+		if t.Request.Body != "" {
+			return nil, fmt.Errorf("template has both request.body and request.form; a request sends one of them")
+		}
+		if contentType, ok := headerValue(t.Request.Headers, "Content-Type"); ok && !isFormContentType(contentType) {
+			return nil, fmt.Errorf("request.form is sent as %s, but the template's Content-Type header is %q", FormContentType, contentType)
+		}
+	}
+
 	return &t, nil
 }
 
@@ -174,14 +186,23 @@ func (a *TemplateAdapter) BuildRequest(inputs map[string]any, config *Environmen
 
 	// Config headers first, then template headers, then the protected headers
 	// (credential, override, overlay), which a template cannot replace. Names
-	// compare case-insensitively.
+	// compare case-insensitively. A request.form sets its Content-Type as a
+	// template header does.
 	merged := make(map[string]string)
 	if config != nil {
 		for k, v := range config.Headers {
 			setHeader(merged, k, v)
 		}
 	}
+	if a.tmpl.Request.Form != nil {
+		setHeader(merged, "Content-Type", FormContentType)
+	}
 	for k, tmplVal := range a.tmpl.Request.Headers {
+		// A header whose whole value is one placeholder is not sent when that
+		// input has no value, as a form field is left out.
+		if name, whole := wholePlaceholder(tmplVal); whole && !valuePresent(inputs, name) {
+			continue
+		}
 		resolved, err := substitutePlaceholders(tmplVal, inputs, renderRaw)
 		if err != nil {
 			return nil, fmt.Errorf("header %q substitution: %w", k, err)
@@ -200,7 +221,17 @@ func (a *TemplateAdapter) BuildRequest(inputs map[string]any, config *Environmen
 	}
 
 	var body []byte
-	if a.tmpl.Request.Body != "" {
+	switch {
+	case a.tmpl.Request.Form != nil:
+		if contentType, _ := headerValue(merged, "Content-Type"); !isFormContentType(contentType) {
+			return nil, fmt.Errorf("request.form sends %s, but a credential or overlay header sets Content-Type %q", FormContentType, contentType)
+		}
+		bodyStr, err := a.tmpl.Request.Form.render(inputs)
+		if err != nil {
+			return nil, fmt.Errorf("form body: %w", err)
+		}
+		body = []byte(bodyStr)
+	case a.tmpl.Request.Body != "":
 		ctx := bodyContext(merged, a.tmpl.Request.Body)
 		bodyStr, err := substitutePlaceholders(a.tmpl.Request.Body, inputs, ctx)
 		if err != nil {
@@ -561,7 +592,8 @@ func normalizeJSONPath(path string) string {
 // body, and the keys of a form-encoded body. A bracketed key counts as the name
 // before its first bracket, so metadata[source]=web supplies metadata. Fields
 // inside {{?key}} or {{#key}} blocks are left out, since they are sent only
-// sometimes. The static OpenAPI check uses this to accept a
+// sometimes, and so is a request.form field whose whole value is one
+// placeholder (see FormInputFields). The static OpenAPI check uses this to accept a
 // required parameter or body property that the template supplies itself, for
 // example a literal "photoUrls": [] with no graph input behind it.
 func (t *Template) SuppliedFields() map[string]bool {
@@ -580,6 +612,15 @@ func (t *Template) SuppliedFields() map[string]bool {
 		}
 	}
 
+	if t.Request.Form != nil {
+		for _, field := range t.Request.Form {
+			if field.alwaysSent() {
+				fields[formFieldName(field.Key)] = true
+			}
+		}
+		return fields
+	}
+
 	body := withoutBlocks(t.Request.Body)
 	if bodyContext(t.Request.Headers, t.Request.Body) == renderForm {
 		for _, name := range pairNames(strings.TrimSpace(body)) {
@@ -595,11 +636,11 @@ func (t *Template) SuppliedFields() map[string]bool {
 
 // HeaderOnlyInputs returns the inputs the template sends only in request
 // headers: placeholders and block keys that appear in a header value but not in
-// the path or body. The static OpenAPI check uses this to accept an input such
-// as an idempotency key, whose header the template names and specs often leave
-// undeclared.
+// the path, body, or form. The static OpenAPI check uses this to accept an input
+// such as an idempotency key, whose header the template names and specs often
+// leave undeclared.
 func (t *Template) HeaderOnlyInputs() map[string]bool {
-	elsewhere := placeholderKeys(t.Request.Path, t.Request.Body)
+	elsewhere := placeholderKeys(append([]string{t.Request.Path, t.Request.Body}, t.Request.Form.texts()...)...)
 	inputs := make(map[string]bool)
 	for _, value := range t.Request.Headers {
 		for key := range placeholderKeys(value) {
@@ -711,7 +752,8 @@ func topLevelJSONKeys(body string) []string {
 // placeholder into one of three categories:
 //   - required: placeholders that appear in unconditional context
 //   - conditional: placeholders that appear only inside {{?key}}...{{/key}} blocks
-//     (both the gate key and any {{innerKey}} only referenced inside)
+//     (both the gate key and any {{innerKey}} only referenced inside), or as
+//     the whole value of a header or form field, which is left out without one
 //   - iterable: placeholders that appear inside {{#key}}...{{/key}} blocks
 //
 // Returns sorted, deduplicated slices.
@@ -721,13 +763,27 @@ func ClassifyInputs(tmpl *Template) (required, conditional, iterable []string) {
 	condInnerKeys := make(map[string]bool)
 	allKeys := make(map[string]bool)
 
-	// Analyze all text sources: path, header values, and body.
+	// Analyze all text sources: path, header values, body, and form values. A
+	// header or form value that is one placeholder is left out when its input
+	// has no value, so that input is conditional unless another part of the
+	// template needs it.
 	sources := []string{tmpl.Request.Path}
+	var whole []string
+	addSource := func(src string) {
+		if name, ok := wholePlaceholder(src); ok {
+			whole = append(whole, name)
+			return
+		}
+		sources = append(sources, src)
+	}
 	for _, v := range tmpl.Request.Headers {
-		sources = append(sources, v)
+		addSource(v)
 	}
 	if tmpl.Request.Body != "" {
 		sources = append(sources, tmpl.Request.Body)
+	}
+	for _, text := range tmpl.Request.Form.texts() {
+		addSource(text)
 	}
 
 	for _, src := range sources {
@@ -738,6 +794,11 @@ func ClassifyInputs(tmpl *Template) (required, conditional, iterable []string) {
 	for k := range allKeys {
 		if !iterKeys[k] && !condKeys[k] && !condInnerKeys[k] {
 			reqSet[k] = true
+		}
+	}
+	for _, name := range whole {
+		if !reqSet[name] && !iterKeys[name] {
+			condKeys[name] = true
 		}
 	}
 

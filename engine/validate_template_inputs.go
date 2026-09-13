@@ -90,6 +90,17 @@ func validateTemplateInputsForNodes(g *graph.Graph, registry *adapter.Registry, 
 			graphInputs[node.Inputs[i].Name] = &node.Inputs[i]
 		}
 
+		// A form field or header whose whole value is one placeholder is left
+		// out when that input has no value, so one naming no input of the node
+		// would never be sent, and nothing would say so.
+		for _, placeholder := range tmpl.WholeValueInputs() {
+			if _, exists := graphInputs[placeholder]; !exists {
+				errs = append(errs, fmt.Sprintf(
+					"node %q: template sends {{%s}} as the whole value of a form field or header, but the node has no input %q, so it is never sent",
+					name, placeholder, placeholder))
+			}
+		}
+
 		for _, placeholder := range required {
 			inp, exists := graphInputs[placeholder]
 			if !exists {

@@ -97,6 +97,19 @@ func TemplateHeaderInputs(g *graph.Graph, registry *adapter.Registry) oas.Header
 	return inputs
 }
 
+// TemplateFormInputFields maps each templated node to the form fields its
+// template sends inputs as, for the static OAS input checks (see
+// oas.Validator.WithFormInputFields).
+func TemplateFormInputFields(g *graph.Graph, registry *adapter.Registry) oas.FormInputFields {
+	fields := make(oas.FormInputFields, len(g.Nodes))
+	for name, node := range g.Nodes {
+		if tmpl, ok := registry.GetTemplate(node.Adapter); ok {
+			fields[name] = tmpl.FormInputFields()
+		}
+	}
+	return fields
+}
+
 // validateAdapterOutputsForNodes is the shared implementation. When nodeFilter
 // is non-nil, only nodes in the set are checked.
 func validateAdapterOutputsForNodes(g *graph.Graph, registry *adapter.Registry, nodeFilter map[string]bool) error {

@@ -7,6 +7,22 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- Form bodies can be written as `form:`, a mapping of field names to values, in place of a `body:` query string.
+  - The request is sent as `application/x-www-form-urlencoded`, and every key and value is URL-encoded, keeping the
+    brackets of a key.
+  - A field whose whole value is one placeholder is left out when that input has no value (absent, null, `""`, or an
+    empty list or map), so optional fields need no conditional blocks.
+  - Nested mappings write bracketed keys: `metadata: {source: web}` sends `metadata[source]=web`. An input whose value
+    is a map does the same, a list repeats its key as written (`tags[]`), and a map in a list writes `items[0][sku]`.
+  - Other text is rendered as one value. Iteration blocks, placeholders in field names, duplicate fields, and fields that
+    nesting would send twice are errors when the template loads.
+  - A credential or overlay header that changes the Content-Type fails the request.
+  - The MCP server's template view shows the form.
+- `aat validate` matches an input that is the whole value of a `form:` field to that field, so a graph can name its
+  inputs its own way: `payment_method_types[]: "{{paymentMethodTypes}}"` counts as the spec's `payment_method_types`,
+  in both the unknown-input and the required-field checks.
+- `aat validate` and `aat run` report a header or `form:` field whose whole value names no input of the node, which
+  would never be sent.
 - `settings.minRequestInterval` paces requests for APIs with rate limits: the starts of any two requests are at
   least that far apart, such as `250ms`. One interval covers everything a command sends, including the plans of
   a parallel batch, retries, verification, and cleanup. `aat prompt` and the MCP server's `execute_plan` honor it
@@ -102,6 +118,12 @@ the graph and plan formats may still change before 1.0.
   generates its own value, and a retried step resends the values its first attempt generated.
 
 ### Changed
+- A header whose whole value is one placeholder, such as `Idempotency-Key: "{{requestKey}}"`, isn't sent when that
+  input has no value, instead of failing with `unresolved placeholders`. The `{{?requestKey}}…{{/requestKey}}` wrapper
+  still works, and a placeholder inside other text still needs a value.
+- `aat generate` scaffolds a form body as `form:`, one field per property with no `Content-Type` header, and writes an
+  array property the spec encodes as a `deepObject` as `name[]`. An object property no longer warns, since a map value
+  is sent as bracketed keys. An optional header parameter is a plain placeholder.
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
   slot step can take an output that only an addon produces, and a base workflow without slots or addons resolves
   its markers. The final pass takes the nearest earlier producer that does not depend on the step. Markers the

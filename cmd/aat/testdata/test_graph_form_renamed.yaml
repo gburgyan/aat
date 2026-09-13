@@ -1,0 +1,18 @@
+version: "1.0.0"
+oas: oas/form_supplied.yaml
+
+nodes:
+  createRefund:
+    description: "Refund an order through a form template whose inputs are named apart from the fields they fill"
+    adapter: createRefund
+    oas:
+      operationId: createRefund
+    inputs:
+      - name: order
+        type: string
+      - name: refundMetadata
+        type: object
+        optional: true
+    outputs:
+      - name: refundId
+        type: string

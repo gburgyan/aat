@@ -305,3 +305,59 @@ unconditionally, and the optional-output warnings in the MCP server's validation
 - A scratch copy of the shop with `cleanup: {node: deleteCart, when: 'staus == "open"'}`: `aat validate --strict` and
   `aat validate graph` exit 1, and `aat run plan smoke` and `aat mcp serve` exit 2. Each names `staus` while loading
   the graph.
+
+## 2026-09-13 — Phase 3a PR A: form bodies
+
+**What:** a template writes a form-encoded body as `form:`, a mapping of field names to values. Every Stripe template
+from the discovery run wrote its body as one hand-escaped query string, with a conditional block for each optional
+field.
+- **Rendering:** `adapter/form.go` renders the mapping in template order.
+  - A field whose whole value is one placeholder is left out when that input has no value.
+  - Nested mappings and map inputs write bracketed keys, and a list repeats its key as written. A map in a list writes
+    indexed keys.
+  - Keys and values are URL-encoded, keeping the brackets of a key.
+- **Headers:** a header whose whole value is one placeholder isn't sent without a value (author).
+- **Checks:**
+  - A whole-value placeholder that names no input of the node fails `aat validate` and `aat run`.
+  - OAS rules 5 and 6 match an input to the `form:` field it fills.
+- **Generate:** form operations get `form:`, with `deepObject` arrays written `name[]`, and optional header parameters
+  are plain placeholders.
+
+**Decisions:**
+- **A dedicated `form:` key (author),** not a `body:` mapping encoded by the Content-Type. It sets its own Content-Type,
+  so an environment header can't re-encode it, and a credential or overlay Content-Type that isn't a form fails the
+  request.
+- **Render the mapping directly (design review),** not by compiling it to the string syntax. Compiling would have:
+  - let a conditional block open in one value and close in another
+  - put compiled text in error messages
+  - followed a JSON Content-Type set by an overlay
+- **Omission reuses the `{{?x}}` presence rule** (absent, null, `""`), plus empty lists and maps. Inside a map input an
+  empty string is sent, since Stripe unsets a metadata key that way, and nil is left out.
+- **Headers follow the same rule (author).** The review cautioned that a misspelled `X-Api-Key: "{{apiKey}}"` would
+  turn a clear error into a 401.
+  - The typo guard keeps that loud: the engine's inputs map holds only node inputs, so a name that isn't one never has
+    a value.
+  - `SuppliedFields` still counts a whole-value header as sent, so a required header parameter fed by an input doesn't
+    start warning.
+- **Name matching is form-only.** A string body's `key={{input}}` pairs aren't parsed for it, and the fixture with a
+  string body still fails `--strict`.
+- **Map expansion is form-only.** A string body or query still sends an object as JSON text (`render_lists_test.go`).
+- **Array keys in `aat generate` follow the spec's encoding.** All 1,304 of Stripe's form encodings are `deepObject`,
+  so arrays are `name[]`. Without an encoding, OpenAPI's form style repeats the plain name.
+
+**Verification:**
+- `make check`, `make docs`, and `make example-shop` pass.
+- **`aat validate --strict`,** compared as sets of lines between `main` (983108d) and the branch, is unchanged for:
+  - the shop (exit 0)
+  - the private project (439 lines, exit 1)
+  - scratch clones at their discovery tags: aat-duffel (exit 0), aat-duffel2 (exit 1), and aat-stripe (exit 0)
+- **Stripe templates, offline.** The six form templates of aat-stripe at `stripe-discovery-end` were rewritten as
+  `form:`, with bare-placeholder idempotency headers.
+  - In 13 input cases, with optional fields set and unset, they build the same method, path, headers, and body bytes
+    as the originals.
+  - The rewritten project passes `validate --strict`, and still does with `cancellation_reason` renamed to
+    `cancellationReason`.
+  - A misspelled `{{amount_to_captur}}` fails with the typo guard's message.
+
+**Open questions:**
+- The live Stripe run of the rewritten templates waits for `STRIPE_TEST_SECRET_KEY` in the session's environment.

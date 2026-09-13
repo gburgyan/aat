@@ -12,10 +12,11 @@ import (
 
 // Validator implements graph.SpecValidator for OpenAPI specifications.
 type Validator struct {
-	specs          map[string]*v3high.Document
-	outputPaths    OutputPaths
-	suppliedFields SuppliedFields
-	headerInputs   HeaderInputs
+	specs           map[string]*v3high.Document
+	outputPaths     OutputPaths
+	suppliedFields  SuppliedFields
+	headerInputs    HeaderInputs
+	formInputFields FormInputFields
 }
 
 // OutputPaths maps node name → output name → the GJSON path the node's template
@@ -30,6 +31,11 @@ type SuppliedFields map[string]map[string]bool
 // HeaderInputs maps node name → the inputs the node's template sends only in
 // request headers.
 type HeaderInputs map[string]map[string]bool
+
+// FormInputFields maps node name → input → the top-level request fields the
+// node's template sends that input as: the form fields whose whole value is the
+// input.
+type FormInputFields map[string]map[string][]string
 
 // NewValidator creates a new OAS validator.
 func NewValidator() *Validator {
@@ -61,6 +67,14 @@ func (v *Validator) WithSuppliedFields(fields SuppliedFields) *Validator {
 // spec, and specs often leave such headers undeclared.
 func (v *Validator) WithHeaderInputs(inputs HeaderInputs) *Validator {
 	v.headerInputs = inputs
+	return v
+}
+
+// WithFormInputFields makes the input checks match an input to the form field
+// the node's template sends it as, so an input named paymentMethodTypes and sent
+// as payment_method_types[] counts as the payment_method_types field.
+func (v *Validator) WithFormInputFields(fields FormInputFields) *Validator {
+	v.formInputFields = fields
 	return v
 }
 
@@ -152,10 +166,11 @@ func (v *Validator) Validate(g *graph.Graph) *graph.SpecValidationResult {
 		}
 
 		// Rule 5: graph inputs should exist in OAS parameters or request body,
-		// unless the template sends them only in headers
+		// unless the template sends them only in headers, or as a form field
+		// with another name
 		oasParamNames := collectInputNames(pathItem, op)
 		for _, inp := range node.Inputs {
-			if _, exists := oasParamNames[inp.Name]; !exists && !v.headerInputs[nodeName][inp.Name] {
+			if !oasParamNames[inp.Name] && !v.headerInputs[nodeName][inp.Name] && !v.sentAsField(nodeName, inp.Name, oasParamNames) {
 				result.Issues = append(result.Issues, graph.SpecValidationIssue{
 					Severity: graph.SpecWarning,
 					Node:     nodeName,
@@ -169,6 +184,10 @@ func (v *Validator) Validate(g *graph.Graph) *graph.SpecValidationResult {
 		graphInputNames := make(map[string]bool)
 		for _, inp := range node.Inputs {
 			graphInputNames[inp.Name] = true
+			// An input a form field sends counts as that field.
+			for _, field := range v.formInputFields[nodeName][inp.Name] {
+				graphInputNames[field] = true
+			}
 		}
 		for name := range collectRequiredInputs(pathItem, op) {
 			if !graphInputNames[name] && !v.suppliedFields[nodeName][name] {
@@ -220,6 +239,17 @@ func (v *Validator) outputPath(nodeName, output string) (string, bool) {
 		return path, true
 	}
 	return output, false
+}
+
+// sentAsField reports whether the node's template sends input as a form field
+// that names holds.
+func (v *Validator) sentAsField(nodeName, input string, names map[string]bool) bool {
+	for _, field := range v.formInputFields[nodeName][input] {
+		if names[field] {
+			return true
+		}
+	}
+	return false
 }
 
 // collectInputNames returns all parameter names (path-item and operation level)

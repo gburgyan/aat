@@ -74,8 +74,8 @@ When the API publishes an OpenAPI 3.0 or 3.1 spec, scaffold from it, and let AAT
   aat generate --oas openapi.json --path /carts --output-graph graph.yaml --output-templates templates/
   ```
 
-  The warnings list what each template leaves to write by hand, such as a form property that takes an object, which you write as bracketed pairs (`shipping[city]={{city}}`). Specs with circular references load. See [Large Specs](https://gburgyan.github.io/aat/generate/#large-specs).
-- **Validate the project against it.** `aat validate --strict` checks that each node's `operationId` exists, that its inputs are parameters or body properties (an input the template sends only in a header, such as an idempotency key, is exempt), that required fields are inputs or written by the template, and that outputs exist in the 2xx response schema.
+  The warnings list what each template leaves to write by hand, such as a multipart body. A form body becomes a `form:` mapping. Specs with circular references load. See [Large Specs](https://gburgyan.github.io/aat/generate/#large-specs).
+- **Validate the project against it.** `aat validate --strict` checks that each node's `operationId` exists, that its inputs are parameters or body properties (an input the template sends only in a header, such as an idempotency key, is exempt, and an input that is the whole value of a `form:` field counts as that field), that required fields are inputs or written by the template, and that outputs exist in the 2xx response schema.
 - **Validate every run against it.** `--oas-validate strict` checks each step's request body, JSON or form-encoded, and its response body against the schema for its status code or the spec's `default` response, and fails a step on a violation. A request body of another type, or a schema the validator can't compile, shows `OAS: request not validated` or `OAS: response not validated` and never fails a step. Under `strict`, a spec that fails to load stops the run with exit code 2. Only the operations the graph's nodes name are compiled, so a large spec loads quickly. See [OAS Validation](https://gburgyan.github.io/aat/running/#oas-validation).
 
 ## Graph Schema
@@ -217,7 +217,7 @@ response:
 ### Template Rules
 
 - `adapter` must match a graph node's `adapter` field; the file name does not matter
-- `{{placeholder}}` in path, headers, and body are replaced with resolved input values; a placeholder with no value fails the request (`unresolved placeholders: …`), so wrap optional parts in `{{?name}}…{{/name}}`
+- `{{placeholder}}` in path, headers, and body are replaced with resolved input values; a placeholder with no value fails the request (`unresolved placeholders: …`), so wrap optional parts in `{{?name}}…{{/name}}`. A header or `form:` field whose whole value is one placeholder is left out instead when that input has no value (absent, null, or `""`)
 - `response.extract` is a map from output name to a gjson path into the response JSON (`$.` prefixes are accepted). A path can count an array: `productCount: products.#`
 - For array extraction, give the output a `path` and a `fields` map from element field name to a path within each element; add `optional: true` to an entry whose path may be missing
 - `{{#key}}…{{/key}}` repeats its body once per element of the list input `key`. `{{.}}` is the element, `{{.field}}` is a field of it, and `{{@index}}` is its position from 0. The copies are joined with commas, except in a form body or a query string: there a body that writes a whole `key=value` pair is joined with `&` (`{{#tags}}tags[]={{.}}{{/tags}}`), and a body that starts with `&` is repeated with nothing between. Wrap an optional list in `{{?key}}…{{/key}}`
@@ -233,6 +233,26 @@ response:
 ```
 
 ### Form Bodies and Query Strings
+
+- **Write a form body as `form:`,** a mapping of field names to values, in place of `body:`. It is sent as `application/x-www-form-urlencoded`, with every key and value URL-encoded and the brackets of a key kept.
+- **A field whose whole value is one placeholder** is left out when that input has no value (absent, null, `""`, or an empty list or map), so optional fields need no conditional blocks.
+- **Lists and maps:** a list repeats the key as written (`tags[]` or `tags`). A map, nested in the template or as an input's value, writes bracketed keys, and a map in a list writes `items[0][sku]`.
+- **Other text,** such as `"Order {{orderId}}"`, is sent as one value and still needs its placeholders. Iteration blocks aren't allowed in a form.
+- **Field names needn't match input names:** `customer: "{{customerId}}"` counts `customerId` as the spec's `customer` field in `aat validate`.
+
+```yaml
+request:
+  method: POST
+  path: /refunds
+  form:
+    orderId: "{{orderId}}"
+    amount: "{{amount}}"      # left out when amount has no value
+    skus[]: "{{skus}}"        # one skus[]= pair per element
+    metadata:
+      source: aat             # metadata[source]=aat
+```
+
+A `body:` string with `Content-Type: application/x-www-form-urlencoded` still works:
 
 - **Escaping follows the `Content-Type`** the request is sent with, whether the template, the environment, or the plan sets it. In a form body (`application/x-www-form-urlencoded`) and in a query string, each value is URL-encoded.
 - **Write a form body as the query string it sends,** on one line. Whitespace around a form body is removed.
@@ -254,7 +274,7 @@ See [Body](https://gburgyan.github.io/aat/templates/#body).
 ### Headers
 
 - **Merge order,** later wins: environment headers, plan headers, template headers, then the auth credential and overlay headers, which a template can't replace. Names compare case-insensitively. See [Header Merge Order](https://gburgyan.github.io/aat/templates/#header-merge-order).
-- **Values take placeholders.** A header whose whole value is a conditional block that resolves to nothing isn't sent.
+- **Values take placeholders.** A header whose whole value is one placeholder isn't sent when that input has no value, and neither is one whose whole value is a conditional block that resolves to nothing. A placeholder inside other text still needs a value.
 
 **Idempotency keys.** Give the node an optional input that generates a key, and send the header only when the input has a value:
 
@@ -266,10 +286,10 @@ See [Body](https://gburgyan.github.io/aat/templates/#body).
   default: "{{uuid}}"
 # the template
 headers:
-  Idempotency-Key: "{{?requestKey}}{{requestKey}}{{/requestKey}}"
+  Idempotency-Key: "{{requestKey}}"
 ```
 
-A retried step resends the same key, and a later step replays it with `requestKey: {fromInput: createOrder.requestKey}`. Keep the header conditional: a cleanup step takes its inputs only from earlier outputs, not from graph defaults. See [Idempotency Key Header](https://gburgyan.github.io/aat/templates/#idempotency-key-header).
+A retried step resends the same key, and a later step replays it with `requestKey: {fromInput: createOrder.requestKey}`. A cleanup step takes its inputs only from earlier outputs, not from graph defaults, so a node that runs as a cleanup sends no key. See [Idempotency Key Header](https://gburgyan.github.io/aat/templates/#idempotency-key-header).
 
 ### Lua Transforms
 

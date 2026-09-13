@@ -88,10 +88,11 @@ func TestGenerate_NullableTypeLists(t *testing.T) {
 func TestGenerate_RequestBodyMediaTypes(t *testing.T) {
 	result := loadRequestShapes(t)
 
-	t.Run("a form body is a query string", func(t *testing.T) {
+	t.Run("a form body is a request.form", func(t *testing.T) {
 		tmpl := shapeTemplate(t, result, "requestRefund")
-		assert.Equal(t, "application/x-www-form-urlencoded", tmpl.Request.Headers["Content-Type"])
-		assert.Equal(t, "orderId={{orderId}}{{?reasons}}&reasons={{reasons}}{{/reasons}}{{?note}}&note={{note}}{{/note}}", tmpl.Request.Body)
+		assert.NotContains(t, tmpl.Request.Headers, "Content-Type", "request.form sets it")
+		assert.Empty(t, tmpl.Request.Body)
+		assert.Equal(t, ScaffoldForm{{"orderId", "{{orderId}}"}, {"reasons", "{{reasons}}"}, {"note", "{{note}}"}}, tmpl.Request.Form)
 		assert.Equal(t, map[string]string{"orderId": "string", "reasons": "string[]", "note": "string"}, inputTypes(t, result, "requestRefund"))
 		assert.Empty(t, warningsFor(result, "requestRefund"))
 	})
