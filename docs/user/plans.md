@@ -458,6 +458,13 @@ assertions:
 
 `path` is a [gjson](https://github.com/tidwall/gjson) path, so `fieldExists` and `fieldEquals` can index arrays (`items.0.id`) and query them (`items.#(sku=="ABC")`); a leading `$.` and `[0]` bracket indexes are accepted too. A predicate `expr` is simpler: it reads dotted field names only, with no array indexes or queries.
 
+**Expressions in assertions.** A `fieldEquals` `value`, and a quoted string in a `predicate` `expr`, can hold `{{…}}` [expressions](value-flow.md#dynamic-expressions), such as `value: "{{today + 3 days}}"` or `expr: 'quantity == "{{quantity}}"'`.
+- They are evaluated when the step's assertions run, and they can name the step's inputs.
+- A quoted expression that evaluates to a number or a boolean compares as one.
+- An expression that can't be evaluated fails its assertion.
+- `aat validate` checks their syntax.
+- Selection filters and cleanup `when` conditions don't evaluate expressions.
+
 `status` and `schema` are unaffected by `raw` — they always look at the HTTP status and the full response body respectively.
 
 **Default status assertion.** Steps composed from workflow templates (recipes, `aat prompt`) that declare no status assertion get `status: 2xx`, so APIs that answer `201 Created` or `204 No Content` pass. Steps with `expectFailure` get no default.

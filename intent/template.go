@@ -62,6 +62,10 @@ func LoadWorkflowTemplate(templatePath, graphDir string, g *graph.Graph) (*plan.
 		}
 	}
 
+	if err := checkTemplateAssertionTypes(p); err != nil {
+		return nil, err
+	}
+
 	return p, nil
 }
 

@@ -69,6 +69,9 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...
 	if err := checkOverrideSteps(skeleton, targeted); err != nil {
 		return nil, fmt.Errorf("reconstitute: %w", err)
 	}
+	if err := checkOverrideAssertionTypes(recipe.Overrides); err != nil {
+		return nil, fmt.Errorf("reconstitute: %w", err)
+	}
 	unfedSet := unfedInputSet(skeleton, g)
 
 	// Recipe overrides are explicit user intent — always allow them

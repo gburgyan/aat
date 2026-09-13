@@ -440,9 +440,9 @@ A string containing `{{…}}` is an expression.
 
 - **Types.** A value that is one whole expression keeps the result's type. Mixed text, such as `"Deliver on {{deliveryDate}}"`, becomes a string.
 - **Generated values.** Each occurrence is its own value, so two inputs set to `{{uuid}}` differ; reuse one with `fromResolved` or `fromInput`. A step's values are resolved once, so a retried step resends the same ones, and a new run generates new ones. `uuid`, `now`, and `unixtime` are reserved words, and `{{today}}` counts days only.
-- **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`.
-- **Where they are not:** templates (where `{{name}}` is a placeholder for an input), overlay `values:`, `rawBody`, and assertions.
-- **Checking.** `aat validate` does not check expression syntax; a bad expression fails when its step runs.
+- **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`. Also a `fieldEquals` `value` and a quoted string in a `predicate` `expr`, where they can name the step's inputs: `expr: 'quantity == "{{quantity}}"'`. A quoted expression that yields a number or a boolean compares as one.
+- **Where they are not:** templates (where `{{name}}` is a placeholder for an input), overlay `values:`, `rawBody`, selection filters, and cleanup `when`.
+- **Checking.** `aat validate` checks expression syntax in step values, pools, and assertions. An expression that fails to evaluate fails its step, or its assertion.
 
 ### Assertion Types
 

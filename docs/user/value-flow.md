@@ -217,7 +217,11 @@ The syntax is `stepId.inputName`. The referenced step must be listed directly in
 
 ## Dynamic Expressions
 
-Expressions use `{{...}}` delimiters and are evaluated at execution time.
+Expressions use `{{...}}` delimiters and are evaluated at execution time. Where they work:
+- step values, pools, graph defaults, layers, recipe overrides, and slot `inject` values
+- a `fieldEquals` `value` and a quoted `predicate` string in an assertion, which can name the step's inputs (see [Plans: Assertions](plans.md))
+
+`aat validate` checks their syntax in step values, pools, and assertions.
 
 ### Date Expressions
 

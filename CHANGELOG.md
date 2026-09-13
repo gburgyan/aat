@@ -53,6 +53,12 @@ the graph and plan formats may still change before 1.0.
   - A pool entry for an array input gets a hint: a bare list in a graph default or a layer is a pool, so write one list
     as `{value: [...]}`.
   - Expressions and custom types aren't checked.
+- Expressions in assertions: a `fieldEquals` `value` and a quoted string in a `predicate` `expr` can hold `{{…}}`
+  expressions that name the step's inputs, such as `value: "{{today + 3 days}}"` or
+  `expr: 'quantity == "{{quantity}}"'`.
+  - A quoted expression that yields a number or a boolean compares as one.
+  - An expression that can't be evaluated fails its assertion.
+  - Selection filters and cleanup `when` conditions stay literal.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
 - `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,
@@ -169,6 +175,10 @@ the graph and plan formats may still change before 1.0.
     `inject: {ages: {default: [35]}}` fails validation instead of sending a map. A bare list is still the literal list.
   - An injected value no longer replaces a step's pool, constraint, or `fromInput`.
   - `inject` on a base workflow or an addon, where it was ignored, is a validation error.
+- Validation reports an assertion of an unknown type, such as `fieldEqual`, and bad expression syntax in step values,
+  pools, and assertions. The checks run in `aat validate`, when a workflow template loads, and when a recipe's override
+  assertions are applied. Before, an unknown type failed only at run time, a recipe override of one was dropped
+  silently, and a bad expression failed only when its step ran.
 - Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
   `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
   bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an

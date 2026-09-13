@@ -825,6 +825,13 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	// available, falling back to the raw body (e.g., on 4xx responses).
 	if step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
 		merged := &validate.MechanicalResult{Passed: true}
+		// Expressions in a fieldEquals value or a quoted predicate string read
+		// the step's inputs, as step values do.
+		rctx := e.buildResolveContext(node)
+		ectx := plan.ExprContext{Now: rctx.Now, Env: rctx.EnvLookup, Values: inputs, Random: rctx.Random}
+		predicateEval := func(expr string, fields map[string]any) (bool, error) {
+			return plan.EvalPredicateWithExprs(expr, fields, ectx)
+		}
 		var rawAssertions, normalAssertions []plan.MechanicalAssertion
 		for _, a := range step.Assertions.Mechanical {
 			// A status assertion that expects success (a composed "2xx" default,
@@ -839,6 +846,20 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 					Message: fmt.Sprintf("status assertion expecting %v contradicts expectFailure", a.Expect),
 				})
 				continue
+			}
+			if a.Type == string(validate.AssertFieldEquals) {
+				expanded, err := plan.EvalExpr(a.Value, ectx)
+				if err != nil {
+					merged.Results = append(merged.Results, validate.AssertionResult{
+						Type:    validate.AssertFieldEquals,
+						Path:    a.Path,
+						Raw:     a.Raw,
+						Message: fmt.Sprintf("expanding value %v: %v", a.Value, err),
+					})
+					merged.Passed = false
+					continue
+				}
+				a.Value = expanded
 			}
 			if a.Raw {
 				rawAssertions = append(rawAssertions, a)
@@ -858,7 +879,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 
 		if len(normalAssertions) > 0 {
 			nr := validate.RunMechanical(resp.StatusCode, normalBody,
-				convertAssertions(normalAssertions), plan.EvalPredicate, schemaCheck)
+				convertAssertions(normalAssertions), predicateEval, schemaCheck)
 			merged.Results = append(merged.Results, nr.Results...)
 			if !nr.Passed {
 				merged.Passed = false
@@ -866,7 +887,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		}
 		if len(rawAssertions) > 0 {
 			rr := validate.RunMechanical(resp.StatusCode, resp.Body,
-				convertAssertions(rawAssertions), plan.EvalPredicate, schemaCheck)
+				convertAssertions(rawAssertions), predicateEval, schemaCheck)
 			merged.Results = append(merged.Results, rr.Results...)
 			if !rr.Passed {
 				merged.Passed = false

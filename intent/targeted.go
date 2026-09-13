@@ -502,18 +502,10 @@ func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet
 // mistakes like putting a predicate expression in the "expect" field instead
 // of "expr", or omitting required fields.
 func sanitizeAssertions(assertions []TargetedAssertion) []plan.MechanicalAssertion {
-	validTypes := map[string]bool{
-		"status":      true,
-		"fieldExists": true,
-		"fieldEquals": true,
-		"predicate":   true,
-		"schema":      true,
-	}
-
 	var result []plan.MechanicalAssertion
 	for _, a := range assertions {
 		// Skip unknown assertion types.
-		if !validTypes[a.Type] {
+		if !plan.IsAssertionType(a.Type) {
 			continue
 		}
 

@@ -14,6 +14,69 @@ func EvalPredicate(expr string, context map[string]any) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("tokenize: %w", err)
 	}
+	return evalTokens(tokens, context)
+}
+
+// EvalPredicateWithExprs evaluates a predicate like EvalPredicate, after
+// expanding each quoted string literal that holds a {{…}} expression with ectx,
+// so an assertion can compare a field with a computed value, as in
+// `deliveryDate == "{{today + 3 days}}"`. A literal whose expression evaluates
+// to a number or a boolean becomes that value. Selection filters and cleanup
+// conditions use EvalPredicate, where such a literal stays text.
+func EvalPredicateWithExprs(expr string, context map[string]any, ectx ExprContext) (bool, error) {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return false, fmt.Errorf("tokenize: %w", err)
+	}
+	for i, tok := range tokens {
+		if tok.kind != tokenString || !ContainsExpr(tok.value) {
+			continue
+		}
+		v, err := EvalExpr(tok.value, ectx)
+		if err != nil {
+			return false, fmt.Errorf("evaluating %q: %w", tok.value, err)
+		}
+		tokens[i] = literalToken(v)
+	}
+	return evalTokens(tokens, context)
+}
+
+// ValidatePredicateExprs checks the syntax of the {{…}} expressions in a
+// predicate's quoted string literals, without evaluating them.
+func ValidatePredicateExprs(expr string) error {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return fmt.Errorf("tokenize: %w", err)
+	}
+	for _, tok := range tokens {
+		if tok.kind == tokenString && ContainsExpr(tok.value) {
+			if err := ValidateExpr(tok.value); err != nil {
+				return fmt.Errorf("%q: %w", tok.value, err)
+			}
+		}
+	}
+	return nil
+}
+
+// literalToken is the predicate token for an expanded value: a number, a
+// boolean, or otherwise its text.
+func literalToken(v any) token {
+	switch x := v.(type) {
+	case bool:
+		return token{tokenBool, strconv.FormatBool(x)}
+	case int:
+		return token{tokenNumber, strconv.Itoa(x)}
+	case int64:
+		return token{tokenNumber, strconv.FormatInt(x, 10)}
+	case float64:
+		return token{tokenNumber, strconv.FormatFloat(x, 'f', -1, 64)}
+	default:
+		return token{tokenString, fmt.Sprint(v)}
+	}
+}
+
+// evalTokens parses a tokenized predicate and evaluates it against context.
+func evalTokens(tokens []token, context map[string]any) (bool, error) {
 	p := &parser{tokens: tokens}
 	node, err := p.parseExpression()
 	if err != nil {

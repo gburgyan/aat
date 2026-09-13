@@ -63,6 +63,46 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("plan validation failed:\n  - %s", strings.Join(distinctErrors(e.Errors), "\n  - "))
 }
 
+// AssertionTypes returns the mechanical assertion types the engine evaluates, in
+// the order documentation lists them.
+func AssertionTypes() []string {
+	return []string{"status", "fieldExists", "fieldEquals", "predicate", "schema"}
+}
+
+// IsAssertionType reports whether t names a mechanical assertion type.
+func IsAssertionType(t string) bool {
+	return slices.Contains(AssertionTypes(), t)
+}
+
+// validateAssertions checks a step's mechanical assertions: each type exists,
+// and the expressions in a predicate and in a fieldEquals value parse. prefix
+// names the step in each message.
+func validateAssertions(prefix string, assertions *Assertions) []string {
+	if assertions == nil {
+		return nil
+	}
+	var errs []string
+	for j, ma := range assertions.Mechanical {
+		switch {
+		case !IsAssertionType(ma.Type):
+			errs = append(errs, fmt.Sprintf("%s: assertion %d has unknown type %q (use %s)", prefix, j, ma.Type, strings.Join(AssertionTypes(), ", ")))
+		case ma.Type == "predicate" && ma.Expr != "":
+			if err := ValidatePredicate(ma.Expr); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: invalid predicate assertion %d: %v", prefix, j, err))
+			} else if err := ValidatePredicateExprs(ma.Expr); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: invalid expression in predicate assertion %d: %v", prefix, j, err))
+			}
+		case ma.Type == "fieldEquals":
+			if s, ok := ma.Value.(string); ok && ContainsExpr(s) {
+				if err := ValidateExpr(s); err != nil {
+					errs = append(errs, fmt.Sprintf("%s: invalid expression in fieldEquals assertion %d: %v", prefix, j, err))
+				}
+			}
+		}
+	}
+	return errs
+}
+
 // isAutowireMarker reports whether v is an AUTOWIRE or AUTOWIRE? placeholder,
 // which composition replaces with a reference.
 func isAutowireMarker(v any) bool {
@@ -525,16 +565,20 @@ func Validate(p *Plan, g *graph.Graph) error {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, sid, name, err))
 				}
 			}
-		}
-		if step.Assertions != nil {
-			for j, ma := range step.Assertions.Mechanical {
-				if ma.Type == "predicate" && ma.Expr != "" {
-					if err := ValidatePredicate(ma.Expr); err != nil {
-						errs = append(errs, fmt.Sprintf("step %d (%s): invalid predicate assertion %d: %v", i, sid, j, err))
+			if s, ok := sv.Default.(string); ok && ContainsExpr(s) {
+				if err := ValidateExpr(s); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
+				}
+			}
+			for k, entry := range sv.Pool {
+				if s, ok := entry.(string); ok && ContainsExpr(s) {
+					if err := ValidateExpr(s); err != nil {
+						errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression in pool entry %d for %q: %v", i, sid, k, name, err))
 					}
 				}
 			}
 		}
+		errs = append(errs, validateAssertions(fmt.Sprintf("step %d (%s)", i, sid), step.Assertions)...)
 
 		// Validate expectFailure
 		errs = append(errs, validateRetryConfig(fmt.Sprintf("step %d (%s)", i, step.StepID()), step.Retry)...)
@@ -602,15 +646,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 		if _, exists := g.Nodes[vs.Node]; !exists {
 			errs = append(errs, fmt.Sprintf("verification step %d: node %q not found in graph", i, vs.Node))
 		}
-		if vs.Assertions != nil {
-			for j, ma := range vs.Assertions.Mechanical {
-				if ma.Type == "predicate" && ma.Expr != "" {
-					if err := ValidatePredicate(ma.Expr); err != nil {
-						errs = append(errs, fmt.Sprintf("verification step %d (%s): invalid predicate assertion %d: %v", i, vs.Node, j, err))
-					}
-				}
-			}
-		}
+		errs = append(errs, validateAssertions(fmt.Sprintf("verification step %d (%s)", i, vs.Node), vs.Assertions)...)
 	}
 
 	// Gap 8: Goal consistency validation (uses step IDs)

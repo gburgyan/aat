@@ -258,15 +258,6 @@ func fixFilterPrefixes(p *plan.Plan) {
 	}
 }
 
-// validAssertionTypes is the set of recognized mechanical assertion types.
-var validAssertionTypes = map[string]bool{
-	"status":      true,
-	"schema":      true,
-	"fieldExists": true,
-	"fieldEquals": true,
-	"predicate":   true,
-}
-
 // fixAssertions removes mechanical assertions with empty or unknown types and
 // ensures every step has at least a status assertion. LLMs sometimes produce
 // assertions with missing type fields; this cleans them up.
@@ -285,7 +276,7 @@ func fixAssertions(p *plan.Plan) {
 		var valid []plan.MechanicalAssertion
 		hasStatus := false
 		for _, a := range step.Assertions.Mechanical {
-			if !validAssertionTypes[a.Type] {
+			if !plan.IsAssertionType(a.Type) {
 				continue
 			}
 			if a.Type == "status" {
