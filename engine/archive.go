@@ -277,6 +277,8 @@ func convertOASPayload(p *oas.PayloadResult) *archive.OASPayloadRecord {
 	rec := &archive.OASPayloadRecord{
 		Valid:               p.Valid,
 		CompilationWarnings: p.CompilationWarnings,
+		Skipped:             p.Skipped,
+		SkipReason:          p.SkipReason,
 	}
 	for _, e := range p.Errors {
 		rec.Errors = append(rec.Errors, archive.OASSchemaError{

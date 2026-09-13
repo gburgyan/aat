@@ -94,6 +94,11 @@ type OASPayloadRecord struct {
 	Valid               bool             `json:"valid"`
 	Errors              []OASSchemaError `json:"errors,omitempty"`
 	CompilationWarnings []string         `json:"compilationWarnings,omitempty"`
+	// Skipped marks a payload that was not validated, with SkipReason saying
+	// why: a request body type the validator doesn't read, or a schema it
+	// couldn't compile.
+	Skipped    bool   `json:"skipped,omitempty"`
+	SkipReason string `json:"skipReason,omitempty"`
 }
 
 // OASSchemaError is a single OAS validation error in the archive.

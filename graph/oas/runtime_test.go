@@ -351,7 +351,7 @@ func TestValidateStep_GraphOASFallback(t *testing.T) {
 	assert.Equal(t, "createPet", result.OperationID)
 }
 
-func TestValidateStep_NonJSONRequestBody(t *testing.T) {
+func TestValidateStep_UnsupportedRequestBodySkipped(t *testing.T) {
 	_, specPath := writeTestSpec(t)
 	cache := NewSpecCache()
 	require.NoError(t, cache.Load("spec.yaml", specPath))
@@ -361,15 +361,18 @@ func TestValidateStep_NonJSONRequestBody(t *testing.T) {
 		OAS:  &graph.OASRef{OperationID: "createPet", Spec: "spec.yaml"},
 	}
 
-	// Non-JSON request body
 	reqBody := []byte(`<pet><name>Fido</name></pet>`)
+	reqHeaders := map[string]string{"Content-Type": "application/xml; charset=utf-8"}
 	respBody := []byte(`{"id": 1, "name": "Fido"}`)
 	respHeaders := http.Header{"Content-Type": []string{"application/json"}}
 
-	result := ValidateStep(node, "", cache, "POST", "/pets", nil, reqBody, 201, respHeaders, respBody)
+	result := ValidateStep(node, "", cache, "POST", "/pets", reqHeaders, reqBody, 201, respHeaders, respBody)
 	require.NotNil(t, result)
-	// Request validation should be skipped for non-JSON
-	assert.Nil(t, result.Request)
+	require.NotNil(t, result.Request)
+	assert.True(t, result.Request.Skipped)
+	assert.Equal(t, "application/xml request bodies are not validated", result.Request.SkipReason)
+	assert.True(t, result.HasSkippedPayload())
+	assert.False(t, result.HasErrors())
 }
 
 func TestValidationResult_NilSafe(t *testing.T) {
@@ -388,6 +391,9 @@ func TestConvertValidationErrors_CompilationWarnings_NotValid(t *testing.T) {
 	assert.False(t, result.Valid, "should not report as valid when compilation warnings exist")
 	assert.Empty(t, result.Errors)
 	assert.Len(t, result.CompilationWarnings, 1)
+	assert.True(t, result.Skipped, "a payload whose schema couldn't be compiled wasn't validated")
+	assert.Contains(t, result.SkipReason, "failed schema compilation")
+	assert.False(t, (&ValidationResult{Response: result}).HasErrors(), "compilation warnings are not errors")
 }
 
 func TestConvertValidationErrors_NoErrors_NoWarnings_Valid(t *testing.T) {

@@ -1167,6 +1167,8 @@ func toOASPayloadDetail(r *archive.OASPayloadRecord) *OASPayloadDetail {
 		Valid:               r.Valid,
 		ErrorCount:          len(r.Errors),
 		CompilationWarnings: r.CompilationWarnings,
+		Skipped:             r.Skipped,
+		SkipReason:          r.SkipReason,
 	}
 	for _, e := range r.Errors {
 		detail.Errors = append(detail.Errors, OASValidationErrorDetail{

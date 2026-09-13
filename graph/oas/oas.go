@@ -9,6 +9,7 @@ import (
 
 	"github.com/pb33f/libopenapi"
 	validator "github.com/pb33f/libopenapi-validator"
+	"github.com/pb33f/libopenapi-validator/config"
 	"github.com/pb33f/libopenapi/datamodel"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/pb33f/libopenapi/index"
@@ -74,7 +75,7 @@ func (c *SpecCache) load(refPath, fsPath string, operationIDs []string, allOpera
 	if !allOperations {
 		validatorModel = operationsModel(model, operationIDs)
 	}
-	v := validator.NewValidatorFromV3Model(validatorModel)
+	v := validator.NewValidatorFromV3Model(validatorModel, config.WithBodyDecoder(formMediaType, formBodyDecoder()))
 
 	c.mu.Lock()
 	defer c.mu.Unlock()

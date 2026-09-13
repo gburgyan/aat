@@ -896,6 +896,12 @@ func buildSchemaCheck(v *oas.ValidationResult) validate.SchemaCheckFunc {
 			ar.Message = "schema validation skipped: no response body validated"
 			return ar
 		}
+		if v.Response.Skipped {
+			ar.Passed = true
+			ar.Skipped = true
+			ar.Message = "schema validation skipped: " + v.Response.SkipReason
+			return ar
+		}
 		if v.Response.Valid {
 			ar.Passed = true
 			ar.Message = "response matches OAS schema"

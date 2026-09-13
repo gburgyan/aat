@@ -350,7 +350,7 @@ See [Archives](archives.md) for the layout, what is and is not redacted, exporti
 
 ## OAS Validation
 
-When the graph references an OpenAPI spec (a graph-level `oas:` or per-node `oas` references — see [API Graphs: OAS Integration](graphs.md#oas-integration)), AAT validates each step's request and response against the spec as it runs. Violations show up in three places: an `OAS: N warning(s)` marker on the step line and a total after the summary, an `issues` map (`{"oas": N}`) in the `--json` summary and archive summary, and the per-step detail in the archive.
+When the graph references an OpenAPI spec (a graph-level `oas:` or per-node `oas` references — see [API Graphs: OAS Integration](graphs.md#oas-integration)), AAT validates each step's request body, when it is JSON or form-encoded, and its response body against the spec as it runs. Bracketed form keys such as `items[0][sku]` and `tags[]` are read as nested objects and arrays. A request body of another type, or a schema the validator can't compile, is marked as not validated (`OAS: request not validated` on the step line, `skipped` in the archive) and never fails a step. Violations show up in three places: an `OAS: N warning(s)` marker on the step line and a total after the summary, an `issues` map (`{"oas": N}`) in the `--json` summary and archive summary, and the per-step detail in the archive.
 
 The `--oas-validate` flag controls the mode:
 

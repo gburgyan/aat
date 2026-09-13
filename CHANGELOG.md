@@ -39,6 +39,9 @@ the graph and plan formats may still change before 1.0.
   - `llms-full.txt` at the docs site's root holds the whole primer, and `llms.txt` indexes it and the reference pages.
   - `aat docs primer` prints the same primer from the binary, in the version that matches it.
   - The primer links to docs pages by URL, so its links also work outside the site.
+- OAS validation checks form-encoded request bodies (`application/x-www-form-urlencoded`) against the operation's
+  schema. Bracketed keys such as `items[0][sku]=…` and `tags[]=…` are read as nested objects and arrays, and values
+  take the types the schema allows. Before, only JSON request bodies were validated, and a form body was not checked.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
@@ -105,6 +108,10 @@ the graph and plan formats may still change before 1.0.
 - OAS validation accepts `null` for an OpenAPI 3.0 schema marked `nullable: true` that is built with `anyOf` or
   `oneOf`, such as a field that holds either an ID or an expanded object. The validator added `null` only to a
   schema's own `type`, so a response with such a field set to `null` failed with `got null, want object`.
+- A request body that is neither JSON nor form-encoded, or a schema the validator can't compile, is reported as not
+  validated. The archive marks the payload `skipped` with a reason, the step line shows `OAS: request not validated` or
+  `OAS: response not validated`, and a `schema` assertion is skipped with the reason. Before, the step line could read
+  `OAS: 0 warning(s)`, and a `schema` assertion failed with an empty message.
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,

@@ -281,6 +281,8 @@ type OASPayloadDetail struct {
 	ErrorCount          int                        `json:"errorCount"`
 	Errors              []OASValidationErrorDetail `json:"errors,omitempty"`
 	CompilationWarnings []string                   `json:"compilationWarnings,omitempty"`
+	Skipped             bool                       `json:"skipped,omitempty"`
+	SkipReason          string                     `json:"skipReason,omitempty"`
 }
 
 // OASValidationErrorDetail captures a single OAS validation error.
