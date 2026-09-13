@@ -73,6 +73,22 @@ func TestExitCodes(t *testing.T) {
 	shopManifest, err := filepath.Abs(filepath.Join("..", "..", "examples", "shop", "aat-project.yaml"))
 	require.NoError(t, err)
 
+	// A project whose graph names an OpenAPI spec that doesn't exist.
+	noSpec := t.TempDir()
+	for name, content := range map[string]string{
+		"aat-project.yaml": "name: nospec\ngraph: graph.yaml\ntemplates: templates/\nplans: plans/\nenvironment: env.yaml\n",
+		"graph.yaml": "version: \"1.0.0\"\noas: missing.yaml\nnodes:\n  getOrder:\n    description: Get an order\n" +
+			"    adapter: getOrder\n    oas:\n      operationId: getOrder\n    outputs:\n      - name: orderId\n        type: string\n",
+		"templates/getOrder.yaml": "adapter: getOrder\nprotocol: http\nrequest:\n  method: GET\n  path: /orders/1\n" +
+			"response:\n  extract:\n    orderId: \"$.orderId\"\n",
+		"env.yaml":             "environment: test\napiBaseUrl: http://127.0.0.1:9\nauth:\n  type: none\n",
+		"plans/get-order.yaml": "execution:\n  steps:\n    - node: getOrder\n",
+	} {
+		path := filepath.Join(noSpec, name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
+	}
+
 	tests := []struct {
 		name   string
 		dir    string
@@ -97,6 +113,8 @@ func TestExitCodes(t *testing.T) {
 		{name: "run plan with a manifest that fails to load", dir: broken, args: []string{"run", "plan", "smoke"}, code: 2, stderr: brokenManifest},
 		{name: "run plan --json with a manifest that fails to load", dir: broken, args: []string{"run", "plan", "smoke", "--json"}, code: 2, stdout: `"outcome": "error"`},
 		{name: "run plan --dump-state-secrets without --dump-state", dir: empty, args: []string{"run", "plan", "smoke", "--dump-state-secrets"}, code: 2, stderr: "--dump-state-secrets requires --dump-state"},
+		{name: "run plan --oas-validate strict with a spec that doesn't load", dir: noSpec, args: []string{"run", "plan", "get-order", "--oas-validate", "strict"}, code: 2, stderr: "strict OAS validation"},
+		{name: "run plan --json --oas-validate strict with a spec that doesn't load", dir: noSpec, args: []string{"run", "plan", "get-order", "--oas-validate", "strict", "--json"}, code: 2, stdout: `"outcome": "error"`},
 		{name: "run show a part without --step", dir: empty, args: []string{"run", "show", "latest", "--response"}, code: 2, stderr: "need --step"},
 		{name: "run show two parts", dir: empty, args: []string{"run", "show", "latest", "--step", "checkout", "--request", "--response"}, code: 2, stderr: "choose one part"},
 		{name: "run show an unknown run", dir: empty, args: []string{"run", "show", "run-missing"}, code: 2, stderr: "run not found"},

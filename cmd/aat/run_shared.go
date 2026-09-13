@@ -770,25 +770,13 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 	}
 
 	// Load OAS specs for runtime validation (unless disabled)
-	if oasMode != "off" {
-		specPaths := collectOASSpecPaths(g)
-		if len(specPaths) > 0 {
-			graphDir := filepath.Dir(args.GraphPath)
-			oasCache := oas.NewSpecCache()
-			for _, sp := range specPaths {
-				fsPath := sp
-				if !filepath.IsAbs(sp) {
-					fsPath = filepath.Join(graphDir, sp)
-				}
-				if loadErr := oasCache.Load(sp, fsPath); loadErr != nil {
-					logf("aat: warning: could not load OAS spec %q: %s\n", sp, loadErr)
-				}
-			}
-			if oasCache.Len() > 0 {
-				rctx.OASCache = oasCache
-				logf("aat: loaded %d OAS spec(s) for runtime validation\n", oasCache.Len())
-			}
-		}
+	oasCache, err := loadOASCache(g, args.GraphPath, oasMode, os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	if oasCache != nil {
+		rctx.OASCache = oasCache
+		logf("aat: loaded %d OAS spec(s) for runtime validation\n", oasCache.Len())
 	}
 
 	return rctx, nil

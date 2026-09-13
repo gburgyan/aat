@@ -89,6 +89,10 @@ the graph and plan formats may still change before 1.0.
   - `plans.md` no longer says `{}` skips graph defaults for required inputs.
   - `value-flow.md` says an inline `min` or `max` can use `field` alone, and how ties break.
   - `validation.md` no longer claims plan validation checks assertion types.
+- `--oas-validate strict` stops before the first request, with exit code 2, when a spec the graph references fails to
+  load. Before, the run printed a warning and continued without validating, and `--quiet` and `--json` hid the
+  warning. In `auto` mode the warning now goes to stderr, where `--quiet` and `--json` keep it visible. `aat prompt`
+  behaves the same way.
 
 ### Fixed
 - OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another
