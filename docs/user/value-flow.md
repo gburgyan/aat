@@ -117,11 +117,13 @@ The `fromSelection` syntax is `selectionName.fieldName`. If the field part is om
 | `last` | *(none)* | Last element (after filtering) |
 | `index` | `index` | Element at the specified zero-based index (after filtering) |
 | `random` | *(none)* | Random element (after filtering) |
-| `min` | `sortField` | Element with the smallest value of `sortField` |
-| `max` | `sortField` | Element with the largest value of `sortField` |
+| `min` | `sortField`, or `field` in an inline `select` | Element with the smallest value of `sortField` (of `field` when there is no `sortField`) |
+| `max` | `sortField`, or `field` in an inline `select` | Element with the largest value of `sortField` (of `field` when there is no `sortField`) |
 | `match` | `filter` | First element matching the filter predicate (no pre-filtering) |
 
-For `min` and `max`, the `sortField` must resolve to a number or to a string that holds one, such as `"99.10"`: APIs often send prices and totals as decimal strings, and they compare by value. Any other value fails the selection. The `field` parameter (if set) determines which field to extract from the winning element.
+For `min` and `max`, the `sortField` must resolve to a number or to a string that holds one, such as `"99.10"`: APIs often send prices and totals as decimal strings, and they compare by value. Any other value fails the selection. The `field` parameter (if set) determines which field to extract from the winning element. A named selection needs `sortField`.
+
+When several elements share the smallest or largest value, the first of them in array order, after the `filter`, wins. If a tie would pick the wrong element, add a `filter` that narrows the candidates.
 
 A `filter` does not convert strings: comparing a string field with a number fails. Filter such fields with string equality, or let `min` and `max` do the numeric comparison.
 

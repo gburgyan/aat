@@ -104,3 +104,50 @@ The MCP server's `get_sample_response` gains `path` and `shape`.
 
 **Open questions:**
 - Archives are indented JSON, so a run with large responses writes hundreds of megabytes. Not scheduled.
+
+## 2026-09-12 — P19: docs an agent can read verbatim
+
+**What:**
+- The AI assistant primer moved to `internal/primer/llms.md`. `docs/user/llms.md` includes it with a `--8<--` snippet,
+  as `changelog.md` includes the changelog.
+- `aat docs primer` prints the primer from the binary.
+- The docs build publishes the primer as `llms-full.txt` at the site root, beside a static `llms.txt` index of the
+  reference pages.
+- **The primer gains what an agent had to learn by trial and error:**
+  - step value forms for pools, literal lists (`{default: [...]}`), and `{}`
+  - one table of expression forms, with where expressions are evaluated and where they are not
+  - assertion details (literal comparison, the predicate grammar, array counts), plus two checks that catch tests
+    passing for the wrong reason
+  - retry rules, defaults, and waits
+  - `min` and `max` ties
+  - Lua transforms and template iteration blocks
+  - a section on layers and batches: key forms, precedence, groups, dedup, and watching a long batch
+  - how verification and `inject` compose
+  - reading results with `aat run show`, and redacted dumps
+- **Verification of the additions.** Each one was checked against the code first; the literal-list form was also run
+  against a test server. That work found three docs pages that disagreed with the code, now fixed:
+  - `plans.md` on `{}`
+  - `value-flow.md` on inline `min` and `max`
+  - `validation.md` on assertion types
+
+  It also found code defects, noted for later M6.1 phases.
+
+**Decisions:**
+- **Current behavior only.** The primer describes what the code does today, including the limits later phases may
+  lift: no expansion in assertion values, no inputs in a transform, and no bare list in a step value.
+  - A rerun of the discovery run reads these docs, so they use the shop's vocabulary and say nothing about that run's
+    API.
+- **Why verbatim access.** In the discovery run, the agent's fetch tool summarized the primer and declined to
+  reproduce it. Its summaries reported documented features, such as date expressions and `{{env.KEY}}`, as missing,
+  and a guessed `llms-full.txt` returned 404.
+- **One source, embedded.** `docs/go.mod` makes `docs/` a module of its own, so Go cannot embed files there. The
+  primer's source moved into the main module, as the foundation package `internal/primer`, and the site includes it.
+  There is no second copy to keep in sync.
+- **A build hook, not a committed copy.** Snippets do not expand in `.txt` files, so `docs/hooks/llms_txt.py` copies
+  the source into the site at build time, and it cannot drift. The docs workflow now also runs on changes to
+  `internal/primer/**` and `docs/hooks/**`.
+- **Links by URL.** A relative link breaks in raw Markdown and in terminal output, so the primer links to pages by
+  site URL. mkdocs does not check URLs, so `internal/primer`'s test does: every site link in the primer and in
+  `llms.txt` must name an existing page, and every anchor a heading on that page.
+- **Two copies of the primer, for two needs.** `aat docs primer` matches the installed binary, while the site deploys
+  from `main`, and the primer says so.

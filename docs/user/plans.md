@@ -353,7 +353,9 @@ values:
   returnDate: {}
 ```
 
-An empty map `{}` tells the engine to skip this input entirely rather than falling through to graph defaults or auto-wiring.
+An empty map `{}` (or `null`) marks the input as explicitly absent: no graph default, layer, or auto-wiring fills it, and an optional input is left out of the request. Use it on optional inputs.
+
+A required input marked `{}` still takes its graph default when that default is a plain literal. The default is used as written: its expressions are not evaluated, and layers do not apply. With no graph default, the step fails with `required input has no value (empty step value)`. With a pool or `from` default, the input is left out, which usually fails the request with `unresolved placeholders`.
 
 **Inputs you don't need to specify** — graph nodes can declare default value pools on their inputs. When a plan or recipe doesn't provide a value for an input, the engine uses the graph default. For example, if the graph declares:
 

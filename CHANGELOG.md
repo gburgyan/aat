@@ -35,6 +35,10 @@ the graph and plan formats may still change before 1.0.
 - The MCP server's `get_sample_response` takes `path` and `shape`, as `aat run show` does.
   - Its `run_id` accepts `latest` and a batch ID with a run ID, and finds runs inside saved batches.
   - The same goes for `inspect_archive`, `analyze_failure`, and `diff_archives`.
+- The AI assistant primer is published as raw Markdown, for tools that fetch pages.
+  - `llms-full.txt` at the docs site's root holds the whole primer, and `llms.txt` indexes it and the reference pages.
+  - `aat docs primer` prints the same primer from the binary, in the version that matches it.
+  - The primer links to docs pages by URL, so its links also work outside the site.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
@@ -75,6 +79,16 @@ the graph and plan formats may still change before 1.0.
   - `--dump-state-secrets` keeps live credentials, for a harness that sends requests as the run's session. It warns
     on stderr when the dump goes to stdout, and it is an error without `--dump-state`.
   - A harness that reads `auth.headers` to send requests needs the new flag.
+- Docs: the AI assistant primer covers more ground:
+  - layers and batches
+  - step value forms: pools, literal lists, and `{}`
+  - expressions and assertion details
+  - retries and selection ties
+  - Lua transforms, and reading results with `aat run show`
+- Docs: three pages disagreed with the code and are corrected:
+  - `plans.md` no longer says `{}` skips graph defaults for required inputs.
+  - `value-flow.md` says an inline `min` or `max` can use `field` alone, and how ties break.
+  - `validation.md` no longer claims plan validation checks assertion types.
 
 ### Fixed
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere

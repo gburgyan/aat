@@ -51,6 +51,7 @@ make clean         # Remove binaries and frontend artifacts (node_modules, dist)
 | `internal/sandbox/shop/` | Offline e-commerce sandbox API (regions, OAuth2/API key, order state machine, chaos hooks); stdlib only |
 | `internal/httpstatus/` | Expected-status values shared by plan validation and assertions: exact codes, `2xx` classes, contradictions with `expectFailure` |
 | `internal/yamlx/` | Strict YAML decoding for project files: unknown keys are errors with line, key, and suggestion |
+| `internal/primer/` | The AI assistant primer (`llms.md`): embedded for `aat docs primer`, included by `docs/user/llms.md`, and published as `llms-full.txt` |
 | `internal/testutil/` | Shared test helpers and fixtures |
 | `internal/version/` | Build version info |
 | root `embed.go` | `package aat`: embeds `examples/shop` for `aat-sandbox init` |
@@ -59,7 +60,7 @@ make clean         # Remove binaries and frontend artifacts (node_modules, dist)
 
 Dependencies flow in one direction. No cycles. No lateral imports within a tier.
 
-**Foundation packages** (stdlib and third-party imports only; importable from any tier): `internal/httpstatus`, `internal/yamlx`, `internal/version`
+**Foundation packages** (stdlib and third-party imports only; importable from any tier): `internal/httpstatus`, `internal/yamlx`, `internal/version`, `internal/primer`
 **Leaf packages** (no aat imports other than foundation packages): `config`, `graph`, `domain`, `adapter`, `validate`, `internal/sandbox/shop`
 **Mid-tier**: `graph/oas` → graph; `llm` → config; `plan` → graph, config; `archive` → plan
 **Orchestrators**: `engine` → graph, graph/oas, adapter, plan, domain, validate, archive, config
@@ -147,7 +148,7 @@ The environment file supports two formats: **single-environment** (legacy, one `
 
 - **`docs/internal/`** — progress tracker, architecture notes (for contributors)
 - **`docs/worklog/`** — decision log entries per stage (date, decisions, rationale)
-- **`docs/user/`** — user-facing docs, built into the site at https://gburgyan.github.io/aat/ (`mkdocs.yml`, Material for MkDocs; `.github/workflows/docs.yml` deploys it from main). Every page must be listed in the `mkdocs.yml` nav; links, anchors, and nav coverage are checked by `make docs`, so run it before committing doc changes. Keep pages readable on GitHub (plain Markdown); the one site-only construct is the `--8<--` snippet include in `changelog.md` and `examples/shop.md`, which pulls in `CHANGELOG.md` and the `examples/shop/README.md` section between its `[start:body]`/`[end:body]` markers
+- **`docs/user/`** — user-facing docs, built into the site at https://gburgyan.github.io/aat/ (`mkdocs.yml`, Material for MkDocs; `.github/workflows/docs.yml` deploys it from main). Every page must be listed in the `mkdocs.yml` nav; links, anchors, and nav coverage are checked by `make docs`, so run it before committing doc changes. Keep pages readable on GitHub (plain Markdown); the one site-only construct is the `--8<--` snippet include in `changelog.md`, `examples/shop.md`, and `llms.md`, which pulls in `CHANGELOG.md`, the `examples/shop/README.md` section between its `[start:body]`/`[end:body]` markers, and the AI assistant primer, `internal/primer/llms.md`. The primer links to pages by site URL, which `make docs` does not check, so `internal/primer`'s tests check them; `docs/hooks/llms_txt.py` publishes the primer as `llms-full.txt` beside the static `docs/user/llms.txt` index
 
 Record user-visible changes in `CHANGELOG.md` under *Unreleased* as tasks complete. Add worklog entries for non-trivial decisions. The launch roadmap lives in `LAUNCH-PLAN.md`, a local working document.
 
@@ -302,6 +303,7 @@ aat generate --oas FILE [--output-graph graph.yaml|-] [--output-templates templa
 
 # Documentation generation
 aat docs generate --graph FILE [--domain FILE] [--output FILE] [--title TEXT] [--split]
+aat docs primer                        # print the AI assistant primer (llms-full.txt on the site) as Markdown
 ```
 
 All `aat validate` subcommands support manifest auto-discovery: when `--graph` is omitted and a manifest is discoverable, the graph path resolves from the manifest. Explicit flags always override.

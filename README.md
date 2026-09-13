@@ -247,6 +247,7 @@ Release binaries are not notarized. If macOS blocks one you downloaded with a br
 | `aat mcp serve` | Serve the project to AI coding tools over MCP |
 | `aat generate --oas <spec>` | Scaffold a graph and templates from an OpenAPI spec |
 | `aat docs generate` | Write Markdown documentation from the graph |
+| `aat docs primer` | Print the primer AI coding assistants read, as Markdown |
 | `aat prompt "<text>"` | Draft a plan from a sentence (needs LLM configuration) |
 | `aat-sandbox serve` | Run the offline shop API and payments API |
 | `aat-sandbox init <dir>` | Extract the shop example project |

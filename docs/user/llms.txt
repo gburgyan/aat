@@ -1,0 +1,26 @@
+# AAT — Adaptive API Toolkit
+
+> A Go CLI that models an API as a graph and runs long, multi-step test plans against it: values wired between steps, layers for matrix testing, multiple environments, run archives, and an MCP server for AI coding tools. Execution never calls an LLM.
+
+An AI coding assistant needs one document to author and run an AAT project: the primer below. It covers the project files, the edit, validate, run loop, and how to read what a run recorded. The same Markdown is built into the CLI: `aat docs primer` prints the version that matches the installed binary.
+
+## Primer
+
+- [AAT for AI Assistants](https://gburgyan.github.io/aat/llms-full.txt): the full primer, as Markdown
+
+## Reference pages
+
+- [Project setup](https://gburgyan.github.io/aat/project-setup/): the manifest and the project layout
+- [API graphs](https://gburgyan.github.io/aat/graphs/): nodes, inputs, outputs, ordering, and cleanup
+- [Templates](https://gburgyan.github.io/aat/templates/): requests and response extraction
+- [Lua transforms](https://gburgyan.github.io/aat/lua-transforms/): outputs computed from a response
+- [Environments](https://gburgyan.github.io/aat/environments/): base URLs, auth, and multiple environments
+- [Plans and recipes](https://gburgyan.github.io/aat/plans/): steps, values, assertions, and layers
+- [Workflows](https://gburgyan.github.io/aat/workflows/): slots, addons, and composition
+- [Value resolution](https://gburgyan.github.io/aat/value-flow/): how each input gets its value
+- [Running tests](https://gburgyan.github.io/aat/running/): run commands and flags
+- [Matrix testing](https://gburgyan.github.io/aat/batch-layers/): layer groups and duplicate detection
+- [Archives](https://gburgyan.github.io/aat/archives/): what a run records, and `aat run show`
+- [Checkpoints](https://gburgyan.github.io/aat/checkpoints/): stopping a run and handing its state to another tool
+- [Validation](https://gburgyan.github.io/aat/validation/): what `aat validate` checks
+- [MCP server](https://gburgyan.github.io/aat/mcp-server/): tools for AI coding assistants
