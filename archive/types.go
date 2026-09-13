@@ -215,6 +215,9 @@ type ValueResolutionRecord struct {
 	PoolIndex    int    `json:"poolIndex,omitempty"`
 	PoolSize     int    `json:"poolSize,omitempty"`
 	Tried        []any  `json:"tried,omitempty"`
+	// Error, for source "error", says why the input couldn't be resolved. For a
+	// named selection that failed, InputName is the selection's name.
+	Error string `json:"error,omitempty"`
 }
 
 // RunSummary is a lightweight summary of a run, written alongside the full

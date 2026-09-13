@@ -176,10 +176,10 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 		}
 	}
 
-	// Value resolutions
-	if len(s.Resolutions) > 0 {
+	// Value resolutions, each with the selection that picked its value
+	if resolutions := archive.StepResolutions(s); len(resolutions) > 0 {
 		b.WriteString("**Value Resolutions:**\n\n")
-		for _, r := range s.Resolutions {
+		for _, r := range resolutions {
 			fmt.Fprintf(&b, "- **%s**: source=%s", r.InputName, r.Source)
 			if r.FromStep != "" {
 				fmt.Fprintf(&b, " (from %s.%s)", r.FromStep, r.FromOutput)
@@ -193,6 +193,15 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 					ok = "failed"
 				}
 				fmt.Fprintf(&b, " constraint=`%s` (%s)", r.Constraint, ok)
+			}
+			if sel := r.Selection; sel != nil {
+				fmt.Fprintf(&b, " selection=%s[%d] of %d", sel.Strategy, sel.SelectedIndex, sel.FilteredSize)
+				if sel.Ties > 1 {
+					fmt.Fprintf(&b, " (%d tie)", sel.Ties)
+				}
+			}
+			if r.Error != "" {
+				fmt.Fprintf(&b, " error=`%s`", r.Error)
 			}
 			b.WriteString("\n")
 		}

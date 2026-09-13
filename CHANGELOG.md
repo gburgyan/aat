@@ -35,6 +35,14 @@ the graph and plan formats may still change before 1.0.
   - Archive selection records gain `field`, `sortField`, `sortValue`, `ties`, and `onTie`.
   - `onTie: fail` on a selection fails the step on a tie instead, and `onTie: first` takes the first without a
     warning. Plan validation accepts `onTie` only on `min` and `max`.
+- `aat run show --step ID --resolutions` prints how each of the step's inputs got its value, as JSON.
+  - Each entry gives the source, the upstream step and output, the expression, pool pick, or constraint, and the
+    selection that picked the value.
+  - `--step` lists each input with its source, and `--step --json` includes `resolutions`.
+  - A step that fails before its request is sent keeps the resolutions made up to that point, with an `error` record
+    for the input that failed. That covers an input that can't be resolved, a missing adapter, a request that can't be
+    built, and a send error. Before, such a step recorded none.
+  - The MCP server's `inspect_archive` shows each input's selection and error.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
 - `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,

@@ -33,11 +33,13 @@ var runShowCmd = &cobra.Command{
 
 Without --step, list the run's steps with their node, HTTP status, result,
 duration, and output names, then its verification and cleanup steps. --step
-shows one step, named by its step ID or by a node that ran once. --request,
---response, --inputs, and --outputs print that part of the step as JSON. --path
-narrows the part with a gjson path, such as items.0.sku, and --shape prints its
-structure instead of its values: each path with its type, array sizes, and a
-sample value, which is the way to learn a large response.
+shows one step, named by its step ID or by a node that ran once, with where
+each input's value came from. --request, --response, --inputs, --outputs, and
+--resolutions print that part of the step as JSON; --resolutions says how each
+input got its value. --path narrows the part with a gjson path, such as
+items.0.sku, and --shape prints its structure instead of its values: each path
+with its type, array sizes, and a sample value, which is the way to learn a
+large response.
 
 The run is latest (the newest run, runs inside batches included), a run ID, a
 batch ID and a run ID joined by a slash, or a path to a run directory, an
@@ -49,6 +51,7 @@ holds.`,
   aat run show latest --step checkout
   aat run show latest --step checkout --response --shape
   aat run show latest --step checkout --response --path orderId
+  aat run show latest --step checkout --resolutions
   aat run show _output/runs/run-20260910-230852-8b2139bc/archive.json --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -77,6 +80,7 @@ func init() {
 	flags.Bool("response", false, "print the step's response body")
 	flags.Bool("inputs", false, "print the step's resolved inputs")
 	flags.Bool("outputs", false, "print the step's outputs")
+	flags.Bool("resolutions", false, "print how each input got its value: source, upstream step, expression, pool pick, or selection, and the error for one that failed")
 	flags.String("path", "", "print what a gjson path selects in the part (the response body unless another part is chosen)")
 	flags.Bool("shape", false, "print the part's structure instead of its values: each path with its type, array sizes, and a sample")
 	flags.Int("max-bytes", defaultShowMaxBytes, "cut a printed part after this many bytes (0 for no limit)")
@@ -87,7 +91,7 @@ func init() {
 // showOptions holds the flags of aat run show.
 type showOptions struct {
 	Step     string
-	Part     string // request, response, inputs, or outputs; empty for the step overview
+	Part     string // request, response, inputs, outputs, or resolutions; empty for the step overview
 	Path     string
 	Shape    bool
 	JSON     bool
@@ -103,7 +107,7 @@ func showOptionsFromFlags(cmd *cobra.Command) (showOptions, error) {
 	opts.Shape, _ = flags.GetBool("shape")
 	opts.JSON, _ = flags.GetBool("json")
 	opts.MaxBytes, _ = flags.GetInt("max-bytes")
-	for _, part := range []string{"request", "response", "inputs", "outputs"} {
+	for _, part := range []string{"request", "response", "inputs", "outputs", "resolutions"} {
 		if set, _ := flags.GetBool(part); set {
 			if opts.Part != "" {
 				return opts, fmt.Errorf("--%s and --%s: choose one part of the step", opts.Part, part)
@@ -112,7 +116,7 @@ func showOptionsFromFlags(cmd *cobra.Command) (showOptions, error) {
 		}
 	}
 	if opts.Step == "" && (opts.Part != "" || opts.Path != "" || opts.Shape) {
-		return opts, errors.New("--request, --response, --inputs, --outputs, --path, and --shape need --step")
+		return opts, errors.New("--request, --response, --inputs, --outputs, --resolutions, --path, and --shape need --step")
 	}
 	if opts.Part == "" && (opts.Path != "" || opts.Shape) {
 		opts.Part = "response"
@@ -492,24 +496,25 @@ func writeCleanupSkips(b *strings.Builder, skips []CleanupSkipSummary) {
 
 // shownStep is one step as aat run show prints it, and its --json document.
 type shownStep struct {
-	StepID            string           `json:"step_id"`
-	Node              string           `json:"node"`
-	Cleanup           bool             `json:"cleanup,omitempty"`
-	CleanupFor        string           `json:"cleanup_for,omitempty"`
-	Method            string           `json:"method,omitempty"`
-	URL               string           `json:"url,omitempty"`
-	Status            int              `json:"status,omitempty"`
-	Passed            bool             `json:"passed"`
-	DurationMs        int64            `json:"duration_ms"`
-	Retries           int              `json:"retries,omitempty"`
-	RetriedOn         []string         `json:"retried_on,omitempty"`
-	Error             string           `json:"error,omitempty"`
-	Inputs            map[string]any   `json:"inputs,omitempty"`
-	Outputs           map[string]any   `json:"outputs,omitempty"`
-	Assertions        []shownAssertion `json:"assertions,omitempty"`
-	RequestBodyBytes  int              `json:"request_body_bytes,omitempty"`
-	ResponseBodyBytes int              `json:"response_body_bytes,omitempty"`
-	Warnings          []string         `json:"warnings,omitempty"`
+	StepID            string                    `json:"step_id"`
+	Node              string                    `json:"node"`
+	Cleanup           bool                      `json:"cleanup,omitempty"`
+	CleanupFor        string                    `json:"cleanup_for,omitempty"`
+	Method            string                    `json:"method,omitempty"`
+	URL               string                    `json:"url,omitempty"`
+	Status            int                       `json:"status,omitempty"`
+	Passed            bool                      `json:"passed"`
+	DurationMs        int64                     `json:"duration_ms"`
+	Retries           int                       `json:"retries,omitempty"`
+	RetriedOn         []string                  `json:"retried_on,omitempty"`
+	Error             string                    `json:"error,omitempty"`
+	Inputs            map[string]any            `json:"inputs,omitempty"`
+	Outputs           map[string]any            `json:"outputs,omitempty"`
+	Assertions        []shownAssertion          `json:"assertions,omitempty"`
+	RequestBodyBytes  int                       `json:"request_body_bytes,omitempty"`
+	ResponseBodyBytes int                       `json:"response_body_bytes,omitempty"`
+	Resolutions       []archive.InputResolution `json:"resolutions,omitempty"`
+	Warnings          []string                  `json:"warnings,omitempty"`
 }
 
 // shownAssertion is one assertion result of a shown step.
@@ -560,7 +565,7 @@ func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup, asJSO
 	if view.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", view.Error)
 	}
-	writeShownValues(&b, "inputs", view.Inputs)
+	writeShownInputs(&b, view.Inputs, view.Resolutions)
 	writeShownValues(&b, "outputs", view.Outputs)
 	if len(view.Assertions) > 0 {
 		var passed, failed, skipped int
@@ -627,8 +632,75 @@ func buildShownStep(step *archive.StepRecord, id string, cleanup bool) shownStep
 			view.Assertions = append(view.Assertions, shownAssertion{Type: r.Type, Passed: r.Passed, Skipped: r.Skipped, Message: r.Message})
 		}
 	}
+	view.Resolutions = archive.StepResolutions(step)
 	view.Warnings = archive.SelectionTieWarnings(step.Selections)
 	return view
+}
+
+// writeShownInputs writes a step's inputs, one per line sorted by name, each
+// with where its value came from. An input that couldn't be resolved, or that
+// was left unset, shows its source with no value.
+func writeShownInputs(b *strings.Builder, inputs map[string]any, resolutions []archive.InputResolution) {
+	sources := make(map[string]archive.InputResolution, len(resolutions))
+	names := make([]string, 0, len(inputs))
+	for name := range inputs {
+		names = append(names, name)
+	}
+	for _, r := range resolutions {
+		sources[r.InputName] = r
+		if _, ok := inputs[r.InputName]; !ok && (r.Source == "error" || r.Source == "optional_skip") {
+			names = append(names, r.InputName)
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	sort.Strings(names)
+	values := make([]string, len(names))
+	nameWidth, valueWidth := 0, 0
+	for i, name := range names {
+		values[i] = "-"
+		if v, ok := inputs[name]; ok {
+			values[i] = showValue(v)
+		}
+		nameWidth = max(nameWidth, len(name))
+		valueWidth = min(max(valueWidth, len(values[i])), 40)
+	}
+	b.WriteString("inputs:\n")
+	for i, name := range names {
+		line := fmt.Sprintf("  %-*s  %-*s  %s", nameWidth, name, valueWidth, values[i], describeResolution(sources[name]))
+		b.WriteString(strings.TrimRight(line, " "))
+		b.WriteByte('\n')
+	}
+}
+
+// describeResolution says briefly where an input's value came from, as in
+// "plan_from createCart.cartId" or "select_edge min price of listProducts.products[2]".
+func describeResolution(r archive.InputResolution) string {
+	if r.Source == "" {
+		return ""
+	}
+	parts := []string{r.Source}
+	switch {
+	case r.Selection != nil:
+		sel := r.Selection
+		pick := sel.Strategy
+		if sel.SortField != "" {
+			pick += " " + sel.SortField
+		}
+		parts = append(parts, fmt.Sprintf("%s of %s.%s[%d]", pick, sel.SourceNode, sel.SourceField, sel.SelectedIndex))
+	case r.FromStep != "" && r.FromOutput != "":
+		parts = append(parts, r.FromStep+"."+r.FromOutput)
+	case r.FromStep != "" && r.FromInput != "":
+		parts = append(parts, r.FromStep+"."+r.FromInput)
+	}
+	if r.Expression != "" {
+		parts = append(parts, r.Expression)
+	}
+	if r.Error != "" {
+		parts = append(parts, r.Error)
+	}
+	return strings.Join(parts, " ")
 }
 
 // writeShownValues writes a step's inputs or outputs, one per line, sorted by
@@ -732,6 +804,12 @@ func stepPartJSON(step *archive.StepRecord, part string) ([]byte, error) {
 			return nil, nil
 		}
 		return step.Response.Body, nil
+	case "resolutions":
+		resolutions := archive.StepResolutions(step)
+		if len(resolutions) == 0 {
+			return nil, nil
+		}
+		return json.Marshal(resolutions)
 	case "inputs":
 		if len(step.Inputs) == 0 {
 			return nil, nil

@@ -663,11 +663,14 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		inputs, selections, resolutions, err = ResolveInputsWithContext(ctx, step, node, e.graph, state, rctx)
 		if err != nil {
 			return StepResult{
-				StepID:    sid,
-				Node:      step.Node,
-				Error:     fmt.Errorf("resolving inputs: %w", err),
-				StartTime: start,
-				Duration:  time.Since(start),
+				StepID:      sid,
+				Node:        step.Node,
+				Inputs:      inputs,
+				Selections:  selections,
+				Resolutions: resolutions,
+				Error:       fmt.Errorf("resolving inputs: %w", err),
+				StartTime:   start,
+				Duration:    time.Since(start),
 			}
 		}
 
@@ -691,12 +694,14 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	adp, err := e.registry.Get(node.Adapter)
 	if err != nil {
 		return StepResult{
-			StepID:    sid,
-			Node:      step.Node,
-			Inputs:    inputs,
-			Error:     fmt.Errorf("getting adapter: %w", err),
-			StartTime: start,
-			Duration:  time.Since(start),
+			StepID:      sid,
+			Node:        step.Node,
+			Inputs:      inputs,
+			Selections:  selections,
+			Resolutions: resolutions,
+			Error:       fmt.Errorf("getting adapter: %w", err),
+			StartTime:   start,
+			Duration:    time.Since(start),
 		}
 	}
 
@@ -711,6 +716,8 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 			StepID:        sid,
 			Node:          step.Node,
 			Inputs:        inputs,
+			Selections:    selections,
+			Resolutions:   resolutions,
 			Error:         fmt.Errorf("building request: %w", err),
 			StartTime:     start,
 			Duration:      time.Since(start),
@@ -737,6 +744,8 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 			StepID:        sid,
 			Node:          step.Node,
 			Inputs:        inputs,
+			Selections:    selections,
+			Resolutions:   resolutions,
 			Request:       req,
 			Error:         err,
 			StartTime:     start,

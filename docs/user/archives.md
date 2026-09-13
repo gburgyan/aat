@@ -160,16 +160,27 @@ cleanup:
   2  deleteCart   deleteCart      204  pass        0ms  createCart
 ```
 
-`--step` takes a step ID, or a node name when that node ran only once. On its own, it prints the step's method and URL, status, result, duration and retries, error, inputs and outputs (arrays and objects by their size), assertion counts with each failure, and the sizes of the request and response bodies:
+`--step` takes a step ID, or a node name when that node ran only once. On its own, it prints:
+- the step's method and URL, status, result, duration and retries, and error
+- the inputs, each with where its value came from
+- the outputs, with arrays and objects by their size
+- assertion counts, with each failure
+- warnings, such as a [selection tie](value-flow.md#selection-strategies)
+- the sizes of the request and response bodies
+
+A step that failed before its request was sent still shows the inputs resolved up to the failure, and the one that failed.
 
 ```
 step checkout (node checkoutCart)
 POST http://localhost:8765/us/v1/carts/cart_0001/checkout
 status 201  pass  0ms
 inputs:
-  cartId        "cart_0001"
-  postalCode    "78701"
-  shippingTier  "standard"
+  cartId         "cart_0001"  plan_from createCart.cartId
+  customerEmail  -            optional_skip
+  deliveryDate   -            optional_skip
+  notes          -            optional_skip
+  postalCode     "78701"      expression {{env.postalCode}}
+  shippingTier   "standard"   plan_default
 outputs:
   currency       "USD"
   orderId        "ord_0001"
@@ -187,10 +198,11 @@ These flags print one part of the step instead:
 |------|--------|
 | `--request`, `--response` | The request or response body, as indented JSON |
 | `--inputs`, `--outputs` | The resolved inputs or the extracted outputs, as JSON |
+| `--resolutions` | How each input got its value, as JSON. Each entry is the input's resolution record (`source`, `fromStep` and `fromOutput`, `expression`, the pool pick, a `constraint`) with the `selection` that picked the value, and an `error` for an input that couldn't be resolved |
 | `--path PATH` | Only what a [gjson path](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) selects: `lines.0.sku`, or `lines.#.sku` for every element. The `$.lines[0].sku` form works too. Without a part flag, it reads the response body |
 | `--shape` | The part's structure instead of its values. Without a part flag, the response body's |
 | `--max-bytes N` | Cut a printed part after `N` bytes, 65536 by default, with a note on stderr; `0` prints everything |
-| `--json` | The step list or the step as JSON with `snake_case` keys, or the shape as a JSON array |
+| `--json` | The step list or the step as JSON with `snake_case` keys, or the shape as a JSON array. A step's JSON includes `resolutions` and `warnings` |
 
 `--shape` is the way to learn a large response. It prints one line per path: the path's type, an array's item count, how many objects hold a key when not all of them do, and a sample value. The elements of an array are merged, so a key that only some elements hold, or a value that is sometimes `null` (`string|null`), shows up. Each path works as an extract rule in a [template](templates.md) and as `--path`:
 

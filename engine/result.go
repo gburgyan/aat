@@ -177,7 +177,7 @@ type ValueResolution struct {
 	InputName string // input being resolved
 	Source    string // "plan_default", "expression", "plan_from", "select_edge",
 	// "named_selection", "from_input", "from_resolved", "fallback_pool",
-	// "graph_default", "optional_skip", "override_value"
+	// "graph_default", "optional_skip", "override_value", "error"
 	RawValue     any    // before expression evaluation (nil if N/A)
 	FinalValue   any    // after evaluation + coercion
 	FromStep     string // source step (for edge/select_edge/from_input)
@@ -189,4 +189,7 @@ type ValueResolution struct {
 	PoolIndex    int    // index in fallback pool (-1 if not from pool)
 	PoolSize     int    // fallback pool size (0 if no pool)
 	Tried        []any  // values tried and rejected before this one
+	// Error, for source "error", says why the input couldn't be resolved. For a
+	// named selection that failed, InputName is the selection's name.
+	Error string
 }

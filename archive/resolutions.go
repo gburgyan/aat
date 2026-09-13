@@ -5,6 +5,33 @@ import (
 	"strconv"
 )
 
+// InputResolution is how one input of a step got its value: its resolution
+// record, and the array selection that picked the value, if one did.
+type InputResolution struct {
+	ValueResolutionRecord
+	Selection *SelectionRecord `json:"selection,omitempty"`
+}
+
+// StepResolutions joins a step's resolution records to the selections that
+// picked their values, in the order the inputs were resolved. An input that
+// couldn't be resolved has source "error".
+func StepResolutions(step *StepRecord) []InputResolution {
+	if len(step.Resolutions) == 0 {
+		return nil
+	}
+	// A named selection is recorded for itself and then for each input that
+	// reads it, so the last record under an input's name is the input's.
+	selections := make(map[string]*SelectionRecord, len(step.Selections))
+	for i := range step.Selections {
+		selections[step.Selections[i].InputName] = &step.Selections[i]
+	}
+	joined := make([]InputResolution, len(step.Resolutions))
+	for i, r := range step.Resolutions {
+		joined[i] = InputResolution{ValueResolutionRecord: r, Selection: selections[r.InputName]}
+	}
+	return joined
+}
+
 // SelectionTieWarnings returns a warning for each min or max selection whose
 // candidates tied, so the first of them was chosen with nothing to tell them
 // apart, as in

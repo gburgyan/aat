@@ -827,7 +827,7 @@ inputs:
 - **Keys.** A key `node.input` sets that node only. A bare `input` sets every node that declares an input of that name.
   - **Watch for:** a qualified key leaves another node's input of the same name at that node's own default.
   - Use the bare key when every such node should change.
-  - `aat run show latest --step ID` prints the inputs a step actually used.
+  - `aat run show latest --step ID` prints the inputs a step actually used, each with its source. `--resolutions` gives the details as JSON, including the selection that picked a value and the error for an input that couldn't be resolved.
 - **Values** take the forms of a graph default:
   - a scalar
   - a YAML list, which is a pool (one element is picked per run)
@@ -908,6 +908,7 @@ aat run show latest --step checkout                     # one step: URL, status,
 aat run show latest --step checkout --response --shape  # the response's structure, one gjson path per line
 aat run show latest --step checkout --response --path lines.0.sku
 aat run show latest --step checkout --outputs           # what the template extracted
+aat run show latest --step checkout --resolutions       # where each input's value came from, and why one failed
 ```
 
 - **Learn a response with `--shape` before you write extract rules.**
@@ -1016,7 +1017,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
   "resolutions": [
     {
       "inputName": "string",
-      "source": "plan_default | expression | plan_from | select_edge | named_selection | from_input | from_resolved | fallback_pool | graph_default | optional_skip",
+      "source": "plan_default | expression | plan_from | select_edge | named_selection | from_input | from_resolved | fallback_pool | graph_default | optional_skip | override_value | error",
       "rawValue": "any",
       "finalValue": "any",
       "fromStep": "string",
@@ -1027,7 +1028,8 @@ The archive is the primary debugging artifact. Read it to understand what happen
       "constraintOk": true,
       "poolIndex": 0,
       "poolSize": 3,
-      "tried": ["any"]
+      "tried": ["any"],
+      "error": "string (source error only: why the input couldn't be resolved)"
     }
   ],
   "errorClassification": {

@@ -50,6 +50,10 @@ func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunS
 // ({{...}} templates), constraint checking, and fallback pool iteration are
 // activated at priority 3. When rctx is nil, the behavior is identical to
 // the basic ResolveInputs.
+//
+// On an error it returns what resolved before it, and a resolution record with
+// source "error" for the input or named selection that failed, so a step that
+// fails there still shows how far resolution got.
 func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.Node, g *graph.Graph, state *RunState, rctx *ResolveContext) (map[string]any, []SelectionDecision, []ValueResolution, error) {
 	inputs := make(map[string]any)
 	var decisions []SelectionDecision
@@ -65,7 +69,8 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	for selName, sel := range step.Selections {
 		entry, selDecisions, err := resolveNamedSelection(ctx, selName, sel, step, g, state, dedupCache, rctx)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("resolving selection %q for node %q: %w", selName, step.Node, err)
+			resolutions = append(resolutions, ValueResolution{InputName: selName, Source: "error", Error: err.Error(), PoolIndex: -1})
+			return inputs, decisions, resolutions, fmt.Errorf("resolving selection %q for node %q: %w", selName, step.Node, err)
 		}
 		namedSelections[selName] = entry
 		decisions = append(decisions, selDecisions...)
@@ -91,7 +96,8 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 
 		val, decision, resolution, err := resolveInput(ctx, input, step, g, state, dedupCache, namedSelections, rctx, ectx, inputs)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
+			resolutions = append(resolutions, ValueResolution{InputName: input.Name, Source: "error", Error: err.Error(), PoolIndex: -1})
+			return inputs, decisions, resolutions, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
 		if val != nil {
 			val = coerceValue(val, input.Type)
