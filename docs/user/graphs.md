@@ -245,7 +245,7 @@ Before a registered cleanup runs, AAT checks, in order:
    - it succeeded: a status below 400, no error detection rule triggered, and not a [negative test](plans.md#negative-testing-expectfailure)
    - it sent the same value for every input it shares with the cleanup, and there is at least one such input. Numbers compare by value.
 
-   So an explicit `voidPayment` step skips the pairing for the payment it voided, with no `releasedBy`. A step for another payment doesn't, and neither does one that left a shared input unset. Verification steps never release a cleanup.
+   So an explicit `voidPayment` step skips the pairing for the payment it voided, with no `releasedBy`. A step for another payment doesn't, and neither does one that left a shared input unset. Verification steps never release a cleanup, and no main step releases a cleanup in a chain: it cleans up what the cleanup step before it created, after the main steps ran.
 3. **`when`.** A predicate, in the syntax of a selection `filter`, over the outputs of the step that registered the cleanup, or of the cleanup step before it in a chain. The cleanup is skipped when it's false. The predicate reads no other step's outputs, so a later step that returns a `status` of its own doesn't change it. If it can't be evaluated, such as when the step returned no `status`, the cleanup runs, and its record carries `whenError`.
 
 A skipped cleanup sends nothing, so its chain doesn't run either. Where skips appear:

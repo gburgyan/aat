@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -382,7 +381,10 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 		defer cancel()
 	}
 
-	run := newCleanupRun(e.planStepIDs(p), allow, e.mainStepResults(p, steps))
+	// steps holds a result for each main step that ran, in plan order, and then
+	// the verification results.
+	mainSteps := steps[:min(len(steps), len(p.Execution.Steps))]
+	run := newCleanupRun(e.planStepIDs(p), allow, mainSteps)
 	results := make([]StepResult, 0, total)
 	for _, entry := range planEntries {
 		results = append(results, e.runCleanupChain(cleanupCtx, entry, "", nil, state, run)...)
@@ -414,16 +416,6 @@ func (e *Engine) endRun(ctx context.Context, p *plan.Plan, cleanupStack *Cleanup
 		Error:            err,
 		InstantiatedPlan: p,
 	}
-}
-
-// mainStepResults returns the results of p's main steps from steps, leaving out
-// its verification steps, which never release a cleanup.
-func (e *Engine) mainStepResults(p *plan.Plan, steps []StepResult) []StepResult {
-	verification := make(map[string]bool)
-	for _, step := range plan.VerificationSteps(p, e.graph, e.layeredDefaults) {
-		verification[step.StepID()] = true
-	}
-	return slices.DeleteFunc(slices.Clone(steps), func(r StepResult) bool { return verification[r.StepID] })
 }
 
 // planStepIDs returns the IDs of p's main and verification steps, which no

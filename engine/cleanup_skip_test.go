@@ -132,6 +132,23 @@ func TestCleanupSkip_ExplicitReleaseSkipsEachEntry(t *testing.T) {
 	assert.Equal(t, []string{"/createOrder", "/cancelOrder", "/confirmCancel"}, srv.requestPaths())
 }
 
+// TestCleanupSkip_MainStepDoesNotReleaseAChainedCleanup pins that a chained
+// cleanup is never released by a main step: it cleans up what the cleanup step
+// before it created, after every main step ran, so a main step on its node
+// that sent the same value released something else.
+func TestCleanupSkip_MainStepDoesNotReleaseAChainedCleanup(t *testing.T) {
+	srv := newChainServer(t, nil)
+	result := skipEngine(t, srv.URL, skipGraph(), skipResponses()).Run(context.Background(), chainPlan(
+		plan.Step{Node: "createOrder"},
+		plan.Step{Node: "confirmCancel", DependsOn: []string{"createOrder"}, Values: map[string]plan.StepValue{"cancellationId": {Default: "cancel-1"}}},
+	))
+
+	require.Equal(t, OutcomePassed, result.Outcome, "error: %v", result.Error)
+	assert.Equal(t, []string{"cancelOrder", "confirmCancel"}, cleanupNodes(result.CleanupResults))
+	assert.Empty(t, result.CleanupSkipped)
+	assert.Equal(t, []string{"/createOrder", "/confirmCancel", "/cancelOrder", "/confirmCancel"}, srv.requestPaths())
+}
+
 func TestCleanupSkip_ReleasedEntrySkipsItsChain(t *testing.T) {
 	srv := newChainServer(t, nil)
 	result := skipEngine(t, srv.URL, skipGraph(), skipResponses()).Run(context.Background(), chainPlan(
@@ -406,6 +423,9 @@ func TestSameInputValue(t *testing.T) {
 		{"42", 42.0, "integer", true},
 		{42, 43.0, "integer", false},
 		{"x", 1, "integer", false},
+		{" 42", 42, "integer", true},
+		{uint(7), 7.0, "integer", true},
+		{"Inf", "Inf", "float", false},
 		{12.5, float32(12.5), "float", true},
 		{true, true, "boolean", true},
 		{[]any{1, "a"}, []any{1.0, "a"}, "string[]", true},

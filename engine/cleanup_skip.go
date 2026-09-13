@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
-	"strconv"
 
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/internal/predicate"
@@ -50,24 +49,28 @@ func resolveCleanupInputs(node *graph.Node, entry CleanupEntry, ancestors []Step
 // needed, in this order:
 //
 //  1. Released: a later main step already released the resource (see
-//     releasingStep).
+//     releasingStep). Only an entry a main step registered can be released: a
+//     chained entry cleans up what the cleanup step before it created, after
+//     every main step ran.
 //  2. The pairing's when condition is false. It reads the outputs of the step
 //     that registered the entry, or of the cleanup step before it in a chain,
 //     and nothing else, so a later step's outputs never decide it.
 //
-// A condition that can't be evaluated leaves the cleanup to run, and its error
-// is returned for the cleanup step's record. A plan-level cleanup step is not a
+// inputs are the values the cleanup resolved (see resolveCleanupInputs). A
+// condition that can't be evaluated leaves the cleanup to run, and its error is
+// returned for the cleanup step's record. A plan-level cleanup step is not a
 // pairing and is never skipped here; its runOn alone decides it.
-func (e *Engine) cleanupSkip(entry CleanupEntry, cleanupFor string, ancestors []StepResult, state *RunState, run *cleanupRun) (*CleanupSkip, string) {
+func (e *Engine) cleanupSkip(entry CleanupEntry, cleanupFor string, inputs map[string]any, ancestors []StepResult, state *RunState, run *cleanupRun) (*CleanupSkip, string) {
 	declaring, node := e.graph.Nodes[entry.ForNode], e.graph.Nodes[entry.NodeName]
 	if declaring == nil || node == nil || declaring.Cleanup.Node != entry.NodeName {
 		return nil, ""
 	}
 	pairing := declaring.Cleanup
 
-	inputs := resolveCleanupInputs(node, entry, ancestors, state)
-	if by, ok := e.releasingStep(entry, pairing, inputs, run.mainSteps); ok {
-		return &CleanupSkip{Node: entry.NodeName, CleanupFor: cleanupFor, Reason: CleanupSkipReleased, ReleasedBy: by}, ""
+	if len(ancestors) == 0 {
+		if by, ok := e.releasingStep(entry, pairing, inputs, run.mainSteps); ok {
+			return &CleanupSkip{Node: entry.NodeName, CleanupFor: cleanupFor, Reason: CleanupSkipReleased, ReleasedBy: by}, ""
+		}
 	}
 
 	if pairing.When == "" {
@@ -150,33 +153,14 @@ func sameInputValue(a, b any, typ string) bool {
 	if ft, err := graph.ParseFieldType(typ); err == nil && ft.Kind == graph.TypeScalar {
 		switch ft.Name {
 		case "integer", "float", "money":
-			x, okA := asNumber(a)
-			y, okB := asNumber(b)
-			return okA && okB && x == y
+			x, errA := toFloat64(a)
+			y, errB := toFloat64(b)
+			return errA == nil && errB == nil && x == y
 		case "string", "date", "datetime":
 			return fmt.Sprint(a) == fmt.Sprint(b)
 		}
 	}
 	return reflect.DeepEqual(normalizeNumbers(a), normalizeNumbers(b))
-}
-
-// asNumber reads v as a number: any Go number, or a string that parses as one.
-func asNumber(v any) (float64, bool) {
-	if s, ok := v.(string); ok {
-		f, err := strconv.ParseFloat(s, 64)
-		return f, err == nil
-	}
-	rv := reflect.ValueOf(v)
-	switch rv.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return float64(rv.Int()), true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return float64(rv.Uint()), true
-	case reflect.Float32, reflect.Float64:
-		return rv.Float(), true
-	default:
-		return 0, false
-	}
 }
 
 // normalizeNumbers turns every Go number in v, nested ones included, into a
@@ -198,7 +182,7 @@ func normalizeNumbers(v any) any {
 		}
 		return out
 	}
-	if f, ok := asNumber(v); ok {
+	if f, err := toFloat64(v); err == nil {
 		return f
 	}
 	return v

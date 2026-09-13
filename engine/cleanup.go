@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
+	"github.com/gburgyan/aat/graph"
 )
 
 // CleanupEntry records a cleanup node to execute and the step that registered it.
@@ -106,18 +107,22 @@ func (e *Engine) runCleanupStack(ctx context.Context, s *CleanupStack, state *Ru
 // cleanupSkip) is recorded in run and sends nothing, so its chain does not run
 // either.
 func (e *Engine) runCleanupChain(ctx context.Context, entry CleanupEntry, cleanupFor string, ancestors []StepResult, state *RunState, run *cleanupRun) []StepResult {
-	skip, whenErr := e.cleanupSkip(entry, cleanupFor, ancestors, state, run)
+	node := e.graph.Nodes[entry.NodeName]
+	var inputs map[string]any
+	if node != nil {
+		inputs = resolveCleanupInputs(node, entry, ancestors, state)
+	}
+	skip, whenErr := e.cleanupSkip(entry, cleanupFor, inputs, ancestors, state, run)
 	if skip != nil {
 		run.skips = append(run.skips, *skip)
 		return nil
 	}
-	result := e.executeCleanupEntry(ctx, entry, ancestors, state)
+	result := e.executeCleanupEntry(ctx, entry, node, inputs)
 	result.WhenError = whenErr
 	result.StepID = run.nextID(entry.NodeName)
 	result.CleanupFor = cleanupFor
 	results := []StepResult{result}
 
-	node := e.graph.Nodes[entry.NodeName]
 	if node == nil || node.Cleanup.Node == "" || !cleanupSucceeded(result) {
 		return results
 	}
@@ -154,7 +159,9 @@ func cleanupSucceeded(r StepResult) bool {
 	return r.Error == nil && r.StatusCode < 400 && r.ResponseBodyError == nil
 }
 
-func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, ancestors []StepResult, state *RunState) StepResult {
+// executeCleanupEntry sends the cleanup step for entry on node, which is nil
+// when the graph has no such node, with the inputs runCleanupChain resolved.
+func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, node *graph.Node, inputs map[string]any) StepResult {
 	start := time.Now()
 	// base identifies the cleanup step and when it started, so archives place
 	// it on the run's timeline like any other step.
@@ -167,12 +174,9 @@ func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, an
 		return sr
 	}
 
-	node, ok := e.graph.Nodes[entry.NodeName]
-	if !ok {
+	if node == nil {
 		return failed(nil, fmt.Errorf("cleanup node %q not found in graph", entry.NodeName))
 	}
-
-	inputs := resolveCleanupInputs(node, entry, ancestors, state)
 
 	adp, err := e.registry.Get(node.Adapter)
 	if err != nil {

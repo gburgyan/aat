@@ -232,6 +232,20 @@ func toFloat64(v any) (float64, error) {
 		return float64(n), nil
 	case int32:
 		return float64(n), nil
+	case int16:
+		return float64(n), nil
+	case int8:
+		return float64(n), nil
+	case uint:
+		return float64(n), nil
+	case uint64:
+		return float64(n), nil
+	case uint32:
+		return float64(n), nil
+	case uint16:
+		return float64(n), nil
+	case uint8:
+		return float64(n), nil
 	case json.Number:
 		return n.Float64()
 	case string:
