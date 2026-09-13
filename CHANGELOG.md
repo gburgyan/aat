@@ -102,6 +102,9 @@ the graph and plan formats may still change before 1.0.
 - Runs with OAS validation start quickly on a spec with hundreds of operations. The validator is built for the
   operations the graph's nodes name, not for the whole spec, which could take most of a minute before the first
   request.
+- OAS validation accepts `null` for an OpenAPI 3.0 schema marked `nullable: true` that is built with `anyOf` or
+  `oneOf`, such as a field that holds either an ID or an expanded object. The validator added `null` only to a
+  schema's own `type`, so a response with such a field set to `null` failed with `got null, want object`.
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,

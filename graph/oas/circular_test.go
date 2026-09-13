@@ -97,6 +97,14 @@ func TestValidateStep_CircularResponseSchema(t *testing.T) {
 		assert.Equal(t, 0, result.ErrorCount())
 	})
 
+	t.Run("a null nullable composition passes", func(t *testing.T) {
+		body := []byte(`{"orderId": "ord-1", "status": "paid", "lastPayment": null}`)
+		result := ValidateStep(node, "", cache, "GET", "/orders/ord-1", nil, nil, 200, headers, body)
+		require.NotNil(t, result)
+		require.NotNil(t, result.Response)
+		assert.True(t, result.Response.Valid, "response errors: %v", result.Response.Errors)
+	})
+
 	t.Run("a wrong type is an error", func(t *testing.T) {
 		body := []byte(`{"orderId": 5, "status": "paid"}`)
 		result := ValidateStep(node, "", cache, "GET", "/orders/ord-1", nil, nil, 200, headers, body)

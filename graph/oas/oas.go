@@ -14,6 +14,7 @@ import (
 	"github.com/pb33f/libopenapi/index"
 	"github.com/pb33f/libopenapi/orderedmap"
 	"github.com/pb33f/libopenapi/utils"
+	"go.yaml.in/yaml/v4"
 
 	"github.com/gburgyan/aat/graph"
 )
@@ -101,6 +102,9 @@ func documentConfiguration() *datamodel.DocumentConfiguration {
 // cycles, for example an object whose error schema refers back to the object.
 // Any other error fails the build.
 func buildV3Model(doc libopenapi.Document) (*v3high.Document, error) {
+	if info := doc.GetSpecInfo(); info != nil && info.SpecFormat == datamodel.OAS3 {
+		allowNullInCompositions(info.RootNode)
+	}
 	built, err := doc.BuildV3Model()
 	if err != nil && (built == nil || !onlyCircularReferences(err)) {
 		return nil, err
@@ -122,6 +126,67 @@ func onlyCircularReferences(err error) bool {
 		}
 	}
 	return true
+}
+
+// allowNullInCompositions makes each OpenAPI 3.0 schema under node that is
+// nullable and built with anyOf or oneOf accept null. nullable applies to the
+// whole schema, but the validator adds null only to a schema's own type, allOf,
+// and enum, so every alternative still rejected it: a field declared as a
+// nullable anyOf of an ID string and an object failed on null. Each such anyOf
+// and oneOf gains a {type: "null"} alternative. Aliases are not followed; the
+// nodes they point to are visited where they are defined.
+func allowNullInCompositions(node *yaml.Node) {
+	if node == nil {
+		return
+	}
+	switch node.Kind {
+	case yaml.DocumentNode, yaml.SequenceNode:
+		for _, child := range node.Content {
+			allowNullInCompositions(child)
+		}
+	case yaml.MappingNode:
+		nullable := false
+		var compositions []*yaml.Node
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			key, value := node.Content[i], node.Content[i+1]
+			switch key.Value {
+			case "nullable":
+				nullable = value.Kind == yaml.ScalarNode && value.Value == "true"
+			case "anyOf", "oneOf":
+				if value.Kind == yaml.SequenceNode {
+					compositions = append(compositions, value)
+				}
+			}
+			allowNullInCompositions(value)
+		}
+		if !nullable {
+			return
+		}
+		for _, alternatives := range compositions {
+			if !hasNullAlternative(alternatives) {
+				alternatives.Content = append(alternatives.Content, &yaml.Node{
+					Kind: yaml.MappingNode,
+					Tag:  "!!map",
+					Content: []*yaml.Node{
+						{Kind: yaml.ScalarNode, Tag: "!!str", Value: "type"},
+						{Kind: yaml.ScalarNode, Tag: "!!str", Value: "null"},
+					},
+				})
+			}
+		}
+	}
+}
+
+// hasNullAlternative reports whether a list of anyOf or oneOf alternatives
+// already has a {type: "null"} alternative.
+func hasNullAlternative(alternatives *yaml.Node) bool {
+	for _, alt := range alternatives.Content {
+		if alt.Kind == yaml.MappingNode && len(alt.Content) == 2 &&
+			alt.Content[0].Value == "type" && alt.Content[1].Value == "null" {
+			return true
+		}
+	}
+	return false
 }
 
 // operationsModel returns a copy of model whose paths hold only the path items
