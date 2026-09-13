@@ -605,12 +605,18 @@ func composeAddonList(parent *plan.Plan, addons []graph.Workflow, graphDir strin
 	return nil
 }
 
-// applyInjectValues sets default values on steps whose graph node has a matching
-// input. This is used by slot options to propagate values across the composed
-// plan (e.g., a two-traveler slot sets passengers=2 on search steps).
-// Steps that already have an explicit value for the input are skipped.
-func applyInjectValues(p *plan.Plan, inject map[string]any, g *graph.Graph) {
+// applyInjectValues sets injected values on steps whose graph node has a
+// matching input. Slot options use it to carry a choice across the composed plan
+// (e.g., a two-traveler slot sets passengers=2 on search steps). An injected
+// value becomes a step value the way a graph default does, with a from-reference
+// translated to the plan's step IDs. A step that already sets the input, even
+// with only a pool, a constraint, or fromInput, or that locks it, keeps its own
+// value; an empty {} counts as unset.
+func applyInjectValues(p *plan.Plan, inject map[string]graph.InjectValue, g *graph.Graph) {
 	for inputName, value := range inject {
+		if !value.HasValue() {
+			continue
+		}
 		for i := range p.Execution.Steps {
 			step := &p.Execution.Steps[i]
 			node := g.Nodes[step.Node]
@@ -630,7 +636,7 @@ func applyInjectValues(p *plan.Plan, inject map[string]any, g *graph.Graph) {
 			}
 			// Skip if the step already has an explicit value.
 			if sv, exists := step.Values[inputName]; exists {
-				if sv.Default != nil || sv.From != "" || sv.FromSelection != "" || sv.Select != nil || sv.FromResolved != "" || sv.Locked {
+				if !sv.IsEmpty() || sv.Locked {
 					continue
 				}
 			}
@@ -638,7 +644,11 @@ func applyInjectValues(p *plan.Plan, inject map[string]any, g *graph.Graph) {
 			if step.Values == nil {
 				step.Values = make(map[string]plan.StepValue)
 			}
-			step.Values[inputName] = plan.StepValue{Default: value}
+			sv := plan.StepValueFromDefault(&value.InputDefault)
+			if sv.From != "" {
+				sv.From = plan.TranslateFromRef(sv.From, p)
+			}
+			step.Values[inputName] = sv
 		}
 	}
 }

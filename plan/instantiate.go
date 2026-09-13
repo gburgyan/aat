@@ -129,11 +129,11 @@ func mergeGraphDefaultsWithLayers(p *Plan, g *graph.Graph, layeredDefaults map[s
 				continue
 			}
 
-			sv := inputDefaultToStepValue(effectiveDefault)
+			sv := StepValueFromDefault(effectiveDefault)
 
 			// Translate from-ref node names to step IDs for composed plans
 			if sv.From != "" {
-				sv.From = translateFromRef(sv.From, p)
+				sv.From = TranslateFromRef(sv.From, p)
 			}
 
 			p.Execution.Steps[i].Values[input.Name] = sv
@@ -178,9 +178,9 @@ func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*grap
 				if effectiveDefault == nil || !effectiveDefault.HasValue() {
 					continue
 				}
-				sv := inputDefaultToStepValue(effectiveDefault)
+				sv := StepValueFromDefault(effectiveDefault)
 				if sv.From != "" {
-					sv.From = translateFromRef(sv.From, p)
+					sv.From = TranslateFromRef(sv.From, p)
 				}
 				step.Values[input.Name] = sv
 			}
@@ -190,8 +190,8 @@ func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*grap
 	return steps
 }
 
-// inputDefaultToStepValue converts a graph InputDefault to a plan StepValue.
-func inputDefaultToStepValue(d *graph.InputDefault) StepValue {
+// StepValueFromDefault converts a graph InputDefault to a plan StepValue.
+func StepValueFromDefault(d *graph.InputDefault) StepValue {
 	sv := StepValue{}
 
 	if d.Value != nil {
@@ -234,10 +234,10 @@ func inputDefaultToStepValue(d *graph.InputDefault) StepValue {
 	return sv
 }
 
-// translateFromRef translates a "node.field" from-reference to use step IDs
+// TranslateFromRef translates a "node.field" from-reference to use step IDs
 // instead of node names. This handles composed plans where step IDs may be
 // prefixed (e.g., "inc0_createItinerary" instead of "createItinerary").
-func translateFromRef(fromRef string, p *Plan) string {
+func TranslateFromRef(fromRef string, p *Plan) string {
 	nodeName := splitFromNodeName(fromRef)
 	if nodeName == "" {
 		return fromRef

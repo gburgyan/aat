@@ -803,7 +803,10 @@ execution:
 
 **Verification and injected values.**
 - **Verification.** A slot option or addon that declares `verification` for a node replaces every earlier check of that node. Checks of other nodes are kept, in this order: the base's, then slot options' in slot order, then addons' by priority. `verification` sits under `execution:`.
-- **Injected values.** A slot option's `inject` sets an input on every base and slot step whose node declares that input, unless the step already sets a value (an empty `{}` doesn't count). It doesn't reach addon steps, and `inject` on an addon is ignored.
+- **Injected values.** A slot option's `inject` sets an input on every base and slot step whose node declares that input.
+  - **Skipped:** a step that already sets a value, pool, reference, or constraint keeps it. An empty `{}` doesn't count as set.
+  - **Value forms:** the graph-default forms, except that a bare list is the literal list. `[2, 1]` injects that list, and so does `{value: [2, 1]}`. `{pool: [...]}` injects a pool, and `{from: node.output}` a reference. Any other mapping key, such as `default:`, is an error.
+  - **Where it applies:** it doesn't reach addon steps. `inject` on an addon or a base workflow is a validation error.
 
 Cross-ref: [Workflows](https://gburgyan.github.io/aat/workflows/)
 
@@ -1169,6 +1172,7 @@ In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts
 | `invalid expression syntax: …`, `random takes a length from 1 to 64`, `today counts days` | A malformed `{{…}}` expression | Fix it; see [Expressions](#expressions) |
 | `strict OAS validation: reading OAS spec …` | `--oas-validate strict` with a spec that doesn't load | Fix the graph's `oas:` path, or run with `--oas-validate auto` |
 | `additional properties 'X' not allowed` in an OAS request error | The request sends a field the spec doesn't declare | Remove the field, or fix its spelling |
+| `a single value, where integer[] takes a list` | A literal value or pool entry doesn't fit the input's type. In a graph default or a layer, a bare list is a pool | Write one list as `{value: [...]}`, or fix the value or the type |
 
 ## Tips for AI Assistants
 

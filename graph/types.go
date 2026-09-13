@@ -103,17 +103,17 @@ func (a AfterSpec) String() string {
 
 // Workflow describes a named workflow (sequence of operations) within the graph.
 type Workflow struct {
-	Name          string            `yaml:"name"`
-	Description   string            `yaml:"description,omitempty"`
-	Kind          string            `yaml:"kind,omitempty"`          // "addon" for sub-workflows, "slot" for slot options
-	Template      string            `yaml:"template,omitempty"`      // path to plan template YAML (relative to graph file)
-	After         AfterSpec         `yaml:"after,omitempty"`         // addon: node(s) to splice after in the base workflow
-	Wire          map[string]string `yaml:"wire,omitempty"`          // addon: default AUTOWIRE overrides
-	Priority      int               `yaml:"priority,omitempty"`      // addon: composition ordering (lower = earlier, default 0)
-	Slots         []SlotDef         `yaml:"slots,omitempty"`         // choice points (only on base workflows)
-	Inject        map[string]any    `yaml:"inject,omitempty"`        // slot option: input values to apply across the composed plan
-	SelectionHint string            `yaml:"selectionHint,omitempty"` // guidance for LLM workflow selection
-	Deprecated    bool              `yaml:"deprecated,omitempty"`    // when true, excluded from menus and rejected during selection
+	Name          string                 `yaml:"name"`
+	Description   string                 `yaml:"description,omitempty"`
+	Kind          string                 `yaml:"kind,omitempty"`          // "addon" for sub-workflows, "slot" for slot options
+	Template      string                 `yaml:"template,omitempty"`      // path to plan template YAML (relative to graph file)
+	After         AfterSpec              `yaml:"after,omitempty"`         // addon: node(s) to splice after in the base workflow
+	Wire          map[string]string      `yaml:"wire,omitempty"`          // addon: default AUTOWIRE overrides
+	Priority      int                    `yaml:"priority,omitempty"`      // addon: composition ordering (lower = earlier, default 0)
+	Slots         []SlotDef              `yaml:"slots,omitempty"`         // choice points (only on base workflows)
+	Inject        map[string]InjectValue `yaml:"inject,omitempty"`        // slot option: input values to apply across the composed plan
+	SelectionHint string                 `yaml:"selectionHint,omitempty"` // guidance for LLM workflow selection
+	Deprecated    bool                   `yaml:"deprecated,omitempty"`    // when true, excluded from menus and rejected during selection
 }
 
 // SlotDef describes a named decision point in a workflow with mutually exclusive options.

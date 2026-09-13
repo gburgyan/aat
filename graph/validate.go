@@ -134,6 +134,10 @@ func Validate(g *Graph) error {
 	// and when and releasedBy come with a node
 	errs = append(errs, validateCleanupPairings(g)...)
 
+	// 5c. Values fit their inputs: node defaults and slot inject values. inject
+	// applies only to slot options
+	errs = append(errs, validateValueShapes(g)...)
+
 	// 6. Error detection rules: graph-level
 	for i, rule := range g.ErrorDetection {
 		for _, msg := range validateErrorDetectionRule(rule) {

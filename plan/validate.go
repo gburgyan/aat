@@ -63,6 +63,13 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("plan validation failed:\n  - %s", strings.Join(distinctErrors(e.Errors), "\n  - "))
 }
 
+// isAutowireMarker reports whether v is an AUTOWIRE or AUTOWIRE? placeholder,
+// which composition replaces with a reference.
+func isAutowireMarker(v any) bool {
+	s, ok := v.(string)
+	return ok && (s == "AUTOWIRE" || s == "AUTOWIRE?")
+}
+
 // onTieError describes what is wrong with a selection's onTie, or returns "".
 // onTie takes first or fail, and only the min and max strategies can tie.
 func onTieError(onTie, strategy string) string {
@@ -221,6 +228,18 @@ func Validate(p *Plan, g *graph.Graph) error {
 		for _, name := range slices.Sorted(maps.Keys(step.Values)) {
 			if !inputNames[name] {
 				errs = append(errs, fmt.Sprintf("step %d (%s): value %q does not match any input on node %q", i, sid, name, step.Node))
+			}
+		}
+
+		// Literal values and pool entries fit their input's type. An AUTOWIRE
+		// marker is reported on its own.
+		for _, in := range node.Inputs {
+			sv, ok := step.Values[in.Name]
+			if !ok || isAutowireMarker(sv.Default) {
+				continue
+			}
+			if msg := graph.DefaultShapeError(&graph.InputDefault{Value: sv.Default, Pool: sv.Pool}, in.Type); msg != "" {
+				errs = append(errs, fmt.Sprintf("step %d (%s): value %q: %s", i, sid, in.Name, msg))
 			}
 		}
 

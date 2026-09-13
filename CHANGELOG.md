@@ -46,6 +46,13 @@ the graph and plan formats may still change before 1.0.
 - `aat run show --compact` prints JSON on one line: a step part, with or without `--path`, and with `--json` the step
   list, the step, or the shape. `--compact` where the output is text, such as `--shape` without `--json`, is an
   error.
+- `aat validate` and `aat run` check that literal values fit their input's shape: a list for an array input, and no map
+  for a single-value input. A list for a single-value input is still allowed, since a template can send it as repeated
+  pairs.
+  - It covers step values and pools, graph defaults, layers, and slot `inject` values.
+  - A pool entry for an array input gets a hint: a bare list in a graph default or a layer is a pool, so write one list
+    as `{value: [...]}`.
+  - Expressions and custom types aren't checked.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
 - `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,
@@ -157,6 +164,11 @@ the graph and plan formats may still change before 1.0.
 - A registered cleanup no longer runs when a later main step on the cleanup node already released the resource with
   the same inputs, such as an explicit cancel of the order the pairing would cancel. Before, the cleanup ran again
   and usually failed with a 4xx. The skip is recorded, as for a pairing's `releasedBy`.
+- A slot option's `inject` values decode like graph input defaults.
+  - `{value: …}`, `{pool: …}`, `{from: …}`, and expressions work. Any other key is an error, so
+    `inject: {ages: {default: [35]}}` fails validation instead of sending a map. A bare list is still the literal list.
+  - An injected value no longer replaces a step's pool, constraint, or `fromInput`.
+  - `inject` on a base workflow or an addon, where it was ignored, is a validation error.
 - Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
   `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
   bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an

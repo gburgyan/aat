@@ -544,6 +544,9 @@ func validateLayers(dir string, g *graph.Graph) sectionResult {
 		for _, key := range layers[name].UnknownInputs(g) {
 			errs = append(errs, fmt.Sprintf("layer %q: input %q matches no node input in the graph", name, key))
 		}
+		for _, msg := range layers[name].ShapeErrors(g) {
+			errs = append(errs, fmt.Sprintf("layer %q: %s", name, msg))
+		}
 	}
 	if len(errs) > 0 {
 		return sectionResult{Name: "Layers", Status: "FAILED", Errors: errs}
