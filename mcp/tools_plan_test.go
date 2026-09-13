@@ -106,6 +106,18 @@ func TestHandleValidatePlan_MissingSteps(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "at least one execution step")
 }
 
+func TestHandleValidatePlan_WarnsRequiredFromOptionalOutput(t *testing.T) {
+	g := twoNodeGraph()
+	g.Nodes["search"].Outputs[0].Optional = true
+	srv := newTestServer(g)
+
+	result := callTool(t, srv.handleValidatePlan, map[string]any{"yaml": validPlanYAML()})
+	assert.False(t, result.IsError)
+	text := resultText(t, result)
+	assert.Contains(t, text, "Plan is valid: 2 steps")
+	assert.Contains(t, text, "\n\nWarnings:\n- step 1 (book): required input \"resultId\" takes search.results, an optional output")
+}
+
 // --- list_saved_plans ---
 
 func TestHandleListSavedPlans_MultiplePlans(t *testing.T) {

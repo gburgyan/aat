@@ -58,6 +58,35 @@ func (l *Layer) UnknownInputs(g *Graph) []string {
 	return unknown
 }
 
+// ShapeErrors lists the layer's values that don't fit the type of an input they
+// set (see DefaultShapeError), sorted by key. A bare key is checked against
+// every node input with that name.
+func (l *Layer) ShapeErrors(g *Graph) []string {
+	nodeNames := sortedKeys(g.Nodes)
+	var errs []string
+	for _, key := range sortedKeys(l.Inputs) {
+		nodeName, inputName, qualified := strings.Cut(key, ".")
+		if !qualified {
+			inputName = key
+		}
+		for _, name := range nodeNames {
+			n := g.Nodes[name]
+			if n == nil || (qualified && name != nodeName) {
+				continue
+			}
+			for _, in := range n.Inputs {
+				if in.Name != inputName {
+					continue
+				}
+				if msg := DefaultShapeError(l.Inputs[key], in.Type); msg != "" {
+					errs = append(errs, fmt.Sprintf("input %q for %s.%s: %s", key, name, inputName, msg))
+				}
+			}
+		}
+	}
+	return errs
+}
+
 // ParseLayer unmarshals YAML bytes into a Layer with basic validation. Keys
 // that no layer field accepts are errors.
 func ParseLayer(data []byte) (*Layer, error) {

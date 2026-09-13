@@ -124,7 +124,7 @@ Outputs have no JSON path in the graph: the node's template extracts each output
 | `outputs` | no | Named values the template extracts from the HTTP response |
 | `satisfies` | no | Prerequisite tokens this node provides |
 | `requires` | no | Prerequisite tokens this node depends on |
-| `cleanup` | no | Node to run during teardown (e.g., delete what this node created) |
+| `cleanup` | no | Node to run during teardown (e.g., delete what this node created), or `{node, when, releasedBy}` to skip it when it isn't needed (see Cleanup) |
 | `errorDetection` | no | Rules that fail a successful response whose body reports an error |
 | `oas` | no | `operationId` (and optional `spec`) linking the node to an OpenAPI operation |
 
@@ -181,7 +181,11 @@ outputs:
 
 Selection strategies are `first`, `last`, `index`, `random`, `min`, `max`, and `match`.
 - **`min` and `max`** compare `sortField`, or `field` when there is no `sortField`, by value. A string that holds a number, such as `"19.99"`, compares as that number.
-- **Ties:** when several elements share the smallest or largest value, the first of them in array order after the `filter` wins. If candidates can tie, add a `filter` that narrows them to the element you mean, and assert the chosen element's distinguishing field in a later step.
+- **Ties:** when several elements share the smallest or largest value, the first of them in array order after the `filter` wins.
+  - The step prints a warning naming the tie. It also appears in the step's `warnings` in `--json` and in `aat run show --step`.
+  - To fix a tie, add a `filter` that narrows the candidates to the element you mean, and assert the chosen element's distinguishing field in a later step.
+  - `onTie: fail` on the selection fails the step on a tie. `onTie: first` accepts any of them and silences the warning.
+  - Inputs that select from the same array share one pick only when they use the same strategy, `filter`, `index`, and compared field.
 - **`match`** returns the first element that matches the `filter`. A `filter` without a `strategy` behaves as `match`, and a `filter` does not convert strings.
 
 Cross-ref: [API Graphs](https://gburgyan.github.io/aat/graphs/)
@@ -418,7 +422,7 @@ A plan's top-level keys are `metadata` (`created`, `prompt`, `graphVersion`), `g
 | Absent | `deliveryDate: {}` | Nothing fills the input: no graph default, layer, or auto-wiring |
 
 - **Lists:** a bare YAML list is an error in a step value (`a step value must be a scalar or a mapping, found a list`), and `value:` is not a step-value key. Write a list as `{default: [...]}`.
-- **`{}` is for optional inputs.** An optional input marked `{}` is left out of the request. A required input marked `{}` still takes its graph default when that default is a plain literal, used as written: no expression evaluation, no layers. With no graph default, the step fails with `required input has no value (empty step value)`.
+- **`{}` is for optional inputs.** An optional input marked `{}` is left out of the request. A required input marked `{}` still takes its default when that default is a plain value, with its expressions evaluated; a layer that sets the input wins over the graph default, as it does without `{}`. With no default, the step fails with `required input has no value (empty step value)`. Over a default with a pool, `from`, `select`, or a constraint, `{}` leaves a required input out too, so its template must send it inside a `{{?name}}…{{/name}}` block, or the request fails on the unresolved placeholder.
 
 ### Expressions
 
@@ -436,9 +440,9 @@ A string containing `{{…}}` is an expression.
 
 - **Types.** A value that is one whole expression keeps the result's type. Mixed text, such as `"Deliver on {{deliveryDate}}"`, becomes a string.
 - **Generated values.** Each occurrence is its own value, so two inputs set to `{{uuid}}` differ; reuse one with `fromResolved` or `fromInput`. A step's values are resolved once, so a retried step resends the same ones, and a new run generates new ones. `uuid`, `now`, and `unixtime` are reserved words, and `{{today}}` counts days only.
-- **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`.
-- **Where they are not:** templates (where `{{name}}` is a placeholder for an input), overlay `values:`, `rawBody`, and assertions.
-- **Checking.** `aat validate` does not check expression syntax; a bad expression fails when its step runs.
+- **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`. Also a `fieldEquals` `value` and a quoted string in a `predicate` `expr`, where they can name the step's inputs: `expr: 'quantity == "{{quantity}}"'`. A quoted expression that yields a number or a boolean compares as one.
+- **Where they are not:** templates (where `{{name}}` is a placeholder for an input), overlay `values:`, `rawBody`, selection filters, and cleanup `when`.
+- **Checking.** `aat validate` checks expression syntax in step values, pools, and assertions. An expression that fails to evaluate fails its step, or its assertion.
 
 ### Assertion Types
 
@@ -509,6 +513,22 @@ cleanup:
 A cleanup step takes only `node` and `runOn`. Its inputs are matched by name against the outputs of the steps that ran, so `cancelOrder`'s `orderId` input takes the `orderId` output of the step that produced one. A node's graph-level `cleanup:` pairing runs even when the plan does not list it.
 
 A cleanup node can have its own `cleanup:`, which makes a chain. The second node runs right after the first succeeds and takes that step's outputs first. That covers a release that takes two calls, such as requesting a refund and then confirming it with the refund's ID. Name the first cleanup node's output after the second one's input.
+
+When a plan may release the resource itself, or leave it in a state the cleanup can't handle, give the pairing as a mapping:
+
+```yaml
+createPayment:
+  adapter: createPayment
+  cleanup:
+    node: voidPayment
+    when: 'status == "authorized"'   # a predicate over createPayment's outputs
+    releasedBy: [capturePayment]
+```
+
+- **Released.** The cleanup is skipped when a main step after the creating one succeeded on the cleanup node itself, or on a `releasedBy` node, and sent the same value for every input it shares with the cleanup. An explicit `voidPayment` step needs no `releasedBy`. A step expected to fail, a verification step, and a step for another resource don't count.
+- **`when`.** The cleanup is skipped when the predicate is false. It reads only the creating step's outputs, or, for a chained cleanup, the outputs of the cleanup step before it. If it can't be evaluated, the cleanup runs, and its record carries `whenError`.
+- **Skipped.** A skipped cleanup's chain doesn't run. Skips are recorded in the archive's `cleanupSkipped` and show under `cleanup skipped:` in `aat run show`.
+- **Caution.** List in `releasedBy` only nodes whose success always ends the resource. If an API reports a failed release in a successful response, give that node `errorDetection`.
 
 Cross-ref: [Plans and Recipes](https://gburgyan.github.io/aat/plans/)
 
@@ -780,10 +800,14 @@ execution:
   - `$after.outputName` names the step the addon attached after.
   - `MANUAL` leaves the input for a recipe override.
 - **`AUTOWIRE?`** is for an optional input that only some compositions feed, such as a value only an addon produces. It is wired when a step produces the output and left unset otherwise. Mark the graph input `optional: true` and wrap its template field in `{{?name}}…{{/name}}`.
+- **An input `from:` an optional output.** When the earlier step didn't return the output, an optional input is left out, as with `AUTOWIRE?`. A required input fails the step. `aat validate --strict` warns when a required input takes `from:` an optional output, in a graph default or in a plan or workflow file.
 
 **Verification and injected values.**
 - **Verification.** A slot option or addon that declares `verification` for a node replaces every earlier check of that node. Checks of other nodes are kept, in this order: the base's, then slot options' in slot order, then addons' by priority. `verification` sits under `execution:`.
-- **Injected values.** A slot option's `inject` sets an input on every base and slot step whose node declares that input, unless the step already sets a value (an empty `{}` doesn't count). It doesn't reach addon steps, and `inject` on an addon is ignored.
+- **Injected values.** A slot option's `inject` sets an input on every base and slot step whose node declares that input.
+  - **Skipped:** a step that already sets a value, pool, reference, or constraint keeps it. An empty `{}` doesn't count as set.
+  - **Value forms:** the graph-default forms, except that a bare list is the literal list. `[2, 1]` injects that list, and so does `{value: [2, 1]}`. `{pool: [...]}` injects a pool, and `{from: node.output}` a reference. Any other mapping key, such as `default:`, is an error.
+  - **Where it applies:** it doesn't reach addon steps. `inject` on an addon or a base workflow is a validation error.
 
 Cross-ref: [Workflows](https://gburgyan.github.io/aat/workflows/)
 
@@ -807,7 +831,7 @@ inputs:
 - **Keys.** A key `node.input` sets that node only. A bare `input` sets every node that declares an input of that name.
   - **Watch for:** a qualified key leaves another node's input of the same name at that node's own default.
   - Use the bare key when every such node should change.
-  - `aat run show latest --step ID` prints the inputs a step actually used.
+  - `aat run show latest --step ID` prints the inputs a step actually used, each with its source. `--resolutions` gives the details as JSON, including the selection that picked a value and the error for an input that couldn't be resolved.
 - **Values** take the forms of a graph default:
   - a scalar
   - a YAML list, which is a pool (one element is picked per run)
@@ -888,6 +912,8 @@ aat run show latest --step checkout                     # one step: URL, status,
 aat run show latest --step checkout --response --shape  # the response's structure, one gjson path per line
 aat run show latest --step checkout --response --path lines.0.sku
 aat run show latest --step checkout --outputs           # what the template extracted
+aat run show latest --step checkout --resolutions       # where each input's value came from, and why one failed
+aat run show latest --json --compact                    # the step list as one JSON line, for a script
 ```
 
 - **Learn a response with `--shape` before you write extract rules.**
@@ -923,6 +949,9 @@ The archive is the primary debugging artifact. Read it to understand what happen
   },
   "steps": [ StepRecord ],
   "cleanup": [ StepRecord ],
+  "cleanupSkipped": [
+    { "node": "string", "cleanupFor": "string", "reason": "released | when", "releasedBy": "string", "when": "string" }
+  ],
   "result": {
     "outcome": "passed | failed | error | aborted | stopped",
     "error": "string (omitted if blank)"
@@ -930,7 +959,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
 }
 ```
 
-`plan` is the plan as loaded (a recipe's reconstituted plan); `instantiatedPlan` is the plan after graph defaults, layers, and mutations were applied. `attempt`, `totalAttempts`, and `layers` are omitted when unused.
+`plan` is the plan as loaded (a recipe's reconstituted plan); `instantiatedPlan` is the plan after graph defaults, layers, and mutations were applied. `attempt`, `totalAttempts`, and `layers` are omitted when unused, and so is `cleanupSkipped` when no cleanup was skipped.
 
 **StepRecord** — one per executed step:
 
@@ -939,6 +968,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
   "stepId": "string",
   "node": "string",
   "cleanupFor": "string (cleanup steps only: the step whose resource it releases, or the cleanup step before it in a chain)",
+  "whenError": "string (cleanup steps only: why the pairing's when condition couldn't be evaluated; the cleanup ran)",
   "startTime": "RFC3339",
   "durationMs": 0,
   "inputs": { "paramName": "resolvedValue" },
@@ -981,13 +1011,18 @@ The archive is the primary debugging artifact. Read it to understand what happen
       "filteredSize": 3,
       "strategy": "first | last | index | random | min | max | match",
       "selectedIndex": 0,
-      "selectionName": "string (named selections only)"
+      "selectionName": "string (named selections only)",
+      "field": "string (inline select: the field taken from the chosen element)",
+      "sortField": "string (min/max: the field compared)",
+      "sortValue": 19.99,
+      "ties": 3,
+      "onTie": "first | fail"
     }
   ],
   "resolutions": [
     {
       "inputName": "string",
-      "source": "plan_default | expression | plan_from | select_edge | named_selection | from_input | from_resolved | fallback_pool | graph_default | optional_skip",
+      "source": "plan_default | expression | plan_from | select_edge | named_selection | from_input | from_resolved | fallback_pool | graph_default | optional_skip | override_value | error",
       "rawValue": "any",
       "finalValue": "any",
       "fromStep": "string",
@@ -998,7 +1033,8 @@ The archive is the primary debugging artifact. Read it to understand what happen
       "constraintOk": true,
       "poolIndex": 0,
       "poolSize": 3,
-      "tried": ["any"]
+      "tried": ["any"],
+      "error": "string (source error only: why the input couldn't be resolved)"
     }
   ],
   "errorClassification": {
@@ -1137,6 +1173,7 @@ In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts
 | `invalid expression syntax: …`, `random takes a length from 1 to 64`, `today counts days` | A malformed `{{…}}` expression | Fix it; see [Expressions](#expressions) |
 | `strict OAS validation: reading OAS spec …` | `--oas-validate strict` with a spec that doesn't load | Fix the graph's `oas:` path, or run with `--oas-validate auto` |
 | `additional properties 'X' not allowed` in an OAS request error | The request sends a field the spec doesn't declare | Remove the field, or fix its spelling |
+| `a single value, where integer[] takes a list` | A literal value or pool entry doesn't fit the input's type. In a graph default or a layer, a bare list is a pool | Write one list as `{value: [...]}`, or fix the value or the type |
 
 ## Tips for AI Assistants
 

@@ -179,12 +179,14 @@ func (s *Server) handleValidatePlan(_ context.Context, req mcp.CallToolRequest) 
 	}
 
 	var p *plan.Plan
+	var warnings string
 	switch v := parsed.(type) {
 	case *plan.Plan:
 		if _, err := plan.InstantiateAndValidate(v, s.ctx.Graph); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("Validation failed:\n%v", err)), nil
 		}
 		p = v
+		warnings = s.planWarnings(v)
 	case *plan.Recipe:
 		// Reconstitution validates the composed plan with the recipe's layers.
 		reconstituted, reconErr := s.ctx.reconstitute(v)
@@ -195,7 +197,18 @@ func (s *Server) handleValidatePlan(_ context.Context, req mcp.CallToolRequest) 
 	}
 
 	summary := fmt.Sprintf("Plan is valid: %d steps, goal: %s", len(p.Execution.Steps), p.Intent.Goal)
-	return mcp.NewToolResultText(summary), nil
+	return mcp.NewToolResultText(summary + warnings), nil
+}
+
+// planWarnings lists, after a blank line, the problems in a plan file that
+// don't fail validation, such as a required input that takes from: an optional
+// output. It returns "" when there are none.
+func (s *Server) planWarnings(p *plan.Plan) string {
+	warnings := plan.RequiredFromOptionalValues(p, s.ctx.Graph)
+	if len(warnings) == 0 {
+		return ""
+	}
+	return "\n\nWarnings:\n- " + strings.Join(warnings, "\n- ")
 }
 
 // handleListSavedPlans scans the plans directories for YAML files.
@@ -351,7 +364,7 @@ func (s *Server) handleSavePlan(_ context.Context, req mcp.CallToolRequest) (*mc
 		if err := plan.WriteFile(v, savePath); err != nil {
 			return mcp.NewToolResultError(fmt.Sprintf("saving plan: %v", err)), nil
 		}
-		summary = fmt.Sprintf("Plan saved to %s (%d steps, goal: %s)", filepath.Base(savePath), len(v.Execution.Steps), v.Intent.Goal)
+		summary = fmt.Sprintf("Plan saved to %s (%d steps, goal: %s)", filepath.Base(savePath), len(v.Execution.Steps), v.Intent.Goal) + s.planWarnings(v)
 	case *plan.Recipe:
 		// Validate by reconstituting.
 		if _, reconErr := s.ctx.reconstitute(v); reconErr != nil {

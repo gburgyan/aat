@@ -37,7 +37,7 @@ func formatNodeDetail(node *graph.Node, g *graph.Graph) string {
 	if node.Adapter != "" {
 		fmt.Fprintf(&b, "**Adapter:** %s\n", node.Adapter)
 	}
-	if node.Cleanup != "" {
+	if node.Cleanup.Node != "" {
 		fmt.Fprintf(&b, "**Cleanup:** %s\n", node.Cleanup)
 	}
 	if node.CycleBreaker {
@@ -268,7 +268,7 @@ func formatChainTrace(cr *graph.ChainResult, g *graph.Graph) string {
 		if node.Description != "" {
 			fmt.Fprintf(&b, "%s\n\n", node.Description)
 		}
-		if node.Cleanup != "" {
+		if node.Cleanup.Node != "" {
 			fmt.Fprintf(&b, "**Cleanup:** %s\n\n", node.Cleanup)
 		}
 

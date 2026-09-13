@@ -305,10 +305,10 @@ The test persona registers 26 tools focused on test plan lifecycle, execution, a
 | Tool | Description |
 |------|-------------|
 | `generate_plan` | Generate an execution plan from a natural-language prompt using the LLM pipeline |
-| `validate_plan` | Parse and validate a plan YAML string against the API graph |
+| `validate_plan` | Parse and validate a plan YAML string against the API graph. Lists warnings that don't fail validation, such as a required input that takes `from:` an optional output |
 | `list_saved_plans` | List saved test plans from the plans directory with name, goal, and step count |
 | `load_plan` | Load a saved plan and return its YAML and narrative |
-| `save_plan` | Validate and save a plan YAML string to the plans directory |
+| `save_plan` | Validate and save a plan YAML string to the plans directory, with the same warnings as `validate_plan` |
 
 ### Execution (1 tool)
 

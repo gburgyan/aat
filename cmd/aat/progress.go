@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/plan"
 )
@@ -37,6 +38,11 @@ func (o *CLIProgressObserver) OnCleanupStart(total int) {
 
 func (o *CLIProgressObserver) OnCleanupStepComplete(index, total int, result engine.StepResult) {
 	writeCleanupResult(o.out, "    ", result, o.term)
+}
+
+// OnCleanupSkipped implements engine.CleanupSkipObserver.
+func (o *CLIProgressObserver) OnCleanupSkipped(skip engine.CleanupSkip) {
+	writeCleanupSkip(o.out, "    ", skip, o.term)
 }
 
 func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
@@ -91,6 +97,9 @@ func writeStepResult(w io.Writer, lead string, index, total int, result engine.S
 		for _, msg := range failedAssertions(result.Validation) {
 			_, _ = fmt.Fprintf(w, "%s%s\n", indent, colorize(msg, colorYellow, color))
 		}
+		for _, msg := range archive.SelectionTieWarnings(engine.SelectionRecords(result.Selections)) {
+			_, _ = fmt.Fprintf(w, "%s%s\n", indent, colorize("warning: "+msg, colorYellow, color))
+		}
 	default:
 		_, _ = fmt.Fprintf(w, "%s (no response)\n", prefix)
 	}
@@ -115,6 +124,15 @@ func writeCleanupResult(w io.Writer, lead string, result engine.StepResult, term
 	default:
 		_, _ = fmt.Fprintf(w, "%s (no response)\n", prefix)
 	}
+}
+
+// writeCleanupSkip prints a registered cleanup that did not run because it was
+// no longer needed: its node, why, and the step it was for, as in
+// "voidPayment skipped: released by capturePayment (for createPayment)".
+func writeCleanupSkip(w io.Writer, lead string, skip engine.CleanupSkip, term TerminalInfo) {
+	label := stepLabel(engine.StepResult{StepID: skip.Node, Node: skip.Node}, nodeColWidth(term.Width, 58), false)
+	reason := archive.CleanupSkipRecord(skip).Description()
+	_, _ = fmt.Fprintf(w, "%s%s %s: %s (for %s)\n", lead, label, colorize("skipped", colorDim, term.IsTTY), reason, skip.CleanupFor)
 }
 
 // writeOASTotal prints the run's count of OpenAPI violations, when it has any.

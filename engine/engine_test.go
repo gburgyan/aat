@@ -427,7 +427,7 @@ func TestEngine_Run_FailingAssertionTriggersCleanup(t *testing.T) {
 				Adapter: "test.step1",
 				Inputs:  []graph.Input{},
 				Outputs: []graph.Output{{Name: "id", Type: "string"}},
-				Cleanup: "cleanup1",
+				Cleanup: graph.CleanupPairing{Node: "cleanup1"},
 			},
 			"cleanup1": {
 				Name:    "cleanup1",
@@ -1007,7 +1007,7 @@ func TestExpectFailure_NoOutputsStored(t *testing.T) {
 				Outputs: []graph.Output{
 					{Name: "result", Type: "string"},
 				},
-				Cleanup: "cleanup1",
+				Cleanup: graph.CleanupPairing{Node: "cleanup1"},
 			},
 			"cleanup1": {
 				Name:    "cleanup1",
@@ -1230,7 +1230,7 @@ func TestEngine_Run_CleanupRunsDespiteCancellation(t *testing.T) {
 				Adapter: "test.create",
 				Inputs:  []graph.Input{{Name: "name", Type: "string"}},
 				Outputs: []graph.Output{{Name: "id", Type: "string"}},
-				Cleanup: "delete",
+				Cleanup: graph.CleanupPairing{Node: "delete"},
 			},
 			"verify": {
 				Name:    "verify",

@@ -69,6 +69,9 @@ func Reconstitute(recipe *plan.Recipe, g *graph.Graph, graphDir string, opts ...
 	if err := checkOverrideSteps(skeleton, targeted); err != nil {
 		return nil, fmt.Errorf("reconstitute: %w", err)
 	}
+	if err := checkOverrideAssertionTypes(recipe.Overrides); err != nil {
+		return nil, fmt.Errorf("reconstitute: %w", err)
+	}
 	unfedSet := unfedInputSet(skeleton, g)
 
 	// Recipe overrides are explicit user intent — always allow them
@@ -160,6 +163,7 @@ func recipeOverridesToTargetedResponse(ro plan.RecipeOverrides) *TargetedRespons
 
 	for k, sel := range ro.Selections {
 		tr.Selections[k] = TargetedSelection{
+			OnTie:     sel.OnTie,
 			Strategy:  sel.Strategy,
 			Filter:    sel.Filter,
 			SortField: sel.SortField,
@@ -219,6 +223,7 @@ func TargetedResponseToRecipeOverrides(tr *TargetedResponse) plan.RecipeOverride
 
 	for k, sel := range tr.Selections {
 		ro.Selections[k] = plan.RecipeSelectionOverride{
+			OnTie:     sel.OnTie,
 			Strategy:  sel.Strategy,
 			Filter:    sel.Filter,
 			SortField: sel.SortField,

@@ -88,6 +88,15 @@ func graphValidateCommand(args *graphValidateArgs) int {
 		return 1
 	}
 	fmt.Printf("Graph structure: OK (%d nodes)\n", len(g.Nodes))
+	if warnings := graph.RequiredFromOptionalDefaults(g); len(warnings) > 0 {
+		fmt.Println("Graph warnings:")
+		for _, warning := range warnings {
+			fmt.Printf("  - %s\n", warning)
+		}
+		if args.Strict {
+			hasError = true
+		}
+	}
 
 	// 2. Apply OAS flag override before collecting spec paths
 	if args.OASPath != "" {

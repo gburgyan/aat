@@ -102,12 +102,14 @@ func validateSinglePlan(planPath, graphPath, layersDir string, g *graph.Graph, s
 	}
 
 	var p *plan.Plan
+	var warnings []string
 	switch v := parsed.(type) {
 	case *plan.Plan:
 		if _, err := plan.InstantiateAndValidate(v, g); err != nil {
 			fmt.Fprintf(os.Stderr, "aat validate plan: %s\n", err)
 			return 1
 		}
+		warnings = plan.RequiredFromOptionalValues(v, g)
 		p = v
 	case *plan.Recipe:
 		fmt.Printf("Reconstituting recipe %q...\n", v.Selection.Workflow)
@@ -123,6 +125,12 @@ func validateSinglePlan(planPath, graphPath, layersDir string, g *graph.Graph, s
 	}
 
 	fmt.Printf("Plan validation: OK (%d steps)\n", len(p.Execution.Steps))
+	if len(warnings) > 0 {
+		fmt.Println("Plan warnings:")
+		for _, warning := range warnings {
+			fmt.Printf("  - %s\n", warning)
+		}
+	}
 
 	if showUnfed {
 		printUnfed(p, g)

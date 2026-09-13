@@ -28,3 +28,10 @@ type ProgressObserver interface {
 	// This fires on every exit path, including early errors.
 	OnRunComplete(result *RunResult)
 }
+
+// CleanupSkipObserver is an optional extension of ProgressObserver. An observer
+// that implements it is told about each registered cleanup the engine skipped
+// because it was no longer needed, after the cleanup steps that ran.
+type CleanupSkipObserver interface {
+	OnCleanupSkipped(skip CleanupSkip)
+}

@@ -43,6 +43,7 @@ type RecipeSelectionOverride struct {
 	Filter    string `yaml:"filter,omitempty"`
 	SortField string `yaml:"sortField,omitempty"`
 	Index     int    `yaml:"index,omitempty"`
+	OnTie     string `yaml:"onTie,omitempty"`
 }
 
 // RecipeAssertion mirrors intent.TargetedAssertion for YAML serialization.

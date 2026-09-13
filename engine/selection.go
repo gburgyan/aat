@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gburgyan/aat/internal/predicate"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -16,11 +17,16 @@ type selectionResult struct {
 	element      any
 	index        int
 	filteredSize int
+	// ties counts the elements that share the chosen min or max value, the
+	// chosen one included, so 1 means no tie. It is 0 for other strategies.
+	ties int
+	// sortValue is the chosen min or max value; nil for other strategies.
+	sortValue *float64
 }
 
 // applySelection selects a single element from arr according to the strategy in sel.
 // Returns the selected element, its index in the (possibly filtered) array, and the
-// size of the array after filtering.
+// size of the array after filtering (for match, the number of matching elements).
 func applySelection(arr []any, sel *plan.SelectionConfig) (*selectionResult, error) {
 	if len(arr) == 0 {
 		return nil, fmt.Errorf("array is empty")
@@ -34,11 +40,11 @@ func applySelection(arr []any, sel *plan.SelectionConfig) (*selectionResult, err
 	// match uses filter directly without pre-filtering; a filter with no
 	// strategy means match, as plan.SelectionStrategies documents
 	if sel.Strategy == "match" || sel.Strategy == "" {
-		elem, idx, err := selectMatch(arr, sel.Filter)
+		elem, idx, matches, err := selectMatch(arr, sel.Filter)
 		if err != nil {
 			return nil, err
 		}
-		return &selectionResult{element: elem, index: idx, filteredSize: len(arr)}, nil
+		return &selectionResult{element: elem, index: idx, filteredSize: matches}, nil
 	}
 
 	// Apply filter for all other strategies if present
@@ -66,32 +72,51 @@ func applySelection(arr []any, sel *plan.SelectionConfig) (*selectionResult, err
 		idx := rand.IntN(len(working))
 		return &selectionResult{element: working[idx], index: idx, filteredSize: len(working)}, nil
 	case "min":
-		compField := sel.SortField
-		if compField == "" {
-			compField = sel.Field
-		}
-		return selectByFieldExtreme(working, compField, false)
+		return selectByFieldExtreme(working, compareField(sel), false)
 	case "max":
-		compField := sel.SortField
-		if compField == "" {
-			compField = sel.Field
-		}
-		return selectByFieldExtreme(working, compField, true)
+		return selectByFieldExtreme(working, compareField(sel), true)
 	default:
 		return nil, fmt.Errorf("unknown selection strategy %q", sel.Strategy)
 	}
 }
 
+// compareField returns the field the min and max strategies compare: sortField,
+// or field when there is no sortField.
+func compareField(sel *plan.SelectionConfig) string {
+	if sel.SortField != "" {
+		return sel.SortField
+	}
+	return sel.Field
+}
+
+// tieError is the resolution error for a min or max selection whose candidates
+// tie, when its onTie is fail. It returns nil otherwise.
+func tieError(result *selectionResult, onTie, strategy, field string) error {
+	if onTie != "fail" || result.ties < 2 {
+		return nil
+	}
+	at := ""
+	if result.sortValue != nil {
+		at = " at " + strconv.FormatFloat(*result.sortValue, 'f', -1, 64)
+	}
+	return fmt.Errorf("%d of %d elements tie for %s %s%s, and onTie is fail; add a filter that picks one",
+		result.ties, result.filteredSize, strategy, field, at)
+}
+
 // applyFilter evaluates a predicate expression against each element, keeping
 // those where the predicate returns true.
 func applyFilter(arr []any, expr string) ([]any, error) {
+	pred, err := predicate.Parse(expr)
+	if err != nil {
+		return nil, fmt.Errorf("evaluating filter: %w", err)
+	}
 	var result []any
 	for _, elem := range arr {
 		m, err := elementToMap(elem)
 		if err != nil {
 			return nil, fmt.Errorf("converting element for filter: %w", err)
 		}
-		match, err := plan.EvalPredicate(expr, m)
+		match, err := pred.Eval(m)
 		if err != nil {
 			return nil, fmt.Errorf("evaluating filter: %w", err)
 		}
@@ -105,27 +130,43 @@ func applyFilter(arr []any, expr string) ([]any, error) {
 	return result, nil
 }
 
-// selectMatch iterates elements and returns the first one matching the predicate.
-func selectMatch(arr []any, expr string) (any, int, error) {
+// selectMatch returns the first element matching the predicate, its index, and
+// how many elements match. An element after the first match that the predicate
+// can't be evaluated against is not counted, so the choice fails only as it did
+// before counting.
+func selectMatch(arr []any, expr string) (any, int, int, error) {
+	pred, err := predicate.Parse(expr)
+	if err != nil {
+		return nil, 0, 0, fmt.Errorf("evaluating match predicate: %w", err)
+	}
+	first, matches := -1, 0
 	for i, elem := range arr {
 		m, err := elementToMap(elem)
-		if err != nil {
-			return nil, 0, fmt.Errorf("converting element for match: %w", err)
+		if err == nil {
+			var match bool
+			match, err = pred.Eval(m)
+			if err == nil && match {
+				if first < 0 {
+					first = i
+				}
+				matches++
+				continue
+			}
 		}
-		match, err := plan.EvalPredicate(expr, m)
-		if err != nil {
-			return nil, 0, fmt.Errorf("evaluating match predicate: %w", err)
-		}
-		if match {
-			return elem, i, nil
+		if err != nil && first < 0 {
+			return nil, 0, 0, fmt.Errorf("evaluating match predicate: %w", err)
 		}
 	}
-	return nil, 0, fmt.Errorf("no element matches predicate %q", expr)
+	if first < 0 {
+		return nil, 0, 0, fmt.Errorf("no element matches predicate %q", expr)
+	}
+	return arr[first], first, matches, nil
 }
 
-// selectByFieldExtreme finds the element with the minimum or maximum value of a field.
+// selectByFieldExtreme finds the element with the minimum or maximum value of a
+// field, the first of them when several share it, and counts how many do.
 func selectByFieldExtreme(arr []any, field string, max bool) (*selectionResult, error) {
-	bestIdx := -1
+	bestIdx, ties := -1, 0
 	var bestVal float64
 
 	for i, elem := range arr {
@@ -133,9 +174,11 @@ func selectByFieldExtreme(arr []any, field string, max bool) (*selectionResult, 
 		if err != nil {
 			return nil, fmt.Errorf("extracting field %q from element %d: %w", field, i, err)
 		}
-		if bestIdx == -1 || (max && val > bestVal) || (!max && val < bestVal) {
-			bestIdx = i
-			bestVal = val
+		switch {
+		case bestIdx == -1 || (max && val > bestVal) || (!max && val < bestVal):
+			bestIdx, bestVal, ties = i, val, 1
+		case val == bestVal:
+			ties++
 		}
 	}
 
@@ -143,6 +186,8 @@ func selectByFieldExtreme(arr []any, field string, max bool) (*selectionResult, 
 		element:      arr[bestIdx],
 		index:        bestIdx,
 		filteredSize: len(arr),
+		ties:         ties,
+		sortValue:    &bestVal,
 	}, nil
 }
 
@@ -186,6 +231,20 @@ func toFloat64(v any) (float64, error) {
 	case int64:
 		return float64(n), nil
 	case int32:
+		return float64(n), nil
+	case int16:
+		return float64(n), nil
+	case int8:
+		return float64(n), nil
+	case uint:
+		return float64(n), nil
+	case uint64:
+		return float64(n), nil
+	case uint32:
+		return float64(n), nil
+	case uint16:
+		return float64(n), nil
+	case uint8:
 		return float64(n), nil
 	case json.Number:
 		return n.Float64()

@@ -258,15 +258,6 @@ func fixFilterPrefixes(p *plan.Plan) {
 	}
 }
 
-// validAssertionTypes is the set of recognized mechanical assertion types.
-var validAssertionTypes = map[string]bool{
-	"status":      true,
-	"schema":      true,
-	"fieldExists": true,
-	"fieldEquals": true,
-	"predicate":   true,
-}
-
 // fixAssertions removes mechanical assertions with empty or unknown types and
 // ensures every step has at least a status assertion. LLMs sometimes produce
 // assertions with missing type fields; this cleans them up.
@@ -285,7 +276,7 @@ func fixAssertions(p *plan.Plan) {
 		var valid []plan.MechanicalAssertion
 		hasStatus := false
 		for _, a := range step.Assertions.Mechanical {
-			if !validAssertionTypes[a.Type] {
+			if !plan.IsAssertionType(a.Type) {
 				continue
 			}
 			if a.Type == "status" {
@@ -316,16 +307,16 @@ func addCleanupSteps(p *plan.Plan, g *graph.Graph) {
 
 	for _, step := range p.Execution.Steps {
 		node := g.Nodes[step.Node]
-		if node == nil || node.Cleanup == "" {
+		if node == nil || node.Cleanup.Node == "" {
 			continue
 		}
 
-		if !existingCleanup[node.Cleanup] {
+		if !existingCleanup[node.Cleanup.Node] {
 			p.Execution.Cleanup = append(p.Execution.Cleanup, plan.CleanupStep{
-				Node:  node.Cleanup,
+				Node:  node.Cleanup.Node,
 				RunOn: "always",
 			})
-			existingCleanup[node.Cleanup] = true
+			existingCleanup[node.Cleanup.Node] = true
 		}
 	}
 }
@@ -487,6 +478,9 @@ func mergeStepFromLLM(skelStep *plan.Step, llmStep *plan.Step, unfed map[string]
 			if llmSel.SortField != "" {
 				skelSel.SortField = llmSel.SortField
 			}
+			if llmSel.OnTie != "" {
+				skelSel.OnTie = llmSel.OnTie
+			}
 			if llmSel.Index != 0 {
 				skelSel.Index = llmSel.Index
 			}
@@ -521,7 +515,7 @@ func mergeStepFromLLM(skelStep *plan.Step, llmStep *plan.Step, unfed map[string]
 			// Named selection: skeleton is authoritative. Skip.
 			continue
 		} else if skelVal.From != "" && skelVal.Select != nil {
-			// Select edge: accept strategy/filter/sortField/index overrides.
+			// Select edge: accept strategy/filter/sortField/index/onTie overrides.
 			if llmVal.Select != nil {
 				if llmVal.Select.Strategy != "" {
 					skelVal.Select.Strategy = llmVal.Select.Strategy
@@ -531,6 +525,9 @@ func mergeStepFromLLM(skelStep *plan.Step, llmStep *plan.Step, unfed map[string]
 				}
 				if llmVal.Select.SortField != "" {
 					skelVal.Select.SortField = llmVal.Select.SortField
+				}
+				if llmVal.Select.OnTie != "" {
+					skelVal.Select.OnTie = llmVal.Select.OnTie
 				}
 				if llmVal.Select.Index != 0 {
 					skelVal.Select.Index = llmVal.Select.Index

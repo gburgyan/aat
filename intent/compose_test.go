@@ -1250,13 +1250,13 @@ func TestCompose_Slots_DeterministicMergeOrder(t *testing.T) {
 			Name:     "OrderTrip",
 			Kind:     "slot",
 			Template: "testdata/compose/slot_order_trip.yaml",
-			Inject:   map[string]any{"channel": "web"},
+			Inject:   map[string]graph.InjectValue{"channel": graph.InjectLiteral("web")},
 		},
 		graph.Workflow{
 			Name:     "OrderPayment",
 			Kind:     "slot",
 			Template: "testdata/compose/slot_order_payment.yaml",
-			Inject:   map[string]any{"channel": "phone"},
+			Inject:   map[string]graph.InjectValue{"channel": graph.InjectLiteral("phone")},
 		},
 	)
 	base := findSlotBaseWorkflow(g)
@@ -1534,7 +1534,7 @@ func TestCompose_Slots_InjectAppliesValue(t *testing.T) {
 			Name:     "TwoTravelers",
 			Kind:     "slot",
 			Template: "testdata/compose/slot_option_a.yaml", // reuse — steps don't matter for inject test
-			Inject:   map[string]any{"passengers": 2},
+			Inject:   map[string]graph.InjectValue{"passengers": graph.InjectLiteral(2)},
 		},
 	)
 
@@ -1568,7 +1568,7 @@ func TestCompose_Slots_InjectAppliesValue(t *testing.T) {
 	}
 
 	// Call applyInjectValues directly to test the inject mechanism.
-	applyInjectValues(basePlan, map[string]any{"passengers": 2}, g)
+	applyInjectValues(basePlan, map[string]graph.InjectValue{"passengers": graph.InjectLiteral(2)}, g)
 
 	// search is not in the basePlan steps, so nothing should be injected.
 	// Let's test with a plan that has the search step.
@@ -1587,7 +1587,7 @@ func TestCompose_Slots_InjectAppliesValue(t *testing.T) {
 		},
 	}
 
-	applyInjectValues(planWithSearch, map[string]any{"passengers": 2}, g)
+	applyInjectValues(planWithSearch, map[string]graph.InjectValue{"passengers": graph.InjectLiteral(2)}, g)
 
 	// search step should now have passengers=2
 	searchStep := planWithSearch.Execution.Steps[1]
@@ -1621,7 +1621,7 @@ func TestApplyInjectValues_SkipsExistingValues(t *testing.T) {
 		},
 	}
 
-	applyInjectValues(p, map[string]any{"passengers": 2}, g)
+	applyInjectValues(p, map[string]graph.InjectValue{"passengers": graph.InjectLiteral(2)}, g)
 
 	// Should keep the existing value of 5, not overwrite with 2.
 	assert.Equal(t, 5, p.Execution.Steps[0].Values["passengers"].Default)
@@ -1647,7 +1647,7 @@ func TestApplyInjectValues_SkipsFromWiring(t *testing.T) {
 		},
 	}
 
-	applyInjectValues(p, map[string]any{"passengers": 2}, g)
+	applyInjectValues(p, map[string]graph.InjectValue{"passengers": graph.InjectLiteral(2)}, g)
 
 	// Should keep the from wiring, not overwrite.
 	assert.Equal(t, "config.passengers", p.Execution.Steps[0].Values["passengers"].From)
@@ -1682,7 +1682,7 @@ func TestApplyInjectValues_MultipleSteps(t *testing.T) {
 		},
 	}
 
-	applyInjectValues(p, map[string]any{"passengers": 2}, g)
+	applyInjectValues(p, map[string]graph.InjectValue{"passengers": graph.InjectLiteral(2)}, g)
 
 	// Both search steps get passengers=2.
 	assert.Equal(t, 2, p.Execution.Steps[0].Values["passengers"].Default)

@@ -145,6 +145,7 @@ Available fields:
 | `filter` | Predicate expression to narrow the array before selection |
 | `sortField` | Field name for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | Element index for `index` strategy |
+| `onTie` | For `min`/`max`, what a tie does: `first` takes the first of the elements that share the value without a warning, and `fail` fails the step |
 
 ### Assertion Overrides
 
@@ -353,9 +354,12 @@ values:
   returnDate: {}
 ```
 
-An empty map `{}` (or `null`) marks the input as explicitly absent: no graph default, layer, or auto-wiring fills it, and an optional input is left out of the request. Use it on optional inputs.
+An empty map `{}` (or `null`) marks the input as explicitly absent: auto-wiring doesn't fill it, and an optional input is left out of the request even when a graph default or a layer sets it. Use it on optional inputs.
 
-A required input marked `{}` still takes its graph default when that default is a plain literal. The default is used as written: its expressions are not evaluated, and layers do not apply. With no graph default, the step fails with `required input has no value (empty step value)`. With a pool or `from` default, the input is left out, which usually fails the request with `unresolved placeholders`.
+What `{}` does to a required input depends on its default: the graph default, with any layers applied:
+- A plain value is used, with its expressions evaluated, so a default of `{{env.postalCode}}` sends the variable's value. A layer that sets the input to a plain value sends that value.
+- A default with a pool, `from`, `select`, or a constraint isn't used, and the input is left out, as an optional one is. The template must send it inside a conditional block such as `{{?couponCode}}…{{/couponCode}}`, or the request fails on the unresolved placeholder. This suits a field sent only in some requests, such as a payment for an order paid now rather than later.
+- With no default, the step fails with `required input has no value (empty step value)`.
 
 **Inputs you don't need to specify** — graph nodes can declare default value pools on their inputs. When a plan or recipe doesn't provide a value for an input, the engine uses the graph default. For example, if the graph declares:
 
@@ -403,6 +407,7 @@ Named selections ensure coordinated multi-field extraction — all three values 
 | `filter` | string | no | Predicate expression to narrow the array |
 | `sortField` | string | no | Field for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | int | no | Element index for `index` strategy |
+| `onTie` | string | no | For `min`/`max`, what a tie does: `first` takes the first tied element without a warning, and `fail` fails the step. Without it, the first is taken and the step warns |
 
 See [Value Resolution: Array Selection](value-flow.md#array-selection) for strategy details.
 
@@ -455,6 +460,13 @@ assertions:
 ```
 
 `path` is a [gjson](https://github.com/tidwall/gjson) path, so `fieldExists` and `fieldEquals` can index arrays (`items.0.id`) and query them (`items.#(sku=="ABC")`); a leading `$.` and `[0]` bracket indexes are accepted too. A predicate `expr` is simpler: it reads dotted field names only, with no array indexes or queries.
+
+**Expressions in assertions.** A `fieldEquals` `value`, and a quoted string in a `predicate` `expr`, can hold `{{…}}` [expressions](value-flow.md#dynamic-expressions), such as `value: "{{today + 3 days}}"` or `expr: 'quantity == "{{quantity}}"'`.
+- They are evaluated when the step's assertions run, and they can name the step's inputs. `today`, `now`, and `unixtime` read the time the inputs were resolved, so a retried step's `{{today}}` is the date it resent.
+- A quoted expression that evaluates to a number or a boolean compares as one.
+- An expression that can't be evaluated fails its assertion.
+- `aat validate` checks their syntax.
+- Selection filters and cleanup `when` conditions don't evaluate expressions.
 
 `status` and `schema` are unaffected by `raw` — they always look at the HTTP status and the full response body respectively.
 
@@ -697,7 +709,9 @@ A cleanup step has just two fields: `node` and `runOn`. There is no `values:` bl
 
 **Ordering.** A graph-level `cleanup:` pairing (see [API Graphs: Cleanup](graphs.md#cleanup)) runs once for each step that created a resource, from a last-in-first-out stack, so the most recently created resource is released first and nothing is sent for a resource that was never created. Listing a paired node here, as recipes and `aat prompt` plans do, does not run it a second time or change that order; the listed step's `runOn` decides whether those cleanups run. If the plan lists that node more than once, they run when any listing's `runOn` matches the outcome. Cleanup steps for other nodes, such as `sendNotification` above, run first, in declaration order. A node reached through a [cleanup chain](graphs.md#cleanup) counts as a pairing too: listing it does not run it on its own, and its `runOn` decides whether the chain continues to it.
 
-Cleanup results are recorded in the archive and in the `cleanup` array of `--json` output, and appear under a `cleanup:` block in the console. A cleanup failure never changes the run outcome. See [Running Tests: Cleanup](running.md#cleanup) for the execution-time details.
+**Skipped pairings.** After `runOn`, a registered pairing is skipped when it's no longer needed: a later main step already released its resource, such as an explicit `cancelOrder` step for the order the pairing would cancel, or the pairing's `when` condition is false. See [API Graphs: Cleanup](graphs.md#cleanup).
+
+Cleanup results are recorded in the archive and in the `cleanup` array of `--json` output, and appear under a `cleanup:` block in the console. Skipped pairings are recorded in the archive's `cleanupSkipped` and in `cleanup_skipped` in `--json`, and appear as `skipped:` lines under `cleanup:`. A cleanup failure never changes the run outcome. See [Running Tests: Cleanup](running.md#cleanup) for the execution-time details.
 
 ## Plan-Level Auth and Headers
 

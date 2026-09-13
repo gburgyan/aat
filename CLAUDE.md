@@ -51,6 +51,7 @@ make clean         # Remove binaries and frontend artifacts (node_modules, dist)
 | `internal/sandbox/shop/` | Offline e-commerce sandbox API (regions, OAuth2/API key, order state machine, chaos hooks); stdlib only |
 | `internal/httpstatus/` | Expected-status values shared by plan validation and assertions: exact codes, `2xx` classes, contradictions with `expectFailure` |
 | `internal/yamlx/` | Strict YAML decoding for project files: unknown keys are errors with line, key, and suggestion |
+| `internal/predicate/` | Predicate expressions (`status == "open" && total > 100`): parsing, evaluation, and the fields they name, for selection filters, constraints, assertions, and cleanup `when` |
 | `internal/primer/` | The AI assistant primer (`llms.md`): embedded for `aat docs primer`, included by `docs/user/llms.md`, and published as `llms-full.txt` |
 | `internal/testutil/` | Shared test helpers and fixtures |
 | `internal/version/` | Build version info |
@@ -60,7 +61,7 @@ make clean         # Remove binaries and frontend artifacts (node_modules, dist)
 
 Dependencies flow in one direction. No cycles. No lateral imports within a tier.
 
-**Foundation packages** (stdlib and third-party imports only; importable from any tier): `internal/httpstatus`, `internal/yamlx`, `internal/version`, `internal/primer`
+**Foundation packages** (stdlib and third-party imports only; importable from any tier): `internal/httpstatus`, `internal/yamlx`, `internal/predicate`, `internal/version`, `internal/primer`
 **Leaf packages** (no aat imports other than foundation packages): `config`, `graph`, `domain`, `adapter`, `validate`, `internal/sandbox/shop`
 **Mid-tier**: `graph/oas` → graph; `llm` → config; `plan` → graph, config; `archive` → plan
 **Orchestrators**: `engine` → graph, graph/oas, adapter, plan, domain, validate, archive, config
@@ -277,7 +278,7 @@ Beyond `prompt` (shown above), the CLI provides:
 # Execute plans
 aat run plan <name-or-path>            # single plan (positional arg)
 aat run batch [directory]              # all plans, or filtered by subdirectory
-aat run show <run|latest|path> [--step ID|NODE] [--request|--response|--inputs|--outputs] [--path GJSON] [--shape] [--json]   # read an archive
+aat run show <run|latest|path> [--step ID|NODE] [--request|--response|--inputs|--outputs|--resolutions] [--path GJSON] [--shape] [--json] [--compact]   # read an archive
 
 # Validation (unified — bare validates everything, subcommands focus on one scope)
 aat validate [--manifest FILE] [--strict]

@@ -219,15 +219,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 			}
 			outcome = OutcomeError
-			// Run cleanup before returning
-			cleanupResults := e.runCleanup(ctx, instantiatedPlan, cleanupStack, state, outcome)
-			return &RunResult{
-				Outcome:          outcome,
-				Steps:            stepResults,
-				CleanupResults:   cleanupResults,
-				Error:            fmt.Errorf("step %s: %w", stepRef(step), stepResult.Error),
-				InstantiatedPlan: instantiatedPlan,
-			}
+			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, stepResults, fmt.Errorf("step %s: %w", stepRef(step), stepResult.Error))
 		}
 
 		// Handle expectFailure steps: inverted success/failure logic
@@ -254,14 +246,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				if stepResult.Validation != nil && !stepResult.Validation.Passed {
 					outcome = OutcomeFailed
 					if !e.ContinueOnAssertionFailure {
-						cleanupResults := e.runCleanup(ctx, instantiatedPlan, cleanupStack, state, outcome)
-						return &RunResult{
-							Outcome:          outcome,
-							Steps:            stepResults,
-							CleanupResults:   cleanupResults,
-							Error:            fmt.Errorf("step %s failed mechanical validation", stepRef(step)),
-							InstantiatedPlan: instantiatedPlan,
-						}
+						return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, stepResults, fmt.Errorf("step %s failed mechanical validation", stepRef(step)))
 					}
 				}
 				if stopped := e.checkpointResult(step, stepResults, instantiatedPlan); stopped != nil {
@@ -272,27 +257,12 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 
 			// Unexpected success or wrong error code — FAIL.
 			outcome = OutcomeFailed
-			cleanupResults := e.runCleanup(ctx, instantiatedPlan, cleanupStack, state, outcome)
-			return &RunResult{
-				Outcome:          outcome,
-				Steps:            stepResults,
-				CleanupResults:   cleanupResults,
-				Error:            fmt.Errorf("step %s: expected failure status %v but got %d", stepRef(step), step.ExpectFailure.Status, stepResult.StatusCode),
-				InstantiatedPlan: instantiatedPlan,
-			}
+			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, stepResults, fmt.Errorf("step %s: expected failure status %v but got %d", stepRef(step), step.ExpectFailure.Status, stepResult.StatusCode))
 		}
 
 		if stepResult.StatusCode >= 400 {
 			outcome = OutcomeFailed
-			// Run cleanup before returning
-			cleanupResults := e.runCleanup(ctx, instantiatedPlan, cleanupStack, state, outcome)
-			return &RunResult{
-				Outcome:          outcome,
-				Steps:            stepResults,
-				CleanupResults:   cleanupResults,
-				Error:            fmt.Errorf("step %s returned status %d", stepRef(step), stepResult.StatusCode),
-				InstantiatedPlan: instantiatedPlan,
-			}
+			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, stepResults, fmt.Errorf("step %s returned status %d", stepRef(step), stepResult.StatusCode))
 		}
 
 		// Check for response body errors (API returned 2xx but body indicates error)
@@ -300,14 +270,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			outcome = OutcomeFailed
 			// Do NOT store outputs — error responses produce unreliable data
 			// Do NOT push cleanup — failing node did not create a valid resource
-			cleanupResults := e.runCleanup(ctx, instantiatedPlan, cleanupStack, state, outcome)
-			return &RunResult{
-				Outcome:          outcome,
-				Steps:            stepResults,
-				CleanupResults:   cleanupResults,
-				Error:            fmt.Errorf("step %s: %s", stepRef(step), stepResult.ResponseBodyError.Summary()),
-				InstantiatedPlan: instantiatedPlan,
-			}
+			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, stepResults, fmt.Errorf("step %s: %s", stepRef(step), stepResult.ResponseBodyError.Summary()))
 		}
 
 		// Store outputs keyed by step ID (supports step aliasing)
@@ -317,9 +280,9 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 
 		// Push cleanup if node has one — done before assertion check because
 		// the step executed successfully (HTTP-wise) and may have created resources.
-		if node.Cleanup != "" {
+		if node.Cleanup.Node != "" {
 			cleanupStack.Push(CleanupEntry{
-				NodeName: node.Cleanup,
+				NodeName: node.Cleanup.Node,
 				ForNode:  node.Name,
 				ForStep:  step.StepID(),
 			})
@@ -330,28 +293,14 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		// accepted the request and created a resource.
 		if err := e.oasStrictError(step, &stepResult); err != nil {
 			outcome = OutcomeFailed
-			cleanupResults := e.runCleanup(ctx, instantiatedPlan, cleanupStack, state, outcome)
-			return &RunResult{
-				Outcome:          outcome,
-				Steps:            stepResults,
-				CleanupResults:   cleanupResults,
-				Error:            err,
-				InstantiatedPlan: instantiatedPlan,
-			}
+			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, stepResults, err)
 		}
 
 		// Run mechanical assertions if configured
 		if stepResult.Validation != nil && !stepResult.Validation.Passed {
 			outcome = OutcomeFailed
 			if !e.ContinueOnAssertionFailure {
-				cleanupResults := e.runCleanup(ctx, instantiatedPlan, cleanupStack, state, outcome)
-				return &RunResult{
-					Outcome:          outcome,
-					Steps:            stepResults,
-					CleanupResults:   cleanupResults,
-					Error:            fmt.Errorf("step %s failed mechanical validation", stepRef(step)),
-					InstantiatedPlan: instantiatedPlan,
-				}
+				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, stepResults, fmt.Errorf("step %s failed mechanical validation", stepRef(step)))
 			}
 		}
 
@@ -371,15 +320,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		outcome = verOutcome
 	}
 
-	cleanupResults := e.runCleanup(ctx, instantiatedPlan, cleanupStack, state, outcome)
-
-	return &RunResult{
-		Outcome:          outcome,
-		Steps:            stepResults,
-		CleanupResults:   cleanupResults,
-		Error:            verErr,
-		InstantiatedPlan: instantiatedPlan,
-	}
+	return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, stepResults, verErr)
 }
 
 // runCleanup executes cleanup after the main flow. A graph-level cleanup
@@ -394,8 +335,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 // (always/success/failure). Cleanup inputs are matched by output name, starting
 // with the cleanup steps before it in its chain and then the step that
 // registered the entry. Cleanup failures are recorded but never change the run
-// outcome.
-func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *CleanupStack, state *RunState, outcome Outcome) []StepResult {
+// outcome. A registered pairing that is no longer needed is skipped and returned
+// in the second result: a later main step already released its resource, or its
+// when condition is false (see cleanupSkip). steps are the run's step results so
+// far; its verification steps never release a cleanup.
+func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *CleanupStack, state *RunState, outcome Outcome, steps []StepResult) ([]StepResult, []CleanupSkip) {
 	paired := e.pairedCleanupNodes(p)
 	var planEntries []CleanupEntry
 	declared := make(map[string]bool) // paired nodes the plan lists as cleanup steps
@@ -421,7 +365,7 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 	// total counts the entries that start a cleanup chain; chains add steps.
 	total := len(planEntries) + cleanupStack.Len()
 	if total == 0 {
-		return nil
+		return nil, nil
 	}
 	if e.Observer != nil {
 		e.Observer.OnCleanupStart(total)
@@ -437,7 +381,10 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 		defer cancel()
 	}
 
-	run := newCleanupRun(e.planStepIDs(p), allow)
+	// steps holds a result for each main step that ran, in plan order, and then
+	// the verification results.
+	mainSteps := steps[:min(len(steps), len(p.Execution.Steps))]
+	run := newCleanupRun(e.planStepIDs(p), allow, mainSteps)
 	results := make([]StepResult, 0, total)
 	for _, entry := range planEntries {
 		results = append(results, e.runCleanupChain(cleanupCtx, entry, "", nil, state, run)...)
@@ -448,8 +395,27 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 		for i, cr := range results {
 			e.Observer.OnCleanupStepComplete(i, len(results), cr)
 		}
+		if so, ok := e.Observer.(CleanupSkipObserver); ok {
+			for _, skip := range run.skips {
+				so.OnCleanupSkipped(skip)
+			}
+		}
 	}
-	return results
+	return results, run.skips
+}
+
+// endRun runs cleanup for a run that ended with outcome and returns its result:
+// the steps that ran, what cleanup ran and skipped, and err.
+func (e *Engine) endRun(ctx context.Context, p *plan.Plan, cleanupStack *CleanupStack, state *RunState, outcome Outcome, steps []StepResult, err error) *RunResult {
+	cleanupResults, cleanupSkipped := e.runCleanup(ctx, p, cleanupStack, state, outcome, steps)
+	return &RunResult{
+		Outcome:          outcome,
+		Steps:            steps,
+		CleanupResults:   cleanupResults,
+		CleanupSkipped:   cleanupSkipped,
+		Error:            err,
+		InstantiatedPlan: p,
+	}
 }
 
 // planStepIDs returns the IDs of p's main and verification steps, which no
@@ -472,9 +438,9 @@ func (e *Engine) pairedCleanupNodes(p *plan.Plan) map[string]bool {
 	paired := make(map[string]bool)
 	for _, step := range p.Execution.Steps {
 		node, ok := e.graph.Nodes[step.Node]
-		for ok && node.Cleanup != "" && !paired[node.Cleanup] {
-			paired[node.Cleanup] = true
-			node, ok = e.graph.Nodes[node.Cleanup]
+		for ok && node.Cleanup.Node != "" && !paired[node.Cleanup.Node] {
+			paired[node.Cleanup.Node] = true
+			node, ok = e.graph.Nodes[node.Cleanup.Node]
 		}
 	}
 	return paired
@@ -487,13 +453,7 @@ const abortedCleanupBudget = 30 * time.Second
 // it runs cleanup under abortedCleanupBudget and records the outcome as
 // aborted with the steps that ran.
 func (e *Engine) abortedResult(ctx context.Context, p *plan.Plan, cleanupStack *CleanupStack, state *RunState, steps []StepResult) *RunResult {
-	return &RunResult{
-		Outcome:          OutcomeAborted,
-		Steps:            steps,
-		CleanupResults:   e.runCleanup(ctx, p, cleanupStack, state, OutcomeAborted),
-		Error:            fmt.Errorf("execution cancelled: %w", ctx.Err()),
-		InstantiatedPlan: p,
-	}
+	return e.endRun(ctx, p, cleanupStack, state, OutcomeAborted, steps, fmt.Errorf("execution cancelled: %w", ctx.Err()))
 }
 
 // cleanupRunOnMatches reports whether a plan-level cleanup step with the given
@@ -670,6 +630,7 @@ type stepInputs struct {
 	inputs      map[string]any
 	selections  []SelectionDecision
 	resolutions []ValueResolution
+	now         time.Time // when they were resolved; assertion expressions read it too
 }
 
 // executeStepWith executes one attempt of a step. When prepared already holds
@@ -684,22 +645,27 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	var inputs map[string]any
 	var selections []SelectionDecision
 	var resolutions []ValueResolution
+	var resolvedAt time.Time
 	if prepared != nil && prepared.resolved {
-		inputs, selections, resolutions = prepared.inputs, prepared.selections, prepared.resolutions
+		inputs, selections, resolutions, resolvedAt = prepared.inputs, prepared.selections, prepared.resolutions, prepared.now
 	} else {
 		// Construct ResolveContext from engine fields
 		rctx := e.buildResolveContext(node)
+		resolvedAt = rctx.Now
 
 		// Resolve inputs
 		var err error
 		inputs, selections, resolutions, err = ResolveInputsWithContext(ctx, step, node, e.graph, state, rctx)
 		if err != nil {
 			return StepResult{
-				StepID:    sid,
-				Node:      step.Node,
-				Error:     fmt.Errorf("resolving inputs: %w", err),
-				StartTime: start,
-				Duration:  time.Since(start),
+				StepID:      sid,
+				Node:        step.Node,
+				Inputs:      inputs,
+				Selections:  selections,
+				Resolutions: resolutions,
+				Error:       fmt.Errorf("resolving inputs: %w", err),
+				StartTime:   start,
+				Duration:    time.Since(start),
 			}
 		}
 
@@ -715,7 +681,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		// Store resolved inputs so later steps can reference them via fromInput
 		state.StoreInputs(sid, inputs)
 		if prepared != nil {
-			*prepared = stepInputs{resolved: true, inputs: inputs, selections: selections, resolutions: resolutions}
+			*prepared = stepInputs{resolved: true, inputs: inputs, selections: selections, resolutions: resolutions, now: resolvedAt}
 		}
 	}
 
@@ -723,12 +689,14 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	adp, err := e.registry.Get(node.Adapter)
 	if err != nil {
 		return StepResult{
-			StepID:    sid,
-			Node:      step.Node,
-			Inputs:    inputs,
-			Error:     fmt.Errorf("getting adapter: %w", err),
-			StartTime: start,
-			Duration:  time.Since(start),
+			StepID:      sid,
+			Node:        step.Node,
+			Inputs:      inputs,
+			Selections:  selections,
+			Resolutions: resolutions,
+			Error:       fmt.Errorf("getting adapter: %w", err),
+			StartTime:   start,
+			Duration:    time.Since(start),
 		}
 	}
 
@@ -743,6 +711,8 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 			StepID:        sid,
 			Node:          step.Node,
 			Inputs:        inputs,
+			Selections:    selections,
+			Resolutions:   resolutions,
 			Error:         fmt.Errorf("building request: %w", err),
 			StartTime:     start,
 			Duration:      time.Since(start),
@@ -769,6 +739,8 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 			StepID:        sid,
 			Node:          step.Node,
 			Inputs:        inputs,
+			Selections:    selections,
+			Resolutions:   resolutions,
 			Request:       req,
 			Error:         err,
 			StartTime:     start,
@@ -848,6 +820,14 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	// available, falling back to the raw body (e.g., on 4xx responses).
 	if step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
 		merged := &validate.MechanicalResult{Passed: true}
+		// Expressions in a fieldEquals value or a quoted predicate string read
+		// the step's inputs, as step values do, and the time they were resolved,
+		// so a retry compares with the dates it resent.
+		rctx := e.buildResolveContext(node)
+		ectx := plan.ExprContext{Now: resolvedAt, Env: rctx.EnvLookup, Values: inputs, Random: rctx.Random}
+		predicateEval := func(expr string, fields map[string]any) (bool, error) {
+			return plan.EvalPredicateWithExprs(expr, fields, ectx)
+		}
 		var rawAssertions, normalAssertions []plan.MechanicalAssertion
 		for _, a := range step.Assertions.Mechanical {
 			// A status assertion that expects success (a composed "2xx" default,
@@ -862,6 +842,20 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 					Message: fmt.Sprintf("status assertion expecting %v contradicts expectFailure", a.Expect),
 				})
 				continue
+			}
+			if a.Type == string(validate.AssertFieldEquals) {
+				expanded, err := plan.EvalExpr(a.Value, ectx)
+				if err != nil {
+					merged.Results = append(merged.Results, validate.AssertionResult{
+						Type:    validate.AssertFieldEquals,
+						Path:    a.Path,
+						Raw:     a.Raw,
+						Message: fmt.Sprintf("expanding value %v: %v", a.Value, err),
+					})
+					merged.Passed = false
+					continue
+				}
+				a.Value = expanded
 			}
 			if a.Raw {
 				rawAssertions = append(rawAssertions, a)
@@ -881,7 +875,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 
 		if len(normalAssertions) > 0 {
 			nr := validate.RunMechanical(resp.StatusCode, normalBody,
-				convertAssertions(normalAssertions), plan.EvalPredicate, schemaCheck)
+				convertAssertions(normalAssertions), predicateEval, schemaCheck)
 			merged.Results = append(merged.Results, nr.Results...)
 			if !nr.Passed {
 				merged.Passed = false
@@ -889,7 +883,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		}
 		if len(rawAssertions) > 0 {
 			rr := validate.RunMechanical(resp.StatusCode, resp.Body,
-				convertAssertions(rawAssertions), plan.EvalPredicate, schemaCheck)
+				convertAssertions(rawAssertions), predicateEval, schemaCheck)
 			merged.Results = append(merged.Results, rr.Results...)
 			if !rr.Passed {
 				merged.Passed = false
@@ -967,6 +961,8 @@ func (e *Engine) buildResolveContext(node *graph.Node) *ResolveContext {
 		Node:      node,
 		Plan:      e.plan,
 		Registry:  e.registry,
+
+		LayeredDefaults: e.layeredDefaults,
 	}
 }
 

@@ -198,11 +198,21 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		printSections(out, sections)
 		return 1
 	}
-	sections = append(sections, sectionResult{
-		Name:   "Graph structure",
-		Status: "OK",
-		Detail: "(" + pluralize(len(g.Nodes), "node") + ")",
-	})
+	graphDetail := "(" + pluralize(len(g.Nodes), "node") + ")"
+	if warnings := graph.RequiredFromOptionalDefaults(g); len(warnings) > 0 {
+		sections = append(sections, sectionResult{
+			Name:   "Graph structure",
+			Status: issueStatus(false, args.Strict),
+			Detail: graphDetail,
+			Errors: warnings,
+		})
+	} else {
+		sections = append(sections, sectionResult{
+			Name:   "Graph structure",
+			Status: "OK",
+			Detail: graphDetail,
+		})
+	}
 
 	// Templates feed the OAS output check (outputs are looked up at their
 	// extract paths) as well as the template sections after it.
@@ -321,18 +331,26 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		graphDir := filepath.Dir(m.GraphPath)
 		wfTemplates := workflowTemplatePaths(g, graphDir)
 		pvr := validateWorkflows(m.WorkflowsDir, g, wfTemplates)
-		if len(pvr.Errors) > 0 {
+		detail := "(" + pluralize(pvr.Total, "file")
+		if pvr.Templates > 0 {
+			detail += ", " + pluralize(pvr.Templates, "template")
+		}
+		detail += ")"
+		switch {
+		case len(pvr.Errors) > 0:
 			sections = append(sections, sectionResult{
 				Name:   "Workflows",
 				Status: "FAILED",
-				Errors: pvr.Errors,
+				Errors: append(pvr.Errors, pvr.Warnings...),
 			})
-		} else if pvr.Total > 0 {
-			detail := "(" + pluralize(pvr.Total, "file")
-			if pvr.Templates > 0 {
-				detail += ", " + pluralize(pvr.Templates, "template")
-			}
-			detail += ")"
+		case len(pvr.Warnings) > 0:
+			sections = append(sections, sectionResult{
+				Name:   "Workflows",
+				Status: issueStatus(false, args.Strict),
+				Detail: detail,
+				Errors: pvr.Warnings,
+			})
+		case pvr.Total > 0:
 			sections = append(sections, sectionResult{
 				Name:   "Workflows",
 				Status: "OK",
@@ -350,18 +368,26 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 	if len(m.PlanDirs) > 0 {
 		graphDir := filepath.Dir(m.GraphPath)
 		pvr := validatePlans([]string(m.PlanDirs), g, graphDir, m.LayersDir)
-		if len(pvr.Errors) > 0 {
+		detail := "(" + pluralize(pvr.Total, "file")
+		if pvr.Recipes > 0 {
+			detail += ", " + pluralize(pvr.Recipes, "recipe")
+		}
+		detail += ")"
+		switch {
+		case len(pvr.Errors) > 0:
 			sections = append(sections, sectionResult{
 				Name:   "Plans",
 				Status: "FAILED",
-				Errors: pvr.Errors,
+				Errors: append(pvr.Errors, pvr.Warnings...),
 			})
-		} else if pvr.Total > 0 {
-			detail := "(" + pluralize(pvr.Total, "file")
-			if pvr.Recipes > 0 {
-				detail += ", " + pluralize(pvr.Recipes, "recipe")
-			}
-			detail += ")"
+		case len(pvr.Warnings) > 0:
+			sections = append(sections, sectionResult{
+				Name:   "Plans",
+				Status: issueStatus(false, args.Strict),
+				Detail: detail,
+				Errors: pvr.Warnings,
+			})
+		case pvr.Total > 0:
 			sections = append(sections, sectionResult{
 				Name:   "Plans",
 				Status: "OK",
@@ -408,6 +434,7 @@ func issueStatus(hasErrors, strict bool) string {
 // workflowValidationResult holds counts from workflow validation for the detail string.
 type workflowValidationResult struct {
 	Errors    []string
+	Warnings  []string // fail only under --strict
 	Total     int
 	Templates int
 }
@@ -444,6 +471,9 @@ func validateWorkflows(workflowsDir string, g *graph.Graph, workflowTemplates ma
 		if _, err := plan.InstantiateAndValidate(p, g); err != nil {
 			result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", planPath, err))
 		}
+		for _, warning := range plan.RequiredFromOptionalValues(p, g) {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %s", planPath, warning))
+		}
 		return nil
 	})
 	if err != nil {
@@ -474,9 +504,10 @@ func workflowTemplatePaths(g *graph.Graph, graphDir string) map[string]bool {
 
 // planValidationResult holds counts from plan validation.
 type planValidationResult struct {
-	Errors  []string
-	Total   int
-	Recipes int
+	Errors   []string
+	Warnings []string // fail only under --strict
+	Total    int
+	Recipes  int
 }
 
 // validatePlans walks all plan directories and validates each plan file.
@@ -502,6 +533,9 @@ func validatePlans(planDirs []string, g *graph.Graph, graphDir, layersDir string
 		case *plan.Plan:
 			if _, err := plan.InstantiateAndValidate(v, g); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("%s: %s", entry.FullPath, err))
+			}
+			for _, warning := range plan.RequiredFromOptionalValues(v, g) {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("%s: %s", entry.FullPath, warning))
 			}
 		case *plan.Recipe:
 			result.Recipes++
@@ -533,6 +567,9 @@ func validateLayers(dir string, g *graph.Graph) sectionResult {
 	for _, name := range names {
 		for _, key := range layers[name].UnknownInputs(g) {
 			errs = append(errs, fmt.Sprintf("layer %q: input %q matches no node input in the graph", name, key))
+		}
+		for _, msg := range layers[name].ShapeErrors(g) {
+			errs = append(errs, fmt.Sprintf("layer %q: %s", name, msg))
 		}
 	}
 	if len(errs) > 0 {
@@ -615,7 +652,13 @@ func printSections(out io.Writer, sections []sectionResult) {
 		_, _ = fmt.Fprintln(out, line)
 
 		if s.Status == "FAILED" || s.Status == "WARN" {
+			printed := make(map[string]bool, len(s.Errors))
 			for _, e := range s.Errors {
+				// An error reported more than once, word for word, is printed once
+				if printed[e] {
+					continue
+				}
+				printed[e] = true
 				// Indent each line of the error
 				for _, eline := range strings.Split(e, "\n") {
 					if eline != "" {

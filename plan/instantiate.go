@@ -116,24 +116,17 @@ func mergeGraphDefaultsWithLayers(p *Plan, g *graph.Graph, layeredDefaults map[s
 				continue
 			}
 
-			// Check layered defaults first, then graph defaults.
-			effectiveDefault := input.Default
-			if layeredDefaults != nil {
-				key := step.Node + "." + input.Name
-				if ld, ok := layeredDefaults[key]; ok {
-					effectiveDefault = ld
-				}
-			}
+			effectiveDefault := EffectiveDefault(step.Node, input, layeredDefaults)
 
 			if effectiveDefault == nil || !effectiveDefault.HasValue() {
 				continue
 			}
 
-			sv := inputDefaultToStepValue(effectiveDefault)
+			sv := StepValueFromDefault(effectiveDefault)
 
 			// Translate from-ref node names to step IDs for composed plans
 			if sv.From != "" {
-				sv.From = translateFromRef(sv.From, p)
+				sv.From = TranslateFromRef(sv.From, p)
 			}
 
 			p.Execution.Steps[i].Values[input.Name] = sv
@@ -169,18 +162,13 @@ func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*grap
 		}
 		if node, ok := g.Nodes[vs.Node]; ok {
 			for _, input := range node.Inputs {
-				effectiveDefault := input.Default
-				if layeredDefaults != nil {
-					if ld, ok := layeredDefaults[vs.Node+"."+input.Name]; ok {
-						effectiveDefault = ld
-					}
-				}
+				effectiveDefault := EffectiveDefault(vs.Node, input, layeredDefaults)
 				if effectiveDefault == nil || !effectiveDefault.HasValue() {
 					continue
 				}
-				sv := inputDefaultToStepValue(effectiveDefault)
+				sv := StepValueFromDefault(effectiveDefault)
 				if sv.From != "" {
-					sv.From = translateFromRef(sv.From, p)
+					sv.From = TranslateFromRef(sv.From, p)
 				}
 				step.Values[input.Name] = sv
 			}
@@ -190,8 +178,19 @@ func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*grap
 	return steps
 }
 
-// inputDefaultToStepValue converts a graph InputDefault to a plan StepValue.
-func inputDefaultToStepValue(d *graph.InputDefault) StepValue {
+// EffectiveDefault returns the default of a node's input after layers: the
+// layered default for nodeName.inputName when layeredDefaults has one, and the
+// graph default otherwise. layeredDefaults is keyed as graph.ApplyLayers keys
+// it, and may be nil.
+func EffectiveDefault(nodeName string, input graph.Input, layeredDefaults map[string]*graph.InputDefault) *graph.InputDefault {
+	if ld, ok := layeredDefaults[nodeName+"."+input.Name]; ok {
+		return ld
+	}
+	return input.Default
+}
+
+// StepValueFromDefault converts a graph InputDefault to a plan StepValue.
+func StepValueFromDefault(d *graph.InputDefault) StepValue {
 	sv := StepValue{}
 
 	if d.Value != nil {
@@ -227,16 +226,17 @@ func inputDefaultToStepValue(d *graph.InputDefault) StepValue {
 			Filter:    d.Select.Filter,
 			Index:     d.Select.Index,
 			SortField: d.Select.SortField,
+			OnTie:     d.Select.OnTie,
 		}
 	}
 
 	return sv
 }
 
-// translateFromRef translates a "node.field" from-reference to use step IDs
+// TranslateFromRef translates a "node.field" from-reference to use step IDs
 // instead of node names. This handles composed plans where step IDs may be
 // prefixed (e.g., "inc0_createItinerary" instead of "createItinerary").
-func translateFromRef(fromRef string, p *Plan) string {
+func TranslateFromRef(fromRef string, p *Plan) string {
 	nodeName := splitFromNodeName(fromRef)
 	if nodeName == "" {
 		return fromRef
@@ -301,14 +301,7 @@ func injectGraphDefaultDeps(p *Plan, g *graph.Graph, layeredDefaults map[string]
 				continue
 			}
 
-			// Check layered defaults first, then graph defaults.
-			effectiveDefault := input.Default
-			if layeredDefaults != nil {
-				key := step.Node + "." + input.Name
-				if ld, ok := layeredDefaults[key]; ok {
-					effectiveDefault = ld
-				}
-			}
+			effectiveDefault := EffectiveDefault(step.Node, input, layeredDefaults)
 
 			if effectiveDefault == nil || effectiveDefault.From == "" {
 				continue

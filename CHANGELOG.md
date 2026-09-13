@@ -17,6 +17,55 @@ the graph and plan formats may still change before 1.0.
   takes its outputs first, so a resource released in two calls (request, then confirm) is cleaned up completely.
   Chained outputs stay inside the chain. Archive cleanup records gain `cleanupFor` (`cleanup_for` in `--json`),
   naming the step each one cleans up after.
+- A cleanup pairing can say when it isn't needed: `cleanup: {node: voidPayment, when: 'status == "authorized"',
+  releasedBy: [capturePayment]}`.
+  - `releasedBy` lists nodes whose success, after the creating step and with the same values for the inputs they
+    share with the cleanup, releases the resource.
+  - `when` is a predicate over the creating step's outputs, or the previous cleanup step's in a chain. The cleanup is
+    skipped when it's false. A `when` that can't be evaluated runs the cleanup and records `whenError`.
+  - A skipped cleanup's chain doesn't run. Skips print as `skipped:` lines under `cleanup:`, and are recorded in the
+    archive's `cleanupSkipped`, in `cleanup_skipped` in `--json`, in a `cleanup skipped:` table in `aat run show`,
+    and in the MCP server's `inspect_archive`.
+  - Loading a graph checks that `releasedBy` names other nodes and that `when` parses and names the node's outputs,
+    so `aat validate`, `aat run`, and the MCP server all reject a bad pairing.
+    `aat docs generate` adds When and Released By columns when a pairing uses them.
+- A `min` or `max` selection whose candidates tie prints a warning under its step, as in
+  `warning: selection "cheapest": 3 of 8 elements from listProducts.products tie for min price at 19.99; picked index 0`.
+  - The warning is also in the step's `warnings` in `--json`, in `aat run show --step`, and in the MCP server's
+    `inspect_archive`.
+  - Archive selection records gain `field`, `sortField`, `sortValue`, `ties`, and `onTie`.
+  - `onTie: fail` on a selection fails the step on a tie instead, and `onTie: first` takes the first without a
+    warning. Plan validation accepts `onTie` only on `min` and `max`.
+- `aat run show --step ID --resolutions` prints how each of the step's inputs got its value, as JSON.
+  - Each entry gives the source, the upstream step and output, the expression, pool pick, or constraint, and the
+    selection that picked the value.
+  - `--step` lists each input with its source, and `--step --json` includes `resolutions`.
+  - A step that fails before its request is sent keeps the resolutions made up to that point, with an `error` record
+    for the input that failed. That covers an input that can't be resolved, a missing adapter, a request that can't be
+    built, and a send error. Before, such a step recorded none.
+  - The MCP server's `inspect_archive` shows each input's selection and error.
+- `aat run show --compact` prints JSON on one line: a step part, with or without `--path`, and with `--json` the step
+  list, the step, or the shape. `--compact` where the output is text, such as `--shape` without `--json`, is an
+  error.
+- `aat validate` and `aat run` check that literal values fit their input's shape: a list for an array input, and no map
+  for a single-value input. A list for a single-value input is still allowed, since a template can send it as repeated
+  pairs.
+  - It covers step values and pools, graph defaults, layers, and slot `inject` values.
+  - A step expected to fail, such as a mutation, isn't checked, since a negative test may send the wrong shape on
+    purpose.
+  - A slot `inject` value fails only when no input with its name takes it, since composition decides which steps it
+    reaches. The composed plan's steps are then checked like any others.
+  - A pool entry for an array input gets a hint: a bare list in a graph default or a layer is a pool, so write one list
+    as `{value: [...]}`.
+  - Expressions and custom types aren't checked.
+- Expressions in assertions: a `fieldEquals` `value` and a quoted string in a `predicate` `expr` can hold `{{…}}`
+  expressions that name the step's inputs, such as `value: "{{today + 3 days}}"` or
+  `expr: 'quantity == "{{quantity}}"'`.
+  - A quoted expression that yields a number or a boolean compares as one.
+  - An expression that can't be evaluated fails its assertion.
+  - `today`, `now`, and `unixtime` read the time the step's inputs were resolved, so a retry compares with what it
+    resent.
+  - Selection filters and cleanup `when` conditions stay literal.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
 - `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,
@@ -97,10 +146,9 @@ the graph and plan formats may still change before 1.0.
   - expressions and assertion details
   - retries and selection ties
   - Lua transforms, and reading results with `aat run show`
-- Docs: three pages disagreed with the code and are corrected:
+- Docs: two pages disagreed with the code and are corrected:
   - `plans.md` no longer says `{}` skips graph defaults for required inputs.
   - `value-flow.md` says an inline `min` or `max` can use `field` alone, and how ties break.
-  - `validation.md` no longer claims plan validation checks assertion types.
 - `--oas-validate strict` stops before the first request, with exit code 2, when a spec the graph references fails to
   load. Before, the run printed a warning and continued without validating, and `--quiet` and `--json` hid the
   warning. In `auto` mode the warning now goes to stderr, where `--quiet` and `--json` keep it visible. `aat prompt`
@@ -120,6 +168,28 @@ the graph and plan formats may still change before 1.0.
   rerun still resolves them again.
 - `uuid`, `now`, and `unixtime` are reserved words in expressions, so `{{now}}` no longer refers to an input named
   `now`. An offset in hours or minutes on `today`, or on a reference, is an error that suggests `now` or `unixtime`.
+- The missing-`dependsOn` message names the value that takes the data, as in
+  `value "orderId" has 'from' reference to "createOrder" but does not list it in dependsOn`, so two values from the same
+  step no longer print the same line. Plan validation lists each distinct problem once, `aat validate` prints an error
+  repeated word for word once, and a step's values and selections are checked in name order, so the output is the same
+  on every run.
+- A registered cleanup no longer runs when a later main step on the cleanup node already released the resource with
+  the same inputs, such as an explicit cancel of the order the pairing would cancel. Before, the cleanup ran again
+  and usually failed with a 4xx. The skip is recorded, as for a pairing's `releasedBy`.
+- A slot option's `inject` values decode like graph input defaults.
+  - `{value: …}`, `{pool: …}`, `{from: …}`, and expressions work. Any other key is an error, so
+    `inject: {ages: {default: [35]}}` fails validation instead of sending a map. A bare list is still the literal list.
+  - An injected value no longer replaces a step's pool, constraint, or `fromInput`.
+  - `inject` on a base workflow or an addon, where it was ignored, is a validation error.
+- Validation reports an assertion of an unknown type, such as `fieldEqual`, and bad expression syntax in step values,
+  pools, and assertions. The checks run in `aat validate`, when a workflow template loads, and when a recipe's override
+  assertions are applied. Before, an unknown type failed only at run time, a recipe override of one was dropped
+  silently, and a bad expression failed only when its step ran.
+- An optional input that takes `from:` an output the earlier step didn't return, directly or through a named selection,
+  is left out, as `AUTOWIRE?` leaves one unset, instead of failing the step. Its resolution records `optional_skip`. A
+  required input still fails, and `aat validate --strict` warns when a required input takes `from:` an optional output,
+  in a graph default or in a plan or workflow file, or reads one through a named selection. The MCP server's
+  `validate_plan` and `save_plan` list the warnings for a plan file.
 - Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
   `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
   bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an
@@ -148,6 +218,12 @@ the graph and plan formats may still change before 1.0.
 - The static OAS check no longer reports an input that the template sends only in request headers, such as an
   idempotency key, as missing from the operation's parameters and request body. The template names the header, and
   specs often leave such headers undeclared, so `aat validate --strict` failed on it.
+- Two inputs that pick from the same array with `min` or `max` by different fields no longer get the same element.
+  The selection cache left out the compared field, so the second input got the element chosen for the first. A
+  `match` selection's `filteredSize` is now the number of matching elements, not the array's size.
+- A required input marked `{}` falls back to its plain default with layers applied, and evaluates the expressions in
+  it, so `postalCode: {}` with a default of `{{env.postalCode}}` sends the variable's value, not the text. A layer's
+  value for the input wins over the graph default, as it does without `{}`.
 - A request that times out says so, naming aat's 30-second request timeout, instead of giving only Go's
   `context deadline exceeded (Client.Timeout exceeded while awaiting headers)`. The limit is named only when the whole
   limit passed, so a shorter timeout or an interrupted run isn't blamed on it.

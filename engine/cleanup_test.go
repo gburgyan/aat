@@ -53,7 +53,7 @@ func TestCleanupStack_FILOOrder(t *testing.T) {
 	}
 
 	executor := adapter.NewHTTPExecutor(server.URL)
-	results := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).runCleanupStack(context.Background(), stack, NewRunState(), newCleanupRun(nil, nil))
+	results := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).runCleanupStack(context.Background(), stack, NewRunState(), newCleanupRun(nil, nil, nil))
 
 	require.Len(t, results, 3)
 	// FILO: C, B, A
@@ -109,7 +109,7 @@ func TestCleanupStack_ErrorDoesNotStop(t *testing.T) {
 	stack.Push(CleanupEntry{NodeName: "cleanOK", ForNode: "ok"})
 	stack.Push(CleanupEntry{NodeName: "cleanFail", ForNode: "fail"})
 
-	results := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).runCleanupStack(context.Background(), stack, NewRunState(), newCleanupRun(nil, nil))
+	results := NewEngine(g, registry, NewExecutorRouter(executor, &adapter.EnvironmentConfig{})).runCleanupStack(context.Background(), stack, NewRunState(), newCleanupRun(nil, nil, nil))
 
 	require.Len(t, results, 2)
 	// cleanFail runs first (FILO) and errors
@@ -130,7 +130,7 @@ func TestEngine_Run_WithCleanup(t *testing.T) {
 				Outputs: []graph.Output{
 					{Name: "resourceId", Type: "string"},
 				},
-				Cleanup: "destroy",
+				Cleanup: graph.CleanupPairing{Node: "destroy"},
 			},
 			"use": {
 				Name:    "use",
@@ -232,7 +232,7 @@ func TestEngine_Run_CleanupOnFailure(t *testing.T) {
 				Outputs: []graph.Output{
 					{Name: "resourceId", Type: "string"},
 				},
-				Cleanup: "destroy",
+				Cleanup: graph.CleanupPairing{Node: "destroy"},
 			},
 			"fail": {
 				Name:    "fail",
@@ -328,7 +328,7 @@ func TestEngine_Run_DeleteNoBody(t *testing.T) {
 				Outputs: []graph.Output{
 					{Name: "id", Type: "string"},
 				},
-				Cleanup: "delete",
+				Cleanup: graph.CleanupPairing{Node: "delete"},
 			},
 			"delete": {
 				Name:    "delete",

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -13,6 +14,7 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/internal/predicate"
 	"github.com/gburgyan/aat/plan"
 	"github.com/tidwall/gjson"
 )
@@ -27,6 +29,10 @@ type ResolveContext struct {
 	Plan      *plan.Plan        // for constraint classification (may be nil)
 	Registry  *adapter.Registry // may be nil; enables template-side elementField resolution
 	Random    io.Reader         // source for {{uuid}} and {{random N}}; nil means crypto/rand
+	// LayeredDefaults are the input defaults after layers, keyed as
+	// graph.ApplyLayers keys them; nil without layers. A required input marked
+	// {} falls back to them.
+	LayeredDefaults map[string]*graph.InputDefault
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -50,12 +56,17 @@ func ResolveInputs(step plan.Step, node *graph.Node, g *graph.Graph, state *RunS
 // ({{...}} templates), constraint checking, and fallback pool iteration are
 // activated at priority 3. When rctx is nil, the behavior is identical to
 // the basic ResolveInputs.
+//
+// On an error it returns what resolved before it, and a resolution record with
+// source "error" for the input or named selection that failed, so a step that
+// fails there still shows how far resolution got.
 func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.Node, g *graph.Graph, state *RunState, rctx *ResolveContext) (map[string]any, []SelectionDecision, []ValueResolution, error) {
 	inputs := make(map[string]any)
 	var decisions []SelectionDecision
 	var resolutions []ValueResolution
 
-	// Dedup cache: keyed by "from|strategy|filter|index" → cached selectionResult
+	// Dedup cache: keyed by source, strategy, filter, index, and compared field
+	// (see dedupKey) → cached selectionResult
 	dedupCache := make(map[string]*selectionResult)
 
 	// Pre-resolve named selections: each selection yields a single element
@@ -64,7 +75,15 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	for selName, sel := range step.Selections {
 		entry, selDecisions, err := resolveNamedSelection(ctx, selName, sel, step, g, state, dedupCache, rctx)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("resolving selection %q for node %q: %w", selName, step.Node, err)
+			// A selection from an output the earlier step didn't return leaves
+			// out the inputs that read it, when they are all optional.
+			if errors.Is(err, ErrOutputMissing) && !requiredInputReads(step, node, selName) {
+				fromNode, fromField, _ := splitRef(sel.From)
+				namedSelections[selName] = &namedSelectionEntry{sourceNode: fromNode, sourceField: fromField, missing: true}
+				continue
+			}
+			resolutions = append(resolutions, ValueResolution{InputName: selName, Source: "error", Error: err.Error(), PoolIndex: -1})
+			return inputs, decisions, resolutions, fmt.Errorf("resolving selection %q for node %q: %w", selName, step.Node, err)
 		}
 		namedSelections[selName] = entry
 		decisions = append(decisions, selDecisions...)
@@ -84,13 +103,14 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	for _, input := range node.Inputs {
 		select {
 		case <-ctx.Done():
-			return nil, nil, nil, fmt.Errorf("input resolution cancelled: %w", ctx.Err())
+			return inputs, decisions, resolutions, fmt.Errorf("input resolution cancelled: %w", ctx.Err())
 		default:
 		}
 
 		val, decision, resolution, err := resolveInput(ctx, input, step, g, state, dedupCache, namedSelections, rctx, ectx, inputs)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
+			resolutions = append(resolutions, ValueResolution{InputName: input.Name, Source: "error", Error: err.Error(), PoolIndex: -1})
+			return inputs, decisions, resolutions, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
 		if val != nil {
 			val = coerceValue(val, input.Type)
@@ -114,23 +134,51 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	return inputs, decisions, resolutions, nil
 }
 
-// dedupKey builds a cache key for selection deduplication.
+// dedupKey builds a cache key for selection deduplication: the source, the
+// strategy, filter, and index, and for min and max the field they compare, so
+// two picks from one array share a result only when they would pick alike.
 func dedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
 	if sel == nil {
-		return fmt.Sprintf("%s|%s|||", fromNode, fromField)
+		return fmt.Sprintf("%s|%s|||||", fromNode, fromField)
 	}
-	return fmt.Sprintf("%s|%s|%s|%s|%d", fromNode, fromField, sel.Strategy, sel.Filter, sel.Index)
+	compare := ""
+	if sel.Strategy == "min" || sel.Strategy == "max" {
+		compare = compareField(sel)
+	}
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%s", fromNode, fromField, sel.Strategy, sel.Filter, sel.Index, compare)
 }
 
 // namedSelectionEntry holds the result of resolving a named selection.
 type namedSelectionEntry struct {
-	element     any    // the full selected element
-	sourceNode  string // e.g. "searchFlights"
-	sourceField string // e.g. "catalogOfferings"
-	strategy    string
-	index       int
-	sourceSize  int
-	filterExpr  string
+	element      any    // the full selected element
+	sourceNode   string // e.g. "listProducts"
+	sourceField  string // e.g. "products"
+	strategy     string
+	index        int
+	sourceSize   int
+	filteredSize int
+	filterExpr   string
+	sortField    string   // for min and max
+	sortValue    *float64 // for min and max
+	ties         int      // for min and max
+	onTie        string
+	missing      bool // the source output is missing, so the inputs that read it are left out
+}
+
+// requiredInputReads reports whether a required input of node reads the named
+// selection selName.
+func requiredInputReads(step plan.Step, node *graph.Node, selName string) bool {
+	for _, in := range node.Inputs {
+		if in.Optional {
+			continue
+		}
+		if sv, ok := step.Values[in.Name]; ok && sv.FromSelection != "" {
+			if name, _ := plan.ParseFromSelection(sv.FromSelection); name == selName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resolveNamedSelection performs the array selection for a named StepSelection.
@@ -157,6 +205,7 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		Filter:    sel.Filter,
 		Index:     sel.Index,
 		SortField: sel.SortField,
+		OnTie:     sel.OnTie,
 	}
 
 	// Resolve elementField names in SortField
@@ -175,14 +224,27 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		dedupCache[key] = result
 	}
 
+	if err := tieError(result, sel.OnTie, strategy, sel.SortField); err != nil {
+		return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
+	}
+	sortField := ""
+	if strategy == "min" || strategy == "max" {
+		sortField = sel.SortField
+	}
+
 	entry := &namedSelectionEntry{
-		element:     result.element,
-		sourceNode:  fromNode,
-		sourceField: fromField,
-		strategy:    strategy,
-		index:       result.index,
-		sourceSize:  len(arr),
-		filterExpr:  sel.Filter,
+		element:      result.element,
+		sourceNode:   fromNode,
+		sourceField:  fromField,
+		strategy:     strategy,
+		index:        result.index,
+		sourceSize:   len(arr),
+		filteredSize: result.filteredSize,
+		filterExpr:   sel.Filter,
+		sortField:    sortField,
+		sortValue:    result.sortValue,
+		ties:         result.ties,
+		onTie:        sel.OnTie,
 	}
 
 	decision := SelectionDecision{
@@ -194,6 +256,10 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		Strategy:      strategy,
 		SelectedIndex: result.index,
 		SelectionName: selName,
+		SortField:     sortField,
+		SortValue:     result.sortValue,
+		Ties:          result.ties,
+		OnTie:         sel.OnTie,
 	}
 	if sel.Filter != "" {
 		decision.FilterExpr = sel.Filter
@@ -225,14 +291,31 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			}
 			return nil, nil, res, nil
 		}
-		if input.Default != nil && input.Default.HasValue() {
-			val := input.Default.EffectiveValue()
-			res := &ValueResolution{
-				InputName:  input.Name,
-				Source:     "graph_default",
-				FinalValue: val,
-				PoolIndex:  -1,
+		var layered map[string]*graph.InputDefault
+		if rctx != nil {
+			layered = rctx.LayeredDefaults
+		}
+		if def := plan.EffectiveDefault(step.Node, input, layered); def != nil && def.HasValue() {
+			// {} takes only a plain default, the graph's or a layer's. With a
+			// pool, from, select, or constraint the input is left out, for a
+			// template that wraps it in a conditional block, such as a payment
+			// sent only for some orders.
+			if !def.IsLiteralOnly() {
+				return nil, nil, &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}, nil
 			}
+			raw := def.Value
+			res := &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}
+			val := raw
+			if s, ok := raw.(string); ok && plan.ContainsExpr(s) && ectx != nil {
+				evaluated, err := plan.EvalExpr(raw, *ectx)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("evaluating graph default %q: %w", s, err)
+				}
+				val = evaluated
+				res.RawValue = raw
+				res.Expression = s
+			}
+			res.FinalValue = val
 			return val, nil, res, nil
 		}
 		return nil, nil, nil, fmt.Errorf("required input has no value (empty step value)")
@@ -244,6 +327,9 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 		entry, exists := namedSelections[selName]
 		if !exists {
 			return nil, nil, nil, fmt.Errorf("fromSelection references unknown selection %q", selName)
+		}
+		if entry.missing {
+			return nil, nil, missingOptionalOutput(input.Name, entry.sourceNode, entry.sourceField), nil
 		}
 
 		var val any
@@ -267,7 +353,12 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			Strategy:      entry.strategy,
 			SelectedIndex: entry.index,
 			FilterExpr:    entry.filterExpr,
+			FilteredSize:  entry.filteredSize,
 			SelectionName: selName,
+			SortField:     entry.sortField,
+			SortValue:     entry.sortValue,
+			Ties:          entry.ties,
+			OnTie:         entry.onTie,
 		}
 		res := &ValueResolution{
 			InputName:  input.Name,
@@ -330,6 +421,9 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			// Plan-defined selection from upstream array output
 			val, decision, err := resolveSelectValue(ctx, fromNode, fromField, input.Name, sv.Select, g, state, dedupCache, rctx)
 			if err != nil {
+				if input.Optional && errors.Is(err, ErrOutputMissing) {
+					return nil, nil, missingOptionalOutput(input.Name, fromNode, fromField), nil
+				}
 				return nil, nil, nil, err
 			}
 			res := &ValueResolution{
@@ -346,6 +440,9 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 		// Plain from reference — resolve directly from upstream output
 		val, err := state.GetOutput(fromNode, fromField)
 		if err != nil {
+			if input.Optional && errors.Is(err, ErrOutputMissing) {
+				return nil, nil, missingOptionalOutput(input.Name, fromNode, fromField), nil
+			}
 			return nil, nil, nil, fmt.Errorf("from reference %q: %w", sv.From, err)
 		}
 		res := &ValueResolution{
@@ -409,6 +506,13 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 	return nil, nil, nil, fmt.Errorf("required input has no value")
 }
 
+// missingOptionalOutput is the resolution of an optional input whose from:
+// output the earlier step didn't return: the input is left out, as AUTOWIRE?
+// leaves one unset.
+func missingOptionalOutput(inputName, fromStep, fromOutput string) *ValueResolution {
+	return &ValueResolution{InputName: inputName, Source: "optional_skip", FromStep: fromStep, FromOutput: fromOutput, PoolIndex: -1}
+}
+
 // resolveSelectValue handles plan-defined "from" + "select" value resolution.
 func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName string, sel *plan.SelectionConfig, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext) (any, *SelectionDecision, error) {
 	arr, err := getArrayFromState(fromNode, fromField, state)
@@ -442,9 +546,19 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 		FilteredSize:  result.filteredSize,
 		Strategy:      strategyName(sel),
 		SelectedIndex: result.index,
+		SortValue:     result.sortValue,
+		Ties:          result.ties,
 	}
-	if sel != nil && sel.Filter != "" {
+	if sel != nil {
 		decision.FilterExpr = sel.Filter
+		decision.Field = sel.Field
+		decision.OnTie = sel.OnTie
+		if sel.Strategy == "min" || sel.Strategy == "max" {
+			decision.SortField = compareField(sel)
+		}
+		if err := tieError(result, sel.OnTie, sel.Strategy, decision.SortField); err != nil {
+			return nil, nil, fmt.Errorf("select from %s.%s for %q: %w", fromNode, fromField, inputName, err)
+		}
 	}
 
 	// Use resolved gjson path for field extraction
@@ -580,7 +694,7 @@ func checkConstraint(constraint string, candidate any, resolvedInputs map[string
 		ctx[k] = v
 	}
 	ctx["value"] = candidate
-	return plan.EvalPredicate(constraint, ctx)
+	return predicate.Eval(constraint, ctx)
 }
 
 // resolveWithFallback tries the StepValue default (with expression evaluation

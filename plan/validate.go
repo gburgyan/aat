@@ -2,12 +2,15 @@ package plan
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/internal/httpstatus"
+	"github.com/gburgyan/aat/internal/predicate"
 )
 
 // RetryCategories lists the error category names accepted in retry.on and
@@ -56,8 +59,81 @@ type ValidationError struct {
 	Errors []string
 }
 
+// Error lists each distinct problem once, in the order found.
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("plan validation failed:\n  - %s", strings.Join(e.Errors, "\n  - "))
+	return fmt.Sprintf("plan validation failed:\n  - %s", strings.Join(distinctErrors(e.Errors), "\n  - "))
+}
+
+// AssertionTypes returns the mechanical assertion types the engine evaluates, in
+// the order documentation lists them.
+func AssertionTypes() []string {
+	return []string{"status", "fieldExists", "fieldEquals", "predicate", "schema"}
+}
+
+// IsAssertionType reports whether t names a mechanical assertion type.
+func IsAssertionType(t string) bool {
+	return slices.Contains(AssertionTypes(), t)
+}
+
+// validateAssertions checks a step's mechanical assertions: each type exists,
+// and the expressions in a predicate and in a fieldEquals value parse. prefix
+// names the step in each message.
+func validateAssertions(prefix string, assertions *Assertions) []string {
+	if assertions == nil {
+		return nil
+	}
+	var errs []string
+	for j, ma := range assertions.Mechanical {
+		switch {
+		case !IsAssertionType(ma.Type):
+			errs = append(errs, fmt.Sprintf("%s: assertion %d has unknown type %q (use %s)", prefix, j, ma.Type, strings.Join(AssertionTypes(), ", ")))
+		case ma.Type == "predicate" && ma.Expr != "":
+			if err := predicate.Validate(ma.Expr); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: invalid predicate assertion %d: %v", prefix, j, err))
+			} else if err := ValidatePredicateExprs(ma.Expr); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: invalid expression in predicate assertion %d: %v", prefix, j, err))
+			}
+		case ma.Type == "fieldEquals":
+			if s, ok := ma.Value.(string); ok && ContainsExpr(s) {
+				if err := ValidateExpr(s); err != nil {
+					errs = append(errs, fmt.Sprintf("%s: invalid expression in fieldEquals assertion %d: %v", prefix, j, err))
+				}
+			}
+		}
+	}
+	return errs
+}
+
+// onTieError describes what is wrong with a selection's onTie, or returns "".
+// onTie takes first or fail, and only the min and max strategies can tie.
+func onTieError(onTie, strategy string) string {
+	switch {
+	case onTie == "":
+		return ""
+	case onTie != "first" && onTie != "fail":
+		return fmt.Sprintf("unknown onTie %q (use first or fail)", onTie)
+	case strategy != "min" && strategy != "max":
+		if strategy == "" {
+			strategy = "first"
+		}
+		return fmt.Sprintf("onTie applies only to the min and max strategies, not %q", strategy)
+	default:
+		return ""
+	}
+}
+
+// distinctErrors returns the messages without repeats, keeping the first
+// occurrence of each.
+func distinctErrors(errs []string) []string {
+	seen := make(map[string]bool, len(errs))
+	out := make([]string, 0, len(errs))
+	for _, msg := range errs {
+		if !seen[msg] {
+			seen[msg] = true
+			out = append(out, msg)
+		}
+	}
+	return out
 }
 
 // Validate checks a plan against a graph for structural correctness.
@@ -145,7 +221,8 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 
 		// Validate step.Selections (named selections) — from uses step IDs
-		for selName, sel := range step.Selections {
+		for _, selName := range slices.Sorted(maps.Keys(step.Selections)) {
+			sel := step.Selections[selName]
 			if sel.From == "" {
 				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q has empty 'from'", i, sid, selName))
 				continue
@@ -182,14 +259,29 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 
 		// Gap 6: Check value names match node inputs
-		for name := range step.Values {
+		for _, name := range slices.Sorted(maps.Keys(step.Values)) {
 			if !inputNames[name] {
 				errs = append(errs, fmt.Sprintf("step %d (%s): value %q does not match any input on node %q", i, sid, name, step.Node))
 			}
 		}
 
+		// Literal values and pool entries fit their input's type. An AUTOWIRE
+		// marker is reported on its own, and a step expected to fail, such as a
+		// mutation, may send a wrong shape on purpose.
+		for _, in := range node.Inputs {
+			sv, ok := step.Values[in.Name]
+			marker, _ := AutowireMarker(sv)
+			if !ok || marker || step.ExpectFailure != nil {
+				continue
+			}
+			if msg := graph.DefaultShapeError(&graph.InputDefault{Value: sv.Default, Pool: sv.Pool}, in.Type); msg != "" {
+				errs = append(errs, fmt.Sprintf("step %d (%s): value %q: %s", i, sid, in.Name, msg))
+			}
+		}
+
 		// Per-value validation: From references, array selection, sortField, dependsOn completeness
-		for name, sv := range step.Values {
+		for _, name := range slices.Sorted(maps.Keys(step.Values)) {
+			sv := step.Values[name]
 			// Validate FromSelection
 			if sv.FromSelection != "" {
 				if sv.From != "" || sv.Select != nil {
@@ -265,7 +357,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 					} else {
 						// DependsOn required
 						if !depsSet[srcStepID] {
-							errs = append(errs, fmt.Sprintf("step %d (%s): has 'fromInput' reference to %q but does not list it in dependsOn", i, sid, srcStepID))
+							errs = append(errs, fmt.Sprintf("step %d (%s): value %q has 'fromInput' reference to %q but does not list it in dependsOn", i, sid, name, srcStepID))
 						}
 						// Input existence on source step's graph node
 						srcGraphNode := srcStepID
@@ -308,7 +400,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 
 					// Gap 9: From implies dependsOn
 					if stepIDs[srcStepID] && !depsSet[srcStepID] {
-						errs = append(errs, fmt.Sprintf("step %d (%s): has 'from' reference to %q but does not list it in dependsOn", i, sid, srcStepID))
+						errs = append(errs, fmt.Sprintf("step %d (%s): value %q has 'from' reference to %q but does not list it in dependsOn", i, sid, name, srcStepID))
 					}
 				}
 			}
@@ -382,13 +474,14 @@ func Validate(p *Plan, g *graph.Graph) error {
 		sid := step.StepID()
 
 		// Validate named selection strategies and filter fields
-		for selName, sel := range step.Selections {
+		for _, selName := range slices.Sorted(maps.Keys(step.Selections)) {
+			sel := step.Selections[selName]
 			strategy := sel.Strategy
 			if !IsSelectionStrategy(strategy) {
 				errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for selection %q", i, sid, strategy, selName))
 			}
 			if sel.Filter != "" {
-				if err := ValidatePredicate(sel.Filter); err != nil {
+				if err := predicate.Validate(sel.Filter); err != nil {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for selection %q: %v", i, sid, selName, err))
 				}
 			}
@@ -396,6 +489,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 				if sel.SortField == "" {
 					errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires sortField for selection %q", i, sid, strategy, selName))
 				}
+			}
+			if msg := onTieError(sel.OnTie, strategy); msg != "" {
+				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q: %s", i, sid, selName, msg))
 			}
 			if strategy == "match" && sel.Filter == "" {
 				errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for selection %q", i, sid, selName))
@@ -413,7 +509,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 				if refErr == nil {
 					if outs, ok := outputsByNode[srcGraphNode]; ok {
 						if out, outExists := outs[srcField]; outExists && len(out.ElementFields) > 0 {
-							for _, field := range PredicateFields(sel.Filter) {
+							for _, field := range predicate.Fields(sel.Filter) {
 								found := false
 								for _, ef := range out.ElementFields {
 									if ef.Name == field {
@@ -433,14 +529,15 @@ func Validate(p *Plan, g *graph.Graph) error {
 			}
 		}
 
-		for name, sv := range step.Values {
+		for _, name := range slices.Sorted(maps.Keys(step.Values)) {
+			sv := step.Values[name]
 			if sv.Select != nil {
 				sel := sv.Select
 				if !IsSelectionStrategy(sel.Strategy) {
 					errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for %q", i, sid, sel.Strategy, name))
 				}
 				if sel.Filter != "" {
-					if err := ValidatePredicate(sel.Filter); err != nil {
+					if err := predicate.Validate(sel.Filter); err != nil {
 						errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for %q: %v", i, sid, name, err))
 					}
 				}
@@ -448,6 +545,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 					if sel.Field == "" && sel.SortField == "" {
 						errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires field or sortField for %q", i, sid, sel.Strategy, name))
 					}
+				}
+				if msg := onTieError(sel.OnTie, sel.Strategy); msg != "" {
+					errs = append(errs, fmt.Sprintf("step %d (%s): select for %q: %s", i, sid, name, msg))
 				}
 				if sel.Strategy == "match" && sel.Filter == "" {
 					errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for %q", i, sid, name))
@@ -457,20 +557,24 @@ func Validate(p *Plan, g *graph.Graph) error {
 				}
 			}
 			if sv.Constraint != "" {
-				if err := ValidatePredicate(sv.Constraint); err != nil {
+				if err := predicate.Validate(sv.Constraint); err != nil {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, sid, name, err))
 				}
 			}
-		}
-		if step.Assertions != nil {
-			for j, ma := range step.Assertions.Mechanical {
-				if ma.Type == "predicate" && ma.Expr != "" {
-					if err := ValidatePredicate(ma.Expr); err != nil {
-						errs = append(errs, fmt.Sprintf("step %d (%s): invalid predicate assertion %d: %v", i, sid, j, err))
+			if s, ok := sv.Default.(string); ok && ContainsExpr(s) {
+				if err := ValidateExpr(s); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
+				}
+			}
+			for k, entry := range sv.Pool {
+				if s, ok := entry.(string); ok && ContainsExpr(s) {
+					if err := ValidateExpr(s); err != nil {
+						errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression in pool entry %d for %q: %v", i, sid, k, name, err))
 					}
 				}
 			}
 		}
+		errs = append(errs, validateAssertions(fmt.Sprintf("step %d (%s)", i, sid), step.Assertions)...)
 
 		// Validate expectFailure
 		errs = append(errs, validateRetryConfig(fmt.Sprintf("step %d (%s)", i, step.StepID()), step.Retry)...)
@@ -538,15 +642,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 		if _, exists := g.Nodes[vs.Node]; !exists {
 			errs = append(errs, fmt.Sprintf("verification step %d: node %q not found in graph", i, vs.Node))
 		}
-		if vs.Assertions != nil {
-			for j, ma := range vs.Assertions.Mechanical {
-				if ma.Type == "predicate" && ma.Expr != "" {
-					if err := ValidatePredicate(ma.Expr); err != nil {
-						errs = append(errs, fmt.Sprintf("verification step %d (%s): invalid predicate assertion %d: %v", i, vs.Node, j, err))
-					}
-				}
-			}
-		}
+		errs = append(errs, validateAssertions(fmt.Sprintf("verification step %d (%s)", i, vs.Node), vs.Assertions)...)
 	}
 
 	// Gap 8: Goal consistency validation (uses step IDs)

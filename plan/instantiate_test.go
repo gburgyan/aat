@@ -389,7 +389,7 @@ func TestInputDefaultToStepValue(t *testing.T) {
 
 	t.Run("literal value", func(t *testing.T) {
 		d := &graph.InputDefault{Value: "hello"}
-		sv := inputDefaultToStepValue(d)
+		sv := StepValueFromDefault(d)
 		assert.Equal(t, "hello", sv.Default)
 		assert.False(t, sv.IsEmpty())
 	})
@@ -399,7 +399,7 @@ func TestInputDefaultToStepValue(t *testing.T) {
 			Pool:         []any{"a", "b", "c"},
 			PoolStrategy: strPtr("random"),
 		}
-		sv := inputDefaultToStepValue(d)
+		sv := StepValueFromDefault(d)
 		assert.Equal(t, []any{"a", "b", "c"}, sv.Pool)
 		require.NotNil(t, sv.PoolStrategy)
 		assert.Equal(t, "random", *sv.PoolStrategy)
@@ -418,7 +418,7 @@ func TestInputDefaultToStepValue(t *testing.T) {
 				Index:    2,
 			},
 		}
-		sv := inputDefaultToStepValue(d)
+		sv := StepValueFromDefault(d)
 		assert.Equal(t, "node.field", sv.From)
 		require.NotNil(t, sv.Select)
 		assert.Equal(t, "min", sv.Select.Strategy)
@@ -680,7 +680,7 @@ func TestSplitFromNodeName(t *testing.T) {
 	assert.Equal(t, "", splitFromNodeName(""))
 }
 
-// --- translateFromRef tests ---
+// --- TranslateFromRef tests ---
 
 func TestTranslateFromRef(t *testing.T) {
 	t.Run("simple plan - no translation needed", func(t *testing.T) {
@@ -691,7 +691,7 @@ func TestTranslateFromRef(t *testing.T) {
 				},
 			},
 		}
-		result := translateFromRef("searchAir.offerings", p)
+		result := TranslateFromRef("searchAir.offerings", p)
 		assert.Equal(t, "searchAir.offerings", result)
 	})
 
@@ -703,7 +703,7 @@ func TestTranslateFromRef(t *testing.T) {
 				},
 			},
 		}
-		result := translateFromRef("searchAir.offerings", p)
+		result := TranslateFromRef("searchAir.offerings", p)
 		assert.Equal(t, "inc0_searchAir.offerings", result)
 	})
 
@@ -715,13 +715,13 @@ func TestTranslateFromRef(t *testing.T) {
 				},
 			},
 		}
-		result := translateFromRef("searchAir.offerings", p)
+		result := TranslateFromRef("searchAir.offerings", p)
 		assert.Equal(t, "searchAir.offerings", result)
 	})
 
 	t.Run("empty ref", func(t *testing.T) {
 		p := &Plan{}
-		result := translateFromRef("", p)
+		result := TranslateFromRef("", p)
 		assert.Equal(t, "", result)
 	})
 }

@@ -87,7 +87,11 @@ A slot option is a workflow with `kind: slot` and a template:
 
 Slot options have no `after`, `wire`, or `slots` fields. Their template contains the steps that replace the slot marker in the base workflow.
 
-A slot option may also carry an `inject` map. After every slot has been filled, each `inject` entry is applied to **every step of the base workflow and the chosen slot options**: any step whose graph node declares an input with that name receives the value as its default — unless the step already sets that input explicitly (a `default`, `from`, `fromSelection`, `select`, `fromResolved`, or a locked value). Addon steps are spliced in afterwards, so they do not receive injected values. This is how a choice made in one slot reaches steps that live outside it:
+A slot option may also carry an `inject` map. After every slot has been filled, each `inject` entry is applied to **every step of the base workflow and the chosen slot options**. Any step whose graph node declares an input with that name receives the value, unless the step already sets that input:
+- A value, reference, selection, pool, or constraint counts as set, and so does a locked value.
+- An empty `{}` counts as unset.
+
+Addon steps are spliced in afterwards, so they do not receive injected values. `inject` on a base workflow or an addon is a validation error. This is how a choice made in one slot reaches steps that live outside it:
 
 ```yaml
   - name: Two Travelers
@@ -99,6 +103,13 @@ A slot option may also carry an `inject` map. After every slot has been filled, 
 ```
 
 Because injected values are defaults, a recipe's `values:` override still wins, and steps that do not declare the input are untouched.
+
+An injected value takes the forms of a graph [input default](graphs.md#input-defaults), with one difference: a bare list is the list itself. `quantities: [2, 1]` injects that list, where a graph default would read it as a pool.
+- A mapping takes the default's keys, such as `{value: [2, 1]}`, `{pool: [us, eu]}`, or `{from: createCart.cartId}`.
+- The node name in `from` is translated to the composed step's ID.
+- Any other key, such as `default:`, is an error.
+
+`aat validate` checks each literal value against the type of every input it sets, so a single number injected for an `integer[]` input fails.
 
 ### Addon Declaration
 
@@ -134,7 +145,7 @@ An addon is a workflow with `kind: addon`. It declares where to insert (`after`)
 | `kind` | slot, addon | string | `"slot"` or `"addon"` (empty = base workflow) |
 | `template` | all | string | Path to the template YAML, relative to the graph file |
 | `slots` | base only | list | Slot definitions (choice points) |
-| `inject` | slot only | map | Input name → value applied as a default to every composed step whose node has that input (skipped where the step sets the input itself) |
+| `inject` | slot only | map | Input name → value set on every composed base and slot step whose node has that input, unless the step sets it itself. Values take the input default forms, except that a bare list is a literal list |
 | `after` | addon only | string or list | Node name(s) to insert after; first match wins |
 | `wire` | addon only | map | Explicit input wiring overrides (see [The Wire Map](#the-wire-map)) |
 | `priority` | addon only | int | Composition ordering — lower values compose first (default: 0) |

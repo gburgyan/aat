@@ -31,6 +31,7 @@ func ToArchive(result *RunResult, meta archive.ArchiveMetadata, baseURL string, 
 
 	a.Steps = convertStepResults(result.Steps, baseURL)
 	a.Cleanup = convertStepResults(result.CleanupResults, baseURL)
+	a.CleanupSkipped = convertCleanupSkips(result.CleanupSkipped)
 	a.Metadata.InstantiatedPlan = redactPlan(result.InstantiatedPlan)
 
 	// Redact fails only on a value encoding/json cannot marshal. The archive is
@@ -50,6 +51,17 @@ func convertStepResults(steps []StepResult, baseURL string) []archive.StepRecord
 	return records
 }
 
+func convertCleanupSkips(skips []CleanupSkip) []archive.CleanupSkipRecord {
+	if len(skips) == 0 {
+		return nil
+	}
+	records := make([]archive.CleanupSkipRecord, len(skips))
+	for i, s := range skips {
+		records[i] = archive.CleanupSkipRecord(s)
+	}
+	return records
+}
+
 func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 	rec := archive.StepRecord{
 		StepID:          s.StepID,
@@ -62,6 +74,7 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		Error:           errString(s.Error),
 		RetryCount:      s.RetryCount,
 		CleanupFor:      s.CleanupFor,
+		WhenError:       s.WhenError,
 	}
 	for _, c := range s.RetriedOn {
 		rec.RetriedOn = append(rec.RetriedOn, c.String())
@@ -77,7 +90,7 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		rec.Validation = convertValidation(s.Validation)
 	}
 	if len(s.Selections) > 0 {
-		rec.Selections = convertSelections(s.Selections)
+		rec.Selections = SelectionRecords(s.Selections)
 	}
 	if len(s.Resolutions) > 0 {
 		rec.Resolutions = convertResolutions(s.Resolutions)
@@ -205,7 +218,9 @@ func convertValidation(v *validate.MechanicalResult) *archive.ValidationRecord {
 	return rec
 }
 
-func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
+// SelectionRecords converts a step's selection decisions to archive records,
+// for the archive and for tie warnings (see archive.SelectionTieWarnings).
+func SelectionRecords(sels []SelectionDecision) []archive.SelectionRecord {
 	records := make([]archive.SelectionRecord, len(sels))
 	for i, s := range sels {
 		records[i] = archive.SelectionRecord{
@@ -218,6 +233,11 @@ func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
 			Strategy:      s.Strategy,
 			SelectedIndex: s.SelectedIndex,
 			SelectionName: s.SelectionName,
+			Field:         s.Field,
+			SortField:     s.SortField,
+			SortValue:     s.SortValue,
+			Ties:          s.Ties,
+			OnTie:         s.OnTie,
 		}
 	}
 	return records
@@ -248,6 +268,7 @@ func convertResolutions(resolutions []ValueResolution) []archive.ValueResolution
 			PoolIndex:  r.PoolIndex,
 			PoolSize:   r.PoolSize,
 			Tried:      r.Tried,
+			Error:      r.Error,
 		}
 		if r.Constraint != "" {
 			ok := r.ConstraintOK

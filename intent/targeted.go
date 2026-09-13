@@ -8,6 +8,7 @@ import (
 
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/internal/predicate"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -33,6 +34,7 @@ type TargetedSelection struct {
 	Filter    string `json:"filter,omitempty"`
 	SortField string `json:"sortField,omitempty"`
 	Index     int    `json:"index,omitempty"`
+	OnTie     string `json:"onTie,omitempty"`
 }
 
 // TargetedAssertion represents a single mechanical assertion from the LLM.
@@ -444,6 +446,9 @@ func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet
 				if sel.SortField != "" {
 					existing.SortField = sel.SortField
 				}
+				if sel.OnTie != "" {
+					existing.OnTie = sel.OnTie
+				}
 				if sel.Index != 0 {
 					existing.Index = sel.Index
 				}
@@ -462,6 +467,9 @@ func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet
 			}
 			if sel.SortField != "" {
 				sv.Select.SortField = sel.SortField
+			}
+			if sel.OnTie != "" {
+				sv.Select.OnTie = sel.OnTie
 			}
 			if sel.Index != 0 {
 				sv.Select.Index = sel.Index
@@ -495,18 +503,10 @@ func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet
 // mistakes like putting a predicate expression in the "expect" field instead
 // of "expr", or omitting required fields.
 func sanitizeAssertions(assertions []TargetedAssertion) []plan.MechanicalAssertion {
-	validTypes := map[string]bool{
-		"status":      true,
-		"fieldExists": true,
-		"fieldEquals": true,
-		"predicate":   true,
-		"schema":      true,
-	}
-
 	var result []plan.MechanicalAssertion
 	for _, a := range assertions {
 		// Skip unknown assertion types.
-		if !validTypes[a.Type] {
+		if !plan.IsAssertionType(a.Type) {
 			continue
 		}
 
@@ -544,7 +544,7 @@ func sanitizeAssertions(assertions []TargetedAssertion) []plan.MechanicalAsserti
 				}
 			}
 			// Validate the predicate expression can be parsed.
-			if err := plan.ValidatePredicate(a.Expr); err != nil {
+			if err := predicate.Validate(a.Expr); err != nil {
 				continue
 			}
 
@@ -770,7 +770,7 @@ func validateSelectionFilters(resp *TargetedResponse, selectionContexts []Select
 		if sel.Filter == "" {
 			continue
 		}
-		if err := plan.ValidatePredicate(sel.Filter); err != nil {
+		if err := predicate.Validate(sel.Filter); err != nil {
 			issues = append(issues, TargetedValidationIssue{
 				Key:     key,
 				Kind:    "invalid_filter_syntax",
@@ -781,7 +781,7 @@ func validateSelectionFilters(resp *TargetedResponse, selectionContexts []Select
 
 		// Check filter field references are in element fields.
 		if fields, ok := selectionFields[key]; ok && len(fields) > 0 {
-			filterFields := plan.PredicateFields(sel.Filter)
+			filterFields := predicate.Fields(sel.Filter)
 			for _, ff := range filterFields {
 				if !fields[ff] {
 					var available []string

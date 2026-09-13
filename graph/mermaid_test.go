@@ -80,7 +80,7 @@ func TestGenerateMermaid_FanOut(t *testing.T) {
 func TestGenerateMermaid_CleanupEdges(t *testing.T) {
 	g := &Graph{
 		Nodes: map[string]*Node{
-			"create":  {Name: "create", Description: "Create resource", Cleanup: "cleanup", Satisfies: []string{"tokenCreate"}},
+			"create":  {Name: "create", Description: "Create resource", Cleanup: CleanupPairing{Node: "cleanup"}, Satisfies: []string{"tokenCreate"}},
 			"use":     {Name: "use", Description: "Use resource", Requires: []string{"tokenCreate"}},
 			"cleanup": {Name: "cleanup", Description: "Clean up resource"},
 		},

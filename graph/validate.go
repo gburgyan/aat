@@ -118,17 +118,25 @@ func Validate(g *Graph) error {
 		}
 
 		// 5. Cleanup: references an existing node, not self
-		if node.Cleanup != "" {
-			if node.Cleanup == name {
+		if node.Cleanup.Node != "" {
+			if node.Cleanup.Node == name {
 				errs = append(errs, fmt.Sprintf("node %q: cleanup cannot reference itself", name))
-			} else if g.Nodes[node.Cleanup] == nil {
-				errs = append(errs, fmt.Sprintf("node %q: cleanup references unknown node %q", name, node.Cleanup))
+			} else if g.Nodes[node.Cleanup.Node] == nil {
+				errs = append(errs, fmt.Sprintf("node %q: cleanup references unknown node %q", name, node.Cleanup.Node))
 			}
 		}
 	}
 
 	// 5a. Cleanup chains end: following cleanup pairings never loops back
 	errs = append(errs, detectCleanupCycles(g)...)
+
+	// 5b. Cleanup pairings: releasedBy names other existing nodes, once each,
+	// and when and releasedBy come with a node
+	errs = append(errs, validateCleanupPairings(g)...)
+
+	// 5c. Values fit their inputs: node defaults and slot inject values. inject
+	// applies only to slot options
+	errs = append(errs, validateValueShapes(g)...)
 
 	// 6. Error detection rules: graph-level
 	for i, rule := range g.ErrorDetection {

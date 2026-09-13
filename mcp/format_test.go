@@ -147,7 +147,7 @@ func TestFormatNodeDetail(t *testing.T) {
 					Name:        "searchFlights",
 					Description: "Search for flights",
 					Adapter:     "searchFlightsTemplate",
-					Cleanup:     "ignoreItinerary",
+					Cleanup:     graph.CleanupPairing{Node: "ignoreItinerary"},
 					Satisfies:   []string{"flights"},
 					OAS: &graph.OASRef{
 						OperationID: "CreateAirSearch",
@@ -249,7 +249,7 @@ func TestFormatChainTrace(t *testing.T) {
 			"book": {
 				Name:        "book",
 				Description: "Book flight",
-				Cleanup:     "cancelBooking",
+				Cleanup:     graph.CleanupPairing{Node: "cancelBooking"},
 				Inputs:      []graph.Input{{Name: "resultId", Type: "string"}},
 				Outputs:     []graph.Output{{Name: "locator", Type: "string"}},
 			},

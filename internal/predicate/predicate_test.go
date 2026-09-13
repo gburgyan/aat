@@ -1,4 +1,4 @@
-package plan
+package predicate
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestPredicateFields(t *testing.T) {
+func TestFields(t *testing.T) {
 	tests := []struct {
 		name   string
 		expr   string
@@ -57,7 +57,7 @@ func TestPredicateFields(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			result := PredicateFields(tc.expr)
+			result := Fields(tc.expr)
 			assert.Equal(t, tc.expect, result)
 		})
 	}
@@ -231,7 +231,7 @@ func TestTokenize_Errors(t *testing.T) {
 	}
 }
 
-func TestEvalPredicate(t *testing.T) {
+func TestEval(t *testing.T) {
 	tests := []struct {
 		name    string
 		expr    string
@@ -508,14 +508,14 @@ func TestEvalPredicate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := EvalPredicate(tt.expr, tt.context)
+			got, err := Eval(tt.expr, tt.context)
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}
 }
 
-func TestEvalPredicate_Errors(t *testing.T) {
+func TestEval_Errors(t *testing.T) {
 	tests := []struct {
 		name    string
 		expr    string
@@ -604,14 +604,14 @@ func TestEvalPredicate_Errors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := EvalPredicate(tt.expr, tt.context)
+			_, err := Eval(tt.expr, tt.context)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
 
-func TestValidatePredicate(t *testing.T) {
+func TestValidate(t *testing.T) {
 	tests := []struct {
 		name    string
 		expr    string
@@ -629,7 +629,7 @@ func TestValidatePredicate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidatePredicate(tt.expr)
+			err := Validate(tt.expr)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {

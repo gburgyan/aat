@@ -24,7 +24,7 @@ func stopAfterGraph() *graph.Graph {
 				Adapter: "test.create",
 				Inputs:  []graph.Input{},
 				Outputs: []graph.Output{{Name: "resourceId", Type: "string"}},
-				Cleanup: "destroy",
+				Cleanup: graph.CleanupPairing{Node: "destroy"},
 			},
 			"use": {
 				Name:    "use",

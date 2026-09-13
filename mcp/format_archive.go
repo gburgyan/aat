@@ -59,6 +59,15 @@ func formatArchiveDetail(a *archive.Archive) string {
 		}
 	}
 
+	// Registered cleanups that were no longer needed
+	if len(a.CleanupSkipped) > 0 {
+		b.WriteString("## Cleanup Skipped\n\n")
+		for _, s := range a.CleanupSkipped {
+			fmt.Fprintf(&b, "- **%s** for %s: %s\n", s.Node, s.CleanupFor, s.Description())
+		}
+		b.WriteString("\n")
+	}
+
 	return b.String()
 }
 
@@ -152,15 +161,25 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 			if sel.FilterExpr != "" {
 				fmt.Fprintf(&b, ", filter: `%s` → %d", sel.FilterExpr, sel.FilteredSize)
 			}
+			if sel.Ties > 1 {
+				fmt.Fprintf(&b, ", %d tie for %s %s", sel.Ties, sel.Strategy, sel.SortField)
+			}
 			b.WriteString(")\n")
 		}
 		b.WriteString("\n")
+		if warnings := archive.SelectionTieWarnings(s.Selections); len(warnings) > 0 {
+			b.WriteString("**Warnings:**\n\n")
+			for _, w := range warnings {
+				fmt.Fprintf(&b, "- %s\n", w)
+			}
+			b.WriteString("\n")
+		}
 	}
 
-	// Value resolutions
-	if len(s.Resolutions) > 0 {
+	// Value resolutions, each with the selection that picked its value
+	if resolutions := archive.StepResolutions(s); len(resolutions) > 0 {
 		b.WriteString("**Value Resolutions:**\n\n")
-		for _, r := range s.Resolutions {
+		for _, r := range resolutions {
 			fmt.Fprintf(&b, "- **%s**: source=%s", r.InputName, r.Source)
 			if r.FromStep != "" {
 				fmt.Fprintf(&b, " (from %s.%s)", r.FromStep, r.FromOutput)
@@ -174,6 +193,15 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 					ok = "failed"
 				}
 				fmt.Fprintf(&b, " constraint=`%s` (%s)", r.Constraint, ok)
+			}
+			if sel := r.Selection; sel != nil {
+				fmt.Fprintf(&b, " selection=%s[%d] of %d", sel.Strategy, sel.SelectedIndex, sel.FilteredSize)
+				if sel.Ties > 1 {
+					fmt.Fprintf(&b, " (%d tie)", sel.Ties)
+				}
+			}
+			if r.Error != "" {
+				fmt.Fprintf(&b, " error=`%s`", r.Error)
 			}
 			b.WriteString("\n")
 		}

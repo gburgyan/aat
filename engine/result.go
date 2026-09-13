@@ -46,9 +46,12 @@ func (o Outcome) String() string {
 
 // RunResult captures the complete outcome of a plan execution.
 type RunResult struct {
-	Outcome          Outcome
-	Steps            []StepResult
-	CleanupResults   []StepResult
+	Outcome        Outcome
+	Steps          []StepResult
+	CleanupResults []StepResult
+	// CleanupSkipped lists the registered cleanups that did not run because
+	// they were no longer needed, in the order cleanup reached them.
+	CleanupSkipped   []CleanupSkip
 	Error            error
 	InstantiatedPlan *plan.Plan // fully merged plan with graph defaults, nil on early errors
 
@@ -110,7 +113,28 @@ type StepResult struct {
 	// a chain. Empty for main steps and for plan-level cleanup steps that are
 	// not a graph pairing.
 	CleanupFor string
+	// WhenError, on a cleanup step, says why its pairing's when condition could
+	// not be evaluated. The cleanup ran anyway.
+	WhenError string
 }
+
+// CleanupSkip records a registered cleanup that did not run because it was no
+// longer needed.
+type CleanupSkip struct {
+	Node       string // the cleanup node
+	CleanupFor string // the step whose resource it would have released, or the cleanup step before it in a chain
+	Reason     string // CleanupSkipReleased or CleanupSkipWhen
+	ReleasedBy string // for CleanupSkipReleased: the main step that already released the resource
+	When       string // for CleanupSkipWhen: the pairing's condition, which was false
+}
+
+// Reasons a registered cleanup is skipped.
+const (
+	// CleanupSkipReleased: a later main step already released the resource.
+	CleanupSkipReleased = "released"
+	// CleanupSkipWhen: the pairing's when condition was false.
+	CleanupSkipWhen = "when"
+)
 
 // DisplayOutput captures an output value tagged for display to the user.
 type DisplayOutput struct {
@@ -138,6 +162,14 @@ type SelectionDecision struct {
 	Strategy      string
 	SelectedIndex int
 	SelectionName string // non-empty for named selections
+	Field         string // for an inline select: the field taken from the chosen element
+	// SortField, SortValue, and Ties describe a min or max pick: the field
+	// compared, the chosen value, and how many elements share it, the chosen
+	// one included.
+	SortField string
+	SortValue *float64
+	Ties      int
+	OnTie     string // the selection's onTie: "", "first", or "fail"
 }
 
 // ValueResolution records how a single input was resolved.
@@ -145,7 +177,7 @@ type ValueResolution struct {
 	InputName string // input being resolved
 	Source    string // "plan_default", "expression", "plan_from", "select_edge",
 	// "named_selection", "from_input", "from_resolved", "fallback_pool",
-	// "graph_default", "optional_skip", "override_value"
+	// "graph_default", "optional_skip", "override_value", "error"
 	RawValue     any    // before expression evaluation (nil if N/A)
 	FinalValue   any    // after evaluation + coercion
 	FromStep     string // source step (for edge/select_edge/from_input)
@@ -157,4 +189,7 @@ type ValueResolution struct {
 	PoolIndex    int    // index in fallback pool (-1 if not from pool)
 	PoolSize     int    // fallback pool size (0 if no pool)
 	Tried        []any  // values tried and rejected before this one
+	// Error, for source "error", says why the input couldn't be resolved. For a
+	// named selection that failed, InputName is the selection's name.
+	Error string
 }
