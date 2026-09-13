@@ -44,6 +44,9 @@ the graph and plan formats may still change before 1.0.
   take the types the schema allows. Before, only JSON request bodies were validated, and a form body was not checked.
 - `{{@index}}` in an iteration block is the element's position, counting from 0, for keys such as
   `items[{{@index}}][sku]`.
+- `aat generate --operation` and `--path` scaffold only some of a spec's operations: the operationIds named, or the
+  operations under a path, matched by whole segments. An operationId the spec doesn't have is an error that suggests
+  similar ones, and so is a path that matches nothing.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
@@ -102,6 +105,10 @@ the graph and plan formats may still change before 1.0.
   copies with `&` instead of commas, so `{{#tags}}tags[]={{.}}{{/tags}}` sends `tags[]=a&tags[]=b`. A block whose body
   starts or ends with `&` is repeated with nothing between the copies. Blocks elsewhere, including JSON bodies and
   blocks inside a pair, still join with commas.
+- `aat generate` writes each optional form body field as one conditional block that brings its own `&`, so a body of
+  many optional fields grows with their number rather than its square. A request body the spec declares empty (no
+  properties and `additionalProperties: false`) gets no body and no warning. A form body property that takes an object,
+  or an array of objects, gets a warning to write its keys by hand as bracketed pairs.
 
 ### Fixed
 - OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another

@@ -20,12 +20,15 @@ Generated 17 nodes, 17 templates written to templates/
 | `--output-graph` | path | `graph.yaml` | Graph file to write; `-` prints the graph to stdout instead |
 | `--output-templates` | path | `templates` | Directory for the templates, created if missing. With `--output-graph -`, templates are written only when this flag is given |
 | `--force` | bool | `false` | Replace a graph file or templates that already exist |
+| `--operation` | string | — | Generate only this operationId. Repeat the flag, or separate IDs with commas |
+| `--path` | string | — | Generate only the operations under this path, matched by whole segments: `/carts` matches `/carts/{cartId}` but not `/cartsummary`. Repeatable |
 
 Paths are relative to the working directory. `aat generate` does not look for or read a project manifest. Warnings go to stderr. A failure exits with code `2`. Failures include:
 
 - a missing `--oas`
 - an unreadable spec
 - a spec with no operations that have an `operationId`
+- an `--operation` the spec doesn't have (the error suggests similar operationIds), or a `--path` that matches no path
 - files that already exist, without `--force`
 
 The spec must be OpenAPI 3.0 or 3.1. A Swagger 2.0 file fails with `supplied spec is a different version (oas2)`; convert it to OpenAPI 3 first. Circular references, such as a schema that refers back to itself through another, are fine.
@@ -211,7 +214,7 @@ Its body is the same as the hand-written one in `examples/shop/templates/payment
 
 An object property is typed `object` and placed as `"shipping": {{shipping}}`. Give it a map, such as a plan value `shipping: {default: {city: Austin}}`, or JSON text. Either one is sent as a nested object.
 
-A **form body** is a query string, `orderId={{orderId}}{{?note}}&note={{note}}{{/note}}`, sent with `Content-Type: application/x-www-form-urlencoded`. A list value repeats its pair, as in a query string; an object value is sent as JSON text.
+A **form body** is a query string, `orderId={{orderId}}{{?note}}&note={{note}}{{/note}}`, sent with `Content-Type: application/x-www-form-urlencoded`. Each optional field is one conditional block that brings its own `&`, so a body whose fields are all optional can start with `&`, which form parsers skip. A list value repeats its pair, as in a query string. An object value is sent as JSON text, so a property that takes an object, or an array of objects, gets a warning: write its keys by hand as bracketed pairs, such as `shipping[city]={{city}}`.
 
 These bodies are left for you to write, each with a warning:
 
@@ -219,6 +222,8 @@ These bodies are left for you to write, each with a warning:
 - **Any other media type,** such as `application/octet-stream` or `application/xml`: no inputs, no `body`, and no `Content-Type`.
 - **A JSON or form schema without properties,** such as a bare `type: object` or an array: no `body` and no `Content-Type`.
 - **`oneOf` or `anyOf`:** the alternatives are left out. Properties declared outside them still become inputs and body fields.
+
+A body schema that declares it has no fields, with no properties and `additionalProperties: false`, needs no body: the template gets none, and there is no warning.
 
 ## What It Ignores
 
@@ -240,6 +245,17 @@ aat generate --oas openapi.yaml --output-graph -
 ```
 
 Add `--output-templates DIR` to write the templates as well while the graph goes to stdout.
+
+## Large Specs
+
+A published spec can have hundreds of operations. Generate only the ones you need, previewing first:
+
+```bash
+aat generate --oas openapi.json --operation createCart,addItem --output-graph -
+aat generate --oas openapi.json --path /carts --output-graph graph.yaml --output-templates templates/
+```
+
+`--operation` and `--path` can be combined and repeated. An operation that matches any of them is generated, and the warnings cover only those operations. To add operations to a scaffold later, generate them into a scratch directory and copy the new nodes and templates across, since existing files need `--force`.
 
 ## Gotchas
 

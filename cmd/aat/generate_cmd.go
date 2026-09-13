@@ -24,6 +24,8 @@ var generateCmd = &cobra.Command{
 		outputGraph, _ := cmd.Flags().GetString("output-graph")
 		outputTemplates, _ := cmd.Flags().GetString("output-templates")
 		force, _ := cmd.Flags().GetBool("force")
+		operations, _ := cmd.Flags().GetStringArray("operation")
+		paths, _ := cmd.Flags().GetStringArray("path")
 
 		if oasPath == "" {
 			return fmt.Errorf("--oas is required")
@@ -35,6 +37,8 @@ var generateCmd = &cobra.Command{
 			OutputTemplates:   outputTemplates,
 			TemplatesExplicit: cmd.Flags().Changed("output-templates"),
 			Force:             force,
+			Operations:        operations,
+			Paths:             paths,
 		}
 
 		return generateCommand(ga)
@@ -46,6 +50,8 @@ func init() {
 	generateCmd.Flags().String("output-graph", "graph.yaml", "output path for graph YAML (\"-\" for stdout)")
 	generateCmd.Flags().String("output-templates", "templates", "output directory for template YAML files (not written with --output-graph - unless given)")
 	generateCmd.Flags().Bool("force", false, "replace an existing graph file and templates")
+	generateCmd.Flags().StringArray("operation", nil, "generate only this operationId (repeatable, or comma-separated)")
+	generateCmd.Flags().StringArray("path", nil, "generate only the operations under this path, matched by whole segments (repeatable)")
 }
 
 // generateArgs holds parsed CLI flags for the generate command.
@@ -53,8 +59,10 @@ type generateArgs struct {
 	OASPath           string
 	OutputGraph       string
 	OutputTemplates   string
-	TemplatesExplicit bool // --output-templates was given; templates are written even with --output-graph -
-	Force             bool // replace files that already exist
+	TemplatesExplicit bool     // --output-templates was given; templates are written even with --output-graph -
+	Force             bool     // replace files that already exist
+	Operations        []string // --operation values; each may hold comma-separated operationIds
+	Paths             []string // --path prefixes
 }
 
 // generateCommand runs the scaffold generation pipeline. Extracted for testability.
@@ -66,7 +74,10 @@ func generateCommand(args *generateArgs) error {
 	}
 
 	// Generate scaffold
-	result, err := oas.Generate(model, specReference(args.OASPath, args.OutputGraph))
+	result, err := oas.GenerateOperations(model, specReference(args.OASPath, args.OutputGraph), oas.GenerateOptions{
+		OperationIDs: commaSeparated(args.Operations),
+		PathPrefixes: args.Paths,
+	})
 	if err != nil {
 		return fmt.Errorf("generating scaffold: %w", err)
 	}
@@ -143,6 +154,21 @@ func generateCommand(args *generateArgs) error {
 	}
 
 	return nil
+}
+
+// commaSeparated splits each value on commas, trims the parts, and drops empty
+// ones. operationIds never contain commas, so --operation accepts a list either
+// way; --path doesn't, since a path can.
+func commaSeparated(values []string) []string {
+	var parts []string
+	for _, v := range values {
+		for _, part := range strings.Split(v, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				parts = append(parts, part)
+			}
+		}
+	}
+	return parts
 }
 
 // refuseOverwrite returns an error naming the paths that already exist (the

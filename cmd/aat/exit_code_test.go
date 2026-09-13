@@ -72,6 +72,8 @@ func TestExitCodes(t *testing.T) {
 
 	shopManifest, err := filepath.Abs(filepath.Join("..", "..", "examples", "shop", "aat-project.yaml"))
 	require.NoError(t, err)
+	petstoreSpec, err := filepath.Abs(filepath.Join("testdata", "oas", "petstore.yaml"))
+	require.NoError(t, err)
 
 	// A project whose graph names an OpenAPI spec that doesn't exist.
 	noSpec := t.TempDir()
@@ -126,6 +128,7 @@ func TestExitCodes(t *testing.T) {
 		{name: "validate with a --var the environment file never uses", dir: empty, args: []string{"validate", "--manifest", shopManifest, "--var", "nope=1"}, code: 2, stdout: "unknown var(s) nope"},
 		{name: "validate finds a manifest that fails to load", dir: broken, args: []string{"validate"}, code: 1, stdout: brokenManifest},
 		{name: "validate graph without a graph", dir: empty, args: []string{"validate", "graph"}, code: 2, stderr: "--graph is required"},
+		{name: "generate with an --operation the spec lacks", dir: empty, args: []string{"generate", "--oas", petstoreSpec, "--operation", "nope", "--output-graph", "-"}, code: 2, stderr: `operationId "nope" is not in the spec`},
 
 		{name: "plan list with a manifest that fails to load", dir: broken, args: []string{"plan", "list"}, code: 2, stderr: brokenManifest},
 		{name: "mcp serve without a manifest", dir: empty, args: []string{"mcp", "serve"}, code: 2, stderr: "no manifest found"},
