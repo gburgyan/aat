@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -383,6 +384,9 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			// Plan-defined selection from upstream array output
 			val, decision, err := resolveSelectValue(ctx, fromNode, fromField, input.Name, sv.Select, g, state, dedupCache, rctx)
 			if err != nil {
+				if input.Optional && errors.Is(err, ErrOutputMissing) {
+					return nil, nil, missingOptionalOutput(input.Name, fromNode, fromField), nil
+				}
 				return nil, nil, nil, err
 			}
 			res := &ValueResolution{
@@ -399,6 +403,9 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 		// Plain from reference — resolve directly from upstream output
 		val, err := state.GetOutput(fromNode, fromField)
 		if err != nil {
+			if input.Optional && errors.Is(err, ErrOutputMissing) {
+				return nil, nil, missingOptionalOutput(input.Name, fromNode, fromField), nil
+			}
 			return nil, nil, nil, fmt.Errorf("from reference %q: %w", sv.From, err)
 		}
 		res := &ValueResolution{
@@ -460,6 +467,13 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 
 	// 5. Required input with no value → error
 	return nil, nil, nil, fmt.Errorf("required input has no value")
+}
+
+// missingOptionalOutput is the resolution of an optional input whose from:
+// output the earlier step didn't return: the input is left out, as AUTOWIRE?
+// leaves one unset.
+func missingOptionalOutput(inputName, fromStep, fromOutput string) *ValueResolution {
+	return &ValueResolution{InputName: inputName, Source: "optional_skip", FromStep: fromStep, FromOutput: fromOutput, PoolIndex: -1}
 }
 
 // resolveSelectValue handles plan-defined "from" + "select" value resolution.

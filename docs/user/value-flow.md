@@ -376,7 +376,7 @@ Every input resolution is recorded in the run archive with a `ValueResolution` e
 | Field | Description |
 |-------|-------------|
 | `inputName` | Which input was resolved |
-| `source` | How it was resolved: `plan_default`, `expression`, `fallback_pool`, `plan_from`, `select_edge`, `named_selection`, `from_resolved`, `from_input`, `graph_default`, `optional_skip` |
+| `source` | How it was resolved: `plan_default`, `expression`, `fallback_pool`, `plan_from`, `select_edge`, `named_selection`, `from_resolved`, `from_input`, `graph_default`, or `optional_skip` when an optional input is left out (`AUTOWIRE?`, or `from:` an output the earlier step didn't return) |
 | `rawValue` | Value before expression evaluation |
 | `finalValue` | Value after evaluation and type coercion |
 | `expression` | The `{{...}}` template if evaluated |

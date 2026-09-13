@@ -29,11 +29,11 @@ func (s *RunState) StoreOutputs(nodeName string, outputs map[string]any) {
 func (s *RunState) GetOutput(nodeName, outputName string) (any, error) {
 	nodeOutputs, ok := s.outputs[nodeName]
 	if !ok {
-		return nil, fmt.Errorf("no outputs for node %q", nodeName)
+		return nil, outputMissingError{fmt.Sprintf("no outputs for node %q", nodeName)}
 	}
 	val, ok := nodeOutputs[outputName]
 	if !ok {
-		return nil, fmt.Errorf("output %q not found for node %q", outputName, nodeName)
+		return nil, outputMissingError{fmt.Sprintf("output %q not found for node %q", outputName, nodeName)}
 	}
 	return val, nil
 }

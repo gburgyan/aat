@@ -800,6 +800,7 @@ execution:
   - `$after.outputName` names the step the addon attached after.
   - `MANUAL` leaves the input for a recipe override.
 - **`AUTOWIRE?`** is for an optional input that only some compositions feed, such as a value only an addon produces. It is wired when a step produces the output and left unset otherwise. Mark the graph input `optional: true` and wrap its template field in `{{?name}}…{{/name}}`.
+- **An input `from:` an optional output.** When the earlier step didn't return the output, an optional input is left out, as with `AUTOWIRE?`. A required input fails the step. `aat validate --strict` warns when a required input takes `from:` an optional output, in a graph default or in a plan or workflow file.
 
 **Verification and injected values.**
 - **Verification.** A slot option or addon that declares `verification` for a node replaces every earlier check of that node. Checks of other nodes are kept, in this order: the base's, then slot options' in slot order, then addons' by priority. `verification` sits under `execution:`.

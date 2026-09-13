@@ -179,6 +179,10 @@ the graph and plan formats may still change before 1.0.
   pools, and assertions. The checks run in `aat validate`, when a workflow template loads, and when a recipe's override
   assertions are applied. Before, an unknown type failed only at run time, a recipe override of one was dropped
   silently, and a bad expression failed only when its step ran.
+- An optional input that takes `from:` an output the earlier step didn't return is left out, as `AUTOWIRE?` leaves one
+  unset, instead of failing the step. Its resolution records `optional_skip`. A required input still fails, and
+  `aat validate --strict` warns when a required input takes `from:` an optional output, in a graph default or in a plan
+  or workflow file.
 - Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
   `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
   bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an
