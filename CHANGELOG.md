@@ -47,6 +47,10 @@ the graph and plan formats may still change before 1.0.
 - `aat generate --operation` and `--path` scaffold only some of a spec's operations: the operationIds named, or the
   operations under a path, matched by whole segments. An operationId the spec doesn't have is an error that suggests
   similar ones, and so is a path that matches nothing.
+- Expressions for generated values and timestamps: `{{uuid}}` (a random version 4 UUID), `{{random N}}` (`N` random
+  digits and lowercase letters), `{{now}}` (UTC, RFC 3339), and `{{unixtime}}` (Unix seconds, an integer). `now` and
+  `unixtime` take offsets in seconds, minutes, hours, or days, such as `{{unixtime - 1 hours}}`. Each occurrence
+  generates its own value, and a retried step resends the values its first attempt generated.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
@@ -114,6 +118,8 @@ the graph and plan formats may still change before 1.0.
 - A retried step sends the same inputs on every attempt. Its values are resolved once, before the first attempt, so a
   random pool pick, a `today` date, and an overlay value no longer change between attempts. A plan-level `--retries`
   rerun still resolves them again.
+- `uuid`, `now`, and `unixtime` are reserved words in expressions, so `{{now}}` no longer refers to an input named
+  `now`. An offset in hours or minutes on `today`, or on a reference, is an error that suggests `now` or `unixtime`.
 
 ### Fixed
 - OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another

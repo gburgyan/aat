@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -25,6 +26,7 @@ type ResolveContext struct {
 	Node      *graph.Node
 	Plan      *plan.Plan        // for constraint classification (may be nil)
 	Registry  *adapter.Registry // may be nil; enables template-side elementField resolution
+	Random    io.Reader         // source for {{uuid}} and {{random N}}; nil means crypto/rand
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -75,6 +77,7 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 			Now:    rctx.Now,
 			Env:    rctx.EnvLookup,
 			Values: make(map[string]any),
+			Random: rctx.Random,
 		}
 	}
 

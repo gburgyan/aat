@@ -375,8 +375,13 @@ A string containing `{{…}}` is an expression.
 | `{{today}}`, `{{today + 7 days}}`, `{{today - 7 days}}` | A `YYYY-MM-DD` date in the local time zone of the machine running `aat` |
 | `{{env.KEY}}` | The OS environment variable `KEY`, else the environment file's `values:` entry; fails when both are empty |
 | `{{name}}`, `{{name + 3 days}}` | Another input of the same step, declared earlier on the node; date arithmetic needs a `YYYY-MM-DD` value |
+| `{{uuid}}` | A random version 4 UUID |
+| `{{random N}}` | `N` random characters from `0-9a-z`, with `N` from 1 to 64 |
+| `{{now}}`, `{{now + 90 minutes}}` | The time in UTC, RFC 3339 to the second. Units: `seconds`, `minutes`, `hours`, `days` |
+| `{{unixtime}}`, `{{unixtime - 1 hours}}` | The time as Unix seconds, an integer, with the same units |
 
 - **Types.** A value that is one whole expression keeps the result's type. Mixed text, such as `"Deliver on {{deliveryDate}}"`, becomes a string.
+- **Generated values.** Each occurrence is its own value, so two inputs set to `{{uuid}}` differ; reuse one with `fromResolved` or `fromInput`. A step's values are resolved once, so a retried step resends the same ones, and a new run generates new ones. `uuid`, `now`, and `unixtime` are reserved words, and `{{today}}` counts days only.
 - **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`.
 - **Where they are not:** templates (where `{{name}}` is a placeholder for an input), overlay `values:`, `rawBody`, and assertions.
 - **Checking.** `aat validate` does not check expression syntax; a bad expression fails when its step runs.
