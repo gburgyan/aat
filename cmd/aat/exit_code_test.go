@@ -96,6 +96,10 @@ func TestExitCodes(t *testing.T) {
 		{name: "run plan without a project", dir: empty, args: []string{"run", "plan", "smoke"}, code: 2},
 		{name: "run plan with a manifest that fails to load", dir: broken, args: []string{"run", "plan", "smoke"}, code: 2, stderr: brokenManifest},
 		{name: "run plan --json with a manifest that fails to load", dir: broken, args: []string{"run", "plan", "smoke", "--json"}, code: 2, stdout: `"outcome": "error"`},
+		{name: "run plan --dump-state-secrets without --dump-state", dir: empty, args: []string{"run", "plan", "smoke", "--dump-state-secrets"}, code: 2, stderr: "--dump-state-secrets requires --dump-state"},
+		{name: "run show a part without --step", dir: empty, args: []string{"run", "show", "latest", "--response"}, code: 2, stderr: "need --step"},
+		{name: "run show two parts", dir: empty, args: []string{"run", "show", "latest", "--step", "checkout", "--request", "--response"}, code: 2, stderr: "choose one part"},
+		{name: "run show an unknown run", dir: empty, args: []string{"run", "show", "run-missing"}, code: 2, stderr: "run not found"},
 		{name: "run batch with a bad --var", dir: empty, args: []string{"run", "batch", "--var", "novalue"}, code: 2},
 		{name: "run batch --json with a bad --var", dir: empty, args: []string{"run", "batch", "--var", "novalue", "--json"}, code: 2, stdout: `"error": "`},
 

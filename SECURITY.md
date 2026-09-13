@@ -29,14 +29,16 @@ credited in the advisory and release notes unless they ask otherwise.
   credential (environment, host override, plan, and overlay auth, except the oauth2 `username` and
   `clientId`, and the LLM API key) is redacted from every string in the archive, request and response
   bodies and URLs included; a secret shorter than eight characters only where a whole value equals it.
-  Tokens an API issues at run time (outside credential headers) and personal data it returns are
-  stored as-is, and terminal and `--json` output are not redacted, so review an archive before
-  sharing it.
-- **`--dump-state` files contain live credentials.** The live-state export written by
-  `aat run plan --dump-state FILE` includes each step's base URL and live request headers, the
-  default route's auth headers, and step outputs, so an external harness can pick up where a run
-  left off. The file is written with mode `0600`, including when it replaces an existing file.
-  Never commit these files, attach them to issues, or leave them in a shared location.
+  Tokens that API responses carry outside credential headers, such as a session token a login step
+  returns, and personal data an API returns are stored as-is, and terminal and `--json` output are
+  not redacted, so review an archive before sharing it.
+- **`--dump-state` redacts credentials unless asked not to.** The live-state export written by
+  `aat run plan --dump-state FILE` includes each step's base URL and request headers, the default
+  route's headers, and step inputs and outputs, with credentials redacted as in archives.
+  `--dump-state-secrets` keeps the live credentials so an external harness can act as the run's
+  session; such a dump holds them, and with `--dump-state -` they go wherever stdout goes. Dump
+  files are written with mode `0600`, including when one replaces an existing file. Never commit a
+  dump made with `--dump-state-secrets`, attach it to issues, or leave it in a shared location.
 - **Lua transforms have limited reach, but they are not a sandbox.** A template's transform cannot
   use `io`, `os`, or `package`, and it cannot load or run code from files or strings: `dofile`,
   `loadfile`, `load`, `loadstring`, and `require` are removed. It still runs inside the `aat` process

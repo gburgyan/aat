@@ -234,12 +234,12 @@ func (s *diskArchiveService) GetAttemptStep(runID string, attemptNum int, stepID
 
 // getStepFromArchive extracts a step detail from a loaded archive.
 func getStepFromArchive(a *archive.Archive, runID, stepID string) (*StepDetail, error) {
-	rec, isCleanup, found := findStep(a, stepID)
-	if !found {
+	rec, isCleanup := archive.FindStep(a, stepID)
+	if rec == nil {
 		return nil, fmt.Errorf("step %q in run %q: %w", stepID, runID, ErrStepNotFound)
 	}
 	nodeSteps := nodeToStepMap(a)
-	detail := toStepDetail(rec, isCleanup, nodeSteps)
+	detail := toStepDetail(*rec, isCleanup, nodeSteps)
 	detail.StepID = stepID // Use the deduplicated ID
 	detail.Extractions = buildExtractions(stepID, rec.Outputs, a, nodeSteps)
 	detail.PlanStepYAML = findPlanStepYAML(a, stepID, rec.Node, isCleanup)
@@ -249,9 +249,9 @@ func getStepFromArchive(a *archive.Archive, runID, stepID string) (*StepDetail, 
 	// Cleanup steps use deduplicated IDs to match the API's step list.
 	allSteps := make([]string, 0, len(a.Steps)+len(a.Cleanup))
 	for _, s := range a.Steps {
-		allSteps = append(allSteps, effectiveStepID(s))
+		allSteps = append(allSteps, archive.StepID(s))
 	}
-	allSteps = append(allSteps, buildCleanupIDs(a.Cleanup)...)
+	allSteps = append(allSteps, archive.CleanupStepIDs(a.Cleanup)...)
 	for i, id := range allSteps {
 		if id == stepID {
 			if i > 0 {
@@ -447,30 +447,6 @@ func (s *diskArchiveService) loadAttemptSummaries(runID, batchID string) []Attem
 	return attempts
 }
 
-// effectiveStepID returns the step's explicit StepID if set, else falls back to Node.
-func effectiveStepID(s archive.StepRecord) string {
-	if s.StepID != "" {
-		return s.StepID
-	}
-	return s.Node
-}
-
-// deduplicateIDs takes a slice of IDs and returns a new slice with duplicates
-// suffixed (_2, _3, ...). The first occurrence keeps its original ID.
-func deduplicateIDs(ids []string) []string {
-	seen := make(map[string]int)
-	result := make([]string, len(ids))
-	for i, id := range ids {
-		seen[id]++
-		if seen[id] == 1 {
-			result[i] = id
-		} else {
-			result[i] = fmt.Sprintf("%s_%d", id, seen[id])
-		}
-	}
-	return result
-}
-
 // deduplicateStepIDs mutates the StepID fields in a slice of StepSummary
 // to ensure uniqueness by suffixing duplicates with _2, _3, etc.
 func deduplicateStepIDs(steps []StepSummary) {
@@ -482,33 +458,6 @@ func deduplicateStepIDs(steps []StepSummary) {
 			steps[i].StepID = fmt.Sprintf("%s_%d", id, seen[id])
 		}
 	}
-}
-
-// buildCleanupIDs returns deduplicated step IDs for cleanup steps.
-func buildCleanupIDs(cleanup []archive.StepRecord) []string {
-	ids := make([]string, len(cleanup))
-	for i, s := range cleanup {
-		ids[i] = effectiveStepID(s)
-	}
-	return deduplicateIDs(ids)
-}
-
-// findStep scans Steps then Cleanup for a step matching the given ID.
-// Cleanup steps use deduplicated IDs (e.g., ignoreItinerary_2) when multiple
-// cleanup steps share the same node.
-func findStep(a *archive.Archive, stepID string) (archive.StepRecord, bool, bool) {
-	for _, s := range a.Steps {
-		if effectiveStepID(s) == stepID {
-			return s, false, true
-		}
-	}
-	cleanupIDs := buildCleanupIDs(a.Cleanup)
-	for i, id := range cleanupIDs {
-		if id == stepID {
-			return a.Cleanup[i], true, true
-		}
-	}
-	return archive.StepRecord{}, false, false
 }
 
 // formatDuration renders a millisecond duration as a human-readable string.
@@ -888,7 +837,7 @@ func toRunDetail(a *archive.Archive) *RunDetail {
 	steps := make([]StepSummary, len(a.Steps))
 	for i, s := range a.Steps {
 		steps[i] = toStepSummary(s, false, runStart)
-		if stepPassed(s) {
+		if archive.StepPassed(s) {
 			passed++
 		} else {
 			failed++
@@ -944,12 +893,12 @@ func toStepSummary(s archive.StepRecord, isCleanup bool, runStart time.Time) Ste
 	}
 
 	return StepSummary{
-		StepID:               effectiveStepID(s),
+		StepID:               archive.StepID(s),
 		Node:                 s.Node,
 		Status:               status,
 		DurationMs:           s.DurationMs,
 		DurationDisplay:      formatDuration(s.DurationMs),
-		Passed:               stepPassed(s),
+		Passed:               archive.StepPassed(s),
 		AssertionCount:       assertionCount,
 		AssertionPassedCount: assertionPassed,
 		DisplayOutputs:       toDisplayOutputs(s.DisplayOutputs),
@@ -973,10 +922,10 @@ func toStepSummary(s archive.StepRecord, isCleanup bool, runStart time.Time) Ste
 func nodeToStepMap(a *archive.Archive) map[string]string {
 	m := make(map[string]string)
 	for _, s := range a.Steps {
-		m[s.Node] = effectiveStepID(s)
+		m[s.Node] = archive.StepID(s)
 	}
 	for _, s := range a.Cleanup {
-		m[s.Node] = effectiveStepID(s)
+		m[s.Node] = archive.StepID(s)
 	}
 	return m
 }
@@ -990,12 +939,12 @@ func toStepDetail(s archive.StepRecord, isCleanup bool, nodeSteps map[string]str
 	assertionCount, assertionPassed := countAssertions(s)
 
 	return &StepDetail{
-		StepID:               effectiveStepID(s),
+		StepID:               archive.StepID(s),
 		Node:                 s.Node,
 		Status:               status,
 		DurationMs:           s.DurationMs,
 		DurationDisplay:      formatDuration(s.DurationMs),
-		Passed:               stepPassed(s),
+		Passed:               archive.StepPassed(s),
 		AssertionCount:       assertionCount,
 		AssertionPassedCount: assertionPassed,
 		DisplayOutputs:       toDisplayOutputs(s.DisplayOutputs),
@@ -1316,7 +1265,7 @@ func buildExtractions(stepID string, outputs map[string]any, a *archive.Archive,
 		var consumers []OutputConsumer
 
 		for _, other := range allSteps {
-			otherID := effectiveStepID(other)
+			otherID := archive.StepID(other)
 
 			// Check resolutions: FromStep matches this step's ID and FromOutput matches output name.
 			for _, res := range other.Resolutions {
@@ -1438,21 +1387,4 @@ func extractPlanName(a *archive.Archive) string {
 		return d
 	}
 	return a.Metadata.Plan.Intent.Goal
-}
-
-// stepPassed returns true when a step has no errors or failures.
-func stepPassed(s archive.StepRecord) bool {
-	if s.Error != "" {
-		return false
-	}
-	if s.Validation != nil && !s.Validation.Passed {
-		return false
-	}
-	if s.ExpectFailure != nil && !s.ExpectFailure.Passed {
-		return false
-	}
-	if s.ResponseBodyError != nil {
-		return false
-	}
-	return true
 }

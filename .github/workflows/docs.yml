@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - docs/user/**
+      - docs/hooks/**
+      - internal/primer/**
       - docs/requirements.txt
       - mkdocs.yml
       - CHANGELOG.md
@@ -14,6 +16,8 @@ on:
     branches: [main]
     paths:
       - docs/user/**
+      - docs/hooks/**
+      - internal/primer/**
       - docs/requirements.txt
       - mkdocs.yml
       - CHANGELOG.md

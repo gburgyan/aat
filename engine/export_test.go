@@ -163,3 +163,78 @@ func TestWriteStateExport_ExistingFileGetsMode0600(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, entries, 1, "no temporary file is left behind")
 }
+
+// TestRedactStateExport: a redacted export masks credential headers at the top
+// level and in every step, replaces known secrets wherever they appear, keeps
+// identifiers and other data, and leaves the export it copies unchanged.
+func TestRedactStateExport(t *testing.T) {
+	const secret = "s3cret-api-key-123"
+	result := &RunResult{
+		Outcome:   OutcomeStopped,
+		StoppedAt: "pay",
+		Steps: []StepResult{
+			{
+				StepID: "login", Node: "login", ActualBaseURL: "https://api.example.com",
+				Inputs:  map[string]any{"apiKey": secret, "user": "alice"},
+				Outputs: map[string]any{"session": "sess-" + secret, "count": 3},
+				Request: &adapter.Request{Headers: map[string]string{"Authorization": "Bearer issued-token", "Accept": "application/json"}},
+			},
+			{
+				StepID: "pay", Node: "pay", ActualBaseURL: "https://pay.example.com",
+				Outputs: map[string]any{"status": "pay"},
+				Request: &adapter.Request{Headers: map[string]string{"X-Custom-Key": secret}},
+			},
+		},
+	}
+	exp := BuildStateExport(result, "https://api.example.com")
+
+	red, err := RedactStateExport(exp, map[string]bool{secret: true, "pay": true})
+	require.NoError(t, err)
+
+	assert.True(t, red.Redacted)
+	assert.Equal(t, "[REDACTED]", red.Auth.Headers["Authorization"], "a credential header is masked by name")
+	assert.Equal(t, "application/json", red.Auth.Headers["Accept"])
+	require.Len(t, red.Steps, 2)
+	assert.Equal(t, "[REDACTED]", red.Steps[0].Headers["Authorization"])
+	assert.Equal(t, "[REDACTED]", red.Steps[1].Headers["X-Custom-Key"], "a known secret is masked under any header")
+	assert.Equal(t, "[REDACTED]", red.Steps[0].Inputs["apiKey"])
+	assert.Equal(t, "alice", red.Steps[0].Inputs["user"])
+	assert.Equal(t, "sess-[REDACTED]", red.Steps[0].Outputs["session"])
+	assert.Equal(t, "sess-[REDACTED]", red.Values["login.session"])
+	assert.Equal(t, "https://pay.example.com", red.Steps[1].BaseURL)
+
+	// A short secret is replaced only where a whole value equals it, and never in
+	// the identifiers a harness looks steps up by.
+	assert.Equal(t, "[REDACTED]", red.Steps[1].Outputs["status"])
+	assert.Equal(t, "pay", red.StoppedAt)
+	assert.Equal(t, "pay", red.Steps[1].StepID)
+	assert.Equal(t, "pay", red.Steps[1].Node)
+	assert.Contains(t, red.Values, "pay.status", "map keys are kept")
+
+	data, err := json.Marshal(red)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"redacted":true`)
+	assert.NotContains(t, string(data), secret)
+	assert.NotContains(t, string(data), "issued-token")
+
+	// The export it copied still holds what was sent.
+	assert.False(t, exp.Redacted)
+	assert.Equal(t, "Bearer issued-token", exp.Auth.Headers["Authorization"])
+	assert.Equal(t, secret, exp.Steps[0].Inputs["apiKey"])
+}
+
+// TestRedactStateExport_NoKnownSecrets: credential headers are masked by name
+// even when the run has no known secrets, such as a token issued at run time.
+func TestRedactStateExport_NoKnownSecrets(t *testing.T) {
+	exp := BuildStateExport(&RunResult{Outcome: OutcomePassed, Steps: []StepResult{{
+		StepID: "a", Node: "a", ActualBaseURL: "https://h",
+		Request: &adapter.Request{Headers: map[string]string{"Authorization": "Bearer t"}},
+	}}}, "https://h")
+
+	red, err := RedactStateExport(exp, nil)
+	require.NoError(t, err)
+	assert.True(t, red.Redacted)
+	assert.Equal(t, "[REDACTED]", red.Auth.Headers["Authorization"])
+	assert.Equal(t, "[REDACTED]", red.Steps[0].Headers["Authorization"])
+	assert.Equal(t, "Bearer t", exp.Steps[0].Headers["Authorization"], "the original export is unchanged")
+}

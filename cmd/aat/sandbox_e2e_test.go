@@ -171,16 +171,92 @@ func TestShopExample(t *testing.T) {
 		assert.GreaterOrEqual(t, res.summary.Summary.DurationMs, int64(2375), "the run's duration is wall-clock time")
 	})
 
+	t.Run("checkpoint dump redacts credentials", func(t *testing.T) {
+		t.Parallel()
+		p := newShopProject(t)
+
+		args := p.runArgs(t, "us")
+		args.PlanPath = p.plan(t, "smoke")
+		args.StopAfterStep = "paymentCharge"
+		args.DumpStatePath = filepath.Join(t.TempDir(), "state.json")
+		res := runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		require.Equal(t, engine.OutcomeStopped, res.outcome)
+
+		data, err := os.ReadFile(args.DumpStatePath)
+		require.NoError(t, err)
+		var state engine.StateExport
+		require.NoError(t, json.Unmarshal(data, &state))
+		assert.True(t, state.Redacted)
+		assert.Equal(t, "[REDACTED]", state.Auth.Headers["Authorization"], "the shop's OAuth2 token")
+		assert.NotEmpty(t, state.Values["checkout.orderId"], "IDs stay, so a harness can find what the run created")
+		var payment *engine.StateStep
+		for i := range state.Steps {
+			if state.Steps[i].Node == "paymentCharge" {
+				payment = &state.Steps[i]
+			}
+		}
+		require.NotNil(t, payment, "the payment step is in the export")
+		assert.Equal(t, "[REDACTED]", payment.Headers["X-API-Key"], "the payments API key")
+
+		dump := string(data)
+		assert.NotContains(t, dump, "Bearer ")
+		assert.NotContains(t, dump, "pay-demo-key")
+		assert.NotContains(t, dump, "aat-shop-secret")
+	})
+
+	t.Run("issued token redacted wherever it appears", func(t *testing.T) {
+		t.Parallel()
+		// The shop API echoes the bearer token in a response header that no
+		// redaction rule names, so only knowing the issued token as a secret
+		// keeps it out of the archive and the dump.
+		seen := make(chan string, 100)
+		p := newShopProjectWith(t, func(h http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
+					select {
+					case seen <- token:
+					default:
+					}
+					w.Header().Set("X-Echo-Token", token)
+				}
+				h.ServeHTTP(w, r)
+			})
+		})
+
+		args := p.runArgs(t, "us")
+		args.PlanPath = p.plan(t, "smoke")
+		args.DumpStatePath = filepath.Join(t.TempDir(), "state.json")
+		res := runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		require.Equal(t, engine.OutcomePassed, res.outcome)
+		require.NotEmpty(t, res.archivePath)
+
+		archived, err := os.ReadFile(res.archivePath)
+		require.NoError(t, err)
+		dump, err := os.ReadFile(args.DumpStatePath)
+		require.NoError(t, err)
+		require.NotZero(t, len(seen), "the shop API saw a bearer token")
+		for len(seen) > 0 {
+			token := <-seen
+			assert.NotContains(t, string(archived), token)
+			assert.NotContains(t, string(dump), token)
+		}
+		assert.Contains(t, string(archived), `"X-Echo-Token": "[REDACTED]"`)
+	})
+
 	t.Run("checkpoint handoff", func(t *testing.T) {
 		t.Parallel()
 		p := newShopProject(t)
 
 		// Stop after the payment, which runs on the payments host with its own
 		// API key: the export must still carry the shop session at top level.
+		// The replay below sends the dumped token, so it asks for live credentials.
 		args := p.runArgs(t, "us")
 		args.PlanPath = p.plan(t, "smoke")
 		args.StopAfterStep = "paymentCharge"
 		args.DumpStatePath = filepath.Join(t.TempDir(), "state.json")
+		args.DumpStateSecrets = true
 		res := runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
 		require.NoError(t, res.err)
 		assert.Equal(t, engine.OutcomeStopped, res.outcome)
@@ -218,6 +294,27 @@ func TestShopExample(t *testing.T) {
 		}
 		require.NoError(t, json.NewDecoder(resp.Body).Decode(&order))
 		assert.Equal(t, "paid", order.Status)
+	})
+
+	t.Run("run show", func(t *testing.T) {
+		t.Parallel()
+		p := newShopProject(t)
+
+		args := p.runArgs(t, "us")
+		args.PlanPath = p.plan(t, "smoke")
+		res := runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		require.Equal(t, engine.OutcomePassed, res.outcome)
+		archiveDir := func() (string, error) { return args.OutputDir, nil }
+
+		var out bytes.Buffer
+		require.NoError(t, runShowCommand("latest", archiveDir, showOptions{Step: "checkout", Part: "response", Shape: true}, &out, io.Discard))
+		assert.Regexp(t, `(?m)^orderId\s+string\s+"ord_`, out.String())
+		assert.Regexp(t, `(?m)^total\s+number`, out.String())
+
+		out.Reset()
+		require.NoError(t, runShowCommand("latest", archiveDir, showOptions{Step: "checkout", Part: "outputs", Path: "orderId"}, &out, io.Discard))
+		assert.Regexp(t, `^"ord_\w+"\n$`, out.String())
 	})
 
 	t.Run("published kit", func(t *testing.T) {

@@ -663,7 +663,9 @@ func TestExecuteRun_JSONOutput(t *testing.T) {
 
 // TestExecuteRun_DumpStateStdoutCarriesOnlyState: without --json,
 // --dump-state - owns stdout, so the export pipes into jq whether or not
-// --quiet is set; progress and the summary line go to stderr.
+// --quiet is set; progress and the summary line go to stderr. The export is
+// redacted unless --dump-state-secrets asks for live credentials, which warns
+// on stderr.
 func TestExecuteRun_DumpStateStdoutCarriesOnlyState(t *testing.T) {
 	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -671,13 +673,16 @@ func TestExecuteRun_DumpStateStdoutCarriesOnlyState(t *testing.T) {
 	}))
 	defer apiServer.Close()
 
+	const liveWarning = "aat: warning: --dump-state-secrets writes live credentials to stdout"
 	tests := []struct {
 		name       string
 		quiet      bool
+		secrets    bool
 		wantStderr string
 	}{
 		{name: "progress", quiet: false, wantStderr: "aat: executing plan"},
 		{name: "quiet", quiet: true, wantStderr: "STOPPED"},
+		{name: "live credentials", quiet: true, secrets: true, wantStderr: liveWarning},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -690,14 +695,15 @@ func TestExecuteRun_DumpStateStdoutCarriesOnlyState(t *testing.T) {
 			oldStdout, oldStderr := os.Stdout, os.Stderr
 			os.Stdout, os.Stderr = stdout, stderr
 			code := executeRun(&runArgs{
-				PlanPath:      "testdata/test_plan.yaml",
-				EnvPath:       writeTestEnv(t, "none", apiServer.URL),
-				GraphPath:     "testdata/test_graph.yaml",
-				TemplatesPath: "testdata/templates",
-				OutputDir:     filepath.Join(dir, "runs"),
-				Quiet:         tt.quiet,
-				StopAfterStep: "testNode",
-				DumpStatePath: "-",
+				PlanPath:         "testdata/test_plan.yaml",
+				EnvPath:          writeTestEnv(t, "none", apiServer.URL),
+				GraphPath:        "testdata/test_graph.yaml",
+				TemplatesPath:    "testdata/templates",
+				OutputDir:        filepath.Join(dir, "runs"),
+				Quiet:            tt.quiet,
+				StopAfterStep:    "testNode",
+				DumpStatePath:    "-",
+				DumpStateSecrets: tt.secrets,
 			})
 			os.Stdout, os.Stderr = oldStdout, oldStderr
 			require.NoError(t, stdout.Close())
@@ -709,10 +715,14 @@ func TestExecuteRun_DumpStateStdoutCarriesOnlyState(t *testing.T) {
 			var exp engine.StateExport
 			require.NoError(t, json.Unmarshal(data, &exp), "stdout must hold exactly the state export: %s", data)
 			assert.Equal(t, "stopped", exp.Outcome)
+			assert.Equal(t, !tt.secrets, exp.Redacted, "credentials are redacted unless --dump-state-secrets asks for them")
 
 			logs, err := os.ReadFile(stderr.Name())
 			require.NoError(t, err)
 			assert.Contains(t, string(logs), tt.wantStderr)
+			if !tt.secrets {
+				assert.NotContains(t, string(logs), liveWarning)
+			}
 		})
 	}
 }

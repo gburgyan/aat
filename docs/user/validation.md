@@ -199,7 +199,7 @@ Plan validation catches:
 - **Required inputs** — non-optional inputs have a plan value, reference, or default
 - **Selection configs** — valid strategy, source exists, field references match elementFields
 - **Constraints** — predicate expressions parse correctly, `appliesTo` references valid steps
-- **Assertions** — predicate syntax is valid, assertion types are recognized
+- **Assertions** — predicate syntax is valid. Assertion types are not checked here: an unknown type fails when a full plan's step runs, and composing a recipe drops it
 - **Expect-failure** — status codes are >= 400, no contradicting success assertions
 - **Cleanup steps** — nodes exist, `runOn` is `always`, `failure`, or `success`
 - **Graph version** — plan's `graphVersion` is compatible (same major version) with graph

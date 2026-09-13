@@ -48,7 +48,11 @@ Each step line shows the step index, the step ID, the HTTP status code, and the 
 
 ## Checkpoints
 
-`aat run plan --stop-after STEP` stops after a step passes and skips cleanup, so the resources created so far stay alive, and `--dump-state FILE` writes the live session (base URLs, unredacted headers, and step outputs) for another tool to pick up. The outcome is `stopped` with exit code `0`. See [Checkpoints](checkpoints.md) for the dump format, stdout mode, security, and a pytest handoff example.
+`aat run plan --stop-after STEP` stops after a step passes and skips cleanup, so the resources created so far stay alive, and `--dump-state FILE` writes the session (base URLs, headers, and step inputs and outputs) for another tool to pick up, with credentials redacted unless `--dump-state-secrets` asks for them. The outcome is `stopped` with exit code `0`. See [Checkpoints](checkpoints.md) for the dump format, stdout mode, security, and a pytest handoff example.
+
+## Inspecting a Run
+
+`aat run show latest` lists the newest run's steps with their HTTP status, result, and outputs. `--step ID` shows one step, and `--response --shape` prints the structure of its response, which is the quickest way to learn what an API returned, from a terminal or from an AI coding assistant. See [Archives: Inspecting a Run from the CLI](archives.md#inspecting-a-run-from-the-cli).
 
 ## Running Batches
 
@@ -133,7 +137,8 @@ The `run plan` command adds:
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `--stop-after` | string | — | Stop after the step with this ID passes and skip cleanup (see [Checkpoints](checkpoints.md)) |
-| `--dump-state` | path | — | Write the live run state, unredacted, to a file with mode `0600` (`-` for stdout, which then carries only the state) |
+| `--dump-state` | path | — | Write the run state to a file with mode `0600`, with credentials redacted (`-` for stdout, which then carries only the state) |
+| `--dump-state-secrets` | bool | `false` | Keep live credentials in the `--dump-state` output, for a harness that sends requests as the run's session (see [Checkpoints: Security](checkpoints.md#security)) |
 
 The `run batch` command adds:
 

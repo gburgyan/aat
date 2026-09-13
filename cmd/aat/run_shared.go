@@ -53,6 +53,7 @@ type runArgs struct {
 	SkipMutations     bool              // strip mutations from plans before running (smoke-test mode)
 	StopAfterStep     string            // stop after this step ID; skip cleanup (checkpoint handoff)
 	DumpStatePath     string            // write accumulated run state to this file (mode 0600)
+	DumpStateSecrets  bool              // keep live credentials in the state dump instead of redacting them
 	Vars              map[string]string // --var KEY=VALUE for multi-environment files
 }
 
@@ -67,9 +68,10 @@ type RunSummary struct {
 	Attempts    int           `json:"attempts,omitempty"`   // total attempts (omitted if 1)
 	Retried     bool          `json:"retried,omitempty"`    // true if any retries occurred
 	StoppedAt   string        `json:"stopped_at,omitempty"` // checkpoint step ID when the outcome is "stopped"
-	// State is the accumulated run state (base URL, live auth headers, step
-	// outputs), populated only when --dump-state=- requests stdout output.
-	// Contains UNREDACTED auth — emitted only on explicit opt-in.
+	// State is the accumulated run state (base URLs, request headers, step
+	// inputs and outputs), populated only when --dump-state=- requests stdout
+	// output. Its credentials are redacted unless --dump-state-secrets asked
+	// for them.
 	State *engine.StateExport `json:"state,omitempty"`
 }
 
@@ -659,9 +661,10 @@ type runContext struct {
 	Pacer *engine.Pacer
 
 	// Execution options
-	SkipMutations bool   // strip mutations from each plan before instantiation
-	StopAfterStep string // stop after this step ID; skip cleanup (checkpoint handoff)
-	DumpStatePath string // write accumulated run state to this file (mode 0600)
+	SkipMutations    bool   // strip mutations from each plan before instantiation
+	StopAfterStep    string // stop after this step ID; skip cleanup (checkpoint handoff)
+	DumpStatePath    string // write accumulated run state to this file (mode 0600)
+	DumpStateSecrets bool   // keep live credentials in the state dump instead of redacting them
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -735,6 +738,7 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		SkipMutations:     args.SkipMutations,
 		StopAfterStep:     args.StopAfterStep,
 		DumpStatePath:     args.DumpStatePath,
+		DumpStateSecrets:  args.DumpStateSecrets,
 	}
 
 	// Pre-load layers referenced by --layer and/or --layer-group flags.
@@ -977,6 +981,11 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 
 	// 8. Write archive
 	secrets := config.RunSecrets(rctx.Env, p.Auth, autoOverlay, envOverlayFile)
+	// The token the run authenticated with, such as an OAuth2 access token, is
+	// a secret too, wherever an API echoes it.
+	if token != nil && token.AccessToken != "" {
+		secrets[token.AccessToken] = true
+	}
 
 	meta := archive.ArchiveMetadata{
 		Version:       "1.0.0",
@@ -1008,18 +1017,26 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	// 8b. Dump accumulated run state for external harness consumption.
 	// A path of "-" means stdout: attach the export to the summary so it is
 	// surfaced inline by --json (or printed standalone in non-JSON mode),
-	// obviating the file. Any other value writes a 0600 file.
+	// obviating the file. Any other value writes a 0600 file. Credentials are
+	// redacted as in the archive unless --dump-state-secrets asked for them.
 	// Non-fatal: a dump failure must not change the run's exit code.
 	if rctx.DumpStatePath != "" {
 		exp := engine.BuildStateExport(result, apiConfig.BaseURL)
-		if rctx.DumpStatePath == "-" {
+		var dumpErr error
+		if !rctx.DumpStateSecrets {
+			exp, dumpErr = engine.RedactStateExport(exp, secrets)
+		}
+		if dumpErr == nil && rctx.DumpStatePath == "-" {
 			summary.State = exp
-		} else if dumpErr := engine.WriteStateExport(exp, rctx.DumpStatePath); dumpErr != nil {
+		} else if dumpErr == nil {
+			if dumpErr = engine.WriteStateExport(exp, rctx.DumpStatePath); dumpErr == nil {
+				logf("aat: state dumped to %s\n", rctx.DumpStatePath)
+			}
+		}
+		if dumpErr != nil {
 			// Always visible: under --quiet or --json logf is silent, and a
-			// harness waiting for this file needs to know it is missing.
+			// harness waiting for this dump needs to know it is missing.
 			fmt.Fprintf(os.Stderr, "aat: warning: failed to write state dump: %s\n", dumpErr)
-		} else {
-			logf("aat: state dumped to %s\n", rctx.DumpStatePath)
 		}
 	}
 

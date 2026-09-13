@@ -164,7 +164,7 @@ Then:
 
 - **Ask for a client.** The tool looks up operations, request templates, and integration flows instead of guessing at request and response shapes.
 - **Run a reference flow** against the sandbox to see real exchanges: `cd vendor/shop-kit && aat run plan full-lifecycle`, then `aat web view latest`. The run's archive also gives `get_sample_response` real responses to return.
-- **Start from live state.** `aat run plan smoke --stop-after paymentCharge --dump-state state.json` stops with a paid order still live, and the state file holds its IDs and credentials for the new client to pick up; see [Checkpoints](checkpoints.md).
+- **Start from live state.** `aat run plan smoke --stop-after paymentCharge --dump-state state.json --dump-state-secrets` stops with a paid order still live, and the state file holds its IDs and the session's live credentials for the new client to pick up. Without `--dump-state-secrets`, the credentials read `[REDACTED]`. See [Checkpoints](checkpoints.md).
 
 ## Current Limits
 

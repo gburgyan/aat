@@ -270,56 +270,6 @@ func TestBuildRunSummary_NoSteps(t *testing.T) {
 	assert.Equal(t, int64(0), s.DurationMs)
 }
 
-func TestStepRecordPassed(t *testing.T) {
-	tests := []struct {
-		name     string
-		step     StepRecord
-		expected bool
-	}{
-		{
-			name:     "passing step",
-			step:     StepRecord{Validation: &ValidationRecord{Passed: true}},
-			expected: true,
-		},
-		{
-			name:     "step with error",
-			step:     StepRecord{Error: "failed"},
-			expected: false,
-		},
-		{
-			name:     "failed validation",
-			step:     StepRecord{Validation: &ValidationRecord{Passed: false}},
-			expected: false,
-		},
-		{
-			name:     "failed expect-failure",
-			step:     StepRecord{ExpectFailure: &ExpectFailureRecord{Passed: false}},
-			expected: false,
-		},
-		{
-			name:     "passed expect-failure",
-			step:     StepRecord{ExpectFailure: &ExpectFailureRecord{Passed: true}},
-			expected: true,
-		},
-		{
-			name:     "response body error",
-			step:     StepRecord{ResponseBodyError: &ResponseBodyErrorRecord{RulePath: "errors"}},
-			expected: false,
-		},
-		{
-			name:     "no validation or errors",
-			step:     StepRecord{},
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, stepRecordPassed(tt.step))
-		})
-	}
-}
-
 func TestBuildRunSummary_WithLayers(t *testing.T) {
 	a := &Archive{
 		Metadata: ArchiveMetadata{

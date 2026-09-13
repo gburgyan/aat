@@ -8,11 +8,17 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/validate"
 	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/tidwall/gjson"
 )
+
+// maxSampleShapeBytes caps the shape get_sample_response returns.
+const maxSampleShapeBytes = 8000
 
 // registerArchiveTools adds archive inspection tools to the MCP server.
 func (s *Server) registerArchiveTools() {
@@ -273,13 +279,19 @@ func (s *Server) handleListRecentFailures(_ context.Context, req mcp.CallToolReq
 func (s *Server) registerSampleResponseTool() {
 	s.mcp.AddTool(
 		mcp.NewTool("get_sample_response",
-			mcp.WithDescription("Get a sample API response for an operation from run archives: the newest successful response, or the newest failed one when no run succeeded. Shows the response body, status code, and source run. Useful for understanding response shapes and extract rules."),
+			mcp.WithDescription("Get a sample API response for an operation from run archives: the newest successful response, or the newest failed one when no run succeeded. Shows the response body, status code, and source run. `path` narrows the body with a gjson path, and `shape` returns the body's structure instead of its values (each path with its type, array sizes, and a sample value), which suits large responses. Useful for understanding response shapes and extract rules."),
 			mcp.WithString("node",
 				mcp.Description("Operation/node name to get a sample response for"),
 				mcp.Required(),
 			),
 			mcp.WithString("run_id",
-				mcp.Description("Specific run ID to get the response from (optional — defaults to searching recent archives)"),
+				mcp.Description("Run to get the response from: a run ID, a batch ID and run ID joined by a slash, or latest (optional — defaults to searching recent archives)"),
+			),
+			mcp.WithString("path",
+				mcp.Description("gjson path selecting part of the response body, such as data.items.0 or data.items.#.id (optional)"),
+			),
+			mcp.WithBoolean("shape",
+				mcp.Description("Return the structure of the body (or of what path selects) instead of its values (optional)"),
 			),
 		),
 		s.handleGetSampleResponse,
@@ -321,7 +333,8 @@ func (s *Server) handleGetSampleResponse(_ context.Context, req mcp.CallToolRequ
 		return mcp.NewToolResultText(s.formatNoArchiveFallback(nodeName, node)), nil
 	}
 
-	return mcp.NewToolResultText(formatSampleResponse(step, nodeName, sourceRunID)), nil
+	view := sampleView{path: req.GetString("path", ""), shape: req.GetBool("shape", false)}
+	return mcp.NewToolResultText(formatSampleResponse(step, nodeName, sourceRunID, view)), nil
 }
 
 // findSampleResponse finds an archived response for nodeName, preferring a
@@ -331,17 +344,17 @@ func (s *Server) handleGetSampleResponse(_ context.Context, req mcp.CallToolRequ
 // any status when none succeeded.
 func findSampleResponse(archiveDir, nodeName, runID string) (*archive.StepRecord, string, error) {
 	if runID != "" {
-		a, err := loadArchive(archiveDir, runID)
+		run, a, err := loadRun(archiveDir, runID)
 		if err != nil {
 			return nil, "", err
 		}
 		if step := sampleStep(a, nodeName); step != nil {
-			return step, runID, nil
+			return step, run.Ref(), nil
 		}
 		return nil, "", fmt.Errorf("node %q not found in archive %q", nodeName, runID)
 	}
 
-	runs, err := listRunArchives(archiveDir)
+	runs, err := archive.ListRuns(archiveDir)
 	if err != nil {
 		return nil, "", err
 	}
@@ -349,7 +362,7 @@ func findSampleResponse(archiveDir, nodeName, runID string) (*archive.StepRecord
 	var fallback *archive.StepRecord
 	var fallbackRunID string
 	for _, run := range runs {
-		a, err := archive.Read(run.path)
+		a, err := archive.Read(run.ArchivePath)
 		if err != nil {
 			continue
 		}
@@ -357,9 +370,9 @@ func findSampleResponse(archiveDir, nodeName, runID string) (*archive.StepRecord
 		switch {
 		case step == nil:
 		case isSuccessStatus(step.Response.Status):
-			return step, run.id, nil
+			return step, run.Ref(), nil
 		case fallback == nil:
-			fallback, fallbackRunID = step, run.id
+			fallback, fallbackRunID = step, run.Ref()
 		}
 	}
 	if fallback != nil {
@@ -392,52 +405,15 @@ func isSuccessStatus(status int) bool {
 	return status >= 200 && status < 300
 }
 
-// runArchive locates one run's archive.json.
-type runArchive struct {
-	id, path string
-}
-
-// listRunArchives returns every run under archiveDir, including the runs inside
-// batch directories, newest first by run ID.
-func listRunArchives(archiveDir string) ([]runArchive, error) {
-	entries, err := os.ReadDir(archiveDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("no archives found — run the integration first")
-		}
-		return nil, fmt.Errorf("reading archive directory: %v", err)
-	}
-
-	var runs []runArchive
-	addRun := func(dir, name string) {
-		runs = append(runs, runArchive{id: name, path: filepath.Join(dir, name, "archive.json")})
-	}
-	for _, e := range entries {
-		switch {
-		case !e.IsDir():
-		case strings.HasPrefix(e.Name(), "run-"):
-			addRun(archiveDir, e.Name())
-		case strings.HasPrefix(e.Name(), "batch-"):
-			batchDir := filepath.Join(archiveDir, e.Name())
-			children, err := os.ReadDir(batchDir)
-			if err != nil {
-				continue
-			}
-			for _, c := range children {
-				if c.IsDir() && strings.HasPrefix(c.Name(), "run-") {
-					addRun(batchDir, c.Name())
-				}
-			}
-		}
-	}
-	sort.Slice(runs, func(i, j int) bool {
-		return runs[i].id > runs[j].id
-	})
-	return runs, nil
+// sampleView holds how get_sample_response shows a body: narrowed to a gjson
+// path, and as its shape instead of its values.
+type sampleView struct {
+	path  string
+	shape bool
 }
 
 // formatSampleResponse renders a sample response as Markdown.
-func formatSampleResponse(step *archive.StepRecord, nodeName, runID string) string {
+func formatSampleResponse(step *archive.StepRecord, nodeName, runID string, view sampleView) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "# Sample Response: %s\n\n", nodeName)
@@ -448,13 +424,31 @@ func formatSampleResponse(step *archive.StepRecord, nodeName, runID string) stri
 		b.WriteString("\n**Note:** no successful response was found; this one failed. Run a plan that calls this operation successfully for a representative sample.\n")
 	}
 
-	if len(step.Response.Body) > 0 {
-		b.WriteString("\n## Response Body\n\n```json\n")
-		b.WriteString(truncateBody(step.Response.Body, 4000))
-		if !strings.HasSuffix(b.String(), "\n") {
-			b.WriteString("\n")
+	if body := step.Response.Body; len(body) > 0 {
+		if view.path != "" {
+			result := gjson.GetBytes(body, validate.NormalizeJSONPath(view.path))
+			if result.Exists() {
+				fmt.Fprintf(&b, "**Path:** `%s`\n", view.path)
+				body = []byte(result.Raw)
+			} else {
+				fmt.Fprintf(&b, "\n**Path:** `%s` matches nothing in the response body.\n", view.path)
+				body = nil
+			}
 		}
-		b.WriteString("```\n")
+		switch {
+		case body == nil:
+		case view.shape:
+			b.WriteString("\n## Response Shape\n\nEach gjson path with its type, array size, how many objects hold the key when not all do, and a sample value.\n\n```\n")
+			b.WriteString(cutShape(archive.RenderShape(archive.Shape(body)), maxSampleShapeBytes))
+			b.WriteString("```\n")
+		default:
+			b.WriteString("\n## Response Body\n\n```json\n")
+			b.WriteString(truncateBody(body, 4000))
+			if !strings.HasSuffix(b.String(), "\n") {
+				b.WriteString("\n")
+			}
+			b.WriteString("```\n")
+		}
 	}
 
 	if len(step.Outputs) > 0 {
@@ -476,6 +470,21 @@ func formatSampleResponse(step *archive.StepRecord, nodeName, runID string) stri
 	}
 
 	return b.String()
+}
+
+// cutShape cuts rendered shape text after maxBytes, at a line boundary.
+func cutShape(text string, maxBytes int) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	cut := text[:maxBytes]
+	if i := strings.LastIndexByte(cut, '\n'); i >= 0 {
+		cut = cut[:i+1]
+	}
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + "... (truncated)\n"
 }
 
 // formatNoArchiveFallback returns helpful information when no sample response
@@ -525,26 +534,26 @@ func (s *Server) formatNoArchiveFallback(nodeName string, node *graph.Node) stri
 	return b.String()
 }
 
-// loadArchive loads an archive from the archive directory by run ID.
+// loadArchive loads a run's archive from the archive directory: by run ID, by
+// batch ID and run ID joined by a slash, or latest.
 func loadArchive(archiveDir, runID string) (*archive.Archive, error) {
-	// A run ID is a directory name; anything else could read a file outside the
-	// archive directory.
-	if err := archive.CheckDirName(runID); err != nil {
-		return nil, fmt.Errorf("archive %q not found: %v", runID, err)
+	_, a, err := loadRun(archiveDir, runID)
+	return a, err
+}
+
+// loadRun resolves runID with archive.FindRun, which never leaves the archive
+// directory, and reads the run's archive.
+func loadRun(archiveDir, runID string) (archive.RunRef, *archive.Archive, error) {
+	run, err := archive.FindRun(archiveDir, runID)
+	if errors.Is(err, archive.ErrRunNotFound) {
+		return run, nil, fmt.Errorf("archive %q not found", runID)
 	}
-	archivePath := filepath.Join(archiveDir, runID, "archive.json")
-	// A run inside a batch lives at batch-*/<runID>/archive.json.
-	if _, err := os.Stat(archivePath); errors.Is(err, os.ErrNotExist) && !strings.ContainsAny(runID, `/\*?[`) {
-		if matches, _ := filepath.Glob(filepath.Join(archiveDir, "batch-*", runID, "archive.json")); len(matches) > 0 {
-			archivePath = matches[0]
-		}
-	}
-	a, err := archive.Read(archivePath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("archive %q not found", runID)
-		}
-		return nil, fmt.Errorf("reading archive: %v", err)
+		return run, nil, fmt.Errorf("reading archive: %v", err)
 	}
-	return a, nil
+	a, err := archive.Read(run.ArchivePath)
+	if err != nil {
+		return run, nil, fmt.Errorf("reading archive: %v", err)
+	}
+	return run, a, nil
 }

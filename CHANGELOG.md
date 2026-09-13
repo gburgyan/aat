@@ -23,6 +23,22 @@ the graph and plan formats may still change before 1.0.
   which it sends as one `Cookie` header. Body and response properties from `allOf` branches become inputs and
   outputs, and an OpenAPI 3.1 type list such as `["null", integer]` maps to its non-null type. The MCP server's
   operation search lists operations of every method too.
+- `aat run show <run>` prints what an archive recorded, without a browser.
+  - Without `--step`, it lists the steps with their node, HTTP status, result, duration, and output names, then the
+    verification and cleanup steps.
+  - `--step` shows one step. `--request`, `--response`, `--inputs`, and `--outputs` print that part as JSON.
+  - `--path` narrows the part with a gjson path.
+  - `--shape` prints the part's structure: each path with its type, array sizes, how many objects hold a key, and a
+    sample value.
+  - The run is `latest` (runs inside batches included), a run ID, a batch ID and run ID joined by a slash, or a path
+    to a run directory, an archive file, or an `.aar` export.
+- The MCP server's `get_sample_response` takes `path` and `shape`, as `aat run show` does.
+  - Its `run_id` accepts `latest` and a batch ID with a run ID, and finds runs inside saved batches.
+  - The same goes for `inspect_archive`, `analyze_failure`, and `diff_archives`.
+- The AI assistant primer is published as raw Markdown, for tools that fetch pages.
+  - `llms-full.txt` at the docs site's root holds the whole primer, and `llms.txt` indexes it and the reference pages.
+  - `aat docs primer` prints the same primer from the binary, in the version that matches it.
+  - The primer links to docs pages by URL, so its links also work outside the site.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
@@ -57,12 +73,30 @@ the graph and plan formats may still change before 1.0.
 - Cleanup step IDs are unique within a run: a node's second cleanup step is `deleteCart_2` in archives and `--json`
   output, as the web UI already named it. Cleanup responses are checked against the graph's error detection rules.
   A flagged response records `responseBodyError` and ends its chain; the run outcome is unchanged.
+- **Breaking:** `aat run plan --dump-state` redacts credentials by default, as run archives do.
+  - Credential headers such as `Authorization` and `X-API-Key` read `[REDACTED]`, at the top level and in every step.
+  - Known secrets are replaced wherever they appear, and the export gains `"redacted": true`.
+  - `--dump-state-secrets` keeps live credentials, for a harness that sends requests as the run's session. It warns
+    on stderr when the dump goes to stdout, and it is an error without `--dump-state`.
+  - A harness that reads `auth.headers` to send requests needs the new flag.
+- Docs: the AI assistant primer covers more ground:
+  - layers and batches
+  - step value forms: pools, literal lists, and `{}`
+  - expressions and assertion details
+  - retries and selection ties
+  - Lua transforms, and reading results with `aat run show`
+- Docs: three pages disagreed with the code and are corrected:
+  - `plans.md` no longer says `{}` skips graph defaults for required inputs.
+  - `value-flow.md` says an inline `min` or `max` can use `field` alone, and how ties break.
+  - `validation.md` no longer claims plan validation checks assertion types.
 
 ### Fixed
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,
   and no longer writes a node-level `name:` line.
+- `aat run plan` and `aat run batch` redact the access token they authenticated with, such as an OAuth2 token,
+  wherever it appears in an archive. Before, it was masked only in credential headers.
 
 ## [0.1.0] - 2026-09-12
 

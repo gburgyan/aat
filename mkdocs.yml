@@ -41,6 +41,14 @@ theme:
 plugins:
   - search
 
+# Copies the AI assistant primer (internal/primer/llms.md, which llms.md includes) to the site root as llms-full.txt.
+hooks:
+  - docs/hooks/llms_txt.py
+
+# The primer's source is outside docs_dir, so `mkdocs serve` watches it too.
+watch:
+  - internal/primer
+
 markdown_extensions:
   - admonition
   - attr_list

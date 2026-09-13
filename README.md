@@ -76,7 +76,7 @@ Examples against real APIs (Duffel flight booking, GitHub, Stripe) are next on t
 | **Graph, not scripts.** Operations, data flow, ordering, and cleanup live in YAML once; plans list steps. | **Long chains.** Values flow between steps, retries follow error categories, verification runs after the flow, and cleanup unwinds what was created. |
 | **Layers → matrix.** `--layer-group` runs every plan across every layer permutation and skips permutations that would send identical requests. | **Multi-environment.** Named environments share a base through `extends` and `vars`, and single operations can route to another host with other credentials. |
 | **Archives with a decision trail.** Every request, response, resolved value, retry, and assertion is recorded, with secrets redacted, and browsable in the web UI. | **CI-native.** Exit codes 0/1/2/130, `--json`, JUnit XML via `tools/aat-to-junit.py`, and a Docker image. |
-| **Checkpoints.** `--stop-after` keeps resources alive and `--dump-state` hands their IDs and credentials to another tool. | **Depth testing.** `expectFailure`, `mutations`, `rawBody`, and overlay files (per-run input values and expected failures) turn happy paths into negative tests. |
+| **Checkpoints.** `--stop-after` keeps resources alive and `--dump-state` hands their IDs to another tool, with the session's credentials on request. | **Depth testing.** `expectFailure`, `mutations`, `rawBody`, and overlay files (per-run input values and expected failures) turn happy paths into negative tests. |
 | **From OpenAPI and back.** `aat generate` scaffolds from a spec; `aat validate --strict` and `--oas-validate strict` hold the graph and every exchange to it; `aat docs generate` writes Markdown. | **AI where it helps.** The MCP server teaches AI coding tools your API, and `aat prompt` can draft a plan; see [AI tools and MCP](#ai-tools-and-mcp). |
 
 <img src="https://raw.githubusercontent.com/gburgyan/aat/main/docs/user/assets/demo-batch.gif" alt="aat run batch with two layer groups and --parallel 4: the dedup list, four progress bars updating in place, and Batch: 27/63 PASSED, 36 SKIPPED" width="820">
@@ -235,6 +235,7 @@ Release binaries are not notarized. If macOS blocks one you downloaded with a br
 |---------|--------------|
 | `aat run plan <name>` | Run one plan or recipe |
 | `aat run batch [dir]` | Run every plan, optionally across layer groups and in parallel |
+| `aat run show <run>` | Print a run's steps, or one step's request, response, inputs, outputs, or response shape |
 | `aat run clean` | Delete old, unsaved run archives |
 | `aat run rebuild-summaries` | Rebuild run summaries from the full archives |
 | `aat validate` | Check the graph, templates, workflows, layers, and plans (`--strict` fails on warnings) |
@@ -246,6 +247,7 @@ Release binaries are not notarized. If macOS blocks one you downloaded with a br
 | `aat mcp serve` | Serve the project to AI coding tools over MCP |
 | `aat generate --oas <spec>` | Scaffold a graph and templates from an OpenAPI spec |
 | `aat docs generate` | Write Markdown documentation from the graph |
+| `aat docs primer` | Print the primer AI coding assistants read, as Markdown |
 | `aat prompt "<text>"` | Draft a plan from a sentence (needs LLM configuration) |
 | `aat-sandbox serve` | Run the offline shop API and payments API |
 | `aat-sandbox init <dir>` | Extract the shop example project |

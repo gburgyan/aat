@@ -97,7 +97,7 @@ The JSON record every run writes: each request and response, how each input was 
 A post-step validation check that verifies response values meet expected conditions. [-> plans.md](plans.md)
 
 ### Checkpoint
-A run stopped after a named step with `--stop-after`, skipping cleanup and exporting live state (base URL, auth headers, outputs) with `--dump-state`. [-> checkpoints.md](checkpoints.md)
+A run stopped after a named step with `--stop-after`, skipping cleanup and exporting its state (base URLs, headers, and outputs, with credentials redacted unless requested) with `--dump-state`. [-> checkpoints.md](checkpoints.md)
 
 ### Cleanup Step
 A teardown step that runs after the plan completes, even on failure, to release resources. [-> plans.md](plans.md)

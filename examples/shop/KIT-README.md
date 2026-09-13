@@ -99,8 +99,8 @@ aat web view latest           # every request and response, with Copy as cURL
 ```
 
 After a run, `get_sample_response` returns the responses it recorded. To continue from live state in your
-own client, `aat run plan smoke --stop-after paymentCharge --dump-state state.json` leaves a paid order in
-place and writes its IDs and the bearer token to `state.json`.
+own client, `aat run plan smoke --stop-after paymentCharge --dump-state state.json --dump-state-secrets`
+leaves a paid order in place and writes its IDs and the live bearer token to `state.json`.
 
 | Plan | Flow |
 |------|------|
