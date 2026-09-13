@@ -35,11 +35,11 @@ func TestRunShow_StepWarnings(t *testing.T) {
 	require.NoError(t, err)
 
 	var text bytes.Buffer
-	require.NoError(t, showStep(&text, step, id, cleanup, false))
+	require.NoError(t, showStep(&text, step, id, cleanup, showText))
 	assert.Contains(t, text.String(), "warnings:\n  "+tieWarning)
 
 	var js bytes.Buffer
-	require.NoError(t, showStep(&js, step, id, cleanup, true))
+	require.NoError(t, showStep(&js, step, id, cleanup, showJSON))
 	var view shownStep
 	require.NoError(t, json.Unmarshal(js.Bytes(), &view))
 	require.Len(t, view.Warnings, 1)

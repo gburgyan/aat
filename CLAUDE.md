@@ -277,7 +277,7 @@ Beyond `prompt` (shown above), the CLI provides:
 # Execute plans
 aat run plan <name-or-path>            # single plan (positional arg)
 aat run batch [directory]              # all plans, or filtered by subdirectory
-aat run show <run|latest|path> [--step ID|NODE] [--request|--response|--inputs|--outputs|--resolutions] [--path GJSON] [--shape] [--json]   # read an archive
+aat run show <run|latest|path> [--step ID|NODE] [--request|--response|--inputs|--outputs|--resolutions] [--path GJSON] [--shape] [--json] [--compact]   # read an archive
 
 # Validation (unified — bare validates everything, subcommands focus on one scope)
 aat validate [--manifest FILE] [--strict]

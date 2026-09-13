@@ -46,13 +46,13 @@ func TestRunShow_CleanupSkipped(t *testing.T) {
 	}
 
 	var text bytes.Buffer
-	require.NoError(t, showRun(&text, a, shownRun{}, false))
+	require.NoError(t, showRun(&text, a, shownRun{}, showText))
 	assert.Contains(t, text.String(), "\ncleanup skipped:\n")
 	assert.Regexp(t, `voidPayment\s+createPayment\s+released by capturePayment\n`, text.String())
 	assert.Regexp(t, `cancelOrder\s+createOrder\s+when status == "open" is false\n`, text.String())
 
 	var js bytes.Buffer
-	require.NoError(t, showRun(&js, a, shownRun{}, true))
+	require.NoError(t, showRun(&js, a, shownRun{}, showJSON))
 	var list shownRunList
 	require.NoError(t, json.Unmarshal(js.Bytes(), &list))
 	assert.Equal(t, []CleanupSkipSummary{

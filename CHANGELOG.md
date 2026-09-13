@@ -43,6 +43,9 @@ the graph and plan formats may still change before 1.0.
     for the input that failed. That covers an input that can't be resolved, a missing adapter, a request that can't be
     built, and a send error. Before, such a step recorded none.
   - The MCP server's `inspect_archive` shows each input's selection and error.
+- `aat run show --compact` prints JSON on one line: a step part, with or without `--path`, and with `--json` the step
+  list, the step, or the shape. `--compact` where the output is text, such as `--shape` without `--json`, is an
+  error.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
 - `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,

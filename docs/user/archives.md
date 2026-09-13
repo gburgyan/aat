@@ -203,6 +203,7 @@ These flags print one part of the step instead:
 | `--shape` | The part's structure instead of its values. Without a part flag, the response body's |
 | `--max-bytes N` | Cut a printed part after `N` bytes, 65536 by default, with a note on stderr; `0` prints everything |
 | `--json` | The step list or the step as JSON with `snake_case` keys, or the shape as a JSON array. A step's JSON includes `resolutions` and `warnings` |
+| `--compact` | JSON on one line, for a script or `jq`: a part, with or without `--path`, and with `--json` the step list, the step, or the shape. With `--shape`, or without a part, it needs `--json` |
 
 `--shape` is the way to learn a large response. It prints one line per path: the path's type, an array's item count, how many objects hold a key when not all of them do, and a sample value. The elements of an array are merged, so a key that only some elements hold, or a value that is sometimes `null` (`string|null`), shows up. Each path works as an extract rule in a [template](templates.md) and as `--path`:
 

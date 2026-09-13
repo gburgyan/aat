@@ -59,7 +59,7 @@ func TestRunShow_StepShowsInputSources(t *testing.T) {
 	require.NoError(t, err)
 
 	var b bytes.Buffer
-	require.NoError(t, showStep(&b, step, id, cleanup, false))
+	require.NoError(t, showStep(&b, step, id, cleanup, showText))
 	text := b.String()
 	assert.Regexp(t, `\n  currency\s+"USD"\s+plan_from listProducts\.currency\n`, text)
 	assert.Regexp(t, `\n  quantity\s+-\s+error required input has no value\n`, text)
@@ -72,7 +72,7 @@ func TestRunShow_StepJSONIncludesResolutions(t *testing.T) {
 	require.NoError(t, err)
 
 	var b bytes.Buffer
-	require.NoError(t, showStep(&b, step, id, cleanup, true))
+	require.NoError(t, showStep(&b, step, id, cleanup, showJSON))
 	var view shownStep
 	require.NoError(t, json.Unmarshal(b.Bytes(), &view))
 	require.Len(t, view.Resolutions, 3)

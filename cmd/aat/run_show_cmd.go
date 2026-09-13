@@ -85,6 +85,7 @@ func init() {
 	flags.Bool("shape", false, "print the part's structure instead of its values: each path with its type, array sizes, and a sample")
 	flags.Int("max-bytes", defaultShowMaxBytes, "cut a printed part after this many bytes (0 for no limit)")
 	flags.Bool("json", false, "print the step list or the step as JSON, or the shape as a JSON array")
+	flags.Bool("compact", false, "print JSON on one line: a step part, or with --json the step list, the step, or the shape")
 	runCmd.AddCommand(runShowCmd)
 }
 
@@ -95,7 +96,43 @@ type showOptions struct {
 	Path     string
 	Shape    bool
 	JSON     bool
+	Compact  bool // JSON on one line
 	MaxBytes int
+}
+
+// showFormat is how aat run show prints a step list or a step.
+type showFormat int
+
+const (
+	showText        showFormat = iota // aligned text
+	showJSON                          // indented JSON
+	showCompactJSON                   // JSON on one line
+)
+
+// format returns the format opts ask for a step list or a step.
+func (opts showOptions) format() showFormat {
+	switch {
+	case !opts.JSON:
+		return showText
+	case opts.Compact:
+		return showCompactJSON
+	default:
+		return showJSON
+	}
+}
+
+// checkCompact reports --compact used where aat run show prints text.
+func checkCompact(opts showOptions) error {
+	switch {
+	case !opts.Compact || opts.JSON:
+		return nil
+	case opts.Shape:
+		return errors.New("--compact --shape needs --json: the shape is text otherwise")
+	case opts.Part == "":
+		return errors.New("--compact needs --json, or a part flag such as --response: the step list and the step are text otherwise")
+	default:
+		return nil
+	}
 }
 
 // showOptionsFromFlags reads and checks the flags of aat run show.
@@ -106,6 +143,7 @@ func showOptionsFromFlags(cmd *cobra.Command) (showOptions, error) {
 	opts.Path, _ = flags.GetString("path")
 	opts.Shape, _ = flags.GetBool("shape")
 	opts.JSON, _ = flags.GetBool("json")
+	opts.Compact, _ = flags.GetBool("compact")
 	opts.MaxBytes, _ = flags.GetInt("max-bytes")
 	for _, part := range []string{"request", "response", "inputs", "outputs", "resolutions"} {
 		if set, _ := flags.GetBool(part); set {
@@ -124,6 +162,9 @@ func showOptionsFromFlags(cmd *cobra.Command) (showOptions, error) {
 	if opts.MaxBytes < 0 {
 		return opts, errors.New("--max-bytes must be 0 or more")
 	}
+	if err := checkCompact(opts); err != nil {
+		return opts, err
+	}
 	return opts, nil
 }
 
@@ -136,14 +177,14 @@ func runShowCommand(ref string, archiveDir func() (string, error), opts showOpti
 		return err
 	}
 	if opts.Step == "" {
-		return showRun(out, a, src, opts.JSON)
+		return showRun(out, a, src, opts.format())
 	}
 	step, id, cleanup, err := findShownStep(a, opts.Step)
 	if err != nil {
 		return err
 	}
 	if opts.Part == "" {
-		return showStep(out, step, id, cleanup, opts.JSON)
+		return showStep(out, step, id, cleanup, opts.format())
 	}
 	return showStepPart(out, errOut, step, id, opts)
 }
@@ -324,10 +365,10 @@ type shownRunList struct {
 }
 
 // showRun prints a run's step list.
-func showRun(out io.Writer, a *archive.Archive, src shownRun, asJSON bool) error {
+func showRun(out io.Writer, a *archive.Archive, src shownRun, format showFormat) error {
 	list := buildShownRunList(a, src)
-	if asJSON {
-		return writeShowJSON(out, list)
+	if format != showText {
+		return writeShowJSON(out, list, format == showCompactJSON)
 	}
 
 	var b strings.Builder
@@ -527,10 +568,10 @@ type shownAssertion struct {
 
 // showStep prints one step: where its request went, what came back, its
 // inputs and outputs, and the sizes of its bodies.
-func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup, asJSON bool) error {
+func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup bool, format showFormat) error {
 	view := buildShownStep(step, id, cleanup)
-	if asJSON {
-		return writeShowJSON(out, view)
+	if format != showText {
+		return writeShowJSON(out, view, format == showCompactJSON)
 	}
 
 	var b strings.Builder
@@ -769,7 +810,12 @@ func showStepPart(out, errOut io.Writer, step *archive.StepRecord, id string, op
 		if lines == nil {
 			lines = []archive.ShapeLine{}
 		}
-		if text, err = json.MarshalIndent(lines, "", "  "); err != nil {
+		if opts.Compact {
+			text, err = json.Marshal(lines)
+		} else {
+			text, err = json.MarshalIndent(lines, "", "  ")
+		}
+		if err != nil {
 			return err
 		}
 		text = append(text, '\n')
@@ -779,8 +825,13 @@ func showStepPart(out, errOut io.Writer, step *archive.StepRecord, id string, op
 			text = []byte("(no paths: the value is an empty object)\n")
 		}
 	default:
+		// A body that isn't JSON is printed as it is.
 		var buf bytes.Buffer
-		if json.Indent(&buf, doc, "", "  ") != nil {
+		format := func() error { return json.Indent(&buf, doc, "", "  ") }
+		if opts.Compact {
+			format = func() error { return json.Compact(&buf, doc) }
+		}
+		if format() != nil {
 			buf.Reset()
 			buf.Write(doc)
 		}
@@ -870,11 +921,13 @@ func writeCapped(out, errOut io.Writer, text []byte, maxBytes int) error {
 	return nil
 }
 
-// writeShowJSON writes v as indented JSON, leaving characters such as & in URLs
-// unescaped.
-func writeShowJSON(out io.Writer, v any) error {
+// writeShowJSON writes v as JSON, indented or on one line, leaving characters
+// such as & in URLs unescaped.
+func writeShowJSON(out io.Writer, v any, compact bool) error {
 	enc := json.NewEncoder(out)
-	enc.SetIndent("", "  ")
+	if !compact {
+		enc.SetIndent("", "  ")
+	}
 	enc.SetEscapeHTML(false)
 	return enc.Encode(v)
 }
