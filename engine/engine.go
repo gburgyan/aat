@@ -250,7 +250,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				// Expected failure occurred — this is a PASS.
 				// Do NOT store outputs (error responses have no useful outputs).
 				// Do NOT push cleanup (no resource was created).
-				// Mechanical assertions still ran in executeStep; check them.
+				// Mechanical assertions still ran in executeStepWith; check them.
 				if stepResult.Validation != nil && !stepResult.Validation.Passed {
 					outcome = OutcomeFailed
 					if !e.ContinueOnAssertionFailure {
@@ -663,35 +663,61 @@ func fillValuesByOutputName(step *plan.Step, node *graph.Node, state *RunState) 
 	}
 }
 
-func (e *Engine) executeStep(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
+// stepInputs holds the inputs resolved for a step, so that every attempt of a
+// retried step sends the same values.
+type stepInputs struct {
+	resolved    bool
+	inputs      map[string]any
+	selections  []SelectionDecision
+	resolutions []ValueResolution
+}
+
+// executeStepWith executes one attempt of a step. When prepared already holds
+// the step's inputs, they are used as they are: a retry resends what the first
+// attempt sent, including pool picks and dates. Otherwise the inputs are
+// resolved, and a successful resolution fills prepared when it is non-nil. A
+// failed resolution is not kept, so the next attempt resolves again.
+func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, prepared *stepInputs) StepResult {
 	start := time.Now()
 	sid := step.StepID()
 
-	// Construct ResolveContext from engine fields
-	rctx := e.buildResolveContext(node)
+	var inputs map[string]any
+	var selections []SelectionDecision
+	var resolutions []ValueResolution
+	if prepared != nil && prepared.resolved {
+		inputs, selections, resolutions = prepared.inputs, prepared.selections, prepared.resolutions
+	} else {
+		// Construct ResolveContext from engine fields
+		rctx := e.buildResolveContext(node)
 
-	// Resolve inputs
-	inputs, selections, resolutions, err := ResolveInputsWithContext(ctx, step, node, e.graph, state, rctx)
-	if err != nil {
-		return StepResult{
-			StepID:    sid,
-			Node:      step.Node,
-			Error:     fmt.Errorf("resolving inputs: %w", err),
-			StartTime: start,
-			Duration:  time.Since(start),
+		// Resolve inputs
+		var err error
+		inputs, selections, resolutions, err = ResolveInputsWithContext(ctx, step, node, e.graph, state, rctx)
+		if err != nil {
+			return StepResult{
+				StepID:    sid,
+				Node:      step.Node,
+				Error:     fmt.Errorf("resolving inputs: %w", err),
+				StartTime: start,
+				Duration:  time.Since(start),
+			}
+		}
+
+		// Overlay value overrides win over plan/graph-resolved values. Each
+		// replaces the input's resolution record, so the archive shows what was
+		// sent.
+		overlayValues, _ := e.router.ResolveValueOverride(node.Name)
+		for k, v := range overlayValues {
+			inputs[k] = v
+			resolutions = recordOverrideValue(resolutions, k, v)
+		}
+
+		// Store resolved inputs so later steps can reference them via fromInput
+		state.StoreInputs(sid, inputs)
+		if prepared != nil {
+			*prepared = stepInputs{resolved: true, inputs: inputs, selections: selections, resolutions: resolutions}
 		}
 	}
-
-	// Overlay value overrides win over plan/graph-resolved values. Each replaces
-	// the input's resolution record, so the archive shows what was sent.
-	overlayValues, _ := e.router.ResolveValueOverride(node.Name)
-	for k, v := range overlayValues {
-		inputs[k] = v
-		resolutions = recordOverrideValue(resolutions, k, v)
-	}
-
-	// Store resolved inputs so later steps can reference them via fromInput
-	state.StoreInputs(sid, inputs)
 
 	// Get adapter
 	adp, err := e.registry.Get(node.Adapter)

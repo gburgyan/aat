@@ -111,6 +111,9 @@ the graph and plan formats may still change before 1.0.
   or an array of objects, gets a warning to write its keys by hand as bracketed pairs.
 - A run that stops on a step's error names the step, as in `step "addSocks" (addItem): executing HTTP request: …`, so
   the `aat:` line and the `--json` error say which step failed.
+- A retried step sends the same inputs on every attempt. Its values are resolved once, before the first attempt, so a
+  random pool pick, a `today` date, and an overlay value no longer change between attempts. A plan-level `--retries`
+  rerun still resolves them again.
 
 ### Fixed
 - OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another

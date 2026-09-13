@@ -501,6 +501,8 @@ When `on` is omitted, the default retries `transient`, `timeout`, and `server` f
 - **Past 60 seconds, the retries stop.** The step fails with the action `failed_fast`, and the error classification's detail says how long the server asked for.
 - **Every wait counts toward the step's duration,** and Ctrl+C interrupts it.
 
+**Every attempt sends the same inputs.** A step's values are resolved once, before its first attempt, so a retry resends the same request: a pool pick, a date, or an overlay value doesn't change between attempts. A plan-level `--retries` rerun starts the plan again and resolves them anew.
+
 To keep a rate-limited API from answering 429 in the first place, set [`settings.minRequestInterval`](environments.md#request-pacing).
 
 #### Negative Testing (expectFailure)
