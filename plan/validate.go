@@ -63,6 +63,24 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("plan validation failed:\n  - %s", strings.Join(distinctErrors(e.Errors), "\n  - "))
 }
 
+// onTieError describes what is wrong with a selection's onTie, or returns "".
+// onTie takes first or fail, and only the min and max strategies can tie.
+func onTieError(onTie, strategy string) string {
+	switch {
+	case onTie == "":
+		return ""
+	case onTie != "first" && onTie != "fail":
+		return fmt.Sprintf("unknown onTie %q (use first or fail)", onTie)
+	case strategy != "min" && strategy != "max":
+		if strategy == "" {
+			strategy = "first"
+		}
+		return fmt.Sprintf("onTie applies only to the min and max strategies, not %q", strategy)
+	default:
+		return ""
+	}
+}
+
 // distinctErrors returns the messages without repeats, keeping the first
 // occurrence of each.
 func distinctErrors(errs []string) []string {
@@ -417,6 +435,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 					errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires sortField for selection %q", i, sid, strategy, selName))
 				}
 			}
+			if msg := onTieError(sel.OnTie, strategy); msg != "" {
+				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q: %s", i, sid, selName, msg))
+			}
 			if strategy == "match" && sel.Filter == "" {
 				errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for selection %q", i, sid, selName))
 			}
@@ -469,6 +490,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 					if sel.Field == "" && sel.SortField == "" {
 						errs = append(errs, fmt.Sprintf("step %d (%s): %s strategy requires field or sortField for %q", i, sid, sel.Strategy, name))
 					}
+				}
+				if msg := onTieError(sel.OnTie, sel.Strategy); msg != "" {
+					errs = append(errs, fmt.Sprintf("step %d (%s): select for %q: %s", i, sid, name, msg))
 				}
 				if sel.Strategy == "match" && sel.Filter == "" {
 					errs = append(errs, fmt.Sprintf("step %d (%s): match strategy requires filter for %q", i, sid, name))

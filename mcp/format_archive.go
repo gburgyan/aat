@@ -161,9 +161,19 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 			if sel.FilterExpr != "" {
 				fmt.Fprintf(&b, ", filter: `%s` → %d", sel.FilterExpr, sel.FilteredSize)
 			}
+			if sel.Ties > 1 {
+				fmt.Fprintf(&b, ", %d tie for %s %s", sel.Ties, sel.Strategy, sel.SortField)
+			}
 			b.WriteString(")\n")
 		}
 		b.WriteString("\n")
+		if warnings := archive.SelectionTieWarnings(s.Selections); len(warnings) > 0 {
+			b.WriteString("**Warnings:**\n\n")
+			for _, w := range warnings {
+				fmt.Fprintf(&b, "- %s\n", w)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	// Value resolutions

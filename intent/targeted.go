@@ -33,6 +33,7 @@ type TargetedSelection struct {
 	Filter    string `json:"filter,omitempty"`
 	SortField string `json:"sortField,omitempty"`
 	Index     int    `json:"index,omitempty"`
+	OnTie     string `json:"onTie,omitempty"`
 }
 
 // TargetedAssertion represents a single mechanical assertion from the LLM.
@@ -444,6 +445,9 @@ func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet
 				if sel.SortField != "" {
 					existing.SortField = sel.SortField
 				}
+				if sel.OnTie != "" {
+					existing.OnTie = sel.OnTie
+				}
 				if sel.Index != 0 {
 					existing.Index = sel.Index
 				}
@@ -462,6 +466,9 @@ func applyTargetedResponse(skeleton *plan.Plan, resp *TargetedResponse, unfedSet
 			}
 			if sel.SortField != "" {
 				sv.Select.SortField = sel.SortField
+			}
+			if sel.OnTie != "" {
+				sv.Select.OnTie = sel.OnTie
 			}
 			if sel.Index != 0 {
 				sv.Select.Index = sel.Index

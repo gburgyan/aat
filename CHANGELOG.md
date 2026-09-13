@@ -28,6 +28,13 @@ the graph and plan formats may still change before 1.0.
     and in the MCP server's `inspect_archive`.
   - `aat validate` checks that `releasedBy` names other nodes and that `when` parses and names the node's outputs.
     `aat docs generate` adds When and Released By columns when a pairing uses them.
+- A `min` or `max` selection whose candidates tie prints a warning under its step, as in
+  `warning: selection "cheapest": 3 of 8 elements from listProducts.products tie for min price at 19.99; picked index 0`.
+  - The warning is also in the step's `warnings` in `--json`, in `aat run show --step`, and in the MCP server's
+    `inspect_archive`.
+  - Archive selection records gain `field`, `sortField`, `sortValue`, `ties`, and `onTie`.
+  - `onTie: fail` on a selection fails the step on a tie instead, and `onTie: first` takes the first without a
+    warning. Plan validation accepts `onTie` only on `min` and `max`.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
 - `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,
@@ -167,6 +174,9 @@ the graph and plan formats may still change before 1.0.
 - The static OAS check no longer reports an input that the template sends only in request headers, such as an
   idempotency key, as missing from the operation's parameters and request body. The template names the header, and
   specs often leave such headers undeclared, so `aat validate --strict` failed on it.
+- Two inputs that pick from the same array with `min` or `max` by different fields no longer get the same element.
+  The selection cache left out the compared field, so the second input got the element chosen for the first. A
+  `match` selection's `filteredSize` is now the number of matching elements, not the array's size.
 - A request that times out says so, naming aat's 30-second request timeout, instead of giving only Go's
   `context deadline exceeded (Client.Timeout exceeded while awaiting headers)`. The limit is named only when the whole
   limit passed, so a shorter timeout or an interrupted run isn't blamed on it.

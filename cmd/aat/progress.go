@@ -97,6 +97,9 @@ func writeStepResult(w io.Writer, lead string, index, total int, result engine.S
 		for _, msg := range failedAssertions(result.Validation) {
 			_, _ = fmt.Fprintf(w, "%s%s\n", indent, colorize(msg, colorYellow, color))
 		}
+		for _, msg := range archive.SelectionTieWarnings(engine.SelectionRecords(result.Selections)) {
+			_, _ = fmt.Fprintf(w, "%s%s\n", indent, colorize("warning: "+msg, colorYellow, color))
+		}
 	default:
 		_, _ = fmt.Fprintf(w, "%s (no response)\n", prefix)
 	}

@@ -653,7 +653,7 @@ func TestParse_UnknownKeys(t *testing.T) {
 		{
 			name: "removed selection prompt",
 			yaml: "execution:\n  steps:\n    - node: a\n      values:\n        id:\n          from: b.items\n          select: {strategy: min, prompt: cheapest}\n",
-			want: `line 7: unknown key "prompt" in selection config (valid keys: field, filter, index, sortField, strategy)`,
+			want: `line 7: unknown key "prompt" in selection config (valid keys: field, filter, index, onTie, sortField, strategy)`,
 		},
 		{
 			name: "removed semantic assertions",

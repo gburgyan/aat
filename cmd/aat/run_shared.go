@@ -98,6 +98,9 @@ type StepSummary struct {
 	// WhenError, on a cleanup step, says why its pairing's when condition could
 	// not be evaluated. The cleanup ran anyway.
 	WhenError string `json:"when_error,omitempty"`
+	// Warnings are problems that didn't fail the step, such as a min or max
+	// selection whose candidates tied.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // CleanupSkipSummary is a registered cleanup that did not run because it was
@@ -255,6 +258,7 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		Retries:    step.RetryCount,
 		CleanupFor: step.CleanupFor,
 		WhenError:  step.WhenError,
+		Warnings:   archive.SelectionTieWarnings(engine.SelectionRecords(step.Selections)),
 	}
 	for _, c := range step.RetriedOn {
 		ss.RetriedOn = append(ss.RetriedOn, c.String())

@@ -133,6 +133,10 @@ type StepSelection struct {
 	Filter    string `yaml:"filter,omitempty" json:"filter,omitempty"`
 	Index     int    `yaml:"index,omitempty" json:"index,omitempty"`
 	SortField string `yaml:"sortField,omitempty" json:"sortField,omitempty"`
+	// OnTie, for min and max, says what to do when several elements share the
+	// chosen value: "first" takes the first of them without a warning, and
+	// "fail" fails the step. Empty takes the first and warns.
+	OnTie string `yaml:"onTie,omitempty" json:"onTie,omitempty"`
 }
 
 // StepValue represents a value assignment for a step input.
@@ -174,6 +178,7 @@ type SelectionConfig struct {
 	Filter    string `yaml:"filter,omitempty" json:"filter,omitempty"`
 	Index     int    `yaml:"index,omitempty" json:"index,omitempty"`
 	SortField string `yaml:"sortField,omitempty" json:"sortField,omitempty"` // For min/max: field to compare by
+	OnTie     string `yaml:"onTie,omitempty" json:"onTie,omitempty"`         // For min/max: "first" or "fail" when elements tie (see StepSelection)
 }
 
 // SelectionStrategies returns the selection strategy names the engine

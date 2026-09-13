@@ -162,6 +162,14 @@ type SelectionDecision struct {
 	Strategy      string
 	SelectedIndex int
 	SelectionName string // non-empty for named selections
+	Field         string // for an inline select: the field taken from the chosen element
+	// SortField, SortValue, and Ties describe a min or max pick: the field
+	// compared, the chosen value, and how many elements share it, the chosen
+	// one included.
+	SortField string
+	SortValue *float64
+	Ties      int
+	OnTie     string // the selection's onTie: "", "first", or "fail"
 }
 
 // ValueResolution records how a single input was resolved.

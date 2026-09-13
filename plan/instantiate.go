@@ -227,6 +227,7 @@ func inputDefaultToStepValue(d *graph.InputDefault) StepValue {
 			Filter:    d.Select.Filter,
 			Index:     d.Select.Index,
 			SortField: d.Select.SortField,
+			OnTie:     d.Select.OnTie,
 		}
 	}
 

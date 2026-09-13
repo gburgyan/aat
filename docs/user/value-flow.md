@@ -123,7 +123,24 @@ The `fromSelection` syntax is `selectionName.fieldName`. If the field part is om
 
 For `min` and `max`, the `sortField` must resolve to a number or to a string that holds one, such as `"99.10"`: APIs often send prices and totals as decimal strings, and they compare by value. Any other value fails the selection. The `field` parameter (if set) determines which field to extract from the winning element. A named selection needs `sortField`.
 
-When several elements share the smallest or largest value, the first of them in array order, after the `filter`, wins. If a tie would pick the wrong element, add a `filter` that narrows the candidates.
+When several elements share the smallest or largest value, the first of them in array order, after the `filter`, wins, and the step prints a warning:
+
+```
+  [3/5] addItem   201  45ms
+        warning: selection "cheapest": 3 of 8 elements from listProducts.products tie for min price at 19.99; picked index 0 (add a filter to choose, or onTie: first to accept)
+```
+
+Where else the tie appears:
+- **Warning:** in the step's `warnings` in `--json`, and in `aat run show --step`.
+- **Archive:** the selection record carries `ties` and `sortValue`.
+
+If a tie would pick the wrong element, add a `filter` that narrows the candidates. `onTie` on the selection says what a tie does:
+- `first` takes the first of the tied elements without a warning.
+- `fail` fails the step.
+
+`onTie` applies only to `min` and `max`.
+
+Selections from the same array share one pick when they use the same strategy, `filter`, `index`, and compared field. That way, several inputs can read fields of the same chosen element. A pick by another field is made separately.
 
 A `filter` does not convert strings: comparing a string field with a number fails. Filter such fields with string equality, or let `min` and `max` do the numeric comparison.
 

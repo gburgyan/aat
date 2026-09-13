@@ -160,6 +160,7 @@ func recipeOverridesToTargetedResponse(ro plan.RecipeOverrides) *TargetedRespons
 
 	for k, sel := range ro.Selections {
 		tr.Selections[k] = TargetedSelection{
+			OnTie:     sel.OnTie,
 			Strategy:  sel.Strategy,
 			Filter:    sel.Filter,
 			SortField: sel.SortField,
@@ -219,6 +220,7 @@ func TargetedResponseToRecipeOverrides(tr *TargetedResponse) plan.RecipeOverride
 
 	for k, sel := range tr.Selections {
 		ro.Selections[k] = plan.RecipeSelectionOverride{
+			OnTie:     sel.OnTie,
 			Strategy:  sel.Strategy,
 			Filter:    sel.Filter,
 			SortField: sel.SortField,

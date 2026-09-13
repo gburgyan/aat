@@ -145,6 +145,7 @@ Available fields:
 | `filter` | Predicate expression to narrow the array before selection |
 | `sortField` | Field name for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | Element index for `index` strategy |
+| `onTie` | For `min`/`max`, what a tie does: `first` takes the first of the elements that share the value without a warning, and `fail` fails the step |
 
 ### Assertion Overrides
 
@@ -403,6 +404,7 @@ Named selections ensure coordinated multi-field extraction — all three values 
 | `filter` | string | no | Predicate expression to narrow the array |
 | `sortField` | string | no | Field for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | int | no | Element index for `index` strategy |
+| `onTie` | string | no | For `min`/`max`, what a tie does: `first` takes the first tied element without a warning, and `fail` fails the step. Without it, the first is taken and the step warns |
 
 See [Value Resolution: Array Selection](value-flow.md#array-selection) for strategy details.
 

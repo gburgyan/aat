@@ -182,6 +182,14 @@ type SelectionRecord struct {
 	Strategy      string `json:"strategy" redact:"-"`
 	SelectedIndex int    `json:"selectedIndex"`
 	SelectionName string `json:"selectionName,omitempty" redact:"-"`
+	Field         string `json:"field,omitempty" redact:"-"`
+	// SortField, SortValue, and Ties describe a min or max pick: the field
+	// compared, the chosen value, and how many elements share it, the chosen
+	// one included.
+	SortField string   `json:"sortField,omitempty" redact:"-"`
+	SortValue *float64 `json:"sortValue,omitempty"`
+	Ties      int      `json:"ties,omitempty"`
+	OnTie     string   `json:"onTie,omitempty" redact:"-"`
 }
 
 // ErrorClassRecord captures the error classification for a failed step.

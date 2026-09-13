@@ -90,7 +90,7 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		rec.Validation = convertValidation(s.Validation)
 	}
 	if len(s.Selections) > 0 {
-		rec.Selections = convertSelections(s.Selections)
+		rec.Selections = SelectionRecords(s.Selections)
 	}
 	if len(s.Resolutions) > 0 {
 		rec.Resolutions = convertResolutions(s.Resolutions)
@@ -218,7 +218,9 @@ func convertValidation(v *validate.MechanicalResult) *archive.ValidationRecord {
 	return rec
 }
 
-func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
+// SelectionRecords converts a step's selection decisions to archive records,
+// for the archive and for tie warnings (see archive.SelectionTieWarnings).
+func SelectionRecords(sels []SelectionDecision) []archive.SelectionRecord {
 	records := make([]archive.SelectionRecord, len(sels))
 	for i, s := range sels {
 		records[i] = archive.SelectionRecord{
@@ -231,6 +233,11 @@ func convertSelections(sels []SelectionDecision) []archive.SelectionRecord {
 			Strategy:      s.Strategy,
 			SelectedIndex: s.SelectedIndex,
 			SelectionName: s.SelectionName,
+			Field:         s.Field,
+			SortField:     s.SortField,
+			SortValue:     s.SortValue,
+			Ties:          s.Ties,
+			OnTie:         s.OnTie,
 		}
 	}
 	return records

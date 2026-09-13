@@ -55,7 +55,8 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	var decisions []SelectionDecision
 	var resolutions []ValueResolution
 
-	// Dedup cache: keyed by "from|strategy|filter|index" → cached selectionResult
+	// Dedup cache: keyed by source, strategy, filter, index, and compared field
+	// (see dedupKey) → cached selectionResult
 	dedupCache := make(map[string]*selectionResult)
 
 	// Pre-resolve named selections: each selection yields a single element
@@ -114,23 +115,34 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	return inputs, decisions, resolutions, nil
 }
 
-// dedupKey builds a cache key for selection deduplication.
+// dedupKey builds a cache key for selection deduplication: the source, the
+// strategy, filter, and index, and for min and max the field they compare, so
+// two picks from one array share a result only when they would pick alike.
 func dedupKey(fromNode, fromField string, sel *plan.SelectionConfig) string {
 	if sel == nil {
-		return fmt.Sprintf("%s|%s|||", fromNode, fromField)
+		return fmt.Sprintf("%s|%s|||||", fromNode, fromField)
 	}
-	return fmt.Sprintf("%s|%s|%s|%s|%d", fromNode, fromField, sel.Strategy, sel.Filter, sel.Index)
+	compare := ""
+	if sel.Strategy == "min" || sel.Strategy == "max" {
+		compare = compareField(sel)
+	}
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%s", fromNode, fromField, sel.Strategy, sel.Filter, sel.Index, compare)
 }
 
 // namedSelectionEntry holds the result of resolving a named selection.
 type namedSelectionEntry struct {
-	element     any    // the full selected element
-	sourceNode  string // e.g. "searchFlights"
-	sourceField string // e.g. "catalogOfferings"
-	strategy    string
-	index       int
-	sourceSize  int
-	filterExpr  string
+	element      any    // the full selected element
+	sourceNode   string // e.g. "listProducts"
+	sourceField  string // e.g. "products"
+	strategy     string
+	index        int
+	sourceSize   int
+	filteredSize int
+	filterExpr   string
+	sortField    string   // for min and max
+	sortValue    *float64 // for min and max
+	ties         int      // for min and max
+	onTie        string
 }
 
 // resolveNamedSelection performs the array selection for a named StepSelection.
@@ -157,6 +169,7 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		Filter:    sel.Filter,
 		Index:     sel.Index,
 		SortField: sel.SortField,
+		OnTie:     sel.OnTie,
 	}
 
 	// Resolve elementField names in SortField
@@ -175,14 +188,27 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		dedupCache[key] = result
 	}
 
+	if err := tieError(result, sel.OnTie, strategy, sel.SortField); err != nil {
+		return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
+	}
+	sortField := ""
+	if strategy == "min" || strategy == "max" {
+		sortField = sel.SortField
+	}
+
 	entry := &namedSelectionEntry{
-		element:     result.element,
-		sourceNode:  fromNode,
-		sourceField: fromField,
-		strategy:    strategy,
-		index:       result.index,
-		sourceSize:  len(arr),
-		filterExpr:  sel.Filter,
+		element:      result.element,
+		sourceNode:   fromNode,
+		sourceField:  fromField,
+		strategy:     strategy,
+		index:        result.index,
+		sourceSize:   len(arr),
+		filteredSize: result.filteredSize,
+		filterExpr:   sel.Filter,
+		sortField:    sortField,
+		sortValue:    result.sortValue,
+		ties:         result.ties,
+		onTie:        sel.OnTie,
 	}
 
 	decision := SelectionDecision{
@@ -194,6 +220,10 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		Strategy:      strategy,
 		SelectedIndex: result.index,
 		SelectionName: selName,
+		SortField:     sortField,
+		SortValue:     result.sortValue,
+		Ties:          result.ties,
+		OnTie:         sel.OnTie,
 	}
 	if sel.Filter != "" {
 		decision.FilterExpr = sel.Filter
@@ -267,7 +297,12 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			Strategy:      entry.strategy,
 			SelectedIndex: entry.index,
 			FilterExpr:    entry.filterExpr,
+			FilteredSize:  entry.filteredSize,
 			SelectionName: selName,
+			SortField:     entry.sortField,
+			SortValue:     entry.sortValue,
+			Ties:          entry.ties,
+			OnTie:         entry.onTie,
 		}
 		res := &ValueResolution{
 			InputName:  input.Name,
@@ -442,9 +477,19 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 		FilteredSize:  result.filteredSize,
 		Strategy:      strategyName(sel),
 		SelectedIndex: result.index,
+		SortValue:     result.sortValue,
+		Ties:          result.ties,
 	}
-	if sel != nil && sel.Filter != "" {
+	if sel != nil {
 		decision.FilterExpr = sel.Filter
+		decision.Field = sel.Field
+		decision.OnTie = sel.OnTie
+		if sel.Strategy == "min" || sel.Strategy == "max" {
+			decision.SortField = compareField(sel)
+		}
+		if err := tieError(result, sel.OnTie, sel.Strategy, decision.SortField); err != nil {
+			return nil, nil, fmt.Errorf("select from %s.%s for %q: %w", fromNode, fromField, inputName, err)
+		}
 	}
 
 	// Use resolved gjson path for field extraction

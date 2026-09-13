@@ -487,6 +487,9 @@ func mergeStepFromLLM(skelStep *plan.Step, llmStep *plan.Step, unfed map[string]
 			if llmSel.SortField != "" {
 				skelSel.SortField = llmSel.SortField
 			}
+			if llmSel.OnTie != "" {
+				skelSel.OnTie = llmSel.OnTie
+			}
 			if llmSel.Index != 0 {
 				skelSel.Index = llmSel.Index
 			}
@@ -521,7 +524,7 @@ func mergeStepFromLLM(skelStep *plan.Step, llmStep *plan.Step, unfed map[string]
 			// Named selection: skeleton is authoritative. Skip.
 			continue
 		} else if skelVal.From != "" && skelVal.Select != nil {
-			// Select edge: accept strategy/filter/sortField/index overrides.
+			// Select edge: accept strategy/filter/sortField/index/onTie overrides.
 			if llmVal.Select != nil {
 				if llmVal.Select.Strategy != "" {
 					skelVal.Select.Strategy = llmVal.Select.Strategy
@@ -531,6 +534,9 @@ func mergeStepFromLLM(skelStep *plan.Step, llmStep *plan.Step, unfed map[string]
 				}
 				if llmVal.Select.SortField != "" {
 					skelVal.Select.SortField = llmVal.Select.SortField
+				}
+				if llmVal.Select.OnTie != "" {
+					skelVal.Select.OnTie = llmVal.Select.OnTie
 				}
 				if llmVal.Select.Index != 0 {
 					skelVal.Select.Index = llmVal.Select.Index

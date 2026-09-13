@@ -181,7 +181,11 @@ outputs:
 
 Selection strategies are `first`, `last`, `index`, `random`, `min`, `max`, and `match`.
 - **`min` and `max`** compare `sortField`, or `field` when there is no `sortField`, by value. A string that holds a number, such as `"19.99"`, compares as that number.
-- **Ties:** when several elements share the smallest or largest value, the first of them in array order after the `filter` wins. If candidates can tie, add a `filter` that narrows them to the element you mean, and assert the chosen element's distinguishing field in a later step.
+- **Ties:** when several elements share the smallest or largest value, the first of them in array order after the `filter` wins.
+  - The step prints a warning naming the tie. It also appears in the step's `warnings` in `--json` and in `aat run show --step`.
+  - To fix a tie, add a `filter` that narrows the candidates to the element you mean, and assert the chosen element's distinguishing field in a later step.
+  - `onTie: fail` on the selection fails the step on a tie. `onTie: first` accepts any of them and silences the warning.
+  - Inputs that select from the same array share one pick only when they use the same strategy, `filter`, `index`, and compared field.
 - **`match`** returns the first element that matches the `filter`. A `filter` without a `strategy` behaves as `match`, and a `filter` does not convert strings.
 
 Cross-ref: [API Graphs](https://gburgyan.github.io/aat/graphs/)
@@ -1001,7 +1005,12 @@ The archive is the primary debugging artifact. Read it to understand what happen
       "filteredSize": 3,
       "strategy": "first | last | index | random | min | max | match",
       "selectedIndex": 0,
-      "selectionName": "string (named selections only)"
+      "selectionName": "string (named selections only)",
+      "field": "string (inline select: the field taken from the chosen element)",
+      "sortField": "string (min/max: the field compared)",
+      "sortValue": 19.99,
+      "ties": 3,
+      "onTie": "first | fail"
     }
   ],
   "resolutions": [

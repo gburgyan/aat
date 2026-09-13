@@ -509,6 +509,7 @@ type shownStep struct {
 	Assertions        []shownAssertion `json:"assertions,omitempty"`
 	RequestBodyBytes  int              `json:"request_body_bytes,omitempty"`
 	ResponseBodyBytes int              `json:"response_body_bytes,omitempty"`
+	Warnings          []string         `json:"warnings,omitempty"`
 }
 
 // shownAssertion is one assertion result of a shown step.
@@ -584,6 +585,12 @@ func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup, asJSO
 			}
 		}
 	}
+	if len(view.Warnings) > 0 {
+		b.WriteString("warnings:\n")
+		for _, warning := range view.Warnings {
+			fmt.Fprintf(&b, "  %s\n", warning)
+		}
+	}
 	fmt.Fprintf(&b, "request body: %s\n", showSize(view.RequestBodyBytes))
 	fmt.Fprintf(&b, "response body: %s\n", showSize(view.ResponseBodyBytes))
 	if view.ResponseBodyBytes > 0 {
@@ -620,6 +627,7 @@ func buildShownStep(step *archive.StepRecord, id string, cleanup bool) shownStep
 			view.Assertions = append(view.Assertions, shownAssertion{Type: r.Type, Passed: r.Passed, Skipped: r.Skipped, Message: r.Message})
 		}
 	}
+	view.Warnings = archive.SelectionTieWarnings(step.Selections)
 	return view
 }
 

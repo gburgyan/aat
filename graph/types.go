@@ -190,6 +190,7 @@ type InputDefaultSelect struct {
 	Filter    string `yaml:"filter,omitempty"`
 	Index     int    `yaml:"index,omitempty"`
 	SortField string `yaml:"sortField,omitempty"`
+	OnTie     string `yaml:"onTie,omitempty"` // for min/max: "first" or "fail" when elements tie
 }
 
 // HasValue reports whether this InputDefault carries any meaningful value.
