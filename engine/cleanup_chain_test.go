@@ -23,7 +23,7 @@ func chainGraph() *graph.Graph {
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
 			"createCart": {
-				Name: "createCart", Adapter: "chain.createCart", Cleanup: "deleteCart",
+				Name: "createCart", Adapter: "chain.createCart", Cleanup: graph.CleanupPairing{Node: "deleteCart"},
 				Outputs: []graph.Output{{Name: "cartId", Type: "string"}},
 			},
 			"deleteCart": {
@@ -31,11 +31,11 @@ func chainGraph() *graph.Graph {
 				Inputs: []graph.Input{{Name: "cartId", Type: "string"}, {Name: "id", Type: "string"}},
 			},
 			"createOrder": {
-				Name: "createOrder", Adapter: "chain.createOrder", Cleanup: "requestRefund",
+				Name: "createOrder", Adapter: "chain.createOrder", Cleanup: graph.CleanupPairing{Node: "requestRefund"},
 				Outputs: []graph.Output{{Name: "orderId", Type: "string"}},
 			},
 			"requestRefund": {
-				Name: "requestRefund", Adapter: "chain.requestRefund", Cleanup: "confirmRefund",
+				Name: "requestRefund", Adapter: "chain.requestRefund", Cleanup: graph.CleanupPairing{Node: "confirmRefund"},
 				Inputs:  []graph.Input{{Name: "orderId", Type: "string"}},
 				Outputs: []graph.Output{{Name: "id", Type: "string"}},
 			},
@@ -278,7 +278,7 @@ func TestPlanCleanup_ListedChainedNodeGatesChild(t *testing.T) {
 func TestCleanupChain_CycleGuard(t *testing.T) {
 	srv := newChainServer(t, nil)
 	eng := chainEngine(t, srv.URL)
-	eng.graph.Nodes["confirmRefund"].Cleanup = "requestRefund" // graph validation would reject this
+	eng.graph.Nodes["confirmRefund"].Cleanup = graph.CleanupPairing{Node: "requestRefund"} // graph validation would reject this
 
 	result := eng.Run(context.Background(), chainPlan(plan.Step{Node: "createOrder"}))
 

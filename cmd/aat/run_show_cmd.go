@@ -305,17 +305,18 @@ type shownStepRow struct {
 
 // shownRunList is the step list of aat run show, and its --json document.
 type shownRunList struct {
-	Run           string         `json:"run,omitempty"`
-	ArchivePath   string         `json:"archive_path"`
-	Plan          string         `json:"plan,omitempty"`
-	Outcome       string         `json:"outcome"`
-	Error         string         `json:"error,omitempty"`
-	DurationMs    int64          `json:"duration_ms"`
-	Attempt       int            `json:"attempt,omitempty"`
-	TotalAttempts int            `json:"total_attempts,omitempty"`
-	OtherAttempts []string       `json:"other_attempts,omitempty"`
-	Steps         []shownStepRow `json:"steps"`
-	Cleanup       []shownStepRow `json:"cleanup,omitempty"`
+	Run            string               `json:"run,omitempty"`
+	ArchivePath    string               `json:"archive_path"`
+	Plan           string               `json:"plan,omitempty"`
+	Outcome        string               `json:"outcome"`
+	Error          string               `json:"error,omitempty"`
+	DurationMs     int64                `json:"duration_ms"`
+	Attempt        int                  `json:"attempt,omitempty"`
+	TotalAttempts  int                  `json:"total_attempts,omitempty"`
+	OtherAttempts  []string             `json:"other_attempts,omitempty"`
+	Steps          []shownStepRow       `json:"steps"`
+	Cleanup        []shownStepRow       `json:"cleanup,omitempty"`
+	CleanupSkipped []CleanupSkipSummary `json:"cleanup_skipped,omitempty"`
 }
 
 // showRun prints a run's step list.
@@ -366,6 +367,10 @@ func showRun(out io.Writer, a *archive.Archive, src shownRun, asJSON bool) error
 		b.WriteString("\ncleanup:\n")
 		writeShownSteps(&b, list.Cleanup, "FOR")
 	}
+	if len(list.CleanupSkipped) > 0 {
+		b.WriteString("\ncleanup skipped:\n")
+		writeCleanupSkips(&b, list.CleanupSkipped)
+	}
 	_, err := io.WriteString(out, b.String())
 	return err
 }
@@ -401,6 +406,9 @@ func buildShownRunList(a *archive.Archive, src shownRun) shownRunList {
 		row := newShownStepRow(i+1, id, a.Cleanup[i])
 		row.CleanupFor = a.Cleanup[i].CleanupFor
 		list.Cleanup = append(list.Cleanup, row)
+	}
+	for _, skip := range a.CleanupSkipped {
+		list.CleanupSkipped = append(list.CleanupSkipped, CleanupSkipSummary(skip))
 	}
 	return list
 }
@@ -461,6 +469,24 @@ func writeShownSteps(b *strings.Builder, rows []shownStepRow, last string) {
 			rest = row.CleanupFor
 		}
 		line(strconv.Itoa(row.Index), row.StepID, row.Node, status, result, formatDuration(time.Duration(row.DurationMs)*time.Millisecond), rest)
+	}
+}
+
+// writeCleanupSkips writes the table of registered cleanups that did not run
+// because they were no longer needed.
+func writeCleanupSkips(b *strings.Builder, skips []CleanupSkipSummary) {
+	nodeWidth, forWidth := len("NODE"), len("FOR")
+	for _, s := range skips {
+		nodeWidth = max(nodeWidth, len(s.Node))
+		forWidth = max(forWidth, len(s.CleanupFor))
+	}
+	line := func(node, cleanupFor, reason string) {
+		b.WriteString(strings.TrimRight(fmt.Sprintf("     %-*s  %-*s  %s", nodeWidth, node, forWidth, cleanupFor, reason), " "))
+		b.WriteByte('\n')
+	}
+	line("NODE", "FOR", "REASON")
+	for _, s := range skips {
+		line(s.Node, s.CleanupFor, archive.CleanupSkipRecord(s).Description())
 	}
 }
 

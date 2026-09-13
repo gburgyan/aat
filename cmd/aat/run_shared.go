@@ -59,15 +59,18 @@ type runArgs struct {
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
 type RunSummary struct {
-	Outcome     string        `json:"outcome"`
-	Error       string        `json:"error,omitempty"`
-	Steps       []StepSummary `json:"steps"`
-	Cleanup     []StepSummary `json:"cleanup,omitempty"`
-	Summary     SummaryStats  `json:"summary"`
-	ArchivePath string        `json:"archive_path,omitempty"`
-	Attempts    int           `json:"attempts,omitempty"`   // total attempts (omitted if 1)
-	Retried     bool          `json:"retried,omitempty"`    // true if any retries occurred
-	StoppedAt   string        `json:"stopped_at,omitempty"` // checkpoint step ID when the outcome is "stopped"
+	Outcome string        `json:"outcome"`
+	Error   string        `json:"error,omitempty"`
+	Steps   []StepSummary `json:"steps"`
+	Cleanup []StepSummary `json:"cleanup,omitempty"`
+	// CleanupSkipped lists the registered cleanups that did not run because
+	// they were no longer needed.
+	CleanupSkipped []CleanupSkipSummary `json:"cleanup_skipped,omitempty"`
+	Summary        SummaryStats         `json:"summary"`
+	ArchivePath    string               `json:"archive_path,omitempty"`
+	Attempts       int                  `json:"attempts,omitempty"`   // total attempts (omitted if 1)
+	Retried        bool                 `json:"retried,omitempty"`    // true if any retries occurred
+	StoppedAt      string               `json:"stopped_at,omitempty"` // checkpoint step ID when the outcome is "stopped"
 	// State is the accumulated run state (base URLs, request headers, step
 	// inputs and outputs), populated only when --dump-state=- requests stdout
 	// output. Its credentials are redacted unless --dump-state-secrets asked
@@ -92,6 +95,19 @@ type StepSummary struct {
 	// CleanupFor, on a cleanup step, is the ID of the step whose resource it
 	// releases, or of the cleanup step before it in a chain.
 	CleanupFor string `json:"cleanup_for,omitempty"`
+	// WhenError, on a cleanup step, says why its pairing's when condition could
+	// not be evaluated. The cleanup ran anyway.
+	WhenError string `json:"when_error,omitempty"`
+}
+
+// CleanupSkipSummary is a registered cleanup that did not run because it was
+// no longer needed, in the JSON summary and in aat run show.
+type CleanupSkipSummary struct {
+	Node       string `json:"node"`
+	CleanupFor string `json:"cleanup_for,omitempty"` // the step it would have cleaned up after
+	Reason     string `json:"reason"`                // "released" or "when"
+	ReleasedBy string `json:"released_by,omitempty"` // the step that released the resource
+	When       string `json:"when,omitempty"`        // the pairing's condition, which was false
 }
 
 // DisplayOutputEntry is a display-tagged output in the JSON summary.
@@ -192,6 +208,9 @@ func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
 	for _, step := range result.CleanupResults {
 		s.Cleanup = append(s.Cleanup, toStepSummary(step))
 	}
+	for _, skip := range result.CleanupSkipped {
+		s.CleanupSkipped = append(s.CleanupSkipped, CleanupSkipSummary(skip))
+	}
 
 	s.Summary = SummaryStats{
 		TotalSteps:  len(result.Steps),
@@ -235,6 +254,7 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		DurationMs: step.Duration.Milliseconds(),
 		Retries:    step.RetryCount,
 		CleanupFor: step.CleanupFor,
+		WhenError:  step.WhenError,
 	}
 	for _, c := range step.RetriedOn {
 		ss.RetriedOn = append(ss.RetriedOn, c.String())

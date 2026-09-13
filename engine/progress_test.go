@@ -259,7 +259,7 @@ func TestProgressObserver_WithCleanup(t *testing.T) {
 				Adapter: "test.create",
 				Inputs:  []graph.Input{{Name: "data", Type: "string"}},
 				Outputs: []graph.Output{{Name: "id", Type: "string"}},
-				Cleanup: "delete",
+				Cleanup: graph.CleanupPairing{Node: "delete"},
 			},
 			"delete": {
 				Name:    "delete",

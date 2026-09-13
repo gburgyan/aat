@@ -51,16 +51,21 @@ func (s *CleanupStack) Filter(keep func(CleanupEntry) bool) {
 type cleanupRun struct {
 	ids   map[string]bool
 	allow func(node string) bool // nil allows every node
+	// mainSteps are the results of the run's main steps, in order. A later one
+	// can release a registered cleanup (see cleanupSkip).
+	mainSteps []StepResult
+	skips     []CleanupSkip // entries skipped as no longer needed, in the order reached
 }
 
 // newCleanupRun starts a cleanup run whose step IDs avoid taken. allow decides
 // whether a node reached through a cleanup chain runs; nil allows every node.
-func newCleanupRun(taken []string, allow func(node string) bool) *cleanupRun {
+// mainSteps are the run's main step results, which can release a cleanup.
+func newCleanupRun(taken []string, allow func(node string) bool, mainSteps []StepResult) *cleanupRun {
 	ids := make(map[string]bool, len(taken))
 	for _, id := range taken {
 		ids[id] = true
 	}
-	return &cleanupRun{ids: ids, allow: allow}
+	return &cleanupRun{ids: ids, allow: allow, mainSteps: mainSteps}
 }
 
 // nextID returns node as a step ID, or node_2, node_3, and so on when that ID
@@ -97,18 +102,26 @@ func (e *Engine) runCleanupStack(ctx context.Context, s *CleanupStack, state *Ru
 // runs next. cleanupFor is the ID the entry's result links to. ancestors are
 // the results of the cleanup steps before this one in its chain, nearest first;
 // their outputs feed the chain and are never stored in the run state, so no
-// other cleanup step picks them up.
+// other cleanup step picks them up. An entry that is no longer needed (see
+// cleanupSkip) is recorded in run and sends nothing, so its chain does not run
+// either.
 func (e *Engine) runCleanupChain(ctx context.Context, entry CleanupEntry, cleanupFor string, ancestors []StepResult, state *RunState, run *cleanupRun) []StepResult {
+	skip, whenErr := e.cleanupSkip(entry, cleanupFor, ancestors, state, run)
+	if skip != nil {
+		run.skips = append(run.skips, *skip)
+		return nil
+	}
 	result := e.executeCleanupEntry(ctx, entry, ancestors, state)
+	result.WhenError = whenErr
 	result.StepID = run.nextID(entry.NodeName)
 	result.CleanupFor = cleanupFor
 	results := []StepResult{result}
 
 	node := e.graph.Nodes[entry.NodeName]
-	if node == nil || node.Cleanup == "" || !cleanupSucceeded(result) {
+	if node == nil || node.Cleanup.Node == "" || !cleanupSucceeded(result) {
 		return results
 	}
-	next := node.Cleanup
+	next := node.Cleanup.Node
 	if run.allow != nil && !run.allow(next) {
 		return results
 	}
@@ -159,38 +172,7 @@ func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, an
 		return failed(nil, fmt.Errorf("cleanup node %q not found in graph", entry.NodeName))
 	}
 
-	// Resolve inputs by output name: first from the cleanup steps before this
-	// one in its chain, nearest first; then from the step that registered the
-	// cleanup; then from the most recently executed step with an output of that
-	// name. Outputs are stored by step ID, so ForNode stands in only for an
-	// entry without a ForStep.
-	source := entry.ForStep
-	if source == "" {
-		source = entry.ForNode
-	}
-	executed := state.ExecutedSteps()
-	lookup := func(name string) (any, bool) {
-		for _, a := range ancestors {
-			if val, ok := a.Outputs[name]; ok {
-				return val, true
-			}
-		}
-		if val, err := state.GetOutput(source, name); err == nil {
-			return val, true
-		}
-		for i := len(executed) - 1; i >= 0; i-- {
-			if val, err := state.GetOutput(executed[i], name); err == nil {
-				return val, true
-			}
-		}
-		return nil, false
-	}
-	inputs := make(map[string]any)
-	for _, input := range node.Inputs {
-		if val, ok := lookup(input.Name); ok {
-			inputs[input.Name] = val
-		}
-	}
+	inputs := resolveCleanupInputs(node, entry, ancestors, state)
 
 	adp, err := e.registry.Get(node.Adapter)
 	if err != nil {

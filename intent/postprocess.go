@@ -316,16 +316,16 @@ func addCleanupSteps(p *plan.Plan, g *graph.Graph) {
 
 	for _, step := range p.Execution.Steps {
 		node := g.Nodes[step.Node]
-		if node == nil || node.Cleanup == "" {
+		if node == nil || node.Cleanup.Node == "" {
 			continue
 		}
 
-		if !existingCleanup[node.Cleanup] {
+		if !existingCleanup[node.Cleanup.Node] {
 			p.Execution.Cleanup = append(p.Execution.Cleanup, plan.CleanupStep{
-				Node:  node.Cleanup,
+				Node:  node.Cleanup.Node,
 				RunOn: "always",
 			})
-			existingCleanup[node.Cleanup] = true
+			existingCleanup[node.Cleanup.Node] = true
 		}
 	}
 }

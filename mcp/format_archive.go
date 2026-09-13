@@ -59,6 +59,15 @@ func formatArchiveDetail(a *archive.Archive) string {
 		}
 	}
 
+	// Registered cleanups that were no longer needed
+	if len(a.CleanupSkipped) > 0 {
+		b.WriteString("## Cleanup Skipped\n\n")
+		for _, s := range a.CleanupSkipped {
+			fmt.Fprintf(&b, "- **%s** for %s: %s\n", s.Node, s.CleanupFor, s.Description())
+		}
+		b.WriteString("\n")
+	}
+
 	return b.String()
 }
 

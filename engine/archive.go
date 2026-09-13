@@ -31,6 +31,7 @@ func ToArchive(result *RunResult, meta archive.ArchiveMetadata, baseURL string, 
 
 	a.Steps = convertStepResults(result.Steps, baseURL)
 	a.Cleanup = convertStepResults(result.CleanupResults, baseURL)
+	a.CleanupSkipped = convertCleanupSkips(result.CleanupSkipped)
 	a.Metadata.InstantiatedPlan = redactPlan(result.InstantiatedPlan)
 
 	// Redact fails only on a value encoding/json cannot marshal. The archive is
@@ -50,6 +51,17 @@ func convertStepResults(steps []StepResult, baseURL string) []archive.StepRecord
 	return records
 }
 
+func convertCleanupSkips(skips []CleanupSkip) []archive.CleanupSkipRecord {
+	if len(skips) == 0 {
+		return nil
+	}
+	records := make([]archive.CleanupSkipRecord, len(skips))
+	for i, s := range skips {
+		records[i] = archive.CleanupSkipRecord(s)
+	}
+	return records
+}
+
 func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 	rec := archive.StepRecord{
 		StepID:          s.StepID,
@@ -62,6 +74,7 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		Error:           errString(s.Error),
 		RetryCount:      s.RetryCount,
 		CleanupFor:      s.CleanupFor,
+		WhenError:       s.WhenError,
 	}
 	for _, c := range s.RetriedOn {
 		rec.RetriedOn = append(rec.RetriedOn, c.String())

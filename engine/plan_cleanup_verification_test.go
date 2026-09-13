@@ -22,7 +22,7 @@ func lifecycleGraph() *graph.Graph {
 		Version: "1.0.0",
 		Nodes: map[string]*graph.Node{
 			"createThing": {
-				Name: "createThing", Adapter: "test.create", Cleanup: "deleteThing",
+				Name: "createThing", Adapter: "test.create", Cleanup: graph.CleanupPairing{Node: "deleteThing"},
 				Outputs: []graph.Output{{Name: "thingId", Type: "string"}},
 			},
 			"getThing": {
@@ -230,7 +230,7 @@ func TestPlanCleanup_ListedPairingsUnwindLastInFirstOut(t *testing.T) {
 	srv := newLifecycleServer(t, nil)
 	eng := lifecycleEngine(t, srv.URL)
 	eng.graph.Nodes["createPart"] = &graph.Node{
-		Name: "createPart", Adapter: "test.createPart", Cleanup: "deletePart",
+		Name: "createPart", Adapter: "test.createPart", Cleanup: graph.CleanupPairing{Node: "deletePart"},
 		Outputs: []graph.Output{{Name: "partId", Type: "string"}},
 	}
 	eng.graph.Nodes["deletePart"] = &graph.Node{

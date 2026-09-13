@@ -142,7 +142,7 @@ type Node struct {
 	Tags           []string             `yaml:"tags,omitempty"`
 	Inputs         []Input              `yaml:"inputs"`
 	Outputs        []Output             `yaml:"outputs"`
-	Cleanup        string               `yaml:"cleanup,omitempty"`
+	Cleanup        CleanupPairing       `yaml:"cleanup,omitempty"`
 	CycleBreaker   bool                 `yaml:"cycleBreaker,omitempty"`
 	OAS            *OASRef              `yaml:"oas,omitempty"`
 	Requires       []string             `yaml:"requires,omitempty"`

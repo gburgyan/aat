@@ -12,7 +12,10 @@ type Archive struct {
 	Metadata ArchiveMetadata `json:"metadata"`
 	Steps    []StepRecord    `json:"steps"`
 	Cleanup  []StepRecord    `json:"cleanup,omitempty"`
-	Result   ArchiveResult   `json:"result"`
+	// CleanupSkipped lists the registered cleanups that did not run because
+	// they were no longer needed.
+	CleanupSkipped []CleanupSkipRecord `json:"cleanupSkipped,omitempty"`
+	Result         ArchiveResult       `json:"result"`
 }
 
 // ArchiveMetadata captures provenance and context for a run.
@@ -55,6 +58,34 @@ type StepRecord struct {
 	// CleanupFor, on a cleanup step, is the ID of the step whose resource it
 	// releases, or of the cleanup step before it in a chain.
 	CleanupFor string `json:"cleanupFor,omitempty" redact:"-"`
+	// WhenError, on a cleanup step, says why its pairing's when condition could
+	// not be evaluated. The cleanup ran anyway.
+	WhenError string `json:"whenError,omitempty"`
+}
+
+// CleanupSkipRecord is a registered cleanup that did not run because it was no
+// longer needed.
+type CleanupSkipRecord struct {
+	Node       string `json:"node" redact:"-"`
+	CleanupFor string `json:"cleanupFor,omitempty" redact:"-"` // the step it would have cleaned up after
+	// Reason is "released" when a later step already released the resource, or
+	// "when" when the pairing's when condition was false.
+	Reason     string `json:"reason" redact:"-"`
+	ReleasedBy string `json:"releasedBy,omitempty" redact:"-"` // the step that released it
+	When       string `json:"when,omitempty" redact:"-"`       // the condition that was false
+}
+
+// Description says why the cleanup was skipped, as in "released by
+// capturePayment" or `when status == "authorized" is false`.
+func (r CleanupSkipRecord) Description() string {
+	switch r.Reason {
+	case "released":
+		return "released by " + r.ReleasedBy
+	case "when":
+		return "when " + r.When + " is false"
+	default:
+		return r.Reason
+	}
 }
 
 // DisplayOutputRecord captures an output value tagged for display.

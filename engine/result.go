@@ -46,9 +46,12 @@ func (o Outcome) String() string {
 
 // RunResult captures the complete outcome of a plan execution.
 type RunResult struct {
-	Outcome          Outcome
-	Steps            []StepResult
-	CleanupResults   []StepResult
+	Outcome        Outcome
+	Steps          []StepResult
+	CleanupResults []StepResult
+	// CleanupSkipped lists the registered cleanups that did not run because
+	// they were no longer needed, in the order cleanup reached them.
+	CleanupSkipped   []CleanupSkip
 	Error            error
 	InstantiatedPlan *plan.Plan // fully merged plan with graph defaults, nil on early errors
 
@@ -110,7 +113,28 @@ type StepResult struct {
 	// a chain. Empty for main steps and for plan-level cleanup steps that are
 	// not a graph pairing.
 	CleanupFor string
+	// WhenError, on a cleanup step, says why its pairing's when condition could
+	// not be evaluated. The cleanup ran anyway.
+	WhenError string
 }
+
+// CleanupSkip records a registered cleanup that did not run because it was no
+// longer needed.
+type CleanupSkip struct {
+	Node       string // the cleanup node
+	CleanupFor string // the step whose resource it would have released, or the cleanup step before it in a chain
+	Reason     string // CleanupSkipReleased or CleanupSkipWhen
+	ReleasedBy string // for CleanupSkipReleased: the main step that already released the resource
+	When       string // for CleanupSkipWhen: the pairing's condition, which was false
+}
+
+// Reasons a registered cleanup is skipped.
+const (
+	// CleanupSkipReleased: a later main step already released the resource.
+	CleanupSkipReleased = "released"
+	// CleanupSkipWhen: the pairing's when condition was false.
+	CleanupSkipWhen = "when"
+)
 
 // DisplayOutput captures an output value tagged for display to the user.
 type DisplayOutput struct {

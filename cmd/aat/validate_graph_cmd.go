@@ -11,6 +11,7 @@ import (
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/intent"
+	"github.com/gburgyan/aat/plan"
 	"github.com/spf13/cobra"
 )
 
@@ -85,6 +86,11 @@ func graphValidateCommand(args *graphValidateArgs) int {
 	g, err := graph.ParseFile(args.GraphPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "aat validate graph: %s\n", err)
+		return 1
+	}
+	// Cleanup when conditions are predicates, which the plan package checks.
+	if condErrs := plan.ValidateCleanupConditions(g); len(condErrs) > 0 {
+		fmt.Fprintf(os.Stderr, "aat validate graph: %s\n", &graph.ValidationError{Errors: condErrs})
 		return 1
 	}
 	fmt.Printf("Graph structure: OK (%d nodes)\n", len(g.Nodes))

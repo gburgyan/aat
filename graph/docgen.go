@@ -355,23 +355,27 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 // writeCleanupTable writes the cleanup section.
 func writeCleanupTable(b *strings.Builder, g *Graph) {
 	type cleanupEntry struct {
-		node     string
-		cleansUp string
-		desc     string
+		node       string
+		cleansUp   string
+		when       string
+		releasedBy string
+		desc       string
 	}
 	var entries []cleanupEntry
 	for _, name := range sortedKeys(g.Nodes) {
 		node := g.Nodes[name]
-		if node.Cleanup != "" {
-			cleanupNode := g.Nodes[node.Cleanup]
+		if node.Cleanup.Node != "" {
+			cleanupNode := g.Nodes[node.Cleanup.Node]
 			desc := ""
 			if cleanupNode != nil {
 				desc = cleanupNode.Description
 			}
 			entries = append(entries, cleanupEntry{
-				node:     node.Cleanup,
-				cleansUp: name,
-				desc:     desc,
+				node:       node.Cleanup.Node,
+				cleansUp:   name,
+				when:       node.Cleanup.When,
+				releasedBy: strings.Join(node.Cleanup.ReleasedBy, ", "),
+				desc:       desc,
 			})
 		}
 	}
@@ -379,10 +383,28 @@ func writeCleanupTable(b *strings.Builder, g *Graph) {
 		return
 	}
 	b.WriteString("## Cleanup\n\n")
-	b.WriteString("| Node | Cleans Up | Description |\n")
-	b.WriteString("|------|-----------|-------------|\n")
+	// The When and Released By columns appear only when a pairing uses them.
+	conditional := false
 	for _, e := range entries {
-		fmt.Fprintf(b, "| %s | %s | %s |\n", e.node, e.cleansUp, e.desc)
+		conditional = conditional || e.when != "" || e.releasedBy != ""
+	}
+	if !conditional {
+		b.WriteString("| Node | Cleans Up | Description |\n")
+		b.WriteString("|------|-----------|-------------|\n")
+		for _, e := range entries {
+			fmt.Fprintf(b, "| %s | %s | %s |\n", e.node, e.cleansUp, e.desc)
+		}
+		b.WriteString("\n")
+		return
+	}
+	b.WriteString("| Node | Cleans Up | When | Released By | Description |\n")
+	b.WriteString("|------|-----------|------|-------------|-------------|\n")
+	for _, e := range entries {
+		when := ""
+		if e.when != "" {
+			when = "`" + strings.ReplaceAll(e.when, "|", `\|`) + "`"
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s |\n", e.node, e.cleansUp, when, e.releasedBy, e.desc)
 	}
 	b.WriteString("\n")
 }

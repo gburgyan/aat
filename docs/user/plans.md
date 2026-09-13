@@ -697,7 +697,9 @@ A cleanup step has just two fields: `node` and `runOn`. There is no `values:` bl
 
 **Ordering.** A graph-level `cleanup:` pairing (see [API Graphs: Cleanup](graphs.md#cleanup)) runs once for each step that created a resource, from a last-in-first-out stack, so the most recently created resource is released first and nothing is sent for a resource that was never created. Listing a paired node here, as recipes and `aat prompt` plans do, does not run it a second time or change that order; the listed step's `runOn` decides whether those cleanups run. If the plan lists that node more than once, they run when any listing's `runOn` matches the outcome. Cleanup steps for other nodes, such as `sendNotification` above, run first, in declaration order. A node reached through a [cleanup chain](graphs.md#cleanup) counts as a pairing too: listing it does not run it on its own, and its `runOn` decides whether the chain continues to it.
 
-Cleanup results are recorded in the archive and in the `cleanup` array of `--json` output, and appear under a `cleanup:` block in the console. A cleanup failure never changes the run outcome. See [Running Tests: Cleanup](running.md#cleanup) for the execution-time details.
+**Skipped pairings.** After `runOn`, a registered pairing is skipped when it's no longer needed: a later main step already released its resource, such as an explicit `cancelOrder` step for the order the pairing would cancel, or the pairing's `when` condition is false. See [API Graphs: Cleanup](graphs.md#cleanup).
+
+Cleanup results are recorded in the archive and in the `cleanup` array of `--json` output, and appear under a `cleanup:` block in the console. Skipped pairings are recorded in the archive's `cleanupSkipped` and in `cleanup_skipped` in `--json`, and appear as `skipped:` lines under `cleanup:`. A cleanup failure never changes the run outcome. See [Running Tests: Cleanup](running.md#cleanup) for the execution-time details.
 
 ## Plan-Level Auth and Headers
 

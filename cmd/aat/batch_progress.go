@@ -52,6 +52,11 @@ func (o *BatchStreamObserver) OnCleanupStepComplete(index, total int, result eng
 	writeCleanupResult(o.out, "      ", result, o.term)
 }
 
+// OnCleanupSkipped implements engine.CleanupSkipObserver.
+func (o *BatchStreamObserver) OnCleanupSkipped(skip engine.CleanupSkip) {
+	writeCleanupSkip(o.out, "      ", skip, o.term)
+}
+
 func (o *BatchStreamObserver) OnRunComplete(result *engine.RunResult) {
 	color := o.term.IsTTY
 	writeOASTotal(o.out, "    ", result.Steps, color)

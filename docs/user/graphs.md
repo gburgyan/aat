@@ -154,7 +154,7 @@ The graph-side `path` is an older way to do the same renaming. It is used only w
 
 ### Cleanup
 
-The `cleanup` field on a node names another node that should run after the plan completes to tear down resources, even if the plan fails. This pairs creation operations with their corresponding deletion or cancellation.
+The `cleanup` field on a node names another node that should run after the plan completes to tear down resources, even if the plan fails. This pairs creation operations with their corresponding deletion or cancellation. The field is the node's name, or a mapping with `node`, `when`, and `releasedBy` that says when the cleanup isn't needed (see **When a cleanup is skipped** below).
 
 ```yaml
 nodes:
@@ -207,6 +207,55 @@ How a chain behaves:
 - **Failure.** When a cleanup step fails, the rest of its chain is skipped.
 - **Loops.** A chain that loops back to a node it already passed is rejected when the graph loads.
 - **Step IDs and links.** In archives and `--json` output, each cleanup step has its own step ID: `requestRefund` for the first order, `requestRefund_2` for the second. `cleanupFor` (`cleanup_for` in `--json`) names the step whose resource the cleanup releases, or the cleanup step before it in its chain.
+
+**When a cleanup is skipped.** A plan can release a resource itself, such as by capturing a payment whose cleanup would void it. It can also leave the resource in a state its cleanup can't handle. Either way, a cleanup that runs anyway fails. Give the pairing as a mapping to say when it isn't needed:
+
+```yaml
+nodes:
+  createPayment:
+    adapter: createPayment
+    cleanup:
+      node: voidPayment
+      when: 'status == "authorized"'   # void only a payment that is still authorized
+      releasedBy: [capturePayment]     # capturing this payment releases it
+    outputs:
+      - name: paymentId
+        type: string
+      - name: status
+        type: string
+
+  capturePayment:
+    adapter: capturePayment
+    inputs:
+      - name: paymentId
+        type: string
+
+  voidPayment:
+    adapter: voidPayment
+    inputs:
+      - name: paymentId
+        type: string
+```
+
+Before a registered cleanup runs, AAT checks, in order:
+1. **`runOn`.** If the plan's `cleanup:` section lists the node, that listing's `runOn` decides first, as described above.
+2. **Released.** The cleanup is skipped when a main step already released the resource:
+   - it ran after the step that registered the cleanup
+   - it ran on the cleanup node itself, or on a node in `releasedBy`
+   - it succeeded: a status below 400, no error detection rule triggered, and not a [negative test](plans.md#negative-testing-expectfailure)
+   - it sent the same value for every input it shares with the cleanup, and there is at least one such input. Numbers compare by value.
+
+   So an explicit `voidPayment` step skips the pairing for the payment it voided, with no `releasedBy`. A step for another payment doesn't, and neither does one that left a shared input unset. Verification steps never release a cleanup.
+3. **`when`.** A predicate, in the syntax of a selection `filter`, over the outputs of the step that registered the cleanup, or of the cleanup step before it in a chain. The cleanup is skipped when it's false. The predicate reads no other step's outputs, so a later step that returns a `status` of its own doesn't change it. If it can't be evaluated, such as when the step returned no `status`, the cleanup runs, and its record carries `whenError`.
+
+A skipped cleanup sends nothing, so its chain doesn't run either. Where skips appear:
+- **Console:** `skipped:` and the reason in place of a status, as in `voidPayment  skipped: released by capturePayment (for createPayment)`.
+- **Archive:** `cleanupSkipped`, and `cleanup_skipped` in `--json`.
+- **[`aat run show`](archives.md#inspecting-a-run-from-the-cli):** under `cleanup skipped:`.
+
+`aat validate` checks that `releasedBy` names other existing nodes, each once. It also checks that `when` parses and names outputs of the node that declares it.
+
+List in `releasedBy` only nodes whose success always ends the resource. If an API reports a failed release in a successful response, give that node an [error detection](#error-detection) rule, so the failure doesn't count as a release.
 
 ### Tags
 

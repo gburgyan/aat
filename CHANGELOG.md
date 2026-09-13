@@ -17,6 +17,17 @@ the graph and plan formats may still change before 1.0.
   takes its outputs first, so a resource released in two calls (request, then confirm) is cleaned up completely.
   Chained outputs stay inside the chain. Archive cleanup records gain `cleanupFor` (`cleanup_for` in `--json`),
   naming the step each one cleans up after.
+- A cleanup pairing can say when it isn't needed: `cleanup: {node: voidPayment, when: 'status == "authorized"',
+  releasedBy: [capturePayment]}`.
+  - `releasedBy` lists nodes whose success, after the creating step and with the same values for the inputs they
+    share with the cleanup, releases the resource.
+  - `when` is a predicate over the creating step's outputs, or the previous cleanup step's in a chain. The cleanup is
+    skipped when it's false. A `when` that can't be evaluated runs the cleanup and records `whenError`.
+  - A skipped cleanup's chain doesn't run. Skips print as `skipped:` lines under `cleanup:`, and are recorded in the
+    archive's `cleanupSkipped`, in `cleanup_skipped` in `--json`, in a `cleanup skipped:` table in `aat run show`,
+    and in the MCP server's `inspect_archive`.
+  - `aat validate` checks that `releasedBy` names other nodes and that `when` parses and names the node's outputs.
+    `aat docs generate` adds When and Released By columns when a pairing uses them.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
 - `aat generate` scaffolds HEAD, OPTIONS, and TRACE operations, form-encoded request bodies, and cookie parameters,
@@ -125,6 +136,9 @@ the graph and plan formats may still change before 1.0.
   step no longer print the same line. Plan validation lists each distinct problem once, `aat validate` prints an error
   repeated word for word once, and a step's values and selections are checked in name order, so the output is the same
   on every run.
+- A registered cleanup no longer runs when a later main step on the cleanup node already released the resource with
+  the same inputs, such as an explicit cancel of the order the pairing would cancel. Before, the cleanup ran again
+  and usually failed with a 4xx. The skip is recorded, as for a pairing's `releasedBy`.
 - Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
   `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
   bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an

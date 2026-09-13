@@ -44,13 +44,14 @@ Directory names are `run-` or `batch-`, the local date and time (`YYYYMMDD-HHMMS
 
 ## What an Archive Contains
 
-`archive.json` has four top-level keys:
+`archive.json` has these top-level keys:
 
 | Key | Contents |
 |-----|----------|
 | `metadata` | Run ID, timestamp, environment name, graph version, AAT version, the plan as loaded (`plan`), the plan after graph defaults and layers were merged in (`instantiatedPlan`), the layers applied, and `attempt`/`totalAttempts` for retried runs |
 | `steps` | One record per main and verification step (see below) |
 | `cleanup` | Cleanup step records in the same format; absent when no cleanup ran |
+| `cleanupSkipped` | Registered cleanups that did not run because they were no longer needed: `node`, `cleanupFor`, `reason` (`released` or `when`), and `releasedBy` or `when`. See [API Graphs: Cleanup](graphs.md#cleanup). Absent when none were skipped |
 | `result` | `outcome` (`passed`, `failed`, `error`, `aborted`, or `stopped`), `error`, and `durationMs`, the run's wall-clock time (archives written before it was recorded omit it, and the web UI then sums the step durations) |
 
 Each step record holds:
@@ -69,6 +70,7 @@ Each step record holds:
 | `oasValidation` | Request and response checks against the OpenAPI spec |
 | `errorClassification`, `error`, `retryCount`, `retriedOn` | Error category and detail for a failed step, and the category of each step-level retry |
 | `cleanupFor` | On a cleanup step: the step whose resource it releases, or the cleanup step before it in a [cleanup chain](graphs.md#cleanup). Cleanup step IDs are unique within a run (`deleteCart`, then `deleteCart_2`) |
+| `whenError` | On a cleanup step: why its pairing's `when` condition couldn't be evaluated, such as an output the step didn't return. The cleanup ran anyway |
 
 ## What Is Redacted, and What Is Not
 

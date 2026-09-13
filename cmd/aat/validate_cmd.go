@@ -198,6 +198,16 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		printSections(out, sections)
 		return 1
 	}
+	// Cleanup when conditions are predicates, which the plan package checks.
+	if condErrs := plan.ValidateCleanupConditions(g); len(condErrs) > 0 {
+		sections = append(sections, sectionResult{
+			Name:   "Graph structure",
+			Status: "FAILED",
+			Errors: []string{(&graph.ValidationError{Errors: condErrs}).Error()},
+		})
+		printSections(out, sections)
+		return 1
+	}
 	sections = append(sections, sectionResult{
 		Name:   "Graph structure",
 		Status: "OK",

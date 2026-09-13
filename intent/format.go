@@ -98,7 +98,7 @@ func formatNodeSection(b *strings.Builder, name string, node *graph.Node) {
 	if len(node.Tags) > 0 {
 		fmt.Fprintf(b, "Tags: %s\n", strings.Join(node.Tags, ", "))
 	}
-	if node.Cleanup != "" {
+	if node.Cleanup.Node != "" {
 		fmt.Fprintf(b, "Cleanup: %s\n", node.Cleanup)
 	}
 	if node.CycleBreaker {

@@ -155,7 +155,7 @@ func isolatedGraph() *graph.Graph {
 					{Name: "token", Type: "string"},
 				},
 				Outputs: []graph.Output{{Name: "cartId", Type: "string"}},
-				Cleanup: "deleteCart",
+				Cleanup: graph.CleanupPairing{Node: "deleteCart"},
 			},
 			"deleteCart": {
 				Name:    "deleteCart",

@@ -124,7 +124,7 @@ Outputs have no JSON path in the graph: the node's template extracts each output
 | `outputs` | no | Named values the template extracts from the HTTP response |
 | `satisfies` | no | Prerequisite tokens this node provides |
 | `requires` | no | Prerequisite tokens this node depends on |
-| `cleanup` | no | Node to run during teardown (e.g., delete what this node created) |
+| `cleanup` | no | Node to run during teardown (e.g., delete what this node created), or `{node, when, releasedBy}` to skip it when it isn't needed (see Cleanup) |
 | `errorDetection` | no | Rules that fail a successful response whose body reports an error |
 | `oas` | no | `operationId` (and optional `spec`) linking the node to an OpenAPI operation |
 
@@ -509,6 +509,22 @@ cleanup:
 A cleanup step takes only `node` and `runOn`. Its inputs are matched by name against the outputs of the steps that ran, so `cancelOrder`'s `orderId` input takes the `orderId` output of the step that produced one. A node's graph-level `cleanup:` pairing runs even when the plan does not list it.
 
 A cleanup node can have its own `cleanup:`, which makes a chain. The second node runs right after the first succeeds and takes that step's outputs first. That covers a release that takes two calls, such as requesting a refund and then confirming it with the refund's ID. Name the first cleanup node's output after the second one's input.
+
+When a plan may release the resource itself, or leave it in a state the cleanup can't handle, give the pairing as a mapping:
+
+```yaml
+createPayment:
+  adapter: createPayment
+  cleanup:
+    node: voidPayment
+    when: 'status == "authorized"'   # a predicate over createPayment's outputs
+    releasedBy: [capturePayment]
+```
+
+- **Released.** The cleanup is skipped when a main step after the creating one succeeded on the cleanup node itself, or on a `releasedBy` node, and sent the same value for every input it shares with the cleanup. An explicit `voidPayment` step needs no `releasedBy`. A step expected to fail, a verification step, and a step for another resource don't count.
+- **`when`.** The cleanup is skipped when the predicate is false. It reads only the creating step's outputs, or, for a chained cleanup, the outputs of the cleanup step before it. If it can't be evaluated, the cleanup runs, and its record carries `whenError`.
+- **Skipped.** A skipped cleanup's chain doesn't run. Skips are recorded in the archive's `cleanupSkipped` and show under `cleanup skipped:` in `aat run show`.
+- **Caution.** List in `releasedBy` only nodes whose success always ends the resource. If an API reports a failed release in a successful response, give that node `errorDetection`.
 
 Cross-ref: [Plans and Recipes](https://gburgyan.github.io/aat/plans/)
 
@@ -923,6 +939,9 @@ The archive is the primary debugging artifact. Read it to understand what happen
   },
   "steps": [ StepRecord ],
   "cleanup": [ StepRecord ],
+  "cleanupSkipped": [
+    { "node": "string", "cleanupFor": "string", "reason": "released | when", "releasedBy": "string", "when": "string" }
+  ],
   "result": {
     "outcome": "passed | failed | error | aborted | stopped",
     "error": "string (omitted if blank)"
@@ -930,7 +949,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
 }
 ```
 
-`plan` is the plan as loaded (a recipe's reconstituted plan); `instantiatedPlan` is the plan after graph defaults, layers, and mutations were applied. `attempt`, `totalAttempts`, and `layers` are omitted when unused.
+`plan` is the plan as loaded (a recipe's reconstituted plan); `instantiatedPlan` is the plan after graph defaults, layers, and mutations were applied. `attempt`, `totalAttempts`, and `layers` are omitted when unused, and so is `cleanupSkipped` when no cleanup was skipped.
 
 **StepRecord** — one per executed step:
 
@@ -939,6 +958,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
   "stepId": "string",
   "node": "string",
   "cleanupFor": "string (cleanup steps only: the step whose resource it releases, or the cleanup step before it in a chain)",
+  "whenError": "string (cleanup steps only: why the pairing's when condition couldn't be evaluated; the cleanup ran)",
   "startTime": "RFC3339",
   "durationMs": 0,
   "inputs": { "paramName": "resolvedValue" },

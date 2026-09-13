@@ -19,8 +19,8 @@ func GenerateMermaid(g *Graph) string {
 	// Identify cleanup nodes (nodes that are targets of a cleanup reference)
 	cleanupNodes := make(map[string]bool)
 	for _, node := range g.Nodes {
-		if node.Cleanup != "" {
-			cleanupNodes[node.Cleanup] = true
+		if node.Cleanup.Node != "" {
+			cleanupNodes[node.Cleanup.Node] = true
 		}
 	}
 
@@ -63,11 +63,11 @@ func GenerateMermaid(g *Graph) string {
 	// Draw cleanup dashed arrows
 	for _, name := range names {
 		node := g.Nodes[name]
-		if node.Cleanup != "" {
-			key := edgeKey{name, node.Cleanup}
+		if node.Cleanup.Node != "" {
+			key := edgeKey{name, node.Cleanup.Node}
 			if !seen[key] {
 				seen[key] = true
-				fmt.Fprintf(&b, "    %s -.-> %s\n", name, node.Cleanup)
+				fmt.Fprintf(&b, "    %s -.-> %s\n", name, node.Cleanup.Node)
 			}
 		}
 	}

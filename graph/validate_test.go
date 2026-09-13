@@ -90,7 +90,7 @@ func TestValidate_SelfReferentialCleanup(t *testing.T) {
 				Adapter: "selfRef",
 				Inputs:  []Input{{Name: "x", Type: "string"}},
 				Outputs: []Output{{Name: "y", Type: "string"}},
-				Cleanup: "selfRef",
+				Cleanup: CleanupPairing{Node: "selfRef"},
 			},
 		},
 	}
@@ -109,7 +109,7 @@ func TestValidate_CleanupUnknownNode(t *testing.T) {
 				Adapter: "n1",
 				Inputs:  []Input{{Name: "x", Type: "string"}},
 				Outputs: []Output{{Name: "y", Type: "string"}},
-				Cleanup: "doesNotExist",
+				Cleanup: CleanupPairing{Node: "doesNotExist"},
 			},
 		},
 	}
@@ -121,7 +121,7 @@ func TestValidate_CleanupUnknownNode(t *testing.T) {
 
 func TestValidate_CleanupCycle(t *testing.T) {
 	node := func(name, cleanup string) *Node {
-		return &Node{Name: name, Adapter: name, Cleanup: cleanup}
+		return &Node{Name: name, Adapter: name, Cleanup: CleanupPairing{Node: cleanup}}
 	}
 	tests := []struct {
 		name  string
@@ -173,8 +173,8 @@ func TestValidate_CleanupChainIsValid(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		Nodes: map[string]*Node{
-			"createOrder":   {Name: "createOrder", Adapter: "createOrder", Cleanup: "requestRefund"},
-			"requestRefund": {Name: "requestRefund", Adapter: "requestRefund", Cleanup: "confirmRefund"},
+			"createOrder":   {Name: "createOrder", Adapter: "createOrder", Cleanup: CleanupPairing{Node: "requestRefund"}},
+			"requestRefund": {Name: "requestRefund", Adapter: "requestRefund", Cleanup: CleanupPairing{Node: "confirmRefund"}},
 			"confirmRefund": {Name: "confirmRefund", Adapter: "confirmRefund"},
 		},
 	}

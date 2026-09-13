@@ -29,7 +29,7 @@ func detectCleanupCycles(g *Graph) []string {
 			}
 			onPath[cur] = len(path)
 			path = append(path, cur)
-			cur = node.Cleanup
+			cur = node.Cleanup.Node
 		}
 	}
 

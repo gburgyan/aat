@@ -40,7 +40,7 @@ func TestParse_TravelFlow(t *testing.T) {
 	assert.Equal(t, "searchFlights", search.Name)
 	assert.Equal(t, "searchFlights", search.Adapter)
 	assert.Len(t, search.Inputs, 5)
-	assert.Equal(t, "cancelSearch", search.Cleanup)
+	assert.Equal(t, "cancelSearch", search.Cleanup.Node)
 
 	// Check optional input
 	returnDate := search.Inputs[3]
@@ -208,7 +208,7 @@ func TestParse_AirlineBooking(t *testing.T) {
 	assert.Empty(t, wb.Inputs)
 	assert.Len(t, wb.Outputs, 1)
 	assert.Equal(t, "itineraryId", wb.Outputs[0].Name)
-	assert.Equal(t, "ignoreItinerary", wb.Cleanup)
+	assert.Equal(t, "ignoreItinerary", wb.Cleanup.Node)
 
 	// --- addOffer ---
 	addOff := g.Nodes["addOffer"]
