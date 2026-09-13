@@ -50,7 +50,7 @@ request:
     X-Custom-Header: "{{customValue}}"
 ```
 
-Headers support `{{placeholder}}` substitution. Static headers like `Content-Type` are set directly; dynamic headers use placeholders resolved from step inputs. A header whose whole value is a conditional block (`{{?requestId}}{{requestId}}{{/requestId}}`) is not sent when the block resolves to nothing. A template header replaces an environment or plan header of the same name, but not the auth credential or a header an overlay sets — see [Header Merge Order](#header-merge-order).
+Headers support `{{placeholder}}` substitution. Static headers like `Content-Type` are set directly; dynamic headers use placeholders resolved from step inputs. A header whose whole value is a conditional block (`{{?requestId}}{{requestId}}{{/requestId}}`) is not sent when the block resolves to nothing. A template header replaces an environment or plan header of the same name, but not the auth credential or a header an overlay sets — see [Header Merge Order](#header-merge-order). To send a generated idempotency key, see [Idempotency Key Header](#idempotency-key-header).
 
 ### Body
 
@@ -510,6 +510,35 @@ response: {}
 ```
 
 When there's nothing to extract, use an empty response object.
+
+### Idempotency Key Header
+
+Give the node an optional input whose default generates a key, and send the header only when the input has a value:
+
+```yaml
+# graph.yaml, on the node's inputs
+- name: requestKey
+  type: string
+  optional: true
+  default: "{{uuid}}"
+```
+
+```yaml
+adapter: createOrder
+request:
+  method: POST
+  path: /orders
+  headers:
+    Content-Type: application/json
+    Idempotency-Key: "{{?requestKey}}{{requestKey}}{{/requestKey}}"
+  body: |
+    {"cartId": "{{cartId}}"}
+response:
+  extract:
+    orderId: orderId
+```
+
+A retried step resends the same key, since a step's inputs are resolved once. To replay the request on purpose, give a later step `requestKey: {fromInput: createOrder.requestKey}`. The header is conditional because a cleanup step takes its inputs only from earlier outputs, not from graph defaults, so a node that runs as a cleanup sends no key. See [Generated Values and Timestamps](value-flow.md#generated-values-and-timestamps).
 
 ## Validation
 

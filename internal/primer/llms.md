@@ -2,7 +2,7 @@
 
 This document is a structural primer for AI coding assistants (Claude Code, Cursor, Copilot, etc.) working on AAT projects. It gives you the schema knowledge to author and iterate on graphs, templates, plans, workflows, and environments without reading the full reference docs.
 
-Read it verbatim rather than through a tool that summarizes pages. `aat docs primer` prints the copy that matches the installed `aat`, and https://gburgyan.github.io/aat/llms-full.txt serves the latest as plain Markdown. If you need deeper detail on any topic, follow the cross-reference links to the full documentation.
+Read it verbatim rather than through a tool that summarizes pages. `aat docs primer` prints the copy that matches the installed `aat`, and https://gburgyan.github.io/aat/llms-full.txt serves the latest as plain Markdown. Save it once, with `aat docs primer > aat-primer.md`, and search that file instead of fetching pages again. If you need deeper detail on any topic, follow the cross-reference links to the full documentation.
 
 ## Project Structure
 
@@ -62,6 +62,21 @@ To author accurate graphs and templates, you need access to the target API's spe
 Both run as MCP servers (stdio transport) that you configure alongside your coding assistant. When available, query them directly instead of guessing at API shapes — this avoids round-trips of writing incorrect YAML, running, failing, and fixing.
 
 AAT also has its own MCP server (`aat mcp serve`) that exposes graph introspection, workflow listing, validation, and plan scaffolding tools. See [MCP Server](https://gburgyan.github.io/aat/mcp-server/).
+
+### Starting from an OpenAPI Spec
+
+When the API publishes an OpenAPI 3.0 or 3.1 spec, scaffold from it, and let AAT check your project and your runs against it.
+
+- **Scaffold only what you need.** A published spec can have hundreds of operations. Preview on stdout, then write:
+
+  ```bash
+  aat generate --oas openapi.json --operation createCart,addItem --output-graph -
+  aat generate --oas openapi.json --path /carts --output-graph graph.yaml --output-templates templates/
+  ```
+
+  The warnings list what each template leaves to write by hand, such as a form property that takes an object, which you write as bracketed pairs (`shipping[city]={{city}}`). Specs with circular references load. See [Large Specs](https://gburgyan.github.io/aat/generate/#large-specs).
+- **Validate the project against it.** `aat validate --strict` checks that each node's `operationId` exists, that its inputs are parameters or body properties, that required fields are inputs or written by the template, and that outputs exist in the 2xx response schema.
+- **Validate every run against it.** `--oas-validate strict` checks each step's request body, JSON or form-encoded, and its response body against the schema for its status code or the spec's `default` response, and fails a step on a violation. A request body of another type, or a schema the validator can't compile, shows `OAS: request not validated` or `OAS: response not validated` and never fails a step. Under `strict`, a spec that fails to load stops the run with exit code 2. Only the operations the graph's nodes name are compiled, so a large spec loads quickly. See [OAS Validation](https://gburgyan.github.io/aat/running/#oas-validation).
 
 ## Graph Schema
 
@@ -212,6 +227,45 @@ response:
         itemId: id
         title: name
 ```
+
+### Form Bodies and Query Strings
+
+- **Escaping follows the `Content-Type`** the request is sent with, whether the template, the environment, or the plan sets it. In a form body (`application/x-www-form-urlencoded`) and in a query string, each value is URL-encoded.
+- **Write a form body as the query string it sends,** on one line. Whitespace around a form body is removed.
+- **Bracketed keys are sent as written:** `metadata[source]={{source}}`.
+- **A list right after `key=` repeats the pair:** `tags={{tags}}` sends `tags=a&tags=b`.
+- **An iteration block writes one pair per element.** Start its body with `&` so that an empty list sends nothing, and use `{{@index}}` for indexed keys:
+
+```yaml
+request:
+  method: POST
+  path: /refunds
+  headers:
+    Content-Type: application/x-www-form-urlencoded
+  body: 'orderId={{orderId}}{{#skus}}&skus[]={{.}}{{/skus}}{{#items}}&items[{{@index}}][sku]={{.sku}}{{/items}}'
+```
+
+See [Body](https://gburgyan.github.io/aat/templates/#body).
+
+### Headers
+
+- **Merge order,** later wins: environment headers, plan headers, template headers, then the auth credential and overlay headers, which a template can't replace. Names compare case-insensitively. See [Header Merge Order](https://gburgyan.github.io/aat/templates/#header-merge-order).
+- **Values take placeholders.** A header whose whole value is a conditional block that resolves to nothing isn't sent.
+
+**Idempotency keys.** Give the node an optional input that generates a key, and send the header only when the input has a value:
+
+```yaml
+# graph.yaml, on the node's inputs
+- name: requestKey
+  type: string
+  optional: true
+  default: "{{uuid}}"
+# the template
+headers:
+  Idempotency-Key: "{{?requestKey}}{{requestKey}}{{/requestKey}}"
+```
+
+A retried step resends the same key, and a later step replays it with `requestKey: {fromInput: createOrder.requestKey}`. Keep the header conditional: a cleanup step takes its inputs only from earlier outputs, not from graph defaults. See [Idempotency Key Header](https://gburgyan.github.io/aat/templates/#idempotency-key-header).
 
 ### Lua Transforms
 
@@ -438,6 +492,8 @@ assertions:
   - It waits longer when the failed response asks: through `Retry-After`, or `RateLimit-Reset` on a 429 without one. Either may be seconds or an HTTP date.
   - If a server asks for more than 60 s, the step ends as `failed_fast`.
 - **Step retries vs `--retries`:** use step retries for rate limits and flaky responses. `--retries N` on `aat run` reruns the whole plan after 2 s, and it ignores those headers.
+- **Same request:** a step's inputs are resolved once, so every attempt sends the same values, pool picks and generated values included.
+- **Request timeout:** aat's client waits 30 s for each response. A request that takes longer fails with `no response within aat's 30s request timeout`, in the `timeout` category, which retries by default. The limit isn't configurable.
 - **Known rate limits:** set `settings.minRequestInterval` (`250ms`, `1s`) in the environment file. It spaces the start of every request one command sends, `--parallel` plans included, but not OAuth token requests.
 
 ### Cleanup
@@ -455,6 +511,15 @@ A cleanup step takes only `node` and `runOn`. Its inputs are matched by name aga
 A cleanup node can have its own `cleanup:`, which makes a chain. The second node runs right after the first succeeds and takes that step's outputs first. That covers a release that takes two calls, such as requesting a refund and then confirming it with the refund's ID. Name the first cleanup node's output after the second one's input.
 
 Cross-ref: [Plans and Recipes](https://gburgyan.github.io/aat/plans/)
+
+### Lists and Pagination
+
+A step sends one request and reads one response, and plans have no loop, so a list step reads one page.
+
+- **Narrow the list to what you need:** filter by a reference the plan generated (`reference: "order-{{random 8}}"`), by a time window (`createdAfter: "{{unixtime - 1 hours}}"`), or by the parent resource, and raise the page size.
+- **Pick elements** with a `select` of strategy `match` and a `filter`.
+- **For a fixed number of pages,** chain list steps: the second takes the first page's cursor with `from: listOrders.nextCursor`.
+- **When you assert that nothing is left,** also assert that the listing covered everything: that it returned items, and that it wasn't cut off, with an output such as `hasMore == false`.
 
 ## Depth and Negative Testing Primitives
 
@@ -477,8 +542,12 @@ a 2xx. Retries are skipped — the first response wins. Cleanup still runs.
     description: "Unknown product should be rejected"
 ```
 
-All `expectFailure.status` entries must be `>= 400`. Outputs are not stored on
-an expected-failure step (the error response has nothing meaningful downstream).
+All `expectFailure.status` entries must be `>= 400`. An expected-failure step
+stores no outputs, so a later step can't read an ID from its error body. To check
+the rejected object afterwards, create it in an earlier step that succeeds and
+make the rejected call on it, or find it with a list step filtered by a value you
+generated. Assertions on the step itself still read the error body, such as a
+`fieldEquals` on `error.code`.
 
 ### 2. `mutations:` — sibling steps for negative variants
 
@@ -975,11 +1044,12 @@ assertion, the same OAS response-validation result is surfaced as an entry in
   "skipped": false,
   "skipReason": "only present when skipped",
   "request":  { "valid": true, "errors": [], "compilationWarnings": [] },
-  "response": { "valid": true, "errors": [], "compilationWarnings": [] }
+  "response": { "valid": false, "skipped": true, "skipReason": "the schema could not be compiled: …" }
 }
 ```
 
-Each `errors[]` entry is `{ "path": "/field", "message": "..." }`.
+Each `errors[]` entry is `{ "path": "/field", "message": "..." }`. A payload that wasn't validated, such as an XML request
+body or a schema the validator can't compile, has `skipped: true` and a `skipReason`, and never counts as a violation.
 
 ### Summary Schema (summary.json)
 
@@ -1063,6 +1133,10 @@ In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts
 | `dependsOn cycle detected involving "A" and "B"` | Plan steps depend on each other | Fix the steps' `dependsOn` lists |
 | `unresolved placeholders: X` | A template placeholder had no value at run time | Give the input a value or default, or wrap the placeholder in a `{{?X}}…{{/X}}` block |
 | `extract path "X" (…) not found in response` | The response lacks a path the template extracts | Fix the path, or mark the extract entry `optional: true` |
+| `executing HTTP request: no response within aat's 30s request timeout` | The API took longer than aat's 30-second limit to answer | Check the API; a step `retry` covers `timeout` by default |
+| `invalid expression syntax: …`, `random takes a length from 1 to 64`, `today counts days` | A malformed `{{…}}` expression | Fix it; see [Expressions](#expressions) |
+| `strict OAS validation: reading OAS spec …` | `--oas-validate strict` with a spec that doesn't load | Fix the graph's `oas:` path, or run with `--oas-validate auto` |
+| `additional properties 'X' not allowed` in an OAS request error | The request sends a field the spec doesn't declare | Remove the field, or fix its spelling |
 
 ## Tips for AI Assistants
 

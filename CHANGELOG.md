@@ -120,6 +120,10 @@ the graph and plan formats may still change before 1.0.
   rerun still resolves them again.
 - `uuid`, `now`, and `unixtime` are reserved words in expressions, so `{{now}}` no longer refers to an input named
   `now`. An offset in hours or minutes on `today`, or on a reference, is an error that suggests `now` or `unixtime`.
+- Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
+  `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
+  bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an
+  object after an expected failure.
 
 ### Fixed
 - OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another
