@@ -52,3 +52,55 @@ AAT made hard. M6.1 fixes those findings in three phases:
   - The run's archives held it 0 times.
 
 **Open questions:** none.
+
+## 2026-09-12 — P18: `aat run show`
+
+**What:** `aat run show <run>` prints what a run archive recorded:
+- the step list
+- one step
+- one part of a step (the request or response body, inputs, or outputs), narrowed with `--path` or summarized with
+  `--shape`
+
+The MCP server's `get_sample_response` gains `path` and `shape`.
+
+**Decisions:**
+- **A read-only command, not another dump.** In the discovery run, the agent read step outputs through `--dump-state`
+  17 times, and sent a subagent through a multi-megabyte archive with `jq`. Reading what an API returned is the core
+  of the authoring loop, so it gets a command that needs no browser and changes nothing.
+- **Run lookup moved into `archive`.** `archive.ListRuns` and `archive.FindRun` replace MCP's private lookup.
+  - **Unfinished batches.** Any directory without `archive.json` is read as a batch. The runs of a batch that is still
+    going, or that stopped before writing `batch.json`, resolve, and `latest` can name one.
+  - **Ordering.** Runs order by the timestamp in `summary.json`, which is read and never written. The server's listing
+    writes a missing summary, so a read-only command could not reuse it.
+  - **References.** A reference is `latest`, a run ID, or a batch ID and run ID. Each part is checked with
+    `CheckDirName`, so MCP's lookups stay inside the archive directory. File paths are the CLI's concern.
+  - **The server's `LatestRef` is unchanged:** a newer batch still wins there, because the web view opens batches.
+- **Step helpers moved into `archive`:** `StepID`, `CleanupStepIDs`, `FindStep`, and `StepPassed`. The server's copies
+  are gone, so `--step` IDs match the web UI's step URLs.
+- **The shape merges every element of an array, not only the first**, which was the plan.
+  - The merge keeps the union of keys, type unions such as `string|null`, and counts of the objects that hold each
+    key.
+  - A first-element shape hides fields that are sometimes missing or null, and those fields drove most of the
+    transform boilerplate in the discovery project.
+  - Paths are gjson paths with `#`, so a line goes straight into an extract rule or `--path`.
+- **Bodies stay raw.** Shapes and paths read the archived `json.RawMessage` with gjson, and nothing decodes a body
+  into maps.
+- **Printed parts are capped at 64 KB by default,** with a note on stderr, so an agent does not pour a large body into
+  its context by accident. `--max-bytes 0` lifts the cap. The step list and the step overview stay small, so they are
+  not capped.
+- **Pass or fail follows the run summary:** `StepPassed`, plus a status of 400 or more without `expectFailure`.
+
+**Verification:**
+- **Tests:**
+  - lookup: batches, saved and unfinished batches, traversal references, and no summary written
+  - the shape
+  - each command form and its exit codes
+  - the MCP parameters
+  - a shop end-to-end subtest that reads a real run's response shape and outputs
+- **On the discovery run's own archives, read in place:**
+  - The step list of a 318 MB archive took 0.36 s, with 661 MB peak memory.
+  - The shape of a 38 MB response took 0.34 s and 288 MB, for 292 lines.
+  - Nothing under that project was written.
+
+**Open questions:**
+- Archives are indented JSON, so a run with large responses writes hundreds of megabytes. Not scheduled.

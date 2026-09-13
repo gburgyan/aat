@@ -23,6 +23,18 @@ the graph and plan formats may still change before 1.0.
   which it sends as one `Cookie` header. Body and response properties from `allOf` branches become inputs and
   outputs, and an OpenAPI 3.1 type list such as `["null", integer]` maps to its non-null type. The MCP server's
   operation search lists operations of every method too.
+- `aat run show <run>` prints what an archive recorded, without a browser.
+  - Without `--step`, it lists the steps with their node, HTTP status, result, duration, and output names, then the
+    verification and cleanup steps.
+  - `--step` shows one step. `--request`, `--response`, `--inputs`, and `--outputs` print that part as JSON.
+  - `--path` narrows the part with a gjson path.
+  - `--shape` prints the part's structure: each path with its type, array sizes, how many objects hold a key, and a
+    sample value.
+  - The run is `latest` (runs inside batches included), a run ID, a batch ID and run ID joined by a slash, or a path
+    to a run directory, an archive file, or an `.aar` export.
+- The MCP server's `get_sample_response` takes `path` and `shape`, as `aat run show` does.
+  - Its `run_id` accepts `latest` and a batch ID with a run ID, and finds runs inside saved batches.
+  - The same goes for `inspect_archive`, `analyze_failure`, and `diff_archives`.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or

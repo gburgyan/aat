@@ -235,6 +235,7 @@ Release binaries are not notarized. If macOS blocks one you downloaded with a br
 |---------|--------------|
 | `aat run plan <name>` | Run one plan or recipe |
 | `aat run batch [dir]` | Run every plan, optionally across layer groups and in parallel |
+| `aat run show <run>` | Print a run's steps, or one step's request, response, inputs, outputs, or response shape |
 | `aat run clean` | Delete old, unsaved run archives |
 | `aat run rebuild-summaries` | Rebuild run summaries from the full archives |
 | `aat validate` | Check the graph, templates, workflows, layers, and plans (`--strict` fails on warnings) |

@@ -296,6 +296,27 @@ func TestShopExample(t *testing.T) {
 		assert.Equal(t, "paid", order.Status)
 	})
 
+	t.Run("run show", func(t *testing.T) {
+		t.Parallel()
+		p := newShopProject(t)
+
+		args := p.runArgs(t, "us")
+		args.PlanPath = p.plan(t, "smoke")
+		res := runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		require.Equal(t, engine.OutcomePassed, res.outcome)
+		archiveDir := func() (string, error) { return args.OutputDir, nil }
+
+		var out bytes.Buffer
+		require.NoError(t, runShowCommand("latest", archiveDir, showOptions{Step: "checkout", Part: "response", Shape: true}, &out, io.Discard))
+		assert.Regexp(t, `(?m)^orderId\s+string\s+"ord_`, out.String())
+		assert.Regexp(t, `(?m)^total\s+number`, out.String())
+
+		out.Reset()
+		require.NoError(t, runShowCommand("latest", archiveDir, showOptions{Step: "checkout", Part: "outputs", Path: "orderId"}, &out, io.Discard))
+		assert.Regexp(t, `^"ord_\w+"\n$`, out.String())
+	})
+
 	t.Run("published kit", func(t *testing.T) {
 		t.Parallel()
 		shell, err := exec.LookPath("sh")

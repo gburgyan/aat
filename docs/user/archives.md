@@ -4,7 +4,7 @@ Every plan execution writes a JSON archive: `aat run plan`, each plan in `aat ru
 
 ## Where Archives Go
 
-Archives are written to the directory given by `--output`, else the manifest's `archives:` entry, else `_output/runs` in the working directory. `aat web`, `aat web view`, `aat import`, `aat run clean`, and `aat run rebuild-summaries` look for them the same way.
+Archives are written to the directory given by `--output`, else the manifest's `archives:` entry, else `_output/runs` in the working directory. `aat web`, `aat web view`, `aat run show`, `aat import`, `aat run clean`, and `aat run rebuild-summaries` look for them the same way.
 
 ## Layout
 
@@ -117,6 +117,100 @@ aat web view downloaded-artifacts/run-20260910-225958-d819f460/archive.json
 Next to an `archive.json`, sibling `attempt-NN.json` files are loaded so the attempt selector works; next to a `batch.json`, the member run directories are loaded. A file is read-only: save, rename, export, and import are unavailable.
 
 Known issue: `aat web view <file>` always starts its own server, so it fails with `bind: address already in use` while `aat web` (or another `aat web view`) holds the port. Pass a different `--port`.
+
+## Inspecting a Run from the CLI
+
+`aat run show` prints what an archive recorded, for a terminal, a script, or an AI coding assistant that cannot open the web UI. It only reads: it writes nothing, not even `summary.json`.
+
+```
+aat run show latest                                     # the steps
+aat run show latest --step checkout                     # one step
+aat run show latest --step checkout --response --shape  # the structure of its response
+aat run show latest --step checkout --response --path orderId
+```
+
+The run is one of:
+
+- `latest`: the newest run, runs inside batches included, even those of a batch that is still running
+- a run ID, such as `run-20260910-225958-d819f460`, looked up at the top of the archive directory and then inside each batch
+- a batch ID and a run ID joined by a slash, such as `batch-20260910-225919-0754c0ea/run-20260910-225919-5a04ca45`
+- a path to a run directory, an `archive.json` or `attempt-NN.json`, or an exported `.aar` file
+
+IDs are looked up in the archive directory, as [Where Archives Go](#where-archives-go) describes.
+
+Without `--step`, it lists the steps: ID, node, HTTP status, pass or fail, duration, and output names, then the verification steps and the cleanup steps, each with the step it releases. After the shop's `smoke` recipe:
+
+```
+run-20260912-224235-0842d2b8  PASSED  2ms
+plan: Buy one in-stock product and pay by card
+archive: /path/to/shop/_output/runs/run-20260912-224235-0842d2b8/archive.json
+
+  #  STEP           NODE           STATUS  RESULT     TIME  OUTPUTS
+  1  listProducts   listProducts      200  pass        0ms  currency, products
+  2  createCart     createCart        201  pass        0ms  cartId, status
+  3  addItem        addItem           201  pass        0ms  cartId, lineCount, subtotal
+  4  checkout       checkoutCart      201  pass        0ms  currency, discount, orderId, receiptNumber, shipping, status, subtotal, tax, ta…
+  5  paymentCharge  paymentCharge     201  pass        0ms  amountDisplay, orderStatus, paymentId, status
+
+cleanup:
+  #  STEP         NODE         STATUS  RESULT     TIME  FOR
+  1  deleteOrder  deleteOrder     204  pass        0ms  checkout
+  2  deleteCart   deleteCart      204  pass        0ms  createCart
+```
+
+`--step` takes a step ID, or a node name when that node ran only once. On its own, it prints the step's method and URL, status, result, duration and retries, error, inputs and outputs (arrays and objects by their size), assertion counts with each failure, and the sizes of the request and response bodies:
+
+```
+step checkout (node checkoutCart)
+POST http://localhost:8765/us/v1/carts/cart_0001/checkout
+status 201  pass  0ms
+inputs:
+  cartId        "cart_0001"
+  postalCode    "78701"
+  shippingTier  "standard"
+outputs:
+  currency       "USD"
+  orderId        "ord_0001"
+  status         "created"
+  total          10340
+  ...
+assertions: 1 passed, 0 failed
+request body: 48 bytes
+response body: 518 bytes
+```
+
+These flags print one part of the step instead:
+
+| Flag | Prints |
+|------|--------|
+| `--request`, `--response` | The request or response body, as indented JSON |
+| `--inputs`, `--outputs` | The resolved inputs or the extracted outputs, as JSON |
+| `--path PATH` | Only what a [gjson path](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) selects: `lines.0.sku`, or `lines.#.sku` for every element. The `$.lines[0].sku` form works too. Without a part flag, it reads the response body |
+| `--shape` | The part's structure instead of its values. Without a part flag, the response body's |
+| `--max-bytes N` | Cut a printed part after `N` bytes, 65536 by default, with a note on stderr; `0` prints everything |
+| `--json` | The step list or the step as JSON with `snake_case` keys, or the shape as a JSON array |
+
+`--shape` is the way to learn a large response. It prints one line per path: the path's type, an array's item count, how many objects hold a key when not all of them do, and a sample value. The elements of an array are merged, so a key that only some elements hold, or a value that is sometimes `null` (`string|null`), shows up. Each path works as an extract rule in a [template](templates.md) and as `--path`:
+
+```
+$ aat run show latest --step checkout --response --shape
+orderId            string  "ord_0001"
+receiptNumber      string  "RCPT-US-0001"
+status             string  "created"
+...
+total              number  10340
+totalDisplay       string  "$103.40"
+lines              array   1 item
+lines.#            object
+lines.#.sku        string  "SKU-1001"
+lines.#.quantity   number  1
+lines.#.lineTotal  number  8999
+createdAt          string  "2026-09-13T03:42:35Z"
+```
+
+Archives several hundred megabytes in size still list their steps in under a second, and so does the shape of a response tens of megabytes long.
+
+A path that matches nothing, an unknown step, or an unknown run exits with code `2`, and the message says what does exist: the top-level keys, the step IDs, or the forms a run reference takes. Archives are redacted when they are written, so `aat run show` prints only what the archive holds; see [What Is Redacted, and What Is Not](#what-is-redacted-and-what-is-not). The MCP server's `get_sample_response` takes the same `path` and `shape`; see [MCP Server](mcp-server.md).
 
 ## Exporting and Importing
 

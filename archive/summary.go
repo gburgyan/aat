@@ -29,7 +29,7 @@ func BuildRunSummary(a *Archive) *RunSummary {
 	passed := 0
 	failed := 0
 	for _, s := range a.Steps {
-		if stepRecordPassed(s) {
+		if StepPassed(s) {
 			passed++
 		} else {
 			failed++
@@ -90,23 +90,6 @@ func ReadSummary(path string) (*RunSummary, error) {
 	}
 
 	return &s, nil
-}
-
-// stepRecordPassed returns true when a step has no errors or failures.
-func stepRecordPassed(s StepRecord) bool {
-	if s.Error != "" {
-		return false
-	}
-	if s.Validation != nil && !s.Validation.Passed {
-		return false
-	}
-	if s.ExpectFailure != nil && !s.ExpectFailure.Passed {
-		return false
-	}
-	if s.ResponseBodyError != nil {
-		return false
-	}
-	return true
 }
 
 // countIssues counts categorized issues across all steps. Returns nil when

@@ -611,7 +611,59 @@ func TestHandleGetSampleResponse_RunIDNotFound(t *testing.T) {
 	assert.Contains(t, resultText(t, result), "not found")
 }
 
+// TestHandleGetSampleResponse_PathAndShape checks that path narrows the body
+// and shape returns its structure instead of its values.
+func TestHandleGetSampleResponse_PathAndShape(t *testing.T) {
+	dir := t.TempDir()
+	srv := newTestServerWithArchives(twoNodeGraph(), dir)
+	step := testStep("search", 200, 100)
+	step.Response.Body = json.RawMessage(`{"data": {"items": [{"id": "a", "note": "fragile"}, {"id": "b"}]}}`)
+	writeTestArchive(t, dir, "run-20260210-140000-aaaa0001", testArchive("passed", step))
+
+	text := resultText(t, callTool(t, srv.handleGetSampleResponse, map[string]any{"node": "search", "path": "data.items.#.id"}))
+	assert.Contains(t, text, "**Path:** `data.items.#.id`")
+	assert.Contains(t, text, `"b"`)
+	assert.NotContains(t, text, "fragile")
+
+	text = resultText(t, callTool(t, srv.handleGetSampleResponse, map[string]any{"node": "search", "shape": true}))
+	assert.Contains(t, text, "## Response Shape")
+	assert.Regexp(t, `data\.items\.#\.note\s+string\s+in 1 of 2`, text)
+	assert.NotContains(t, text, "## Response Body")
+
+	text = resultText(t, callTool(t, srv.handleGetSampleResponse, map[string]any{"node": "search", "path": "data.missing"}))
+	assert.Contains(t, text, "matches nothing in the response body")
+}
+
+// TestHandleGetSampleResponse_RunRefs checks that run_id accepts latest and a
+// batch ID with a run ID, and finds the runs of saved batches.
+func TestHandleGetSampleResponse_RunRefs(t *testing.T) {
+	dir := t.TempDir()
+	srv := newTestServerWithArchives(twoNodeGraph(), dir)
+	const ref = "!nightly/run-20260210-150001-aaaa0003"
+	writeTestArchive(t, dir, ref, testArchive("passed", testStep("search", 200, 100)))
+
+	for _, runID := range []string{"latest", ref, "run-20260210-150001-aaaa0003"} {
+		result := callTool(t, srv.handleGetSampleResponse, map[string]any{"node": "search", "run_id": runID})
+		assert.False(t, result.IsError, runID)
+		assert.Contains(t, resultText(t, result), "**Source:** "+ref, runID)
+	}
+}
+
 // --- loadArchive ---
+
+// TestLoadArchive_StaysInArchiveDir checks that a run ID cannot name an archive
+// outside the archive directory.
+func TestLoadArchive_StaysInArchiveDir(t *testing.T) {
+	parent := t.TempDir()
+	writeTestArchive(t, parent, "outside", testArchive("passed"))
+	dir := filepath.Join(parent, "runs")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+
+	for _, runID := range []string{"../outside", "..", "/outside", "runs/../outside"} {
+		_, err := loadArchive(dir, runID)
+		assert.ErrorContains(t, err, "not found", runID)
+	}
+}
 
 func TestLoadArchive_Valid(t *testing.T) {
 	dir := t.TempDir()
