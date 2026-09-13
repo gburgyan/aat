@@ -400,7 +400,7 @@ aat validate graph --graph graph.yaml --strict
 **Warnings** (fail only with `--strict`):
 
 - A graph input that is neither an OAS parameter nor a request body property
-- A required OAS parameter or required request body property that is not a graph input, unless the node's template sends it itself: a query parameter written into `request.path`, a header in `request.headers`, or a top-level body key outside `{{?…}}` blocks
+- A required OAS parameter or required request body property that is not a graph input, unless the node's template sends it itself: a query parameter written into `request.path`, a header in `request.headers`, a top-level JSON body key, or a form body key, outside `{{?…}}` and `{{#…}}` blocks. A bracketed query or form key such as `metadata[source]` counts as `metadata`
 - A graph output not found in the first 2xx response schema that declares properties. Each output is looked up at its template extract path, through nested objects and array items, and outputs a Lua transform computes are skipped
 
 The template-aware parts of these checks need the templates: `aat validate` always loads them, and `aat validate graph` loads them from `--templates` or the manifest. Without templates, required fields must be graph inputs and outputs must be top-level response properties named after the output.

@@ -557,9 +557,11 @@ func normalizeJSONPath(path string) string {
 }
 
 // SuppliedFields returns the request fields a template always sends: query
-// parameters written into the path, header names, and the top-level keys of a
-// JSON body. Fields inside {{?key}} or {{#key}} blocks are left out, since they
-// are sent only sometimes. The static OpenAPI check uses this to accept a
+// parameters written into the path, header names, the top-level keys of a JSON
+// body, and the keys of a form-encoded body. A bracketed key counts as the name
+// before its first bracket, so metadata[source]=web supplies metadata. Fields
+// inside {{?key}} or {{#key}} blocks are left out, since they are sent only
+// sometimes. The static OpenAPI check uses this to accept a
 // required parameter or body property that the template supplies itself, for
 // example a literal "photoUrls": [] with no graph input behind it.
 func (t *Template) SuppliedFields() map[string]bool {
@@ -567,10 +569,8 @@ func (t *Template) SuppliedFields() map[string]bool {
 
 	path := withoutBlocks(t.Request.Path)
 	if _, query, ok := strings.Cut(path, "?"); ok {
-		for _, pair := range strings.Split(query, "&") {
-			if name, _, _ := strings.Cut(pair, "="); name != "" {
-				fields[name] = true
-			}
+		for _, name := range pairNames(query) {
+			fields[name] = true
 		}
 	}
 
@@ -580,10 +580,32 @@ func (t *Template) SuppliedFields() map[string]bool {
 		}
 	}
 
-	for _, key := range topLevelJSONKeys(withoutBlocks(t.Request.Body)) {
+	body := withoutBlocks(t.Request.Body)
+	if bodyContext(t.Request.Headers, t.Request.Body) == renderForm {
+		for _, name := range pairNames(strings.TrimSpace(body)) {
+			fields[name] = true
+		}
+		return fields
+	}
+	for _, key := range topLevelJSONKeys(body) {
 		fields[key] = true
 	}
 	return fields
+}
+
+// pairNames returns the field names of the key=value pairs in a query string or
+// form body. A bracketed key gives the name before its first bracket, and a key
+// written as a placeholder gives none.
+func pairNames(pairs string) []string {
+	var names []string
+	for _, pair := range strings.Split(pairs, "&") {
+		name, _, _ := strings.Cut(pair, "=")
+		name, _, _ = strings.Cut(name, "[")
+		if name != "" && !strings.Contains(name, "{{") {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // withoutBlocks removes every {{?key}}...{{/key}} and {{#key}}...{{/key}} block,

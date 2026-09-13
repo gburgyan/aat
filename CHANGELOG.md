@@ -120,6 +120,9 @@ the graph and plan formats may still change before 1.0.
   `OAS: 0 warning(s)`, and a `schema` assertion failed with an empty message.
 - A form-encoded body no longer sends the final newline of a `body: |` block, which the server read as part of the last
   value. Whitespace around the body is removed for form bodies only.
+- The static OAS check no longer reports a required form field or query parameter as missing when the template writes
+  it. The keys of a form-encoded body count as supplied, and a bracketed key such as `metadata[source]` supplies
+  `metadata`.
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,
