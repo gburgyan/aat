@@ -181,7 +181,7 @@ cd examples/shop/
 ../../aat run batch --oas-validate strict
 ../../aat run batch --layer-group shipping-standard,shipping-express --layer-group basket-gear,basket-apparel --parallel 4
 ../../aat run plan smoke --env eu
-../../aat run plan smoke --stop-after paymentCharge --dump-state -   # live state for another tool
+../../aat run plan smoke --stop-after paymentCharge --dump-state -   # state for another tool, credentials redacted
 ../../aat run plan smoke --var apiHost=localhost:9765                # a sandbox on other ports
 ../../aat web view latest
 ../../aat validate --strict --manifest aat-kit.yaml                  # the integration kit on its own
@@ -221,7 +221,8 @@ cd examples/petstore/
 #   --oas-validate MODE  runtime OpenAPI validation: auto|strict|off
 # run plan only:
 #   --stop-after STEP  stop after a step, skip cleanup, keep resources alive
-#   --dump-state FILE  write live state (per-step base URLs and headers, outputs) for external harnesses
+#   --dump-state FILE  write run state (per-step base URLs and headers, outputs) for external harnesses; credentials redacted
+#   --dump-state-secrets  keep live credentials in the --dump-state output
 ```
 
 The author's production-grade project (a 74-node airline API graph) lives in a separate private

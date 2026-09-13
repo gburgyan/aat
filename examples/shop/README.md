@@ -161,7 +161,7 @@ selection:
 ## Checkpoints: hand a live order to another tool
 
 ```bash
-aat run plan smoke --stop-after paymentCharge --dump-state state.json
+aat run plan smoke --stop-after paymentCharge --dump-state state.json --dump-state-secrets
 order=$(jq -r '.values["checkout.orderId"]' state.json)
 curl -s -H "$(jq -r '"Authorization: " + .auth.headers.Authorization' state.json)" \
   "localhost:8765/us/v1/orders/$order"
@@ -170,8 +170,9 @@ curl -s -H "$(jq -r '"Authorization: " + .auth.headers.Authorization' state.json
 The run stops after the payment without cleanup, so the paid order stays live for a test harness, a
 debugger, or a hand-written request. The payment ran on the payments host with its own API key, yet
 the top-level `auth` in `state.json` is still the shop's bearer token; each entry in `steps` records
-the host and headers its own request used (`paymentCharge` shows `X-API-Key`). `state.json` holds
-live credentials: it is written with mode 0600 and git-ignored.
+the host and headers its own request used (`paymentCharge` shows `X-API-Key`). A dump redacts
+credentials unless asked: `--dump-state-secrets` keeps the live token that `curl` sends, so
+`state.json` holds live credentials. It is written with mode 0600 and git-ignored.
 
 ## Contract checks
 

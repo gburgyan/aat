@@ -25,6 +25,11 @@ var runPlanCmd = &cobra.Command{
 		changed := func(name string) bool { return cmd.Flags().Changed(name) }
 		getString := func(name string) string { v, _ := cmd.Flags().GetString(name); return v }
 		jsonFlag, _ := cmd.Flags().GetBool("json")
+		dumpState, _ := cmd.Flags().GetString("dump-state")
+		dumpStateSecrets, _ := cmd.Flags().GetBool("dump-state-secrets")
+		if dumpStateSecrets && dumpState == "" {
+			return runSetupFailure(jsonFlag, fmt.Errorf("--dump-state-secrets requires --dump-state"))
+		}
 
 		overrides := buildProjectOverrides(changed, getString)
 		resolved, err := config.ResolveProjectPaths(overrides)
@@ -49,7 +54,6 @@ var runPlanCmd = &cobra.Command{
 			return runSetupFailure(jsonFlag, err)
 		}
 		stopAfter, _ := cmd.Flags().GetString("stop-after")
-		dumpState, _ := cmd.Flags().GetString("dump-state")
 
 		envName, err := selectEnvName(cmd, resolved, envOverlay, noAutoOverrides)
 		if err != nil {
@@ -59,27 +63,28 @@ var runPlanCmd = &cobra.Command{
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
 		ra := &runArgs{
-			PlanPath:        planPath,
-			EnvPath:         resolved.EnvPath,
-			EnvName:         envName,
-			GraphPath:       resolved.GraphPath,
-			TemplatesPath:   resolved.TemplatesPath,
-			OutputDir:       outputDir,
-			DomainPath:      resolved.DomainPath,
-			JSON:            jsonFlag,
-			Quiet:           quiet,
-			Overrides:       overrideFlags,
-			EnvOverlay:      envOverlay,
-			MaxRetries:      retries,
-			Layers:          layerFlags,
-			LayersDir:       resolved.LayersDir,
-			NoAutoOverrides: noAutoOverrides,
-			OASValidateMode: oasValidate,
-			VerboseAuth:     verboseAuth,
-			SkipMutations:   noMutations,
-			StopAfterStep:   stopAfter,
-			DumpStatePath:   dumpState,
-			Vars:            vars,
+			PlanPath:         planPath,
+			EnvPath:          resolved.EnvPath,
+			EnvName:          envName,
+			GraphPath:        resolved.GraphPath,
+			TemplatesPath:    resolved.TemplatesPath,
+			OutputDir:        outputDir,
+			DomainPath:       resolved.DomainPath,
+			JSON:             jsonFlag,
+			Quiet:            quiet,
+			Overrides:        overrideFlags,
+			EnvOverlay:       envOverlay,
+			MaxRetries:       retries,
+			Layers:           layerFlags,
+			LayersDir:        resolved.LayersDir,
+			NoAutoOverrides:  noAutoOverrides,
+			OASValidateMode:  oasValidate,
+			VerboseAuth:      verboseAuth,
+			SkipMutations:    noMutations,
+			StopAfterStep:    stopAfter,
+			DumpStatePath:    dumpState,
+			DumpStateSecrets: dumpStateSecrets,
+			Vars:             vars,
 		}
 
 		code := executeRun(ra)
@@ -95,7 +100,8 @@ func init() {
 	runPlanCmd.Flags().Bool("json", false, "output machine-readable JSON summary to stdout")
 	runPlanCmd.Flags().Bool("quiet", false, "suppress progress messages, show only final summary")
 	runPlanCmd.Flags().String("stop-after", "", "stop execution after the named step (by step ID); cleanup is skipped so resources stay alive for handoff")
-	runPlanCmd.Flags().String("dump-state", "", "write accumulated run state (base URL, live auth headers, step outputs) to FILE (mode 0600); use \"-\" for stdout, which then carries only the state (progress goes to stderr; with --json it is nested under \"state\")")
+	runPlanCmd.Flags().String("dump-state", "", "write accumulated run state (base URLs, request headers, step inputs and outputs, with credentials redacted) to FILE (mode 0600); use \"-\" for stdout, which then carries only the state (progress goes to stderr; with --json it is nested under \"state\")")
+	runPlanCmd.Flags().Bool("dump-state-secrets", false, "keep live credentials in the --dump-state output, for a harness that sends requests as the run's session")
 }
 
 // executeRun handles output modes (JSON/quiet/normal) and returns an exit code.
@@ -104,6 +110,11 @@ func executeRun(ra *runArgs) int {
 	// --json implies --quiet
 	if ra.JSON {
 		ra.Quiet = true
+	}
+
+	// Live credentials on stdout reach terminals, CI logs, and transcripts.
+	if ra.DumpStateSecrets && ra.DumpStatePath == "-" {
+		fmt.Fprintln(os.Stderr, "aat: warning: --dump-state-secrets writes live credentials to stdout")
 	}
 
 	// console receives progress and the summary line. With --dump-state - (and

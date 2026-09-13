@@ -1,15 +1,16 @@
 # Checkpoints
 
-A checkpoint lets AAT drive a system into a particular state and then hand off to another tool. AAT runs a plan only as far as one step, leaves everything it created alive, and writes the live session to a JSON file: base URLs, request headers including credentials, and every step's outputs. A pytest suite, a load test, or a manual `curl` session picks up from there.
+A checkpoint lets AAT drive a system into a particular state and then hand off to another tool. AAT runs a plan only as far as one step, leaves everything it created alive, and writes the session to a JSON file: base URLs, request headers, and every step's inputs and outputs, with credentials redacted unless you ask for them. A pytest suite, a load test, or a manual `curl` session picks up from there.
 
-Two `aat run plan` flags do this:
+These `aat run plan` flags do this:
 
 | Flag | Description |
 |------|-------------|
 | `--stop-after STEP` | Stop after the step whose ID is `STEP` passes. Later steps, verification steps, and all cleanup are skipped, so resources created up to that point stay alive |
-| `--dump-state FILE` | Write the run's live state to `FILE` (mode `0600`). `-` writes it to stdout instead. Works with or without `--stop-after` |
+| `--dump-state FILE` | Write the run's state to `FILE` (mode `0600`), with credentials redacted. `-` writes it to stdout instead. Works with or without `--stop-after` |
+| `--dump-state-secrets` | Keep live credentials in the dump, for a tool that sends requests as the run's session. Needs `--dump-state`; see [Security](#security) |
 
-Neither flag exists on `aat run batch`.
+None of them exists on `aat run batch`.
 
 ## Stopping After a Step
 
@@ -65,18 +66,19 @@ AAT does not clean up after a checkpoint, then or later. Whatever takes over own
 
 ## The State Dump
 
-The dump written by `--stop-after paymentCharge --dump-state state.json` above, trimmed to two of its five steps and five of its 22 `values` entries (the sandbox tokens are not real secrets):
+The dump written by `--stop-after paymentCharge --dump-state state.json` above, trimmed to two of its five steps and five of its 22 `values` entries:
 
 ```json
 {
   "version": "1",
+  "redacted": true,
   "outcome": "stopped",
   "stoppedAt": "paymentCharge",
   "baseUrl": "http://localhost:8765/us/v1",
   "auth": {
     "headers": {
       "Accept": "application/json",
-      "Authorization": "Bearer shop-0001-9acb0442",
+      "Authorization": "[REDACTED]",
       "Content-Type": "application/json"
     }
   },
@@ -87,7 +89,7 @@ The dump written by `--stop-after paymentCharge --dump-state state.json` above, 
       "baseUrl": "http://localhost:8765/us/v1",
       "headers": {
         "Accept": "application/json",
-        "Authorization": "Bearer shop-0001-9acb0442",
+        "Authorization": "[REDACTED]",
         "Content-Type": "application/json"
       },
       "outputs": {
@@ -108,7 +110,7 @@ The dump written by `--stop-after paymentCharge --dump-state state.json` above, 
       "headers": {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "X-API-Key": "pay-demo-key"
+        "X-API-Key": "[REDACTED]"
       },
       "outputs": {
         "amountDisplay": "$103.40",
@@ -138,13 +140,14 @@ The dump written by `--stop-after paymentCharge --dump-state state.json` above, 
 | Field | Contents |
 |-------|----------|
 | `version` | Format version, currently `"1"` |
+| `redacted` | `true` when credentials were redacted, the default; `false` with `--dump-state-secrets` |
 | `outcome` | The run outcome: `stopped` at a checkpoint, otherwise `passed`, `failed`, `error`, or `aborted` |
 | `stoppedAt` | The step ID the run stopped after; absent when it did not stop |
 | `baseUrl`, `auth.headers` | The environment's default route: the base URL and every request header of the last request sent to the environment's `apiBaseUrl`. When no request went there, they come from the last request sent anywhere |
 | `steps` | One entry per step that ran without an execution error, in order: `stepId`, `node`, and, for steps that sent a request, the `baseUrl` and `headers` that request actually used. `outputs` holds the extracted outputs, `inputs` the resolved inputs |
 | `values` | Every step's outputs flattened into `stepId.outputName` keys |
 
-The shop routes `payment*` operations to a second host with its own API key (see [Environments: Multi-Host Routing](environments.md#multi-host-routing)). That is why the top-level `auth.headers` still carry the bearer token even though the last step went to the payments host, and why the `paymentCharge` entry carries `X-API-Key` and its own `baseUrl`. A harness that calls both hosts reads the per-step entries.
+The shop routes `payment*` operations to a second host with its own API key (see [Environments: Multi-Host Routing](environments.md#multi-host-routing)). That is why the top-level `auth.headers` still hold the shop's `Authorization` header even though the last step went to the payments host, and why the `paymentCharge` entry carries `X-API-Key` and its own `baseUrl`. A harness that calls both hosts reads the per-step entries.
 
 Without `--stop-after`, `--dump-state` writes the state after the run finishes, cleanup included, so the resources named in `values` may already be gone. It is still a convenient way to capture outputs.
 
@@ -178,6 +181,7 @@ aat run plan smoke --stop-after paymentCharge --json --dump-state -
   "stopped_at": "paymentCharge",
   "state": {
     "version": "1",
+    "redacted": true,
     "outcome": "stopped",
     "stoppedAt": "paymentCharge",
     "baseUrl": "http://localhost:8765/us/v1",
@@ -190,26 +194,46 @@ aat run plan smoke --stop-after paymentCharge --json --dump-state -
 
 ## Security
 
-The dump exists so another tool can act as the same session, so nothing in it is redacted: authorization headers, API keys, every other request header, resolved inputs, and outputs are written as they were sent and received. Run archives redact auth headers; the dump does not.
+By default, a dump is redacted the way a [run archive](archives.md#what-is-redacted-and-what-is-not) is, and says so with `"redacted": true`:
+
+- The values of credential headers (`Authorization`, `Proxy-Authorization`, `X-API-Key`, `X-Auth-Token`, `Cookie`, and `Set-Cookie`) read `[REDACTED]`, at the top level and in every step.
+- Every secret AAT knows about is replaced wherever it appears, inputs and outputs included: the resolved credentials of the environment, its host overrides, the plan, and overlays, and the access token the run authenticated with.
+- IDs, base URLs, and other data stay, so a harness can still find what the run created. Data that is not a credential, such as the `cardNumber` input in the sample above, is kept, as it is in archives.
+
+A tool that sends requests as the run's session, like the [pytest example](#hand-off-to-pytest) below, needs the live credentials. `--dump-state-secrets` keeps them:
+
+```
+aat run plan smoke --stop-after checkout --dump-state state.json --dump-state-secrets
+```
+
+Such a dump says `"redacted": false` and holds live credentials:
+
+- Treat it like a password file: do not commit it, attach it to issues, or leave it in a shared location. The shop example's `.gitignore` already lists `state.json`.
+- With `--dump-state -`, the credentials land wherever stdout goes: your terminal, a pipe, a CI log, or an AI assistant's transcript. AAT warns on stderr:
+
+    ```
+    aat: warning: --dump-state-secrets writes live credentials to stdout
+    ```
+
+- `--dump-state-secrets` without `--dump-state` is an error, with exit code `2`.
+
+Either way:
 
 - A dump file is written with mode `0600`. AAT writes a temporary file in the same directory and renames it into place, so a file that already existed also ends up `0600`.
-- A dump to stdout lands wherever stdout goes: your terminal, a pipe, or a CI log.
 - If the file cannot be written, AAT prints a warning to stderr even under `--quiet` or `--json`, and the exit code does not change:
 
     ```
     aat: warning: failed to write state dump: creating state export dir: mkdir /no-such-root: read-only file system
     ```
 
-Treat a dump like a password file: do not commit it, attach it to issues, or leave it in a shared location. The shop example's `.gitignore` already lists `state.json`.
-
 ## Hand Off to pytest
 
 This example runs the shop's `smoke` recipe up to checkout, then lets a pytest module check the order AAT created and delete what AAT left behind. It uses only the Python standard library besides pytest, and assumes `aat-sandbox serve` runs on its default ports (8765 and 8766). With the sandbox on other ports, add `--var apiHost=localhost:PORT --var payHost=localhost:PORT` to the `aat` command; the test reads the base URL from the dump and needs no change.
 
-In the shop project directory:
+The test sends requests as AAT's session, so in the shop project directory, dump the state with live credentials:
 
 ```
-$ aat run plan smoke --stop-after checkout --dump-state state.json --quiet
+$ aat run plan smoke --stop-after checkout --dump-state state.json --dump-state-secrets --quiet
 STOPPED (4/4 steps)
 Archive: /path/to/shop/_output/runs/run-20260910-230909-eb7845f6/archive.json
 ```

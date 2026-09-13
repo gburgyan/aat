@@ -57,12 +57,20 @@ the graph and plan formats may still change before 1.0.
 - Cleanup step IDs are unique within a run: a node's second cleanup step is `deleteCart_2` in archives and `--json`
   output, as the web UI already named it. Cleanup responses are checked against the graph's error detection rules.
   A flagged response records `responseBodyError` and ends its chain; the run outcome is unchanged.
+- **Breaking:** `aat run plan --dump-state` redacts credentials by default, as run archives do.
+  - Credential headers such as `Authorization` and `X-API-Key` read `[REDACTED]`, at the top level and in every step.
+  - Known secrets are replaced wherever they appear, and the export gains `"redacted": true`.
+  - `--dump-state-secrets` keeps live credentials, for a harness that sends requests as the run's session. It warns
+    on stderr when the dump goes to stdout, and it is an error without `--dump-state`.
+  - A harness that reads `auth.headers` to send requests needs the new flag.
 
 ### Fixed
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,
   and no longer writes a node-level `name:` line.
+- `aat run plan` and `aat run batch` redact the access token they authenticated with, such as an OAuth2 token,
+  wherever it appears in an archive. Before, it was masked only in credential headers.
 
 ## [0.1.0] - 2026-09-12
 

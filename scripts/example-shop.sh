@@ -2,9 +2,9 @@
 # Runs examples/shop against a local aat-sandbox with the checks the CI
 # example-shop job runs: strict validation, every plan in both regions with
 # strict OpenAPI validation, the layer matrix and its dedup counts, the
-# declined-card overlay, and a checkpoint handed off to curl. It also validates
-# examples/petstore strictly, which needs no network, so the smallest example
-# cannot drift silently.
+# declined-card overlay, a redacted state dump, and a checkpoint handed off to
+# curl. It also validates examples/petstore strictly, which needs no network, so
+# the smallest example cannot drift silently.
 #
 # Usage: scripts/example-shop.sh (or `make example-shop`, which builds first).
 # The binaries default to the repository root builds; set AAT and AAT_SANDBOX to
@@ -75,9 +75,19 @@ step "aat run plan smoke --overlay overlays/declined-card.yaml"
   --output "$out" --json >"$out/declined-card.json" || true
 expect "$out/declined-card.json" '.outcome == "passed" and any(.steps[]; .node == "paymentCharge" and .status == 402)'
 
-step "aat run plan smoke --stop-after paymentCharge --dump-state -, then read the live order with curl"
+step "aat run plan smoke --stop-after paymentCharge --dump-state -: credentials are redacted"
 "$aat" run plan smoke --stop-after paymentCharge --dump-state - --quiet --no-auto-overrides --output "$out" >"$state"
-expect "$state" '.outcome == "stopped" and .stoppedAt == "paymentCharge"
+expect "$state" '.outcome == "stopped" and .stoppedAt == "paymentCharge" and .redacted == true
+  and .auth.headers.Authorization == "[REDACTED]"
+  and any(.steps[]; .node == "paymentCharge" and .headers["X-API-Key"] == "[REDACTED]")'
+if grep -q 'pay-demo-key' "$state"; then
+  fail "the redacted state dump holds the payments API key"
+fi
+
+step "aat run plan smoke --stop-after paymentCharge --dump-state - --dump-state-secrets, then read the live order with curl"
+"$aat" run plan smoke --stop-after paymentCharge --dump-state - --dump-state-secrets --quiet --no-auto-overrides \
+  --output "$out" >"$state"
+expect "$state" '.outcome == "stopped" and .stoppedAt == "paymentCharge" and .redacted == false
   and (.auth.headers.Authorization | startswith("Bearer "))
   and any(.steps[]; .node == "paymentCharge" and .headers["X-API-Key"] == "pay-demo-key" and (.headers.Authorization == null))'
 order="$(jq -r '.values["checkout.orderId"]' "$state")"

@@ -36,7 +36,7 @@ aat run plan smoke-test --json
 | `attempts` | int | Total execution attempts (omitted if 1) |
 | `retried` | bool | Whether any retries occurred (omitted if false) |
 | `stopped_at` | string | Checkpoint step ID when the outcome is `"stopped"` (omitted otherwise) |
-| `state` | object | Accumulated run state, present only with `--dump-state -` (unredacted; see [Checkpoints](checkpoints.md)) |
+| `state` | object | Accumulated run state, present only with `--dump-state -` (credentials redacted unless `--dump-state-secrets` is given; see [Checkpoints](checkpoints.md)) |
 
 **StepSummary fields:**
 

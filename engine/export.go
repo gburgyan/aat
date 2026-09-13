@@ -5,36 +5,41 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/gburgyan/aat/archive"
 )
 
 // StateExport is a self-contained snapshot of the live state accumulated by a
 // run, intended for consumption by an external test harness.
 //
-// SECURITY: Auth headers are deliberately NOT redacted — the whole point is to
-// let an external harness replay calls against the same live session. Files
-// written via WriteStateExport use mode 0600 for this reason. Do not commit or
-// share these files.
+// SECURITY: BuildStateExport copies request headers as they were sent, auth
+// tokens included, and RedactStateExport removes the credentials. aat run plan
+// redacts every dump unless --dump-state-secrets asks for live credentials,
+// which a harness needs to send requests as the run's session. Files written
+// via WriteStateExport use mode 0600 either way. Do not commit or share them.
 type StateExport struct {
-	Version   string         `json:"version"`
-	Outcome   string         `json:"outcome"`
-	StoppedAt string         `json:"stoppedAt,omitempty"`
+	Version string `json:"version" redact:"-"`
+	// Redacted is true when RedactStateExport removed the credentials.
+	Redacted  bool           `json:"redacted"`
+	Outcome   string         `json:"outcome" redact:"-"`
+	StoppedAt string         `json:"stoppedAt,omitempty" redact:"-"`
 	BaseURL   string         `json:"baseUrl"`
 	Auth      StateAuth      `json:"auth"`
 	Steps     []StateStep    `json:"steps"`
 	Values    map[string]any `json:"values"`
 }
 
-// StateAuth holds the live request headers (including auth tokens) of the
-// environment's default route, UNREDACTED.
+// StateAuth holds the request headers of the environment's default route,
+// credential headers included.
 type StateAuth struct {
 	Headers map[string]string `json:"headers"`
 }
 
-// StateStep captures one executed step: where its request went, the live
-// headers it sent (UNREDACTED), its outputs, and its resolved inputs.
+// StateStep captures one executed step: where its request went, the headers it
+// sent, its outputs, and its resolved inputs.
 type StateStep struct {
-	StepID  string            `json:"stepId"`
-	Node    string            `json:"node"`
+	StepID  string            `json:"stepId" redact:"-"`
+	Node    string            `json:"node" redact:"-"`
 	BaseURL string            `json:"baseUrl,omitempty"`
 	Headers map[string]string `json:"headers,omitempty"`
 	Outputs map[string]any    `json:"outputs,omitempty"`
@@ -44,7 +49,8 @@ type StateStep struct {
 // BuildStateExport assembles a StateExport from a completed (or checkpointed)
 // run. It includes every successfully executed step's outputs and resolved
 // inputs, flattens outputs into a "stepID.outputName" → value convenience map,
-// and records each step's base URL and live (unredacted) request headers.
+// and records each step's base URL and request headers as they were sent. Pass
+// the export through RedactStateExport unless live credentials are wanted.
 //
 // The top-level baseUrl and auth describe the environment's default route: they
 // come from the last request sent to defaultBaseURL, so a plan whose last step
@@ -108,10 +114,29 @@ func BuildStateExport(result *RunResult, defaultBaseURL string) *StateExport {
 	return exp
 }
 
+// RedactStateExport returns a copy of exp with its credentials removed the way
+// run archives remove them: the values of credential headers such as
+// Authorization and X-API-Key, at the top level and in every step, and every
+// known secret wherever it appears, inputs, outputs, and values included. The
+// copy has Redacted set, and exp is not modified. Step IDs, node names, the
+// outcome, and map keys are identifiers a harness looks things up by, so they
+// are left alone.
+func RedactStateExport(exp *StateExport, secrets map[string]bool) (*StateExport, error) {
+	cp := *exp
+	cp.Redacted = true
+	cp.Auth = StateAuth{Headers: archive.RedactHeaders(exp.Auth.Headers)}
+	cp.Steps = make([]StateStep, len(exp.Steps))
+	for i, step := range exp.Steps {
+		step.Headers = archive.RedactHeaders(step.Headers)
+		cp.Steps[i] = step
+	}
+	return archive.Redact(&cp, secrets)
+}
+
 // WriteStateExport writes the export as indented JSON to path with mode 0600.
-// The restrictive mode reflects that the file contains plaintext credentials.
-// The file is written to a temporary file in the same directory and renamed
-// into place, so an existing file at path also ends up with mode 0600.
+// The restrictive mode reflects that a dump with live credentials holds them in
+// plain text. The file is written to a temporary file in the same directory and
+// renamed into place, so an existing file at path also ends up with mode 0600.
 func WriteStateExport(exp *StateExport, path string) error {
 	data, err := json.MarshalIndent(exp, "", "  ")
 	if err != nil {
