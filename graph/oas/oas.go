@@ -1,13 +1,18 @@
 package oas
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 
 	"github.com/pb33f/libopenapi"
 	validator "github.com/pb33f/libopenapi-validator"
+	"github.com/pb33f/libopenapi/datamodel"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"github.com/pb33f/libopenapi/index"
+	"github.com/pb33f/libopenapi/utils"
 
 	"github.com/gburgyan/aat/graph"
 )
@@ -37,28 +42,67 @@ func (c *SpecCache) Load(refPath, fsPath string) error {
 		return fmt.Errorf("reading OAS spec %q: %w", fsPath, err)
 	}
 
-	doc, err := libopenapi.NewDocument(data)
+	doc, err := libopenapi.NewDocumentWithConfiguration(data, documentConfiguration())
 	if err != nil {
 		return fmt.Errorf("parsing OAS spec %q: %w", fsPath, err)
 	}
 
-	v3Model, err := doc.BuildV3Model()
+	model, err := buildV3Model(doc)
 	if err != nil {
 		return fmt.Errorf("building OAS V3 model for %q: %w", fsPath, err)
 	}
 
 	// Create the validator once from the pre-built model.
 	// This runs warmSchemaCaches once per spec instead of once per step.
-	v := validator.NewValidatorFromV3Model(&v3Model.Model)
+	v := validator.NewValidatorFromV3Model(model)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries[refPath] = &SpecEntry{
 		Document:  doc,
-		Model:     &v3Model.Model,
+		Model:     model,
 		Validator: v,
 	}
 	return nil
+}
+
+// documentConfiguration is the libopenapi configuration specs are loaded with:
+// the library's defaults without its logger, which writes JSON lines to stdout
+// and would mix them into command output such as a graph written to stdout.
+func documentConfiguration() *datamodel.DocumentConfiguration {
+	cfg := datamodel.NewDocumentConfiguration()
+	cfg.Logger = slog.New(slog.DiscardHandler)
+	return cfg
+}
+
+// buildV3Model builds a document's OpenAPI 3 model. libopenapi reports each
+// circular reference as an error but still builds the model, and it renders and
+// validates those schemas from the cycles it recorded, so a build whose only
+// errors are circular references succeeds. Large real-world specs have such
+// cycles, for example an object whose error schema refers back to the object.
+// Any other error fails the build.
+func buildV3Model(doc libopenapi.Document) (*v3high.Document, error) {
+	built, err := doc.BuildV3Model()
+	if err != nil && (built == nil || !onlyCircularReferences(err)) {
+		return nil, err
+	}
+	return &built.Model, nil
+}
+
+// onlyCircularReferences reports whether err, or every error joined in it, is
+// a circular reference found while resolving the spec.
+func onlyCircularReferences(err error) bool {
+	errs := utils.UnwrapErrors(err)
+	if len(errs) == 0 {
+		return false
+	}
+	for _, e := range errs {
+		var refErr *index.ResolvingError
+		if !errors.As(e, &refErr) || refErr.CircularReference == nil {
+			return false
+		}
+	}
+	return true
 }
 
 // Get returns the SpecEntry for the given reference path, or nil if not loaded.
@@ -82,17 +126,17 @@ func LoadSpec(path string) (*v3high.Document, error) {
 		return nil, fmt.Errorf("reading OAS spec: %w", err)
 	}
 
-	doc, err := libopenapi.NewDocument(data)
+	doc, err := libopenapi.NewDocumentWithConfiguration(data, documentConfiguration())
 	if err != nil {
 		return nil, fmt.Errorf("parsing OAS spec: %w", err)
 	}
 
-	v3Model, err := doc.BuildV3Model()
+	model, err := buildV3Model(doc)
 	if err != nil {
 		return nil, fmt.Errorf("building OAS V3 model: %w", err)
 	}
 
-	return &v3Model.Model, nil
+	return model, nil
 }
 
 // FindOperation looks up an operation by operationId across all paths in the spec.

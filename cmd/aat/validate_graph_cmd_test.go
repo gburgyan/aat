@@ -32,6 +32,13 @@ func TestGraphValidate_WithOAS_Valid(t *testing.T) {
 	assert.Equal(t, 0, code)
 }
 
+func TestGraphValidate_WithCircularOAS(t *testing.T) {
+	code := graphValidateCommand(&graphValidateArgs{
+		GraphPath: "testdata/test_graph_with_circular_oas.yaml",
+	})
+	assert.Equal(t, 0, code)
+}
+
 func TestGraphValidate_WithOAS_Errors(t *testing.T) {
 	code := graphValidateCommand(&graphValidateArgs{
 		GraphPath: "testdata/test_graph_oas_bad_op.yaml",

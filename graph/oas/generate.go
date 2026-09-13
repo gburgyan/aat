@@ -592,7 +592,14 @@ func schemaType(schema *base.Schema) string {
 
 // mapSchemaType converts an OAS JSON Schema type+format to an AAT graph type.
 func mapSchemaType(schema *base.Schema) string {
-	if schema == nil {
+	return mapSchemaTypeAt(schema, 0)
+}
+
+// mapSchemaTypeAt is mapSchemaType for a schema that is the item type of depth
+// enclosing arrays. A circular $ref can make an array its own item type, so
+// past maxShapeDepth the item type is taken as string.
+func mapSchemaTypeAt(schema *base.Schema, depth int) string {
+	if schema == nil || depth > maxShapeDepth {
 		return "string"
 	}
 
@@ -615,7 +622,7 @@ func mapSchemaType(schema *base.Schema) string {
 	case "array":
 		elemType := "string"
 		if schema.Items != nil && schema.Items.IsA() {
-			elemType = mapSchemaType(schema.Items.A.Schema())
+			elemType = mapSchemaTypeAt(schema.Items.A.Schema(), depth+1)
 		}
 		return elemType + "[]"
 	case "object":

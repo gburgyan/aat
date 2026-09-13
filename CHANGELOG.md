@@ -91,6 +91,10 @@ the graph and plan formats may still change before 1.0.
   - `validation.md` no longer claims plan validation checks assertion types.
 
 ### Fixed
+- OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another
+  schema, used to fail with `infinite circular reference detected`, so `aat generate`, `aat validate`, and the MCP
+  server rejected the spec, and `aat run` skipped OAS validation. Large published specs have such cycles. Other
+  errors in a spec still fail it, and libopenapi's log lines no longer reach stdout.
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,

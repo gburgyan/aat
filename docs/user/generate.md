@@ -28,7 +28,7 @@ Paths are relative to the working directory. `aat generate` does not look for or
 - a spec with no operations that have an `operationId`
 - files that already exist, without `--force`
 
-The spec must be OpenAPI 3.0 or 3.1. A Swagger 2.0 file fails with `supplied spec is a different version (oas2)`; convert it to OpenAPI 3 first.
+The spec must be OpenAPI 3.0 or 3.1. A Swagger 2.0 file fails with `supplied spec is a different version (oas2)`; convert it to OpenAPI 3 first. Circular references, such as a schema that refers back to itself through another, are fine.
 
 ## What It Writes
 

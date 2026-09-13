@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -92,6 +94,37 @@ func TestGenerateCommand_Stdout(t *testing.T) {
 
 	assert.Contains(t, output, "listPets")
 	assert.Contains(t, output, "version:")
+}
+
+// TestGenerateCommand_CircularSpec generates from a spec whose schemas refer
+// back to themselves. The graph on stdout must parse, with no log lines from
+// the OpenAPI library mixed in.
+func TestGenerateCommand_CircularSpec(t *testing.T) {
+	oldStdout := os.Stdout
+	r, w, err := os.Pipe()
+	require.NoError(t, err)
+	os.Stdout = w
+	outCh := make(chan []byte)
+	go func() {
+		data, _ := io.ReadAll(r)
+		outCh <- data
+	}()
+
+	genErr := generateCommand(&generateArgs{
+		OASPath:     "testdata/oas/circular.yaml",
+		OutputGraph: "-",
+	})
+
+	_ = w.Close()
+	os.Stdout = oldStdout
+	out := <-outCh
+	require.NoError(t, genErr)
+
+	assert.False(t, strings.Contains(string(out), `"level":`), "log lines on stdout:\n%s", out)
+	g, err := graph.Parse(out)
+	require.NoError(t, err, "stdout:\n%s", out)
+	assert.Contains(t, g.Nodes, "getOrder")
+	assert.Contains(t, g.Nodes, "listCategories")
 }
 
 // TestGenerateCommand_OptionalParametersRender generates templates from a spec

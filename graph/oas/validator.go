@@ -302,12 +302,20 @@ func schemaHasPath(schema *base.Schema, path string) bool {
 }
 
 func schemaHasSegments(schema *base.Schema, segments []string) bool {
-	if schema == nil || len(segments) == 0 {
+	return schemaHasSegmentsAt(schema, segments, 0)
+}
+
+// schemaHasSegmentsAt is schemaHasSegments for a schema reached through depth
+// composition branches. A branch doesn't consume a segment, so a circular
+// allOf, oneOf, or anyOf could be followed forever; past maxShapeDepth the rest
+// of the path counts as present.
+func schemaHasSegmentsAt(schema *base.Schema, segments []string, depth int) bool {
+	if schema == nil || len(segments) == 0 || depth > maxShapeDepth {
 		return true
 	}
 	for _, group := range [][]*base.SchemaProxy{schema.AllOf, schema.OneOf, schema.AnyOf} {
 		for _, branch := range group {
-			if branch != nil && schemaHasSegments(branch.Schema(), segments) {
+			if branch != nil && schemaHasSegmentsAt(branch.Schema(), segments, depth+1) {
 				return true
 			}
 		}
@@ -318,13 +326,13 @@ func schemaHasSegments(schema *base.Schema, segments []string) bool {
 		if schema.Items == nil || !schema.Items.IsA() || schema.Items.A == nil {
 			return true // no item schema to check against
 		}
-		return schemaHasSegments(schema.Items.A.Schema(), rest)
+		return schemaHasSegmentsAt(schema.Items.A.Schema(), rest, depth)
 	}
 	if schema.Properties == nil {
 		return true // no declared properties to check against
 	}
 	if property := schema.Properties.GetOrZero(segment); property != nil {
-		return schemaHasSegments(property.Schema(), rest)
+		return schemaHasSegmentsAt(property.Schema(), rest, depth)
 	}
 	if extra := schema.AdditionalProperties; extra != nil && ((extra.IsA() && extra.A != nil) || (extra.IsB() && extra.B)) {
 		return true

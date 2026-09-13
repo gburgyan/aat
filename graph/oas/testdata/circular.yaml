@@ -1,0 +1,140 @@
+openapi: "3.0.3"
+info:
+  title: Circular Shop
+  version: "1.0.0"
+# Schemas that refer back to themselves, as large real-world specs do: a refund
+# and its payment require each other, which libopenapi reports as an infinite
+# circular reference; an order and its last payment refer to each other; a
+# category refers to its parent and children; and a category tree is an array of
+# category trees.
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - cartId
+              properties:
+                cartId:
+                  type: string
+      responses:
+        "201":
+          description: Order created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+  /orders/{orderId}:
+    get:
+      operationId: getOrder
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The order
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Order"
+  /refunds/{refundId}:
+    get:
+      operationId: getRefund
+      parameters:
+        - name: refundId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The refund
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+  /categories:
+    get:
+      operationId: listCategories
+      responses:
+        "200":
+          description: The category tree
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  root:
+                    $ref: "#/components/schemas/Category"
+                  tree:
+                    $ref: "#/components/schemas/CategoryTree"
+components:
+  schemas:
+    Refund:
+      type: object
+      required:
+        - refundId
+        - payment
+      properties:
+        refundId:
+          type: string
+        payment:
+          $ref: "#/components/schemas/RefundedPayment"
+    RefundedPayment:
+      type: object
+      required:
+        - paymentId
+        - refund
+      properties:
+        paymentId:
+          type: string
+        refund:
+          $ref: "#/components/schemas/Refund"
+    Order:
+      type: object
+      required:
+        - orderId
+        - status
+      properties:
+        orderId:
+          type: string
+        status:
+          type: string
+        lastPayment:
+          nullable: true
+          anyOf:
+            - $ref: "#/components/schemas/Payment"
+    Payment:
+      type: object
+      required:
+        - paymentId
+      properties:
+        paymentId:
+          type: string
+        order:
+          nullable: true
+          anyOf:
+            - $ref: "#/components/schemas/Order"
+    Category:
+      type: object
+      properties:
+        name:
+          type: string
+        parent:
+          $ref: "#/components/schemas/Category"
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/Category"
+    CategoryTree:
+      type: array
+      items:
+        $ref: "#/components/schemas/CategoryTree"
