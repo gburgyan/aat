@@ -84,6 +84,19 @@ func TemplateSuppliedFields(g *graph.Graph, registry *adapter.Registry) oas.Supp
 	return fields
 }
 
+// TemplateHeaderInputs maps each templated node to the inputs its template
+// sends only in request headers, for the static OAS unknown-input check (see
+// oas.Validator.WithHeaderInputs).
+func TemplateHeaderInputs(g *graph.Graph, registry *adapter.Registry) oas.HeaderInputs {
+	inputs := make(oas.HeaderInputs, len(g.Nodes))
+	for name, node := range g.Nodes {
+		if tmpl, ok := registry.GetTemplate(node.Adapter); ok {
+			inputs[name] = tmpl.HeaderOnlyInputs()
+		}
+	}
+	return inputs
+}
+
 // validateAdapterOutputsForNodes is the shared implementation. When nodeFilter
 // is non-nil, only nodes in the set are checked.
 func validateAdapterOutputsForNodes(g *graph.Graph, registry *adapter.Registry, nodeFilter map[string]bool) error {

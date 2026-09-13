@@ -129,7 +129,7 @@ Graph structural validation catches:
 When an OpenAPI spec is configured (at the graph level or per-node), AAT checks consistency between the graph and the spec:
 
 - Every `operationId` in the graph exists in the node's spec (an error)
-- Every graph input is a parameter or a request body property of the operation (a warning)
+- Every graph input is a parameter or a request body property of the operation, unless the node's template sends it only in request headers, such as an idempotency key (a warning)
 - Every required parameter and body property is a graph input or written by the node's template: a query parameter in the path, a header, a JSON body key, or a form body key, where a bracketed key such as `metadata[source]` counts as `metadata` (a warning)
 - Every output exists in the 2xx response schema at its template extract path (a warning)
 

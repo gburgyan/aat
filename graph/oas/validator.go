@@ -15,6 +15,7 @@ type Validator struct {
 	specs          map[string]*v3high.Document
 	outputPaths    OutputPaths
 	suppliedFields SuppliedFields
+	headerInputs   HeaderInputs
 }
 
 // OutputPaths maps node name → output name → the GJSON path the node's template
@@ -25,6 +26,10 @@ type OutputPaths map[string]map[string]string
 // SuppliedFields maps node name → the request fields (query parameters, header
 // names, top-level body keys) the node's template always sends itself.
 type SuppliedFields map[string]map[string]bool
+
+// HeaderInputs maps node name → the inputs the node's template sends only in
+// request headers.
+type HeaderInputs map[string]map[string]bool
 
 // NewValidator creates a new OAS validator.
 func NewValidator() *Validator {
@@ -47,6 +52,15 @@ func (v *Validator) WithOutputPaths(paths OutputPaths) *Validator {
 // literal "photoUrls": [] with no graph input behind it.
 func (v *Validator) WithSuppliedFields(fields SuppliedFields) *Validator {
 	v.suppliedFields = fields
+	return v
+}
+
+// WithHeaderInputs makes the unknown-input check accept an input that the
+// node's template sends only in request headers, such as an idempotency key.
+// The template names the header, so the input's name says nothing about the
+// spec, and specs often leave such headers undeclared.
+func (v *Validator) WithHeaderInputs(inputs HeaderInputs) *Validator {
+	v.headerInputs = inputs
 	return v
 }
 
@@ -137,10 +151,11 @@ func (v *Validator) Validate(g *graph.Graph) *graph.SpecValidationResult {
 			continue
 		}
 
-		// Rule 5: graph inputs should exist in OAS parameters or request body
+		// Rule 5: graph inputs should exist in OAS parameters or request body,
+		// unless the template sends them only in headers
 		oasParamNames := collectInputNames(pathItem, op)
 		for _, inp := range node.Inputs {
-			if _, exists := oasParamNames[inp.Name]; !exists {
+			if _, exists := oasParamNames[inp.Name]; !exists && !v.headerInputs[nodeName][inp.Name] {
 				result.Issues = append(result.Issues, graph.SpecValidationIssue{
 					Severity: graph.SpecWarning,
 					Node:     nodeName,

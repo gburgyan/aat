@@ -1,0 +1,19 @@
+version: "1.0.0"
+oas: oas/form_supplied.yaml
+
+nodes:
+  createRefund:
+    description: "Refund an order, sending a generated idempotency key in a header the spec doesn't declare"
+    adapter: createRefund
+    oas:
+      operationId: createRefund
+    inputs:
+      - name: orderId
+        type: string
+      - name: requestKey
+        type: string
+        optional: true
+        default: "{{uuid}}"
+    outputs:
+      - name: refundId
+        type: string

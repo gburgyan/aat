@@ -75,7 +75,7 @@ When the API publishes an OpenAPI 3.0 or 3.1 spec, scaffold from it, and let AAT
   ```
 
   The warnings list what each template leaves to write by hand, such as a form property that takes an object, which you write as bracketed pairs (`shipping[city]={{city}}`). Specs with circular references load. See [Large Specs](https://gburgyan.github.io/aat/generate/#large-specs).
-- **Validate the project against it.** `aat validate --strict` checks that each node's `operationId` exists, that its inputs are parameters or body properties, that required fields are inputs or written by the template, and that outputs exist in the 2xx response schema.
+- **Validate the project against it.** `aat validate --strict` checks that each node's `operationId` exists, that its inputs are parameters or body properties (an input the template sends only in a header, such as an idempotency key, is exempt), that required fields are inputs or written by the template, and that outputs exist in the 2xx response schema.
 - **Validate every run against it.** `--oas-validate strict` checks each step's request body, JSON or form-encoded, and its response body against the schema for its status code or the spec's `default` response, and fails a step on a violation. A request body of another type, or a schema the validator can't compile, shows `OAS: request not validated` or `OAS: response not validated` and never fails a step. Under `strict`, a spec that fails to load stops the run with exit code 2. Only the operations the graph's nodes name are compiled, so a large spec loads quickly. See [OAS Validation](https://gburgyan.github.io/aat/running/#oas-validation).
 
 ## Graph Schema

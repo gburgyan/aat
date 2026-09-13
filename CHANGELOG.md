@@ -145,6 +145,9 @@ the graph and plan formats may still change before 1.0.
 - The static OAS check no longer reports a required form field or query parameter as missing when the template writes
   it. The keys of a form-encoded body count as supplied, and a bracketed key such as `metadata[source]` supplies
   `metadata`.
+- The static OAS check no longer reports an input that the template sends only in request headers, such as an
+  idempotency key, as missing from the operation's parameters and request body. The template names the header, and
+  specs often leave such headers undeclared, so `aat validate --strict` failed on it.
 - A request that times out says so, naming aat's 30-second request timeout, instead of giving only Go's
   `context deadline exceeded (Client.Timeout exceeded while awaiting headers)`. The limit is named only when the whole
   limit passed, so a shorter timeout or an interrupted run isn't blamed on it.

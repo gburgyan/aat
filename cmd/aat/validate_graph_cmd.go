@@ -112,7 +112,8 @@ func graphValidateCommand(args *graphValidateArgs) int {
 	validator := oas.NewValidator()
 	if registry != nil {
 		validator.WithOutputPaths(engine.OutputExtractPaths(g, registry)).
-			WithSuppliedFields(engine.TemplateSuppliedFields(g, registry))
+			WithSuppliedFields(engine.TemplateSuppliedFields(g, registry)).
+			WithHeaderInputs(engine.TemplateHeaderInputs(g, registry))
 	}
 	specPaths := validator.CollectSpecPaths(g)
 	if len(specPaths) > 0 {

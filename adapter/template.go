@@ -593,6 +593,34 @@ func (t *Template) SuppliedFields() map[string]bool {
 	return fields
 }
 
+// HeaderOnlyInputs returns the inputs the template sends only in request
+// headers: placeholders and block keys that appear in a header value but not in
+// the path or body. The static OpenAPI check uses this to accept an input such
+// as an idempotency key, whose header the template names and specs often leave
+// undeclared.
+func (t *Template) HeaderOnlyInputs() map[string]bool {
+	elsewhere := placeholderKeys(t.Request.Path, t.Request.Body)
+	inputs := make(map[string]bool)
+	for _, value := range t.Request.Headers {
+		for key := range placeholderKeys(value) {
+			if !elsewhere[key] {
+				inputs[key] = true
+			}
+		}
+	}
+	return inputs
+}
+
+// placeholderKeys returns every input key the sources reference: placeholders
+// and the keys of {{?key}} and {{#key}} blocks.
+func placeholderKeys(sources ...string) map[string]bool {
+	keys := make(map[string]bool)
+	for _, src := range sources {
+		classifySource(src, map[string]bool{}, map[string]bool{}, map[string]bool{}, keys)
+	}
+	return keys
+}
+
 // pairNames returns the field names of the key=value pairs in a query string or
 // form body. A bracketed key gives the name before its first bracket, and a key
 // written as a placeholder gives none.
