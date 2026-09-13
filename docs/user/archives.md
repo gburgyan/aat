@@ -63,7 +63,7 @@ Each step record holds:
 | `request` | Method, full URL, headers, and body. When an override routed the step elsewhere, `originalUrl` holds the URL it would have used |
 | `response` | Status, headers, and body |
 | `outputs`, `displayOutputs` | Extracted outputs (after any [Lua transform](lua-transforms.md), whose script is in `transformScript`) and the plan's display outputs |
-| `resolutions` | How each input got its value: `source` (such as `plan_default`, `expression`, `plan_from`, `select_edge`, `fallback_pool`, or `graph_default`), the raw and final value, the step and output it came from, and whether a `constraint` passed |
+| `resolutions` | How each input got its value: `source` (such as `plan_default`, `graph_default`, `layer`, `expression`, `plan_from`, `select_edge`, or `fallback_pool`), the `layer` that set the value, the raw and final value, the step and output it came from, and whether a `constraint` passed |
 | `selections` | For inputs picked from an array: source step and field, array size, filter and how many elements passed it, strategy, and the selected index |
 | `validation` | Each assertion's type, pass or fail, and message |
 | `expectFailure` | For negative steps: expected statuses, actual status, pass or fail |
@@ -180,7 +180,7 @@ inputs:
   deliveryDate   -            optional_skip
   notes          -            optional_skip
   postalCode     "78701"      expression {{env.postalCode}}
-  shippingTier   "standard"   plan_default
+  shippingTier   "standard"   graph_default
 outputs:
   currency       "USD"
   orderId        "ord_0001"

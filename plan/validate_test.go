@@ -1599,7 +1599,7 @@ func TestValidate_DependsOnCompleteness(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("from missing dep", func(t *testing.T) {
+	t.Run("from implies dependsOn", func(t *testing.T) {
 		p := &Plan{
 			Execution: Execution{
 				Steps: []Step{
@@ -1625,9 +1625,11 @@ func TestValidate_DependsOnCompleteness(t *testing.T) {
 				},
 			},
 		}
-		err := Validate(p, g)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "has 'from' reference to \"searchFlights\" but does not list it in dependsOn")
+		InjectReferenceDeps(p, false)
+		assert.Equal(t, []string{"searchFlights"}, p.Execution.Steps[1].DependsOn, "the reference implies the dependency")
+		if err := Validate(p, g); err != nil {
+			assert.NotContains(t, err.Error(), "dependsOn")
+		}
 	})
 }
 
@@ -1807,9 +1809,11 @@ func TestValidate_NamedSelections(t *testing.T) {
 				},
 			},
 		}
-		err := Validate(p, g)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "does not list it in dependsOn")
+		InjectReferenceDeps(p, false)
+		assert.Equal(t, []string{"searchFlights"}, p.Execution.Steps[1].DependsOn, "the selection implies the dependency")
+		if err := Validate(p, g); err != nil {
+			assert.NotContains(t, err.Error(), "dependsOn")
+		}
 	})
 
 	t.Run("fromSelection references unknown selection", func(t *testing.T) {
@@ -3094,9 +3098,11 @@ func TestValidate_FromInput_MissingDependsOn(t *testing.T) {
 		},
 	}
 
-	err := Validate(p, g)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "does not list it in dependsOn")
+	InjectReferenceDeps(p, false)
+	assert.Equal(t, []string{"searchFlights"}, p.Execution.Steps[1].DependsOn, "fromInput implies the dependency")
+	if err := Validate(p, g); err != nil {
+		assert.NotContains(t, err.Error(), "dependsOn")
+	}
 }
 
 func TestValidate_FromInput_MutualExclusion_WithFrom(t *testing.T) {

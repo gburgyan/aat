@@ -18,7 +18,7 @@ import (
 // unset; a plain AUTOWIRE stays for a recipe override or aat prompt to fill, and
 // plan validation rejects it if nothing does.
 func resolveRemainingAutowire(p *plan.Plan, g *graph.Graph) {
-	ensureFromDeps(p, false)
+	plan.InjectReferenceDeps(p, false)
 	steps := p.Execution.Steps
 	for i := range steps {
 		step := &steps[i]
@@ -31,7 +31,7 @@ func resolveRemainingAutowire(p *plan.Plan, g *graph.Graph) {
 		sort.Strings(names)
 		for _, name := range names {
 			_, optional := plan.AutowireMarker(step.Values[name])
-			if src := nearestProducer(steps, i, name, g); src != "" {
+			if src := plan.NearestProducer(steps, i, name, g); src != "" {
 				step.Values[name] = plan.StepValue{From: src + "." + name}
 				if !slices.Contains(step.DependsOn, src) {
 					step.DependsOn = append(step.DependsOn, src)
@@ -43,56 +43,4 @@ func resolveRemainingAutowire(p *plan.Plan, g *graph.Graph) {
 			}
 		}
 	}
-}
-
-// nearestProducer returns the ID of the last step before steps[i] whose node
-// produces output, passing over any step that depends, directly or through
-// other steps, on steps[i]. It returns "" when no step qualifies.
-func nearestProducer(steps []plan.Step, i int, output string, g *graph.Graph) string {
-	consumer := steps[i].StepID()
-	for j := i - 1; j >= 0; j-- {
-		node := g.Nodes[steps[j].Node]
-		if node == nil || !producesOutput(node, output) {
-			continue
-		}
-		if src := steps[j].StepID(); !dependsOnStep(steps, src, consumer) {
-			return src
-		}
-	}
-	return ""
-}
-
-// producesOutput reports whether node declares an output named name.
-func producesOutput(node *graph.Node, name string) bool {
-	for _, out := range node.Outputs {
-		if out.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-// dependsOnStep reports whether the step with ID from depends, directly or
-// through other steps, on the step with ID to.
-func dependsOnStep(steps []plan.Step, from, to string) bool {
-	deps := make(map[string][]string, len(steps))
-	for _, s := range steps {
-		deps[s.StepID()] = s.DependsOn
-	}
-	seen := map[string]bool{from: true}
-	pending := []string{from}
-	for len(pending) > 0 {
-		cur := pending[len(pending)-1]
-		pending = pending[:len(pending)-1]
-		for _, dep := range deps[cur] {
-			if dep == to {
-				return true
-			}
-			if !seen[dep] {
-				seen[dep] = true
-				pending = append(pending, dep)
-			}
-		}
-	}
-	return false
 }

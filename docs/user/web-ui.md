@@ -157,7 +157,7 @@ Start with the **Response** tab to see the status code and response body. Common
 
 Open the **Resolutions** tab to see how each input was resolved:
 
-- **Source**: where the value came from, such as `plan_default` (a literal value in the plan), `expression`, `plan_from` (an earlier step's output), `select_edge` or `named_selection` (an element picked from an array), `fallback_pool` (a `pool` in the plan or a graph default), or `graph_default`
+- **Source**: where the value came from, such as `plan_default` (a literal value in the plan), `expression`, `plan_from` (an earlier step's output), `select_edge` or `named_selection` (an element picked from an array), `fallback_pool` (a `pool` in the plan or a graph default), `graph_default` (a graph default), or `layer` (a layer's value)
 - **Value**: the raw and final value
 - **Constraint**: whether the value satisfied its `constraint`, and which pool values were tried
 

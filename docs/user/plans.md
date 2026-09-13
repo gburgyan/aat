@@ -285,7 +285,7 @@ When multiple steps target the same graph node, use `id` to give each a unique i
     dependsOn: [addToCart, applyDiscount, addPayment]
 ```
 
-In a full plan, every step that a value references with `from`, `fromInput`, or a named selection's `from` must be listed in `dependsOn`; `aat validate plan` reports a missing one. Composition adds these entries for you in recipes and workflow templates, and instantiation adds them for `from` references that come from graph input defaults.
+A step that a value reads with `from` or `fromInput`, or that a named selection reads with `from`, joins `dependsOn` when the plan is instantiated, and so does a step a graph default's `from` reads. List only the ordering the data doesn't show. A reference that closes a cycle is reported with the value or selection that implies the dependency.
 
 #### Values
 
@@ -685,6 +685,16 @@ execution:
 | `node` | Graph node to execute |
 | `purpose` | Human-readable description of what is being verified |
 | `assertions` | Same assertion structure as main steps |
+| `values` | Input values, as a main step takes them. A `from` or `fromInput` names a main step; a verification step has no selections |
+
+An input without a value takes its graph default. A default's `from: node.output` reads the last main step on that node that isn't expected to fail, so a check after a refused retry reads the request that succeeded. To read another step, set the value:
+
+```yaml
+  verification:
+    - node: getCharge
+      values:
+        charge: {from: firstRefund.charge}
+```
 
 ### Cleanup Steps
 
@@ -971,7 +981,8 @@ aat run batch --layer-group european,international
 - Required inputs have plan values
 - `dependsOn` references valid step IDs
 - `from` references point to valid step outputs
-- Steps referenced by `from`, `fromInput`, or a named selection are listed in `dependsOn`
+- `dependsOn` has no cycle, counting the dependencies that references imply
+- Verification values name inputs of their node, and their references name main steps
 - Named selection `from` references are array types
 - Selection strategies are valid (`first`, `last`, `index`, `random`, `min`, `max`, `match`)
 - Filter and predicate expressions parse correctly
@@ -1080,8 +1091,8 @@ execution:
       node: graphNodeName             # required (or slot: for templates)
       description: "What this step does"
       isGoal: true                    # marks as primary goal (matches intent.goal)
-      dependsOn: [stepA, stepB]       # steps that must complete first; list every step
-                                      #   that from, fromInput, or a selection references
+      dependsOn: [stepA, stepB]       # steps that must complete first; a step that from,
+                                      #   fromInput, or a selection reads is added
 
       # Named selections from array outputs
       selections:
@@ -1151,6 +1162,8 @@ execution:
   verification:
     - node: graphNodeName
       purpose: "Verify side effects"
+      values:                         # optional; as a step's, with references to main steps
+        inputName: {from: stepId.outputName}
       assertions:
         mechanical:
           - type: fieldEquals

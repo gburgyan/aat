@@ -268,7 +268,18 @@ func MergeInputDefault(base, overlay *InputDefault) *InputDefault {
 		result.Select = &sel
 	}
 
+	if overlay.Layer != "" {
+		result.Layer = overlay.Layer
+	}
+
 	return &result
+}
+
+// layerDefault returns a copy of a layer's default that names the layer.
+func layerDefault(def *InputDefault, layer string) *InputDefault {
+	cp := *def
+	cp.Layer = layer
+	return &cp
 }
 
 // LayerTouchedKeys returns the set of "nodeName.inputName" keys that are
@@ -376,7 +387,7 @@ func ApplyLayers(g *Graph, layerNames []string, available map[string]*Layer) (ma
 			for _, input := range node.Inputs {
 				if bareDef, ok := bare[input.Name]; ok {
 					key := nodeName + "." + input.Name
-					effective[key] = MergeInputDefault(effective[key], bareDef)
+					effective[key] = MergeInputDefault(effective[key], layerDefault(bareDef, layerName))
 				}
 			}
 		}
@@ -406,7 +417,7 @@ func ApplyLayers(g *Graph, layerNames []string, available map[string]*Layer) (ma
 			}
 
 			key := nodeName + "." + inputName
-			effective[key] = MergeInputDefault(effective[key], def)
+			effective[key] = MergeInputDefault(effective[key], layerDefault(def, layerName))
 		}
 	}
 

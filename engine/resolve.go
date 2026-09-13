@@ -120,6 +120,9 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 				ectx.Values[input.Name] = val
 			}
 		}
+		if resolution != nil {
+			noteDefaultOrigin(resolution, step.Values[input.Name])
+		}
 		if decision != nil {
 			decisions = append(decisions, *decision)
 		}
@@ -301,10 +304,10 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			// template that wraps it in a conditional block, such as a payment
 			// sent only for some orders.
 			if !def.IsLiteralOnly() {
-				return nil, nil, &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}, nil
+				return nil, nil, defaultResolution(input.Name, def), nil
 			}
 			raw := def.Value
-			res := &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}
+			res := defaultResolution(input.Name, def)
 			val := raw
 			if s, ok := raw.(string); ok && plan.ContainsExpr(s) && ectx != nil {
 				evaluated, err := plan.EvalExpr(raw, *ectx)
@@ -695,6 +698,35 @@ func checkConstraint(constraint string, candidate any, resolvedInputs map[string
 	}
 	ctx["value"] = candidate
 	return predicate.Eval(constraint, ctx)
+}
+
+// noteDefaultOrigin records where a value that instantiation merged in came
+// from: a literal from a graph default reads graph_default rather than
+// plan_default, a layer's reads layer, and any resolution of a layer's value
+// names the layer.
+func noteDefaultOrigin(res *ValueResolution, sv plan.StepValue) {
+	if sv.Layer != "" {
+		res.Layer = sv.Layer
+	}
+	if res.Source != "plan_default" {
+		return
+	}
+	switch sv.Origin {
+	case "graph":
+		res.Source = "graph_default"
+	case "layer":
+		res.Source = "layer"
+	}
+}
+
+// defaultResolution starts the record of an input that {} left to its default:
+// graph_default, or layer with the layer's name.
+func defaultResolution(inputName string, def *graph.InputDefault) *ValueResolution {
+	res := &ValueResolution{InputName: inputName, Source: "graph_default", Layer: def.Layer, PoolIndex: -1}
+	if def.Layer != "" {
+		res.Source = "layer"
+	}
+	return res
 }
 
 // resolveWithFallback tries the StepValue default (with expression evaluation

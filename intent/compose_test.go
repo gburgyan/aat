@@ -1381,7 +1381,7 @@ func TestEnsureFromDeps_AddsFromRefDeps(t *testing.T) {
 		},
 	}
 
-	ensureFromDeps(p, false)
+	plan.InjectReferenceDeps(p, false)
 
 	// addOffer should gain createItinerary dep from from ref.
 	assert.Contains(t, p.Execution.Steps[1].DependsOn, "createItinerary")
@@ -1408,7 +1408,7 @@ func TestEnsureFromDeps_NoDuplicateDeps(t *testing.T) {
 		},
 	}
 
-	ensureFromDeps(p, false)
+	plan.InjectReferenceDeps(p, false)
 
 	// "a" should appear only once in b's dependsOn.
 	count := 0
@@ -1434,7 +1434,7 @@ func TestEnsureFromDeps_SkipsSelfRef(t *testing.T) {
 		},
 	}
 
-	ensureFromDeps(p, false)
+	plan.InjectReferenceDeps(p, false)
 	assert.Empty(t, p.Execution.Steps[0].DependsOn, "self-ref should not add self to dependsOn")
 }
 

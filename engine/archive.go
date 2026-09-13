@@ -269,6 +269,7 @@ func convertResolutions(resolutions []ValueResolution) []archive.ValueResolution
 			PoolSize:   r.PoolSize,
 			Tried:      r.Tried,
 			Error:      r.Error,
+			Layer:      r.Layer,
 		}
 		if r.Constraint != "" {
 			ok := r.ConstraintOK

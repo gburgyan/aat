@@ -153,6 +153,12 @@ type StepValue struct {
 	FromResolved  string           `yaml:"fromResolved,omitempty" json:"fromResolved,omitempty"`
 	FromInput     string           `yaml:"fromInput,omitempty" json:"fromInput,omitempty"`
 	Locked        bool             `yaml:"locked,omitempty" json:"locked,omitempty"`
+	// Origin says where a value that instantiation merged in came from: "graph"
+	// for a graph default and "layer" for a layer's. It is empty for a value the
+	// plan sets.
+	Origin string `yaml:"-" json:"-"`
+	// Layer names the layer that set a value whose Origin is "layer".
+	Layer string `yaml:"-" json:"-"`
 }
 
 // IsEmpty returns true when the StepValue carries no resolution information.
@@ -228,6 +234,13 @@ type VerificationStep struct {
 	Node       string      `yaml:"node" json:"node"`
 	Purpose    string      `yaml:"purpose,omitempty" json:"purpose,omitempty"`
 	Assertions *Assertions `yaml:"assertions,omitempty" json:"assertions,omitempty"`
+	// Values set the verification step's inputs, as a step's values do. A
+	// reference names a main step.
+	Values map[string]StepValue `yaml:"values,omitempty" json:"values,omitempty"`
+	// BoundDefaults maps each input whose default reads another node's output
+	// to the step that reference binds to. Instantiation sets it before
+	// mutations expand, so a mutation's clone is never chosen.
+	BoundDefaults map[string]string `yaml:"-" json:"-"`
 }
 
 // CleanupStep describes a step to run during cleanup.
