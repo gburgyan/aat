@@ -139,10 +139,9 @@ the graph and plan formats may still change before 1.0.
   - expressions and assertion details
   - retries and selection ties
   - Lua transforms, and reading results with `aat run show`
-- Docs: three pages disagreed with the code and are corrected:
+- Docs: two pages disagreed with the code and are corrected:
   - `plans.md` no longer says `{}` skips graph defaults for required inputs.
   - `value-flow.md` says an inline `min` or `max` can use `field` alone, and how ties break.
-  - `validation.md` no longer claims plan validation checks assertion types.
 - `--oas-validate strict` stops before the first request, with exit code 2, when a spec the graph references fails to
   load. Before, the run printed a warning and continued without validating, and `--quiet` and `--json` hid the
   warning. In `auto` mode the warning now goes to stderr, where `--quiet` and `--json` keep it visible. `aat prompt`

@@ -82,14 +82,14 @@ A manifest that exists but fails to load is an error for every command that disc
 | Environment | Every non-abstract environment loads: `extends` chains, `${var}` substitution, auth and override rules |
 | Domain | The domain file parses and its concepts, types, and value pools are well formed |
 | Visualizers | `visualizers.yaml` parses and each visualizer's HTML file exists |
-| Graph structure | YAML parsing, node uniqueness, input/output types, required fields |
+| Graph structure | YAML parsing, node uniqueness, input/output types, required fields, cleanup pairings and their `when` conditions, and the shape of literal defaults and slot `inject` values. Warns about a required input whose default takes `from:` an optional output |
 | OAS validation | OpenAPI spec loading, operationId alignment, inputs and required parameters, outputs present in the 2xx response schema at their template extract paths (nested objects and array items included) |
 | Adapter outputs | Template extraction paths match graph output declarations |
 | Template inputs | Required template placeholders vs optional graph inputs |
 | Workflow compatibility | Addon `AUTOWIRE` inputs are produced in every base the addon attaches to; a slot counts when all of its options produce the input, because slots are filled before addons are spliced. A plain `AUTOWIRE` in a base or slot option must be produced by the base or its slots; the warning names any addon that produces the output and suggests `AUTOWIRE?` for an optional input. `AUTOWIRE?` never warns as unfed, but it does warn on a required input with no graph default |
-| Workflows | Workflow directory files, subdirectories included, parse correctly and validate against graph |
-| Layers | Layer files parse, names are unique, and every input key matches a node input in the graph |
-| Plans | Plan directory files parse correctly and validate against graph; recipes reconstitute |
+| Workflows | Workflow directory files, subdirectories included, parse correctly and validate against graph. Warns about a required input that takes `from:` an optional output |
+| Layers | Layer files parse, names are unique, every input key matches a node input in the graph, and values fit the input's shape |
+| Plans | Plan directory files parse correctly and validate against graph; recipes reconstitute. Warns about a required input that takes `from:` an optional output in a plan file |
 
 Sections that depend on optional artifacts (environment file, domain, visualizers, OAS specs, workflows, layers, plans) are skipped when those artifacts are not configured.
 
@@ -120,6 +120,9 @@ Graph structural validation catches:
 - Invalid gjson extraction paths on outputs and elementFields
 - Missing adapter references
 - Cleanup references to unknown or self-referencing nodes, and cleanup pairings that loop back (`a → b → a`)
+- Cleanup pairings whose `releasedBy` names an unknown node, the declaring node, or one node twice, or whose `when` doesn't parse or names anything but the declaring node's outputs
+- Literal defaults and slot `inject` values of the wrong shape (a map for a single-value input, or a single value for an array input), and `inject` outside a slot option
+- A required input whose default takes `from:` an optional output (a warning: when the output is missing, the step fails)
 - Error detection rules with missing paths or unknown rule types
 - Condition references to unknown nodes
 - Requires/satisfies token mismatches and cycles
@@ -199,12 +202,16 @@ Plan validation catches:
 - **Unresolved AUTOWIRE** — no input still holds an `AUTOWIRE` marker (composition leaves one only when no step produces the output)
 - **Duplicate step IDs** — step names are unique within the plan
 - **Required inputs** — non-optional inputs have a plan value, reference, or default
-- **Selection configs** — valid strategy, source exists, field references match elementFields
+- **Value shapes** — literal values and pools fit their input's shape: a list for an array input, and no map for a single-value input
+- **Expressions** — `{{…}}` syntax in step values and pools parses
+- **Selection configs** — valid strategy, source exists, field references match elementFields, `onTie` only on `min` and `max`
 - **Constraints** — predicate expressions parse correctly, `appliesTo` references valid steps
-- **Assertions** — predicate syntax is valid. Assertion types are not checked here: an unknown type fails when a full plan's step runs, and composing a recipe drops it
+- **Assertions** — every assertion has a known type, predicate syntax is valid, and `{{…}}` expressions in `fieldEquals` values and quoted predicate literals parse. The type check also runs when a workflow template loads and when a recipe's override assertions are applied
 - **Expect-failure** — status codes are >= 400, no contradicting success assertions
 - **Cleanup steps** — nodes exist, `runOn` is `always`, `failure`, or `success`
 - **Graph version** — plan's `graphVersion` is compatible (same major version) with graph
+
+For a plan file, `aat validate plan --plan` also prints `Plan warnings:` for a required input that takes `from:` an optional output. They don't fail it; under `aat validate --strict` they fail the Plans section.
 
 ### Unfed Inputs (`--unfed`)
 

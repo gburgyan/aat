@@ -195,3 +195,57 @@ schemas):
 **Deferred:** outputs from an expected-failure body (the primer documents two workarounds), a pruned validator beyond
 the graph's operations, expanding maps into bracketed pairs when rendering, and `--tag` for `aat generate`, since the
 spec has no tags.
+
+## 2026-09-13 — Cleanup skips, selection ties, resolutions, and validation gaps (the second pre-run PR)
+
+**What:** The second PR before the next discovery run takes in what the first two runs and the research pass found:
+- A cleanup pairing can say when it isn't needed (`when`, `releasedBy`), and a cleanup is skipped when a later step on
+  its node already released the resource.
+- `min` and `max` ties print a warning, and `onTie` fails on them or accepts them.
+- A step that fails before its request keeps its resolutions, and `aat run show` gains `--resolutions` and `--compact`.
+- `inject` values decode like graph defaults, and literal values are checked against their input's shape.
+- Assertion values expand expressions, and an unknown assertion type fails validation.
+- An optional input whose `from:` output is missing is left out.
+- A `{}` fallback evaluates its default's expressions.
+- Validation lines name the value and print once.
+
+**Decisions:**
+- **`when` reads only the creating step's outputs,** or the previous cleanup step's in a chain. Reading the newest step
+  on the resource would, in the shop, read the charge step's status and skip cancelling an order that can still be
+  cancelled. A resource that a later step can leave in several states needs a `stateFrom`, which is deferred.
+- **A release must match the resource.** A later main step on the cleanup node, or on a `releasedBy` node, releases it
+  only when that step succeeded, isn't an expected failure, and resolved the same values for the inputs it shares with
+  the cleanup, with numbers compared by value. An unset optional input blocks the release.
+- **A tie warns by default.** A plan may take any of several equal elements on purpose; `onTie: fail` is for one that
+  must not guess, and `first` takes the first without a warning. The selection cache key gained the compared field,
+  since two inputs sorting one array by different fields got the same element.
+- **A failed step keeps what resolved before the failure,** with an `error` record for the input that failed.
+- **A bare list in `inject` stays a literal list,** because the second discovery run's fix relies on it. A mapping
+  decodes strictly, so `{default: [35]}` fails validation instead of sending a map.
+- **A list is allowed for a single-value input.** The first shape check rejected it: the private project's validation
+  gained 13 lines, and 4 of its recipes would have failed, where a template sends the list as repeated pairs.
+- **Selection filters and cleanup `when` conditions stay literal.** Only `fieldEquals` values and quoted predicate
+  literals expand expressions. Filters are evaluated while the step's inputs are still being resolved, and `when`
+  during cleanup, so neither has the step's inputs to expand.
+- **An optional input whose `from:` output is missing is left out,** as `AUTOWIRE?` leaves one unset. The warning for a
+  required input that takes an optional output covers graph defaults and plan and workflow files, not recipes, whose
+  wiring comes from composition.
+- **`{}` over a default that isn't a plain value still leaves a required input out.** A first version made it an error,
+  because a template that sends the placeholder unconditionally fails on it. The rewiring check then found all 7 of the
+  first discovery run's recipes failing to compose. That project blanks a payment amount with `{}` on orders paid later
+  and sends the amount inside a conditional block, and 117 order steps in its archives succeeded that way. The error
+  was dropped; only the plain fallback's expression evaluation remains.
+
+**Verification:**
+- `aat validate --strict` output, compared as sets of lines before and after each change, is unchanged for the shop and
+  the private project, and for the first discovery run's project after the `{}` revision.
+- Composing every recipe with the build before this PR and with its last code commit gives the same plans, apart from
+  each plan's creation time: 74 recipes across the shop, the petstore example, the private project, and both discovery
+  runs' projects.
+- Against the next run's API in test mode, from a scratch project: a payment captured on creation skipped its cancel
+  through `when`, one captured later skipped it through `releasedBy`, one waiting for customer authentication was still
+  cancelled, and an explicit cancel skipped its pairing.
+
+**Deferred:** unused-input and layer-sibling warnings (Phase 3), `stateFrom`, the web UI for skipped cleanups and ties,
+`inject` as a resolution source, a warning when `{}` leaves out a required input that its template sends
+unconditionally, and the optional-output warnings in the MCP server's validation tools.

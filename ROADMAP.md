@@ -18,9 +18,6 @@ Roughly in priority order. None of these have dates.
 - **On-demand web assets.** A binary from `go install github.com/gburgyan/aat/cmd/aat@latest` should
   be able to serve the web UI instead of exiting with an install hint.
 - **More auth flows.** Client-credentials without dummy username/password fields; HTTP basic auth.
-- **Request pacing.** An environment setting for a minimum delay or maximum rate between requests,
-  for APIs that throttle.
-- **`llms.txt`.** A machine-readable index of the docs so external LLM tools can find the right page.
 - **CLI reference page.** One generated page listing every command and flag.
 - **Integration kits from the manifest.** A command that packages a kit from its manifest instead of a
   copy list, and a way to keep internal-only operations and workflows out of a kit that shares the
