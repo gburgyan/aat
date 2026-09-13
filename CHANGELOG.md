@@ -109,6 +109,8 @@ the graph and plan formats may still change before 1.0.
   many optional fields grows with their number rather than its square. A request body the spec declares empty (no
   properties and `additionalProperties: false`) gets no body and no warning. A form body property that takes an object,
   or an array of objects, gets a warning to write its keys by hand as bracketed pairs.
+- A run that stops on a step's error names the step, as in `step "addSocks" (addItem): executing HTTP request: …`, so
+  the `aat:` line and the `--json` error say which step failed.
 
 ### Fixed
 - OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another
@@ -130,6 +132,9 @@ the graph and plan formats may still change before 1.0.
 - The static OAS check no longer reports a required form field or query parameter as missing when the template writes
   it. The keys of a form-encoded body count as supplied, and a bracketed key such as `metadata[source]` supplies
   `metadata`.
+- A request that times out says so, naming aat's 30-second request timeout, instead of giving only Go's
+  `context deadline exceeded (Client.Timeout exceeded while awaiting headers)`. The limit is named only when the whole
+  limit passed, so a shorter timeout or an interrupted run isn't blamed on it.
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,

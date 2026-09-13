@@ -2,13 +2,19 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 )
+
+// DefaultRequestTimeout is how long NewHTTPExecutor's client waits for a
+// response, from sending the request to reading the last byte of its body.
+const DefaultRequestTimeout = 30 * time.Second
 
 // HTTPExecutor sends adapter-built requests over HTTP. It owns the base URL
 // and HTTP client; adapters produce relative paths.
@@ -17,11 +23,12 @@ type HTTPExecutor struct {
 	BaseURL string
 }
 
-// NewHTTPExecutor creates an executor with a default 30-second timeout client.
+// NewHTTPExecutor creates an executor whose client times out after
+// DefaultRequestTimeout.
 func NewHTTPExecutor(baseURL string) *HTTPExecutor {
 	return &HTTPExecutor{
 		Client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: DefaultRequestTimeout,
 		},
 		BaseURL: baseURL,
 	}
@@ -58,14 +65,21 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 		httpReq.Header.Set(k, v)
 	}
 
+	start := time.Now()
 	httpResp, err := e.Client.Do(httpReq)
 	if err != nil {
+		if e.clientTimedOut(ctx, err, start) {
+			return nil, fmt.Errorf("executing HTTP request: no response within aat's %s request timeout: %w", e.Client.Timeout, err)
+		}
 		return nil, fmt.Errorf("executing HTTP request: %w", err)
 	}
 	defer func() { _ = httpResp.Body.Close() }()
 
 	body, err := io.ReadAll(httpResp.Body)
 	if err != nil {
+		if e.clientTimedOut(ctx, err, start) {
+			return nil, fmt.Errorf("reading response body: aat's %s request timeout expired: %w", e.Client.Timeout, err)
+		}
 		return nil, fmt.Errorf("reading response body: %w", err)
 	}
 
@@ -74,6 +88,18 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 		Headers:    httpResp.Header,
 		Body:       body,
 	}, nil
+}
+
+// clientTimedOut reports whether err, from a request sent at start, is the
+// client's own timeout: a timeout error that arrived once the whole limit had
+// passed, while the caller's context was still live. A shorter timeout, such as
+// a TLS handshake's, or a cancelled run is not blamed on the limit.
+func (e *HTTPExecutor) clientTimedOut(ctx context.Context, err error, start time.Time) bool {
+	if ctx.Err() != nil || e.Client == nil || e.Client.Timeout <= 0 {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout() && time.Since(start) >= e.Client.Timeout
 }
 
 // JoinURL combines a base URL with a relative path, preserving query parameters

@@ -488,7 +488,7 @@ Each entry in `on` and `failOn` is either an **error category** name or an **HTT
 | `client` | Any other 4xx |
 | `auth` | HTTP 401, 403 |
 | `server` | HTTP 500, 501, and any other 5xx not listed under `transient` |
-| `timeout` | Request or context deadline exceeded |
+| `timeout` | No response within aat's 30-second request timeout, or a context deadline exceeded |
 | `network` | DNS and other connection-level errors |
 | `adapter` | Template rendering, input resolution, or output extraction errors |
 | `response_error` | A 2xx response whose body matched the graph's `errorDetection` rules |

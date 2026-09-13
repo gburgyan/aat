@@ -225,7 +225,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				Outcome:          outcome,
 				Steps:            stepResults,
 				CleanupResults:   cleanupResults,
-				Error:            stepResult.Error,
+				Error:            fmt.Errorf("step %s: %w", stepRef(step), stepResult.Error),
 				InstantiatedPlan: instantiatedPlan,
 			}
 		}
@@ -542,7 +542,7 @@ func (e *Engine) runVerification(ctx context.Context, steps []plan.Step, state *
 		var failure error
 		switch {
 		case sr.Error != nil:
-			return results, OutcomeError, sr.Error
+			return results, OutcomeError, fmt.Errorf("verification step %s: %w", stepRef(step), sr.Error)
 		case sr.StatusCode >= 400:
 			failure = fmt.Errorf("verification step %s returned status %d", stepRef(step), sr.StatusCode)
 		case sr.ResponseBodyError != nil:
