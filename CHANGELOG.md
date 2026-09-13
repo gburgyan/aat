@@ -99,6 +99,9 @@ the graph and plan formats may still change before 1.0.
   schema, used to fail with `infinite circular reference detected`, so `aat generate`, `aat validate`, and the MCP
   server rejected the spec, and `aat run` skipped OAS validation. Large published specs have such cycles. Other
   errors in a spec still fail it, and libopenapi's log lines no longer reach stdout.
+- Runs with OAS validation start quickly on a spec with hundreds of operations. The validator is built for the
+  operations the graph's nodes name, not for the whole spec, which could take most of a minute before the first
+  request.
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,

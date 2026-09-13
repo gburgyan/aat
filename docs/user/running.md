@@ -360,6 +360,8 @@ The `--oas-validate` flag controls the mode:
 | `strict` | Like `auto`, but a request or response that violates the spec fails the step (outcome `failed`, cleanup still runs). Skipped validations and schema compilation warnings never fail a step; `expectFailure` steps are exempt. A spec that fails to load stops the run before the first request, with exit code `2`. Use a `schema` assertion instead when only specific steps should be strict (see [Plans: Assertions](plans.md#assertions)) |
 | `off` | Do not load specs or validate |
 
+Each spec loads once per command, and the validator is built only for the operations the graph's nodes name, so a spec with hundreds of operations adds little to startup.
+
 The default comes from `settings.oasValidation` in the environment file; the flag overrides it for one run. See [Environments: Runtime Settings](environments.md#runtime-settings).
 
 ## Debugging Authentication

@@ -12,6 +12,7 @@ import (
 	"github.com/pb33f/libopenapi/datamodel"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
 	"github.com/pb33f/libopenapi/index"
+	"github.com/pb33f/libopenapi/orderedmap"
 	"github.com/pb33f/libopenapi/utils"
 
 	"github.com/gburgyan/aat/graph"
@@ -35,8 +36,22 @@ func NewSpecCache() *SpecCache {
 	return &SpecCache{entries: make(map[string]*SpecEntry)}
 }
 
-// Load reads an OAS spec from fsPath and stores it under refPath.
+// Load reads an OAS spec from fsPath and stores it under refPath, with a
+// validator built for every operation in the spec.
 func (c *SpecCache) Load(refPath, fsPath string) error {
+	return c.load(refPath, fsPath, nil, true)
+}
+
+// LoadOperations is Load for a run that uses only operationIDs. Building a
+// validator compiles the schemas of every operation it covers, which takes most
+// of a minute for a spec with hundreds of operations, so this validator covers
+// only the path items that define one of operationIDs. The stored model still
+// has every operation.
+func (c *SpecCache) LoadOperations(refPath, fsPath string, operationIDs []string) error {
+	return c.load(refPath, fsPath, operationIDs, false)
+}
+
+func (c *SpecCache) load(refPath, fsPath string, operationIDs []string, allOperations bool) error {
 	data, err := os.ReadFile(fsPath)
 	if err != nil {
 		return fmt.Errorf("reading OAS spec %q: %w", fsPath, err)
@@ -54,7 +69,11 @@ func (c *SpecCache) Load(refPath, fsPath string) error {
 
 	// Create the validator once from the pre-built model.
 	// This runs warmSchemaCaches once per spec instead of once per step.
-	v := validator.NewValidatorFromV3Model(model)
+	validatorModel := model
+	if !allOperations {
+		validatorModel = operationsModel(model, operationIDs)
+	}
+	v := validator.NewValidatorFromV3Model(validatorModel)
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -103,6 +122,34 @@ func onlyCircularReferences(err error) bool {
 		}
 	}
 	return true
+}
+
+// operationsModel returns a copy of model whose paths hold only the path items
+// that define one of operationIDs. The copy shares those path items with model,
+// so a step validated against a path item that FindOperation returns from model
+// uses the schemas a validator built from the copy compiled.
+func operationsModel(model *v3high.Document, operationIDs []string) *v3high.Document {
+	if model.Paths == nil || model.Paths.PathItems == nil {
+		return model
+	}
+	wanted := make(map[string]bool, len(operationIDs))
+	for _, id := range operationIDs {
+		wanted[id] = true
+	}
+
+	items := orderedmap.New[string, *v3high.PathItem]()
+	for path, pathItem := range model.Paths.PathItems.FromOldest() {
+		for _, mo := range PathOperations(pathItem) {
+			if wanted[mo.Operation.OperationId] {
+				items.Set(path, pathItem)
+				break
+			}
+		}
+	}
+
+	pruned := *model
+	pruned.Paths = &v3high.Paths{PathItems: items, Extensions: model.Paths.Extensions}
+	return &pruned
 }
 
 // Get returns the SpecEntry for the given reference path, or nil if not loaded.

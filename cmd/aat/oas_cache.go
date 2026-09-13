@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
@@ -30,7 +31,7 @@ func loadOASCache(g *graph.Graph, graphPath, mode string, warn io.Writer) (*oas.
 		if !filepath.IsAbs(sp) {
 			fsPath = filepath.Join(graphDir, sp)
 		}
-		if err := cache.Load(sp, fsPath); err != nil {
+		if err := cache.LoadOperations(sp, fsPath, specOperationIDs(g, sp)); err != nil {
 			if mode == "strict" {
 				return nil, fmt.Errorf("strict OAS validation: %w", err)
 			}
@@ -41,4 +42,17 @@ func loadOASCache(g *graph.Graph, graphPath, mode string, warn io.Writer) (*oas.
 		return nil, nil
 	}
 	return cache, nil
+}
+
+// specOperationIDs returns the operationIds of the graph's nodes that use the
+// spec at specRef, sorted. Only these operations are validated at run time.
+func specOperationIDs(g *graph.Graph, specRef string) []string {
+	var ids []string
+	for _, node := range g.Nodes {
+		if node.OAS != nil && node.OAS.OperationID != "" && oas.ResolveNodeSpec(node, g.OAS) == specRef {
+			ids = append(ids, node.OAS.OperationID)
+		}
+	}
+	slices.Sort(ids)
+	return ids
 }

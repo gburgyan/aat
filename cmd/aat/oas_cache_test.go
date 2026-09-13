@@ -11,6 +11,22 @@ import (
 	"github.com/gburgyan/aat/graph"
 )
 
+func TestSpecOperationIDs(t *testing.T) {
+	g := &graph.Graph{
+		OAS: "shop.yaml",
+		Nodes: map[string]*graph.Node{
+			"getCart":       {OAS: &graph.OASRef{OperationID: "getCart"}},
+			"addItem":       {OAS: &graph.OASRef{OperationID: "addItem"}},
+			"chargePayment": {OAS: &graph.OASRef{OperationID: "chargePayment", Spec: "payments.yaml"}},
+			"noOperation":   {OAS: &graph.OASRef{}},
+			"noSpec":        {},
+		},
+	}
+	assert.Equal(t, []string{"addItem", "getCart"}, specOperationIDs(g, "shop.yaml"))
+	assert.Equal(t, []string{"chargePayment"}, specOperationIDs(g, "payments.yaml"))
+	assert.Empty(t, specOperationIDs(g, "other.yaml"))
+}
+
 func TestLoadOASCache(t *testing.T) {
 	missingGraph := filepath.Join(t.TempDir(), "graph.yaml")
 	tests := []struct {
