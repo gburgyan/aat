@@ -2,6 +2,8 @@ package plan
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -56,8 +58,23 @@ type ValidationError struct {
 	Errors []string
 }
 
+// Error lists each distinct problem once, in the order found.
 func (e *ValidationError) Error() string {
-	return fmt.Sprintf("plan validation failed:\n  - %s", strings.Join(e.Errors, "\n  - "))
+	return fmt.Sprintf("plan validation failed:\n  - %s", strings.Join(distinctErrors(e.Errors), "\n  - "))
+}
+
+// distinctErrors returns the messages without repeats, keeping the first
+// occurrence of each.
+func distinctErrors(errs []string) []string {
+	seen := make(map[string]bool, len(errs))
+	out := make([]string, 0, len(errs))
+	for _, msg := range errs {
+		if !seen[msg] {
+			seen[msg] = true
+			out = append(out, msg)
+		}
+	}
+	return out
 }
 
 // Validate checks a plan against a graph for structural correctness.
@@ -145,7 +162,8 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 
 		// Validate step.Selections (named selections) — from uses step IDs
-		for selName, sel := range step.Selections {
+		for _, selName := range slices.Sorted(maps.Keys(step.Selections)) {
+			sel := step.Selections[selName]
 			if sel.From == "" {
 				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q has empty 'from'", i, sid, selName))
 				continue
@@ -182,14 +200,15 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 
 		// Gap 6: Check value names match node inputs
-		for name := range step.Values {
+		for _, name := range slices.Sorted(maps.Keys(step.Values)) {
 			if !inputNames[name] {
 				errs = append(errs, fmt.Sprintf("step %d (%s): value %q does not match any input on node %q", i, sid, name, step.Node))
 			}
 		}
 
 		// Per-value validation: From references, array selection, sortField, dependsOn completeness
-		for name, sv := range step.Values {
+		for _, name := range slices.Sorted(maps.Keys(step.Values)) {
+			sv := step.Values[name]
 			// Validate FromSelection
 			if sv.FromSelection != "" {
 				if sv.From != "" || sv.Select != nil {
@@ -265,7 +284,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 					} else {
 						// DependsOn required
 						if !depsSet[srcStepID] {
-							errs = append(errs, fmt.Sprintf("step %d (%s): has 'fromInput' reference to %q but does not list it in dependsOn", i, sid, srcStepID))
+							errs = append(errs, fmt.Sprintf("step %d (%s): value %q has 'fromInput' reference to %q but does not list it in dependsOn", i, sid, name, srcStepID))
 						}
 						// Input existence on source step's graph node
 						srcGraphNode := srcStepID
@@ -308,7 +327,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 
 					// Gap 9: From implies dependsOn
 					if stepIDs[srcStepID] && !depsSet[srcStepID] {
-						errs = append(errs, fmt.Sprintf("step %d (%s): has 'from' reference to %q but does not list it in dependsOn", i, sid, srcStepID))
+						errs = append(errs, fmt.Sprintf("step %d (%s): value %q has 'from' reference to %q but does not list it in dependsOn", i, sid, name, srcStepID))
 					}
 				}
 			}
@@ -382,7 +401,8 @@ func Validate(p *Plan, g *graph.Graph) error {
 		sid := step.StepID()
 
 		// Validate named selection strategies and filter fields
-		for selName, sel := range step.Selections {
+		for _, selName := range slices.Sorted(maps.Keys(step.Selections)) {
+			sel := step.Selections[selName]
 			strategy := sel.Strategy
 			if !IsSelectionStrategy(strategy) {
 				errs = append(errs, fmt.Sprintf("step %d (%s): unknown selection strategy %q for selection %q", i, sid, strategy, selName))
@@ -433,7 +453,8 @@ func Validate(p *Plan, g *graph.Graph) error {
 			}
 		}
 
-		for name, sv := range step.Values {
+		for _, name := range slices.Sorted(maps.Keys(step.Values)) {
+			sv := step.Values[name]
 			if sv.Select != nil {
 				sel := sv.Select
 				if !IsSelectionStrategy(sel.Strategy) {

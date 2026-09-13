@@ -264,7 +264,7 @@ Workflows:             OK (4 files, 2 templates)
 | `required input "X" has no plan value` | A non-optional input is missing from the step's values | Add a value, `from` reference, or make the input optional in the graph |
 | `input "X" is an unresolved AUTOWIRE` | Composition found no step before this one that produces an output named X | Add the step or addon that produces it, wire it with an addon's `wire:` map, set it in a recipe's `overrides.values`, or use `AUTOWIRE?` for an optional input |
 | `'from' reference "X" for "Y": "Z" is not a step` | A value's `from` references a step name that doesn't exist in the plan | Check the step ID spelling; `from` uses step names, not node names |
-| `has 'from' reference to "X" but does not list it in dependsOn` | A data dependency is missing from `dependsOn` | Add the referenced step to `dependsOn` to ensure execution order |
+| `value "Y" has 'from' reference to "X" but does not list it in dependsOn` | Value `Y` takes data from step `X`, which is missing from `dependsOn` | Add the referenced step to `dependsOn` to ensure execution order |
 | `dependsOn cycle detected` | Steps have circular dependencies | Remove the circular reference; draw out the dependency chain to find the loop |
 | `unknown selection strategy "X"` | Invalid strategy in a selection config | Use one of: `first`, `last`, `index`, `random`, `min`, `max`, `match` |
 | `sortField "X" not found in elementFields` | Selection sort field doesn't match any elementField | Check the array output's elementFields in the graph; use a field name, not a path |

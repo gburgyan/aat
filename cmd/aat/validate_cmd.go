@@ -615,7 +615,13 @@ func printSections(out io.Writer, sections []sectionResult) {
 		_, _ = fmt.Fprintln(out, line)
 
 		if s.Status == "FAILED" || s.Status == "WARN" {
+			printed := make(map[string]bool, len(s.Errors))
 			for _, e := range s.Errors {
+				// An error reported more than once, word for word, is printed once
+				if printed[e] {
+					continue
+				}
+				printed[e] = true
 				// Indent each line of the error
 				for _, eline := range strings.Split(e, "\n") {
 					if eline != "" {

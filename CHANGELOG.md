@@ -120,6 +120,11 @@ the graph and plan formats may still change before 1.0.
   rerun still resolves them again.
 - `uuid`, `now`, and `unixtime` are reserved words in expressions, so `{{now}}` no longer refers to an input named
   `now`. An offset in hours or minutes on `today`, or on a reference, is an error that suggests `now` or `unixtime`.
+- The missing-`dependsOn` message names the value that takes the data, as in
+  `value "orderId" has 'from' reference to "createOrder" but does not list it in dependsOn`, so two values from the same
+  step no longer print the same line. Plan validation lists each distinct problem once, `aat validate` prints an error
+  repeated word for word once, and a step's values and selections are checked in name order, so the output is the same
+  on every run.
 - Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
   `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
   bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an
