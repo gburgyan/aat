@@ -2,7 +2,6 @@ package graph
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/gburgyan/aat/internal/yamlx"
@@ -56,14 +55,11 @@ func (v *InjectValue) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 // validateValueShapes checks that node input defaults and slot inject values fit
-// the inputs they set (see DefaultShapeError), and that inject appears only on
-// slot options, the only workflows composition reads it from.
+// the inputs they set (see DefaultShapeError and injectShapeErrors), and that
+// inject appears only on slot options, the only workflows composition reads it
+// from.
 func validateValueShapes(g *Graph) []string {
-	nodeNames := make([]string, 0, len(g.Nodes))
-	for name := range g.Nodes {
-		nodeNames = append(nodeNames, name)
-	}
-	sort.Strings(nodeNames)
+	nodeNames := sortedKeys(g.Nodes)
 
 	var errs []string
 	for _, name := range nodeNames {
@@ -86,23 +82,29 @@ func validateValueShapes(g *Graph) []string {
 			errs = append(errs, fmt.Sprintf("workflow %d (%q): inject applies only to slot options (kind: slot), and %s ignores it", i, wf.Name, kind))
 			continue
 		}
-		keys := make([]string, 0, len(wf.Inject))
-		for key := range wf.Inject {
-			keys = append(keys, key)
+		for _, key := range sortedKeys(wf.Inject) {
+			errs = append(errs, injectShapeErrors(g, nodeNames, i, wf.Name, key, wf.Inject[key])...)
 		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			value := wf.Inject[key]
-			for _, name := range nodeNames {
-				for _, in := range g.Nodes[name].Inputs {
-					if in.Name != key {
-						continue
-					}
-					if msg := DefaultShapeError(&value.InputDefault, in.Type); msg != "" {
-						errs = append(errs, fmt.Sprintf("workflow %d (%q): inject %q for %s.%s: %s", i, wf.Name, key, name, key, msg))
-					}
-				}
+	}
+	return errs
+}
+
+// injectShapeErrors checks a slot inject value against the inputs with its
+// name, in nodeNames order. Composition decides which steps the value reaches,
+// and plan validation checks those, so it is an error only when no such input
+// takes it; then each input's mismatch is reported.
+func injectShapeErrors(g *Graph, nodeNames []string, i int, workflow, key string, value InjectValue) []string {
+	var errs []string
+	for _, name := range nodeNames {
+		for _, in := range g.Nodes[name].Inputs {
+			if in.Name != key {
+				continue
 			}
+			msg := DefaultShapeError(&value.InputDefault, in.Type)
+			if msg == "" {
+				return nil
+			}
+			errs = append(errs, fmt.Sprintf("workflow %d (%q): inject %q for %s.%s: %s", i, workflow, key, name, key, msg))
 		}
 	}
 	return errs

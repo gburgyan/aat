@@ -54,4 +54,31 @@ func TestValidate_StepValueShape(t *testing.T) {
 	if err != nil {
 		assert.NotContains(t, err.Error(), "takes a")
 	}
+
+	marker := &Plan{Execution: Execution{Steps: []Step{{Node: "addItem", Values: map[string]StepValue{
+		"quantity": {Default: 1},
+		"skus":     {Default: "PLACEHOLDER"},
+	}}}}}
+	err = Validate(marker, g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `input "skus" is an unresolved AUTOWIRE`)
+	assert.NotContains(t, err.Error(), "takes a list", "the legacy marker is reported on its own")
+
+	// A step expected to fail may send a wrong shape on purpose, as a mutation does.
+	negative := &Plan{Execution: Execution{Steps: []Step{
+		{
+			Node:      "addItem",
+			Values:    map[string]StepValue{"quantity": {Default: 2}, "skus": {Default: []any{"SKU-1"}}},
+			Mutations: []Mutation{{Name: "skus-not-a-list", Set: map[string]any{"skus": "SKU-1"}, ExpectStatus: []int{400}}},
+		},
+		{
+			ID: "quantity-as-map", Node: "addItem",
+			Values:        map[string]StepValue{"quantity": {Default: map[string]any{"n": 2}}, "skus": {Default: []any{"SKU-1"}}},
+			ExpectFailure: &ExpectFailure{Status: []int{400}},
+		},
+	}}}
+	_, err = InstantiateAndValidate(negative, g)
+	if err != nil {
+		assert.NotContains(t, err.Error(), "takes a")
+	}
 }

@@ -51,6 +51,10 @@ the graph and plan formats may still change before 1.0.
   for a single-value input. A list for a single-value input is still allowed, since a template can send it as repeated
   pairs.
   - It covers step values and pools, graph defaults, layers, and slot `inject` values.
+  - A step expected to fail, such as a mutation, isn't checked, since a negative test may send the wrong shape on
+    purpose.
+  - A slot `inject` value fails only when no input with its name takes it, since composition decides which steps it
+    reaches. The composed plan's steps are then checked like any others.
   - A pool entry for an array input gets a hint: a bare list in a graph default or a layer is a pool, so write one list
     as `{value: [...]}`.
   - Expressions and custom types aren't checked.

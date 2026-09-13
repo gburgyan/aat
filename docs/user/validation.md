@@ -121,7 +121,7 @@ Graph structural validation catches:
 - Missing adapter references
 - Cleanup references to unknown or self-referencing nodes, and cleanup pairings that loop back (`a → b → a`)
 - Cleanup pairings whose `releasedBy` names an unknown node, the declaring node, or one node twice, or whose `when` doesn't parse or names anything but the declaring node's outputs
-- Literal defaults and slot `inject` values of the wrong shape (a map for a single-value input, or a single value for an array input), and `inject` outside a slot option
+- Literal defaults and slot `inject` values of the wrong shape (a map for a single-value input, or a single value for an array input), and `inject` outside a slot option. An `inject` value is checked against every input with its name and fails only when none of them takes it, since composition decides which steps it reaches
 - A required input whose default takes `from:` an optional output (a warning: when the output is missing, the step fails)
 - Error detection rules with missing paths or unknown rule types
 - Condition references to unknown nodes
@@ -202,7 +202,7 @@ Plan validation catches:
 - **Unresolved AUTOWIRE** — no input still holds an `AUTOWIRE` marker (composition leaves one only when no step produces the output)
 - **Duplicate step IDs** — step names are unique within the plan
 - **Required inputs** — non-optional inputs have a plan value, reference, or default
-- **Value shapes** — literal values and pools fit their input's shape: a list for an array input, and no map for a single-value input
+- **Value shapes** — literal values and pools fit their input's shape: a list for an array input, and no map for a single-value input. A step expected to fail, such as a mutation, isn't checked, since a negative test may send the wrong shape on purpose
 - **Expressions** — `{{…}}` syntax in step values and pools parses
 - **Selection configs** — valid strategy, source exists, field references match elementFields, `onTie` only on `min` and `max`
 - **Constraints** — predicate expressions parse correctly, `appliesTo` references valid steps

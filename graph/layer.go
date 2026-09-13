@@ -62,19 +62,9 @@ func (l *Layer) UnknownInputs(g *Graph) []string {
 // set (see DefaultShapeError), sorted by key. A bare key is checked against
 // every node input with that name.
 func (l *Layer) ShapeErrors(g *Graph) []string {
-	keys := make([]string, 0, len(l.Inputs))
-	for key := range l.Inputs {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	nodeNames := make([]string, 0, len(g.Nodes))
-	for name := range g.Nodes {
-		nodeNames = append(nodeNames, name)
-	}
-	sort.Strings(nodeNames)
-
+	nodeNames := sortedKeys(g.Nodes)
 	var errs []string
-	for _, key := range keys {
+	for _, key := range sortedKeys(l.Inputs) {
 		nodeName, inputName, qualified := strings.Cut(key, ".")
 		if !qualified {
 			inputName = key

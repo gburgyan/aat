@@ -81,6 +81,22 @@ func TestValidate_InjectShapeMismatch(t *testing.T) {
 	assert.NotContains(t, err.Error(), `inject "skus"`)
 }
 
+func TestValidate_InjectFitsAnInputWithItsName(t *testing.T) {
+	g := injectGraph(Workflow{Name: "Open Orders", Kind: "slot", Template: "open.yaml", Inject: map[string]InjectValue{
+		"status": InjectLiteral("open"),
+	}})
+	g.Nodes["listOrders"] = &Node{Name: "listOrders", Adapter: "listOrders", Inputs: []Input{{Name: "status", Type: "string"}}}
+	g.Nodes["bulkUpdate"] = &Node{Name: "bulkUpdate", Adapter: "bulkUpdate", Inputs: []Input{{Name: "status", Type: "string[]"}}}
+
+	assert.NoError(t, Validate(g), "listOrders.status takes it, whichever steps the option composes with")
+
+	g.Workflows[0].Inject["status"] = InjectLiteral(map[string]any{"is": "open"})
+	err := Validate(g)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `workflow 0 ("Open Orders"): inject "status" for bulkUpdate.status: a map, where string[] takes a list`)
+	assert.Contains(t, err.Error(), `workflow 0 ("Open Orders"): inject "status" for listOrders.status: a map, where string takes a single value`)
+}
+
 func TestValidate_NodeDefaultShape(t *testing.T) {
 	g := injectGraph()
 	g.Nodes["addItem"].Inputs[1].Default = &InputDefault{Pool: []any{"SKU-1", "SKU-2"}}

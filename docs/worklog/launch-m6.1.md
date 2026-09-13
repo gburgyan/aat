@@ -249,3 +249,59 @@ spec has no tags.
 **Deferred:** unused-input and layer-sibling warnings (Phase 3), `stateFrom`, the web UI for skipped cleanups and ties,
 `inject` as a resolution source, a warning when `{}` leaves out a required input that its template sends
 unconditionally, and the optional-output warnings in the MCP server's validation tools.
+
+## 2026-09-13 — Review fixes for the second pre-run PR
+
+**What:** A code review of the PR reported 15 findings, and all are fixed.
+- **Bugs:**
+  - A main step could release a chained cleanup when it sent the same value. The cleanup step before it creates that
+    resource during cleanup, so the chain's last call was never sent.
+  - The value-shape check ran on steps expected to fail, so a plan whose mutation sends a wrong shape on purpose
+    stopped at validation.
+  - A required input marked `{}` fell back to the graph default and ignored layers.
+  - A slot `inject` value was checked against every input with its name, so an unrelated node's input stopped the
+    graph from loading.
+- **Gaps:**
+  - An optional input that reads a missing output through a named selection failed the step.
+  - Cleanup `when` checks and the optional-output warnings ran only in `aat validate`.
+  - A retry's assertions read a newer clock than the inputs it resent.
+  - A main step with the ID `verify_<node>` was left out of cleanup release checks.
+  - `PLACEHOLDER` got a shape error on top of its own.
+- **Cleanups:**
+  - A selection joined an input that shared its name.
+  - A cancelled resolution dropped what had resolved.
+  - Match and filter selections parsed their predicate for every element.
+  - Cleanup inputs resolved twice.
+  - Two number helpers disagreed.
+  - Map keys were sorted by hand.
+
+**Decisions:**
+- **Layers apply to a `{}` fallback (author).** The entry above documented that they didn't. The fallback stands in
+  for the default an unset input gets, and layers are how a batch varies that default, so a matrix axis no longer stops
+  at a step that marks the input `{}`.
+  - The default after layers also decides whether it is plain: a pool layer over a plain graph default leaves the input
+    out.
+  - `plan.EffectiveDefault` replaces three copies of the layer lookup.
+- **Predicates moved to the foundation package `internal/predicate` (author).** `graph` can't import `plan`, so only
+  `aat validate` checked `when`. A misspelled field reached a run through `aat run` or the MCP server, and the cleanup
+  then ran every time, recording `whenError`.
+  - `graph.Validate` now checks `when` whenever a graph loads, and the two validate commands lost their extra call.
+  - `plan` keeps the `{{…}}` expansion for assertions, built on `predicate.EvalExpanding`.
+  - `predicate.Parse` lets a selection parse its predicate once.
+- **No main step releases a chained cleanup,** rather than searching for releases after the parent cleanup step:
+  every main step ran before the chain created the resource.
+- **Shape checks skip every step expected to fail,** not only mutation siblings. A hand-written negative step may send
+  a wrong shape on purpose too, and a mutation's happy-path step is still checked.
+- **An inject value fails only when no input with its name takes it.** The graph doesn't say which base workflows an
+  option composes with, and the composed plan's steps are checked like any others.
+- **The optional-output warnings reach the MCP server** through `validate_plan` and `save_plan`, which the entry above
+  deferred. The graph-default warnings stay in `aat validate`.
+- **The review overstated the step ID collision.** Verification step IDs are `verify_<node>`, so only a main step with
+  that exact ID was affected. The fix still replaced the ID filter with a slice of the main results, which also saves
+  two verification instantiations per cleanup run.
+
+**Verification:**
+- `make check`, `make docs`, and `make example-shop` pass.
+- A scratch copy of the shop with `cleanup: {node: deleteCart, when: 'staus == "open"'}`: `aat validate --strict` and
+  `aat validate graph` exit 1, and `aat run plan smoke` and `aat mcp serve` exit 2. Each names `staus` while loading
+  the graph.
