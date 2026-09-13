@@ -262,13 +262,25 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			return nil, nil, res, nil
 		}
 		if input.Default != nil && input.Default.HasValue() {
-			val := input.Default.EffectiveValue()
-			res := &ValueResolution{
-				InputName:  input.Name,
-				Source:     "graph_default",
-				FinalValue: val,
-				PoolIndex:  -1,
+			// {} takes only a plain graph default. A pool, from, select, or
+			// constraint would be dropped, and the request would fail later on
+			// an unresolved placeholder.
+			if !input.Default.IsLiteralOnly() {
+				return nil, nil, nil, fmt.Errorf("required input is {} but its graph default isn't a plain value (it has a pool, from, select, or constraint), which {} doesn't use; remove {} to use the default, or set a value")
 			}
+			raw := input.Default.Value
+			res := &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}
+			val := raw
+			if s, ok := raw.(string); ok && plan.ContainsExpr(s) && ectx != nil {
+				evaluated, err := plan.EvalExpr(raw, *ectx)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("evaluating graph default %q: %w", s, err)
+				}
+				val = evaluated
+				res.RawValue = raw
+				res.Expression = s
+			}
+			res.FinalValue = val
 			return val, nil, res, nil
 		}
 		return nil, nil, nil, fmt.Errorf("required input has no value (empty step value)")
