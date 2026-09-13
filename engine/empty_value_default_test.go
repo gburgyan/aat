@@ -56,3 +56,36 @@ func TestResolveInputs_EmptyStepValue_NonPlainDefaultLeavesInputOut(t *testing.T
 		})
 	}
 }
+
+// TestResolveInputs_EmptyStepValue_FollowsLayers pins that {} on a required
+// input falls back to its default after layers, which decide both the value and
+// whether it is plain.
+func TestResolveInputs_EmptyStepValue_FollowsLayers(t *testing.T) {
+	tests := []struct {
+		name  string
+		base  *graph.InputDefault
+		layer *graph.InputDefault
+		want  any
+	}{
+		{name: "a plain layer over a plain default", base: graph.LiteralDefault("standard"), layer: graph.LiteralDefault("express"), want: "express"},
+		{name: "a plain layer over a pool", base: &graph.InputDefault{Pool: []any{"standard", "economy"}}, layer: graph.LiteralDefault("express"), want: "express"},
+		{name: "a pool layer over a plain default", base: graph.LiteralDefault("standard"), layer: &graph.InputDefault{Pool: []any{"standard", "express"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := &graph.Graph{Version: "1.0.0", Nodes: map[string]*graph.Node{
+				"checkoutCart": {Name: "checkoutCart", Inputs: []graph.Input{{Name: "shippingMethod", Type: "string", Default: tt.base}}},
+			}}
+			layered, err := graph.ApplyLayers(g, []string{"shipping"}, map[string]*graph.Layer{
+				"shipping": {Name: "shipping", Inputs: map[string]*graph.InputDefault{"checkoutCart.shippingMethod": tt.layer}},
+			})
+			require.NoError(t, err)
+			step := plan.Step{Node: "checkoutCart", Values: map[string]plan.StepValue{"shippingMethod": {}}}
+			rctx := &ResolveContext{Now: fixedNow(), LayeredDefaults: layered}
+
+			inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["checkoutCart"], g, NewRunState(), rctx)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, inputs["shippingMethod"])
+		})
+	}
+}

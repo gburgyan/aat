@@ -59,6 +59,8 @@ the graph and plan formats may still change before 1.0.
   `expr: 'quantity == "{{quantity}}"'`.
   - A quoted expression that yields a number or a boolean compares as one.
   - An expression that can't be evaluated fails its assertion.
+  - `today`, `now`, and `unixtime` read the time the step's inputs were resolved, so a retry compares with what it
+    resent.
   - Selection filters and cleanup `when` conditions stay literal.
 - `AUTOWIRE?` in workflow templates marks an optional input that only some compositions feed. It is wired when a
   step produces the output, such as one an addon adds, and left unset otherwise.
@@ -179,10 +181,11 @@ the graph and plan formats may still change before 1.0.
   pools, and assertions. The checks run in `aat validate`, when a workflow template loads, and when a recipe's override
   assertions are applied. Before, an unknown type failed only at run time, a recipe override of one was dropped
   silently, and a bad expression failed only when its step ran.
-- An optional input that takes `from:` an output the earlier step didn't return is left out, as `AUTOWIRE?` leaves one
-  unset, instead of failing the step. Its resolution records `optional_skip`. A required input still fails, and
-  `aat validate --strict` warns when a required input takes `from:` an optional output, in a graph default or in a plan
-  or workflow file. The MCP server's `validate_plan` and `save_plan` list the warnings for a plan file.
+- An optional input that takes `from:` an output the earlier step didn't return, directly or through a named selection,
+  is left out, as `AUTOWIRE?` leaves one unset, instead of failing the step. Its resolution records `optional_skip`. A
+  required input still fails, and `aat validate --strict` warns when a required input takes `from:` an optional output,
+  in a graph default or in a plan or workflow file, or reads one through a named selection. The MCP server's
+  `validate_plan` and `save_plan` list the warnings for a plan file.
 - Docs: the OAS validation pages no longer claim checks that don't run (the HTTP method and input types in
   `aat validate`, and every request at run time). The AI assistant primer covers starting from an OpenAPI spec, form
   bodies and query strings, headers and idempotency keys, lists and pagination, the request timeout, and reaching an
@@ -214,8 +217,9 @@ the graph and plan formats may still change before 1.0.
 - Two inputs that pick from the same array with `min` or `max` by different fields no longer get the same element.
   The selection cache left out the compared field, so the second input got the element chosen for the first. A
   `match` selection's `filteredSize` is now the number of matching elements, not the array's size.
-- A required input marked `{}` evaluates the expressions in the plain graph default it falls back to, so
-  `postalCode: {}` with a default of `{{env.postalCode}}` sends the variable's value, not the text.
+- A required input marked `{}` falls back to its plain default with layers applied, and evaluates the expressions in
+  it, so `postalCode: {}` with a default of `{{env.postalCode}}` sends the variable's value, not the text. A layer's
+  value for the input wins over the graph default, as it does without `{}`.
 - A request that times out says so, naming aat's 30-second request timeout, instead of giving only Go's
   `context deadline exceeded (Client.Timeout exceeded while awaiting headers)`. The limit is named only when the whole
   limit passed, so a shorter timeout or an interrupted run isn't blamed on it.

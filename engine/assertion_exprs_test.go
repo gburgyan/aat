@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,4 +63,36 @@ func TestExecuteStep_AssertionExpressionErrorFailsAssertion(t *testing.T) {
 	assert.False(t, v.Results[0].Passed)
 	assert.Contains(t, v.Results[0].Message, "expanding value {{missingInput}}")
 	assert.True(t, v.Results[1].Passed, "the other assertion still runs")
+}
+
+// TestExecuteStep_AssertionExpressionsReadTheResolutionTime pins that an attempt
+// that resends prepared inputs evaluates its assertions at the time the inputs
+// were resolved, so a retry after midnight still matches the date it sent.
+func TestExecuteStep_AssertionExpressionsReadTheResolutionTime(t *testing.T) {
+	g := &graph.Graph{Version: "1.0.0", Nodes: map[string]*graph.Node{
+		"scheduleDelivery": {
+			Name: "scheduleDelivery", Adapter: "expr.scheduleDelivery",
+			Inputs:  []graph.Input{{Name: "deliveryDate", Type: "date"}},
+			Outputs: []graph.Output{{Name: "deliveryDate", Type: "date"}},
+		},
+	}}
+	srv := newChainServer(t, nil)
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("expr.scheduleDelivery", &stubAdapter{method: "POST", path: "/deliveries", response: map[string]any{"deliveryDate": "2026-01-04"}}))
+	eng := NewEngine(g, registry, NewExecutorRouter(adapter.NewHTTPExecutor(srv.URL), &adapter.EnvironmentConfig{}))
+	step := plan.Step{
+		Node:       "scheduleDelivery",
+		Values:     map[string]plan.StepValue{"deliveryDate": {Default: "{{today + 3 days}}"}},
+		Assertions: &plan.Assertions{Mechanical: []plan.MechanicalAssertion{{Type: "fieldEquals", Path: "deliveryDate", Value: "{{today + 3 days}}"}}},
+	}
+	prepared := stepInputs{
+		resolved: true,
+		inputs:   map[string]any{"deliveryDate": "2026-01-04"},
+		now:      time.Date(2026, 1, 1, 23, 59, 59, 0, time.UTC),
+	}
+
+	result := eng.executeStepWith(context.Background(), step, g.Nodes["scheduleDelivery"], NewRunState(), &prepared)
+	require.NoError(t, result.Error)
+	require.NotNil(t, result.Validation)
+	assert.True(t, result.Validation.Passed, "%+v", result.Validation.Results)
 }

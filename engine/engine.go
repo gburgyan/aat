@@ -630,6 +630,7 @@ type stepInputs struct {
 	inputs      map[string]any
 	selections  []SelectionDecision
 	resolutions []ValueResolution
+	now         time.Time // when they were resolved; assertion expressions read it too
 }
 
 // executeStepWith executes one attempt of a step. When prepared already holds
@@ -644,11 +645,13 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	var inputs map[string]any
 	var selections []SelectionDecision
 	var resolutions []ValueResolution
+	var resolvedAt time.Time
 	if prepared != nil && prepared.resolved {
-		inputs, selections, resolutions = prepared.inputs, prepared.selections, prepared.resolutions
+		inputs, selections, resolutions, resolvedAt = prepared.inputs, prepared.selections, prepared.resolutions, prepared.now
 	} else {
 		// Construct ResolveContext from engine fields
 		rctx := e.buildResolveContext(node)
+		resolvedAt = rctx.Now
 
 		// Resolve inputs
 		var err error
@@ -678,7 +681,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		// Store resolved inputs so later steps can reference them via fromInput
 		state.StoreInputs(sid, inputs)
 		if prepared != nil {
-			*prepared = stepInputs{resolved: true, inputs: inputs, selections: selections, resolutions: resolutions}
+			*prepared = stepInputs{resolved: true, inputs: inputs, selections: selections, resolutions: resolutions, now: resolvedAt}
 		}
 	}
 
@@ -818,9 +821,10 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	if step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
 		merged := &validate.MechanicalResult{Passed: true}
 		// Expressions in a fieldEquals value or a quoted predicate string read
-		// the step's inputs, as step values do.
+		// the step's inputs, as step values do, and the time they were resolved,
+		// so a retry compares with the dates it resent.
 		rctx := e.buildResolveContext(node)
-		ectx := plan.ExprContext{Now: rctx.Now, Env: rctx.EnvLookup, Values: inputs, Random: rctx.Random}
+		ectx := plan.ExprContext{Now: resolvedAt, Env: rctx.EnvLookup, Values: inputs, Random: rctx.Random}
 		predicateEval := func(expr string, fields map[string]any) (bool, error) {
 			return plan.EvalPredicateWithExprs(expr, fields, ectx)
 		}
@@ -957,6 +961,8 @@ func (e *Engine) buildResolveContext(node *graph.Node) *ResolveContext {
 		Node:      node,
 		Plan:      e.plan,
 		Registry:  e.registry,
+
+		LayeredDefaults: e.layeredDefaults,
 	}
 }
 

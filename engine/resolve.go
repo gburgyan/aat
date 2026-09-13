@@ -29,6 +29,10 @@ type ResolveContext struct {
 	Plan      *plan.Plan        // for constraint classification (may be nil)
 	Registry  *adapter.Registry // may be nil; enables template-side elementField resolution
 	Random    io.Reader         // source for {{uuid}} and {{random N}}; nil means crypto/rand
+	// LayeredDefaults are the input defaults after layers, keyed as
+	// graph.ApplyLayers keys them; nil without layers. A required input marked
+	// {} falls back to them.
+	LayeredDefaults map[string]*graph.InputDefault
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -71,6 +75,13 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	for selName, sel := range step.Selections {
 		entry, selDecisions, err := resolveNamedSelection(ctx, selName, sel, step, g, state, dedupCache, rctx)
 		if err != nil {
+			// A selection from an output the earlier step didn't return leaves
+			// out the inputs that read it, when they are all optional.
+			if errors.Is(err, ErrOutputMissing) && !requiredInputReads(step, node, selName) {
+				fromNode, fromField, _ := splitRef(sel.From)
+				namedSelections[selName] = &namedSelectionEntry{sourceNode: fromNode, sourceField: fromField, missing: true}
+				continue
+			}
 			resolutions = append(resolutions, ValueResolution{InputName: selName, Source: "error", Error: err.Error(), PoolIndex: -1})
 			return inputs, decisions, resolutions, fmt.Errorf("resolving selection %q for node %q: %w", selName, step.Node, err)
 		}
@@ -92,7 +103,7 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	for _, input := range node.Inputs {
 		select {
 		case <-ctx.Done():
-			return nil, nil, nil, fmt.Errorf("input resolution cancelled: %w", ctx.Err())
+			return inputs, decisions, resolutions, fmt.Errorf("input resolution cancelled: %w", ctx.Err())
 		default:
 		}
 
@@ -151,6 +162,23 @@ type namedSelectionEntry struct {
 	sortValue    *float64 // for min and max
 	ties         int      // for min and max
 	onTie        string
+	missing      bool // the source output is missing, so the inputs that read it are left out
+}
+
+// requiredInputReads reports whether a required input of node reads the named
+// selection selName.
+func requiredInputReads(step plan.Step, node *graph.Node, selName string) bool {
+	for _, in := range node.Inputs {
+		if in.Optional {
+			continue
+		}
+		if sv, ok := step.Values[in.Name]; ok && sv.FromSelection != "" {
+			if name, _ := plan.ParseFromSelection(sv.FromSelection); name == selName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resolveNamedSelection performs the array selection for a named StepSelection.
@@ -263,14 +291,19 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			}
 			return nil, nil, res, nil
 		}
-		if input.Default != nil && input.Default.HasValue() {
-			// {} takes only a plain graph default. With a pool, from, select, or
-			// constraint the input is left out, for a template that wraps it in
-			// a conditional block, such as a payment sent only for some orders.
-			if !input.Default.IsLiteralOnly() {
+		var layered map[string]*graph.InputDefault
+		if rctx != nil {
+			layered = rctx.LayeredDefaults
+		}
+		if def := plan.EffectiveDefault(step.Node, input, layered); def != nil && def.HasValue() {
+			// {} takes only a plain default, the graph's or a layer's. With a
+			// pool, from, select, or constraint the input is left out, for a
+			// template that wraps it in a conditional block, such as a payment
+			// sent only for some orders.
+			if !def.IsLiteralOnly() {
 				return nil, nil, &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}, nil
 			}
-			raw := input.Default.Value
+			raw := def.Value
 			res := &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}
 			val := raw
 			if s, ok := raw.(string); ok && plan.ContainsExpr(s) && ectx != nil {
@@ -294,6 +327,9 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 		entry, exists := namedSelections[selName]
 		if !exists {
 			return nil, nil, nil, fmt.Errorf("fromSelection references unknown selection %q", selName)
+		}
+		if entry.missing {
+			return nil, nil, missingOptionalOutput(input.Name, entry.sourceNode, entry.sourceField), nil
 		}
 
 		var val any

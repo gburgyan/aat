@@ -116,14 +116,7 @@ func mergeGraphDefaultsWithLayers(p *Plan, g *graph.Graph, layeredDefaults map[s
 				continue
 			}
 
-			// Check layered defaults first, then graph defaults.
-			effectiveDefault := input.Default
-			if layeredDefaults != nil {
-				key := step.Node + "." + input.Name
-				if ld, ok := layeredDefaults[key]; ok {
-					effectiveDefault = ld
-				}
-			}
+			effectiveDefault := EffectiveDefault(step.Node, input, layeredDefaults)
 
 			if effectiveDefault == nil || !effectiveDefault.HasValue() {
 				continue
@@ -169,12 +162,7 @@ func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*grap
 		}
 		if node, ok := g.Nodes[vs.Node]; ok {
 			for _, input := range node.Inputs {
-				effectiveDefault := input.Default
-				if layeredDefaults != nil {
-					if ld, ok := layeredDefaults[vs.Node+"."+input.Name]; ok {
-						effectiveDefault = ld
-					}
-				}
+				effectiveDefault := EffectiveDefault(vs.Node, input, layeredDefaults)
 				if effectiveDefault == nil || !effectiveDefault.HasValue() {
 					continue
 				}
@@ -188,6 +176,17 @@ func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*grap
 		steps = append(steps, step)
 	}
 	return steps
+}
+
+// EffectiveDefault returns the default of a node's input after layers: the
+// layered default for nodeName.inputName when layeredDefaults has one, and the
+// graph default otherwise. layeredDefaults is keyed as graph.ApplyLayers keys
+// it, and may be nil.
+func EffectiveDefault(nodeName string, input graph.Input, layeredDefaults map[string]*graph.InputDefault) *graph.InputDefault {
+	if ld, ok := layeredDefaults[nodeName+"."+input.Name]; ok {
+		return ld
+	}
+	return input.Default
 }
 
 // StepValueFromDefault converts a graph InputDefault to a plan StepValue.
@@ -302,14 +301,7 @@ func injectGraphDefaultDeps(p *Plan, g *graph.Graph, layeredDefaults map[string]
 				continue
 			}
 
-			// Check layered defaults first, then graph defaults.
-			effectiveDefault := input.Default
-			if layeredDefaults != nil {
-				key := step.Node + "." + input.Name
-				if ld, ok := layeredDefaults[key]; ok {
-					effectiveDefault = ld
-				}
-			}
+			effectiveDefault := EffectiveDefault(step.Node, input, layeredDefaults)
 
 			if effectiveDefault == nil || effectiveDefault.From == "" {
 				continue

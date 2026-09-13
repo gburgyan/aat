@@ -19,17 +19,19 @@ func TestStepResolutions_JoinsSelections(t *testing.T) {
 			{InputName: "rateId", Source: "select_edge", FinalValue: "rate_1", FromStep: "listShippingRates", FromOutput: "rates"},
 			{InputName: "currency", Source: "plan_from", FinalValue: "USD", FromStep: "listProducts", FromOutput: "currency"},
 			{InputName: "quantity", Source: "error", Error: "required input has no value"},
+			{InputName: "cheapest", Source: "plan_default", FinalValue: "a literal"},
 		},
 	}
 
 	joined := StepResolutions(step)
-	require.Len(t, joined, 4)
+	require.Len(t, joined, 5)
 	require.NotNil(t, joined[0].Selection)
 	assert.Equal(t, "sku", joined[0].Selection.InputName, "the input's own record of the named selection")
 	require.NotNil(t, joined[1].Selection)
 	assert.Equal(t, "first", joined[1].Selection.Strategy)
 	assert.Nil(t, joined[2].Selection)
 	assert.Equal(t, "required input has no value", joined[3].Error)
+	assert.Nil(t, joined[4].Selection, "an input named like a selection got its value elsewhere")
 
 	assert.Nil(t, StepResolutions(&StepRecord{}))
 }

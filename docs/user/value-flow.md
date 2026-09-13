@@ -23,7 +23,7 @@ Two kinds of override sit outside this chain:
 - A recipe's `overrides.values` rewrite the composed plan before it runs, replacing an input's literal or its wiring, so the engine sees them at priority 5.
 - Override `values:` from `env.yaml` `overrides:`, `.aat-overrides.yaml`, or an `--overlay` file apply after resolution and win over everything. The archive records them with the source `override_value`.
 
-The explicit-absence marker `{}` short-circuits this chain for an optional input: it tells the engine to skip the input entirely, bypassing graph defaults and auto-wiring. On a required input, a plain literal graph default still applies, and without one the step fails.
+The explicit-absence marker `{}` short-circuits this chain for an optional input: it tells the engine to skip the input entirely, bypassing graph defaults, layers, and auto-wiring. On a required input, a plain literal default still applies, from the graph or from a layer, and without one the step fails.
 
 ## Literal Values
 

@@ -354,12 +354,12 @@ values:
   returnDate: {}
 ```
 
-An empty map `{}` (or `null`) marks the input as explicitly absent: no graph default, layer, or auto-wiring fills it, and an optional input is left out of the request. Use it on optional inputs.
+An empty map `{}` (or `null`) marks the input as explicitly absent: auto-wiring doesn't fill it, and an optional input is left out of the request even when a graph default or a layer sets it. Use it on optional inputs.
 
-What `{}` does to a required input depends on its graph default:
-- A plain value is used, with its expressions evaluated, so a default of `{{env.postalCode}}` sends the variable's value. Layers don't apply.
+What `{}` does to a required input depends on its default: the graph default, with any layers applied:
+- A plain value is used, with its expressions evaluated, so a default of `{{env.postalCode}}` sends the variable's value. A layer that sets the input to a plain value sends that value.
 - A default with a pool, `from`, `select`, or a constraint isn't used, and the input is left out, as an optional one is. The template must send it inside a conditional block such as `{{?couponCode}}…{{/couponCode}}`, or the request fails on the unresolved placeholder. This suits a field sent only in some requests, such as a payment for an order paid now rather than later.
-- With no graph default, the step fails with `required input has no value (empty step value)`.
+- With no default, the step fails with `required input has no value (empty step value)`.
 
 **Inputs you don't need to specify** — graph nodes can declare default value pools on their inputs. When a plan or recipe doesn't provide a value for an input, the engine uses the graph default. For example, if the graph declares:
 
@@ -462,7 +462,7 @@ assertions:
 `path` is a [gjson](https://github.com/tidwall/gjson) path, so `fieldExists` and `fieldEquals` can index arrays (`items.0.id`) and query them (`items.#(sku=="ABC")`); a leading `$.` and `[0]` bracket indexes are accepted too. A predicate `expr` is simpler: it reads dotted field names only, with no array indexes or queries.
 
 **Expressions in assertions.** A `fieldEquals` `value`, and a quoted string in a `predicate` `expr`, can hold `{{…}}` [expressions](value-flow.md#dynamic-expressions), such as `value: "{{today + 3 days}}"` or `expr: 'quantity == "{{quantity}}"'`.
-- They are evaluated when the step's assertions run, and they can name the step's inputs.
+- They are evaluated when the step's assertions run, and they can name the step's inputs. `today`, `now`, and `unixtime` read the time the inputs were resolved, so a retried step's `{{today}}` is the date it resent.
 - A quoted expression that evaluates to a number or a boolean compares as one.
 - An expression that can't be evaluated fails its assertion.
 - `aat validate` checks their syntax.

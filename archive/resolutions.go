@@ -27,7 +27,12 @@ func StepResolutions(step *StepRecord) []InputResolution {
 	}
 	joined := make([]InputResolution, len(step.Resolutions))
 	for i, r := range step.Resolutions {
-		joined[i] = InputResolution{ValueResolutionRecord: r, Selection: selections[r.InputName]}
+		joined[i] = InputResolution{ValueResolutionRecord: r}
+		// Only a value a selection picked has one: an input that shares a named
+		// selection's name got its value elsewhere.
+		if r.Source == "named_selection" || r.Source == "select_edge" {
+			joined[i].Selection = selections[r.InputName]
+		}
 	}
 	return joined
 }

@@ -67,3 +67,50 @@ func TestResolveInputs_RequiredFromMissingOutputFails(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `output "couponCode" not found for node "getCart"`)
 }
+
+func TestResolveInputs_SelectionFromMissingOutput(t *testing.T) {
+	state := NewRunState()
+	state.StoreOutputs("getCart", map[string]any{"cartId": "cart-1"})
+	step := plan.Step{
+		Node:       "checkoutCart",
+		Selections: map[string]plan.StepSelection{"promo": {From: "getCart.promotions"}},
+		Values: map[string]plan.StepValue{
+			"cartId":     {From: "getCart.cartId"},
+			"couponCode": {FromSelection: "promo.code"},
+		},
+	}
+
+	t.Run("optional readers are left out", func(t *testing.T) {
+		g := optionalOutputGraph(true)
+		inputs, decisions, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["checkoutCart"], g, state, nil)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"cartId": "cart-1"}, inputs)
+		assert.Empty(t, decisions)
+		assert.Contains(t, resolutions, ValueResolution{InputName: "couponCode", Source: "optional_skip", FromStep: "getCart", FromOutput: "promotions", PoolIndex: -1})
+	})
+
+	t.Run("a required reader fails", func(t *testing.T) {
+		g := optionalOutputGraph(false)
+		_, _, err := ResolveInputs(step, g.Nodes["checkoutCart"], g, state)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `resolving selection "promo"`)
+	})
+}
+
+func TestResolveInputs_CancelledKeepsWhatResolved(t *testing.T) {
+	g := optionalOutputGraph(true)
+	state := NewRunState()
+	state.StoreOutputs("getCart", map[string]any{"cartId": "cart-1", "promotions": []any{map[string]any{"code": "SAVE10"}}})
+	step := plan.Step{
+		Node:       "checkoutCart",
+		Selections: map[string]plan.StepSelection{"promo": {From: "getCart.promotions"}},
+		Values:     map[string]plan.StepValue{"couponCode": {FromSelection: "promo.code"}},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, decisions, _, err := ResolveInputsWithContext(ctx, step, g.Nodes["checkoutCart"], g, state, nil)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Len(t, decisions, 1, "the named selection resolved before the cancellation was seen")
+	assert.Equal(t, "promo", decisions[0].SelectionName)
+}
