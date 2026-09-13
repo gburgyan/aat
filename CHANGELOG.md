@@ -42,6 +42,8 @@ the graph and plan formats may still change before 1.0.
 - OAS validation checks form-encoded request bodies (`application/x-www-form-urlencoded`) against the operation's
   schema. Bracketed keys such as `items[0][sku]=…` and `tags[]=…` are read as nested objects and arrays, and values
   take the types the schema allows. Before, only JSON request bodies were validated, and a form body was not checked.
+- `{{@index}}` in an iteration block is the element's position, counting from 0, for keys such as
+  `items[{{@index}}][sku]`.
 
 ### Changed
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
@@ -96,6 +98,10 @@ the graph and plan formats may still change before 1.0.
   load. Before, the run printed a warning and continued without validating, and `--quiet` and `--json` hid the
   warning. In `auto` mode the warning now goes to stderr, where `--quiet` and `--json` keep it visible. `aat prompt`
   behaves the same way.
+- In a form body, or in a path after its `?`, an iteration block whose body writes a whole `key=value` pair joins its
+  copies with `&` instead of commas, so `{{#tags}}tags[]={{.}}{{/tags}}` sends `tags[]=a&tags[]=b`. A block whose body
+  starts or ends with `&` is repeated with nothing between the copies. Blocks elsewhere, including JSON bodies and
+  blocks inside a pair, still join with commas.
 
 ### Fixed
 - OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another
@@ -112,6 +118,8 @@ the graph and plan formats may still change before 1.0.
   validated. The archive marks the payload `skipped` with a reason, the step line shows `OAS: request not validated` or
   `OAS: response not validated`, and a `schema` assertion is skipped with the reason. Before, the step line could read
   `OAS: 0 warning(s)`, and a `schema` assertion failed with an empty message.
+- A form-encoded body no longer sends the final newline of a `body: |` block, which the server read as part of the last
+  value. Whitespace around the body is removed for form bodies only.
 - `aat generate` writes the graph's `oas:` reference relative to the graph file's directory, so a spec kept elsewhere
   resolves. It used to write only the spec's file name.
 - `aat generate` types object body properties `object` and inserts them as JSON literals instead of quoted strings,

@@ -201,9 +201,16 @@ func (a *TemplateAdapter) BuildRequest(inputs map[string]any, config *Environmen
 
 	var body []byte
 	if a.tmpl.Request.Body != "" {
-		bodyStr, err := substitutePlaceholders(a.tmpl.Request.Body, inputs, bodyContext(merged, a.tmpl.Request.Body))
+		ctx := bodyContext(merged, a.tmpl.Request.Body)
+		bodyStr, err := substitutePlaceholders(a.tmpl.Request.Body, inputs, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("body substitution: %w", err)
+		}
+		if ctx == renderForm {
+			// Every form value is URL-encoded, so whitespace around the body can
+			// only come from the template, such as the final newline a YAML block
+			// scalar (body: |) keeps. Sent, it would end the last value.
+			bodyStr = strings.TrimSpace(bodyStr)
 		}
 		body = []byte(bodyStr)
 	}
@@ -320,7 +327,7 @@ func substitutePlaceholders(tmpl string, inputs map[string]any, ctx renderContex
 	// Phase 2: expand iteration blocks. Their element values become
 	// placeholders, so phase 3 escapes them like the rest.
 	var elements []any
-	expanded, err := expandIterationBlocks(condExpanded, inputs, &elements)
+	expanded, err := expandIterationBlocks(condExpanded, inputs, &elements, ctx)
 	if err != nil {
 		return "", err
 	}
@@ -410,11 +417,12 @@ func condPresent(inputs map[string]any, key string) bool {
 }
 
 // expandIterationBlocks finds and expands {{#key}}...{{/key}} blocks in the
-// template. Each block is repeated for every element in the named array,
-// with elements comma-separated in the output. The values {{.}} and
-// {{.field}} stand for are appended to elements and left as placeholders for
-// substitutePlaceholders to escape and fill.
-func expandIterationBlocks(tmpl string, inputs map[string]any, elements *[]any) (string, error) {
+// template. Each block is repeated for every element in the named array, with
+// the copies joined as iterationSeparator decides for ctx. {{@index}} becomes
+// the element's index, and the values {{.}} and {{.field}} stand for are
+// appended to elements and left as placeholders for substitutePlaceholders to
+// escape and fill.
+func expandIterationBlocks(tmpl string, inputs map[string]any, elements *[]any, ctx renderContext) (string, error) {
 	result := tmpl
 	for {
 		loc := iterOpenRe.FindStringIndex(result)
@@ -445,26 +453,61 @@ func expandIterationBlocks(tmpl string, inputs map[string]any, elements *[]any) 
 			return "", fmt.Errorf("iteration variable %q is not an array (got %T)", key, val)
 		}
 
-		expanded := expandArray(body, arr, elements)
+		expanded := expandArray(body, arr, elements, iterationSeparator(ctx, result[:loc[0]], body))
 		result = result[:loc[0]] + expanded + result[blockEnd:]
 	}
 	return result, nil
 }
 
-// expandArray repeats body for each element in arr, joining results with commas.
-func expandArray(body string, arr []any, elements *[]any) string {
+// expandArray repeats body for each element in arr, joining the copies with sep.
+func expandArray(body string, arr []any, elements *[]any, sep string) string {
 	parts := make([]string, len(arr))
 	for i, elem := range arr {
-		parts[i] = expandElement(body, elem, elements)
+		parts[i] = expandElement(indexRe.ReplaceAllLiteralString(body, fmt.Sprint(i)), elem, elements)
 	}
-	return strings.Join(parts, ",")
+	return strings.Join(parts, sep)
 }
 
-// dotFieldRe matches {{.field}} and dotRe matches {{.}} inside an iteration
-// block.
+// iterationSeparator returns what joins the copies of an iteration block with
+// body, which follows the template text before and is rendered in ctx. In a
+// form body, or in a path after its first "?", the copies are key=value pairs of
+// their own: a body that starts or ends with "&" brings its separator, so the
+// copies are concatenated, and a body that starts a pair is joined with "&".
+// Anywhere else, including a block in the middle of a pair, the copies are
+// joined with commas.
+func iterationSeparator(ctx renderContext, before, body string) string {
+	var pair string
+	switch ctx {
+	case renderForm:
+		pair = before
+	case renderPath:
+		_, query, inQuery := strings.Cut(before, "?")
+		if !inQuery {
+			return ","
+		}
+		pair = query
+	default:
+		return ","
+	}
+	pair = pair[strings.LastIndexByte(pair, '&')+1:]
+
+	trimmed := strings.TrimSpace(body)
+	switch {
+	case strings.HasPrefix(trimmed, "&") || strings.HasSuffix(trimmed, "&"):
+		return ""
+	case strings.TrimSpace(pair) == "" && strings.Contains(body, "="):
+		return "&"
+	default:
+		return ","
+	}
+}
+
+// dotFieldRe matches {{.field}}, dotRe matches {{.}}, and indexRe matches
+// {{@index}} inside an iteration block.
 var (
 	dotFieldRe = regexp.MustCompile(`\{\{\s*\.(\w+)\s*\}\}`)
 	dotRe      = regexp.MustCompile(`\{\{\s*\.\s*\}\}`)
+	indexRe    = regexp.MustCompile(`\{\{\s*@index\s*\}\}`)
 )
 
 // expandElement replaces {{.}} with a placeholder for the element itself (for
@@ -728,8 +771,8 @@ func classifySource(src string, iterKeys, condKeys, condInnerKeys, allKeys map[s
 		innerMatches := placeholderRe.FindAllStringSubmatch(innerBody, -1)
 		for _, m := range innerMatches {
 			innerKey := strings.TrimSpace(m[1])
-			// Skip dot-access, block open/close, and iteration tags
-			if strings.HasPrefix(innerKey, ".") || strings.HasPrefix(innerKey, "#") ||
+			// Skip dot-access, {{@index}}, block open/close, and iteration tags
+			if strings.HasPrefix(innerKey, ".") || strings.HasPrefix(innerKey, "@") || strings.HasPrefix(innerKey, "#") ||
 				strings.HasPrefix(innerKey, "?") || strings.HasPrefix(innerKey, "/") {
 				continue
 			}
@@ -744,7 +787,8 @@ func classifySource(src string, iterKeys, condKeys, condInnerKeys, allKeys map[s
 	matches := placeholderRe.FindAllStringSubmatch(remaining, -1)
 	for _, m := range matches {
 		key := strings.TrimSpace(m[1])
-		if strings.HasPrefix(key, ".") || strings.HasPrefix(key, "#") || strings.HasPrefix(key, "?") || strings.HasPrefix(key, "/") {
+		if strings.HasPrefix(key, ".") || strings.HasPrefix(key, "@") || strings.HasPrefix(key, "#") ||
+			strings.HasPrefix(key, "?") || strings.HasPrefix(key, "/") {
 			continue
 		}
 		allKeys[key] = true

@@ -201,7 +201,7 @@ response:
 - `{{placeholder}}` in path, headers, and body are replaced with resolved input values; a placeholder with no value fails the request (`unresolved placeholders: …`), so wrap optional parts in `{{?name}}…{{/name}}`
 - `response.extract` is a map from output name to a gjson path into the response JSON (`$.` prefixes are accepted). A path can count an array: `productCount: products.#`
 - For array extraction, give the output a `path` and a `fields` map from element field name to a path within each element; add `optional: true` to an entry whose path may be missing
-- `{{#key}}…{{/key}}` repeats its body once per element of the list input `key`, joining the copies with commas. `{{.}}` is the element, and `{{.field}}` is a field of it. Wrap an optional list in `{{?key}}…{{/key}}`
+- `{{#key}}…{{/key}}` repeats its body once per element of the list input `key`. `{{.}}` is the element, `{{.field}}` is a field of it, and `{{@index}}` is its position from 0. The copies are joined with commas, except in a form body or a query string: there a body that writes a whole `key=value` pair is joined with `&` (`{{#tags}}tags[]={{.}}{{/tags}}`), and a body that starts with `&` is repeated with nothing between. Wrap an optional list in `{{?key}}…{{/key}}`
 
 ```yaml
 response:

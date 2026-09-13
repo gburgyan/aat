@@ -70,6 +70,17 @@ request:
 
 The body is a string template with `{{placeholder}}` substitution. In a JSON body, put quotes around a placeholder for a string value, and none around a number, a boolean, or an array or object. AAT escapes each value for where it lands; see [Escaping](#escaping).
 
+A form-encoded body (`Content-Type: application/x-www-form-urlencoded`) is written as the query string it sends. Whitespace around it, such as the final newline a `body: |` block keeps, is removed, so write the pairs on one line. Bracketed keys such as `metadata[source]={{source}}` are sent as written, and an iteration block can write one pair per element (see [Iteration Blocks](#iteration-blocks)):
+
+```yaml
+request:
+  method: POST
+  path: /refunds
+  headers:
+    Content-Type: application/x-www-form-urlencoded
+  body: 'orderId={{orderId}}&amount={{amount}}{{#skus}}&skus[]={{.}}{{/skus}}'
+```
+
 ## Placeholders
 
 Templates use `{{key}}` placeholders that are resolved at execution time. Whitespace inside braces is tolerated: `{{ key }}` works the same as `{{key}}`.
@@ -84,7 +95,7 @@ Each value is escaped for the place it fills, so a value cannot change the shape
 | Path, after the first `?` | URL-encoded as a query component: `a&b` becomes `a%26b`. A list right after `key=` repeats the pair, so `tags={{tags}}` becomes `tags=a&tags=b`, and an empty list sends `tags=`. Anywhere else in the query, a list's elements are joined with commas |
 | JSON body, inside quotes | JSON-escaped, so a quote, backslash, or newline stays inside the string |
 | JSON body, outside quotes | Written as JSON: numbers in plain digits, arrays and objects as JSON, a null value as `null`. A string goes in as it is |
-| Form body (`application/x-www-form-urlencoded`) | URL-encoded. A list right after `key=` repeats the pair, as in a query |
+| Form body (`application/x-www-form-urlencoded`) | URL-encoded. A list right after `key=` repeats the pair, as in a query. Whitespace around the body is removed |
 | Header, or any other body | Inserted as text |
 
 A body counts as JSON when its `Content-Type` contains `json`, or when it has no `Content-Type` and starts with `{` or `[`. Values that iteration blocks insert are escaped the same way. To send a malformed payload on purpose, give the step a `rawBody`, which replaces the rendered body.
@@ -215,10 +226,18 @@ Iteration blocks repeat a section of a template for each element in an array inp
 
 **Syntax:** `{{#key}}...{{/key}}`
 
-The block body is repeated for each element in the array, with iterations separated by commas. Inside the block:
+The block body is repeated for each element in the array. What joins the copies depends on where the block is:
+
+- **In a form body, or in a path after its first `?`:** a block whose body writes a whole `key=value` pair joins the copies with `&`, so `{{#tags}}tags[]={{.}}{{/tags}}` sends `tags[]=a&tags[]=b`. A block whose body starts or ends with `&`, such as `{{#tags}}&tags[]={{.}}{{/tags}}`, is repeated with nothing between the copies, so an empty list sends nothing.
+- **Everywhere else,** including a JSON body and a block in the middle of a pair, the copies are separated by commas.
+
+Inside the block:
 
 - **`{{.}}`** — the element value itself (for scalar arrays)
 - **`{{.fieldName}}`** — a named field from a map element (letters, digits, and underscores only)
+- **`{{@index}}`** — the element's position, counting from 0, for keys such as `items[{{@index}}][sku]`
+
+Blocks don't nest: a block inside another is not repeated for each element of the outer one.
 
 The input must exist and be an array; otherwise the request fails. Wrap the block in a conditional when the input is optional, as in the second example below.
 
