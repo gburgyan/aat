@@ -34,7 +34,10 @@ func TestResolveInputs_EmptyStepValue_EvaluatesLiteralDefault(t *testing.T) {
 	assert.Equal(t, "{{env.postalCode}}", resolutions[0].Expression)
 }
 
-func TestResolveInputs_EmptyStepValue_NonPlainDefaultFails(t *testing.T) {
+// TestResolveInputs_EmptyStepValue_NonPlainDefaultLeavesInputOut pins {} over
+// a pool or from default: the input is left out, for a template that sends it
+// in a conditional block, such as a payment sent only for orders paid now.
+func TestResolveInputs_EmptyStepValue_NonPlainDefaultLeavesInputOut(t *testing.T) {
 	for name, def := range map[string]*graph.InputDefault{
 		"pool": {Pool: []any{"standard", "express"}},
 		"from": {From: "listShippingRates.tier"},
@@ -45,9 +48,11 @@ func TestResolveInputs_EmptyStepValue_NonPlainDefaultFails(t *testing.T) {
 			}}
 			step := plan.Step{Node: "checkoutCart", Values: map[string]plan.StepValue{"shippingTier": {}}}
 
-			_, _, err := ResolveInputs(step, g.Nodes["checkoutCart"], g, NewRunState())
-			require.Error(t, err)
-			assert.Contains(t, err.Error(), "is {} but its graph default isn't a plain value")
+			inputs, _, resolutions, err := ResolveInputsWithContext(context.Background(), step, g.Nodes["checkoutCart"], g, NewRunState(), nil)
+			require.NoError(t, err)
+			assert.Nil(t, inputs["shippingTier"])
+			require.Len(t, resolutions, 1)
+			assert.Equal(t, ValueResolution{InputName: "shippingTier", Source: "graph_default", PoolIndex: -1}, resolutions[0])
 		})
 	}
 }

@@ -3,13 +3,14 @@ package plan
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/gburgyan/aat/graph"
 )
 
-func TestValidate_EmptyValueNeedsPlainDefault(t *testing.T) {
+// TestValidate_EmptyValueOverAnyDefault checks that {} passes validation over
+// any graph default: a plain one is used, and otherwise the input is left out.
+func TestValidate_EmptyValueOverAnyDefault(t *testing.T) {
 	g := &graph.Graph{Version: "1.0.0", Nodes: map[string]*graph.Node{
 		"checkoutCart": {Name: "checkoutCart", Inputs: []graph.Input{
 			{Name: "shippingTier", Type: "string", Default: &graph.InputDefault{Pool: []any{"standard", "express"}}},
@@ -22,10 +23,5 @@ func TestValidate_EmptyValueNeedsPlainDefault(t *testing.T) {
 		Values: map[string]StepValue{"shippingTier": {}, "postalCode": {}, "notes": {}},
 	}}}}
 
-	err := Validate(p, g)
-	require.Error(t, err)
-	msg := err.Error()
-	assert.Contains(t, msg, `step 0 (checkoutCart): required input "shippingTier" is {} but its graph default isn't a plain value`)
-	assert.NotContains(t, msg, `"postalCode" is {}`, "a plain default is fine")
-	assert.NotContains(t, msg, `"notes" is {}`, "an optional input marked {} is left out")
+	require.NoError(t, Validate(p, g))
 }

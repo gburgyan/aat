@@ -422,7 +422,7 @@ A plan's top-level keys are `metadata` (`created`, `prompt`, `graphVersion`), `g
 | Absent | `deliveryDate: {}` | Nothing fills the input: no graph default, layer, or auto-wiring |
 
 - **Lists:** a bare YAML list is an error in a step value (`a step value must be a scalar or a mapping, found a list`), and `value:` is not a step-value key. Write a list as `{default: [...]}`.
-- **`{}` is for optional inputs.** An optional input marked `{}` is left out of the request. A required input marked `{}` still takes its graph default when that default is a plain value, with its expressions evaluated but no layers. With no graph default, the step fails with `required input has no value (empty step value)`. A default with a pool, `from`, `select`, or a constraint is a validation error for `{}`.
+- **`{}` is for optional inputs.** An optional input marked `{}` is left out of the request. A required input marked `{}` still takes its graph default when that default is a plain value, with its expressions evaluated but no layers. With no graph default, the step fails with `required input has no value (empty step value)`. Over a default with a pool, `from`, `select`, or a constraint, `{}` leaves a required input out too, so its template must send it inside a `{{?name}}…{{/name}}` block, or the request fails on the unresolved placeholder.
 
 ### Expressions
 

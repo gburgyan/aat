@@ -214,12 +214,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 			if input.Optional {
 				continue
 			}
-			sv, hasPlanValue := step.Values[input.Name]
-			switch {
-			case !hasPlanValue:
+			_, hasPlanValue := step.Values[input.Name]
+			if !hasPlanValue {
 				errs = append(errs, fmt.Sprintf("step %d (%s): required input %q has no plan value", i, sid, input.Name))
-			case sv.IsEmpty() && input.Default != nil && input.Default.HasValue() && !input.Default.IsLiteralOnly():
-				errs = append(errs, fmt.Sprintf("step %d (%s): required input %q is {} but its graph default isn't a plain value (it has a pool, from, select, or constraint), which {} doesn't use; remove {} to use the default, or set a value", i, sid, input.Name))
 			}
 		}
 

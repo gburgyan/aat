@@ -214,11 +214,8 @@ the graph and plan formats may still change before 1.0.
 - Two inputs that pick from the same array with `min` or `max` by different fields no longer get the same element.
   The selection cache left out the compared field, so the second input got the element chosen for the first. A
   `match` selection's `filteredSize` is now the number of matching elements, not the array's size.
-- A required input marked `{}` evaluates the expressions in the plain graph default it falls back to.
-  - `postalCode: {}` with a default of `{{env.postalCode}}` sends the variable's value, not the text.
-  - `{}` on a required input whose graph default has a pool, `from`, `select`, or a constraint is an error in
-    `aat validate` and at run time. Before, the input was left out, and the request failed with
-    `unresolved placeholders`.
+- A required input marked `{}` evaluates the expressions in the plain graph default it falls back to, so
+  `postalCode: {}` with a default of `{{env.postalCode}}` sends the variable's value, not the text.
 - A request that times out says so, naming aat's 30-second request timeout, instead of giving only Go's
   `context deadline exceeded (Client.Timeout exceeded while awaiting headers)`. The limit is named only when the whole
   limit passed, so a shorter timeout or an interrupted run isn't blamed on it.

@@ -356,11 +356,10 @@ values:
 
 An empty map `{}` (or `null`) marks the input as explicitly absent: no graph default, layer, or auto-wiring fills it, and an optional input is left out of the request. Use it on optional inputs.
 
-A required input marked `{}` still takes its graph default when that default is a plain value:
-- The default's expressions are evaluated, so a default of `{{env.postalCode}}` sends the variable's value.
-- Layers don't apply.
+What `{}` does to a required input depends on its graph default:
+- A plain value is used, with its expressions evaluated, so a default of `{{env.postalCode}}` sends the variable's value. Layers don't apply.
+- A default with a pool, `from`, `select`, or a constraint isn't used, and the input is left out, as an optional one is. The template must send it inside a conditional block such as `{{?couponCode}}…{{/couponCode}}`, or the request fails on the unresolved placeholder. This suits a field sent only in some requests, such as a payment for an order paid now rather than later.
 - With no graph default, the step fails with `required input has no value (empty step value)`.
-- A graph default with a pool, `from`, `select`, or a constraint is an error for `{}`, reported by `aat validate` and at run time. Remove `{}` to use that default, or set a value.
 
 **Inputs you don't need to specify** — graph nodes can declare default value pools on their inputs. When a plan or recipe doesn't provide a value for an input, the engine uses the graph default. For example, if the graph declares:
 

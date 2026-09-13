@@ -263,11 +263,11 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			return nil, nil, res, nil
 		}
 		if input.Default != nil && input.Default.HasValue() {
-			// {} takes only a plain graph default. A pool, from, select, or
-			// constraint would be dropped, and the request would fail later on
-			// an unresolved placeholder.
+			// {} takes only a plain graph default. With a pool, from, select, or
+			// constraint the input is left out, for a template that wraps it in
+			// a conditional block, such as a payment sent only for some orders.
 			if !input.Default.IsLiteralOnly() {
-				return nil, nil, nil, fmt.Errorf("required input is {} but its graph default isn't a plain value (it has a pool, from, select, or constraint), which {} doesn't use; remove {} to use the default, or set a value")
+				return nil, nil, &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}, nil
 			}
 			raw := input.Default.Value
 			res := &ValueResolution{InputName: input.Name, Source: "graph_default", PoolIndex: -1}
