@@ -122,7 +122,8 @@ func graphValidateCommand(args *graphValidateArgs) int {
 	if registry != nil {
 		validator.WithOutputPaths(engine.OutputExtractPaths(g, registry)).
 			WithSuppliedFields(engine.TemplateSuppliedFields(g, registry)).
-			WithHeaderInputs(engine.TemplateHeaderInputs(g, registry))
+			WithHeaderInputs(engine.TemplateHeaderInputs(g, registry)).
+			WithFormInputFields(engine.TemplateFormInputFields(g, registry))
 	}
 	specPaths := validator.CollectSpecPaths(g)
 	if len(specPaths) > 0 {

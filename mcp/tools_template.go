@@ -148,6 +148,12 @@ func formatTemplate(tmpl *adapter.Template) string {
 		b.WriteString("```\n")
 	}
 
+	if tmpl.Request.Form != nil {
+		b.WriteString("\n## Form\n\nSent as application/x-www-form-urlencoded. A field whose whole value is one placeholder is left out when that input has no value.\n\n```yaml\n")
+		b.WriteString(tmpl.Request.Form.YAML())
+		b.WriteString("```\n")
+	}
+
 	if len(tmpl.Response.Extract) > 0 {
 		b.WriteString("\n## Extract Rules\n\n")
 

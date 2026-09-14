@@ -7,6 +7,7 @@ import (
 
 	"github.com/pb33f/libopenapi/datamodel/high/base"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
+	"gopkg.in/yaml.v3"
 
 	"github.com/gburgyan/aat/graph"
 )
@@ -33,6 +34,29 @@ type ScaffoldTemplateRequest struct {
 	Path    string            `yaml:"path"`
 	Headers map[string]string `yaml:"headers,omitempty"`
 	Body    string            `yaml:"body,omitempty"`
+	Form    ScaffoldForm      `yaml:"form,omitempty"`
+}
+
+// ScaffoldForm is a scaffold template's request.form: one field per body
+// property, in the order the spec lists them.
+type ScaffoldForm []ScaffoldFormField
+
+// ScaffoldFormField is one request.form field and its value.
+type ScaffoldFormField struct {
+	Name  string
+	Value string
+}
+
+// MarshalYAML writes the fields as a mapping in order, which a Go map would
+// sort.
+func (f ScaffoldForm) MarshalYAML() (any, error) {
+	n := &yaml.Node{Kind: yaml.MappingNode}
+	for _, field := range f {
+		n.Content = append(n.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: field.Name},
+			&yaml.Node{Kind: yaml.ScalarNode, Value: field.Value})
+	}
+	return n, nil
 }
 
 // ScaffoldTemplateResponse defines output extraction for a scaffold template.
@@ -249,19 +273,17 @@ func generateTemplate(method, path string, params []*v3high.Parameter, op *v3hig
 	}
 	tmpl.Request.Path = convertPathParams(path) + buildQueryString(query)
 
-	// Headers: the body's media type, header parameters, and one Cookie header
+	// Headers: the body's media type, header parameters, and one Cookie header.
+	// A request.form sets its own Content-Type unless the spec's media type adds
+	// parameters, such as a charset. A header whose value is one placeholder is
+	// not sent when an optional parameter has no value.
 	headers := make(map[string]string)
-	if body.generated() {
+	if body.generated() && body.mediaType != formMediaType {
 		headers["Content-Type"] = body.mediaType
 	}
 	for _, param := range params {
-		if param.In != "header" {
-			continue
-		}
-		if param.Required != nil && *param.Required {
+		if param.In == "header" {
 			headers[param.Name] = fmt.Sprintf("{{%s}}", param.Name)
-		} else {
-			headers[param.Name] = fmt.Sprintf("{{?%s}}{{%s}}{{/%s}}", param.Name, param.Name, param.Name)
 		}
 	}
 	if len(cookies) > 0 {
@@ -274,7 +296,7 @@ func generateTemplate(method, path string, params []*v3high.Parameter, op *v3hig
 	// Body
 	if body.generated() {
 		if body.kind == bodyForm {
-			tmpl.Request.Body = buildFormBody(body.fields())
+			tmpl.Request.Form = buildForm(body)
 		} else {
 			tmpl.Request.Body = buildJSONBody(body.fields())
 		}
@@ -321,25 +343,22 @@ func buildPairs(fields []templateField, lead, sep string) string {
 	return b.String()
 }
 
-// buildFormBody renders a form body: the required fields joined by &, then one
-// {{?name}}&name={{name}}{{/name}} block per optional field. With no required
-// field the body can start with &, which form parsers skip, so each optional
-// field costs one block, where gating the separator on the fields before it
-// would grow with the square of their number.
-func buildFormBody(fields []templateField) string {
-	required, optional := splitRequired(fields)
-	render := func(f templateField) string {
-		return f.name + "={{" + f.name + "}}"
-	}
-	var b strings.Builder
-	for i, f := range required {
-		if i > 0 {
-			b.WriteString("&")
+// buildForm returns a request.form with one field per body property, in spec
+// order, each sending its input. A field is left out when its input has no
+// value, so required and optional properties are written alike. An array
+// property the spec encodes as a deepObject, as Stripe's are, is written
+// name[]; any other repeats its plain name. An object value is sent as
+// bracketed keys.
+func buildForm(body requestBody) ScaffoldForm {
+	form := make(ScaffoldForm, len(body.props))
+	for i, p := range body.props {
+		name := p.name
+		if body.deepObject[p.name] && p.proxy != nil && schemaType(p.proxy.Schema()) == "array" {
+			name += "[]"
 		}
-		b.WriteString(render(f))
+		form[i] = ScaffoldFormField{Name: name, Value: "{{" + p.name + "}}"}
 	}
-	writeOptional(&b, optional, true, "", "&", render)
-	return b.String()
+	return form
 }
 
 // splitRequired partitions fields into required and optional, keeping order.
@@ -431,6 +450,9 @@ type requestBody struct {
 	mediaType string // as the spec writes it; the template's Content-Type
 	props     []schemaProperty
 	required  map[string]bool
+	// deepObject holds the form properties the spec encodes with style
+	// deepObject.
+	deepObject map[string]bool
 }
 
 // generated reports whether the template gets a body and a Content-Type: a
@@ -500,12 +522,16 @@ func describeRequestBody(op *v3high.Operation) (requestBody, []string) {
 		return requestBody{}, nil
 	}
 
-	var notes []string
-	if body.kind == bodyForm {
-		if names := objectFormProperties(body.props); len(names) > 0 {
-			notes = append(notes, fmt.Sprintf("the template sends the object form properties %s as JSON text; write them by hand as bracketed pairs, such as %s[key]=value", strings.Join(names, ", "), names[0]))
+	if body.kind == bodyForm && content.Encoding != nil {
+		body.deepObject = make(map[string]bool)
+		for name, enc := range content.Encoding.FromOldest() {
+			if enc != nil && enc.Style == "deepObject" {
+				body.deepObject[name] = true
+			}
 		}
 	}
+
+	var notes []string
 	switch {
 	case body.kind == bodyMultipart && len(body.props) > 0:
 		notes = append(notes, fmt.Sprintf("the %s body is not generated; its properties are inputs, so write the body by hand", body.mediaType))
@@ -529,37 +555,6 @@ func declaresNoFields(schema *base.Schema) bool {
 	}
 	extra := schema.AdditionalProperties
 	return extra != nil && extra.IsB() && !extra.B
-}
-
-// objectFormProperties returns the names of the form body properties that take
-// an object, or an array of objects, in any of their alternatives. A form body
-// sends those as bracketed keys, which a generated template doesn't write.
-func objectFormProperties(props []schemaProperty) []string {
-	var names []string
-	for _, p := range props {
-		if p.proxy != nil && takesObject([]*base.Schema{p.proxy.Schema()}, 0) {
-			names = append(names, p.name)
-		}
-	}
-	return names
-}
-
-// takesObject reports whether one of schemas, or an alternative it composes, is
-// an object or an array of objects, following arrays to maxShapeDepth.
-func takesObject(schemas []*base.Schema, depth int) bool {
-	if depth > maxShapeDepth {
-		return false
-	}
-	for _, s := range expandSchemas(schemas, 0) {
-		if schemaType(s) == "object" || (s.Properties != nil && s.Properties.Len() > 0) {
-			return true
-		}
-		if schemaType(s) == "array" && s.Items != nil && s.Items.IsA() && s.Items.A != nil &&
-			takesObject([]*base.Schema{s.Items.A.Schema()}, depth+1) {
-			return true
-		}
-	}
-	return false
 }
 
 // collectNodeInputs gathers inputs from an operation's parameters (path-item

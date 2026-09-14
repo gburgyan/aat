@@ -153,11 +153,11 @@ That renders as `/search` with no values, `/search?page=2` with only `page`, and
 
 ### Headers
 
-A template with a body sends a `Content-Type` of the body's media type. Header parameters become headers: a required one is a plain placeholder, and an optional one is a conditional block, which AAT leaves out of the request when it resolves to nothing:
+A template with a JSON body sends a `Content-Type` of the body's media type; a `form:` sets its own. Header parameters become headers, each a plain placeholder, which AAT leaves out of the request when an optional parameter has no value:
 
 ```yaml
     headers:
-        X-Request-Id: '{{?X-Request-Id}}{{X-Request-Id}}{{/X-Request-Id}}'
+        X-Request-Id: '{{X-Request-Id}}'
         X-Tenant: '{{X-Tenant}}'
 ```
 
@@ -214,13 +214,13 @@ Its body is the same as the hand-written one in `examples/shop/templates/payment
 
 An object property is typed `object` and placed as `"shipping": {{shipping}}`. Give it a map, such as a plan value `shipping: {default: {city: Austin}}`, or JSON text. Either one is sent as a nested object.
 
-A **form body** is a query string, `orderId={{orderId}}{{?note}}&note={{note}}{{/note}}`, sent with `Content-Type: application/x-www-form-urlencoded`. Each optional field is one conditional block that brings its own `&`, so a body whose fields are all optional can start with `&`, which form parsers skip. A list value repeats its pair, as in a query string. An object value is sent as JSON text, so a property that takes an object, or an array of objects, gets a warning: write its keys by hand as bracketed pairs, such as `shipping[city]={{city}}`.
+A **form body** is a [`form:` mapping](templates.md#body) with one field per property, in spec order, such as `orderId: '{{orderId}}'`. AAT leaves a field out when its input has no value, so optional properties need nothing more, and the request is sent as `application/x-www-form-urlencoded` without a `Content-Type` header in the template. An object value, such as a plan value `shipping: {default: {city: Austin}}`, is sent as bracketed keys: `shipping[city]=Austin`. A list value repeats its field, and an array property the spec encodes as a `deepObject`, as Stripe's spec does, is written `name[]`.
 
 These bodies are left for you to write, each with a warning:
 
 - **Multipart:** the properties become inputs, but the template has no `body` and no `Content-Type`, which must carry the multipart boundary.
 - **Any other media type,** such as `application/octet-stream` or `application/xml`: no inputs, no `body`, and no `Content-Type`.
-- **A JSON or form schema without properties,** such as a bare `type: object` or an array: no `body` and no `Content-Type`.
+- **A JSON or form schema without properties,** such as a bare `type: object` or an array: no `body`, `form`, or `Content-Type`.
 - **`oneOf` or `anyOf`:** the alternatives are left out. Properties declared outside them still become inputs and body fields.
 
 A body schema that declares it has no fields, with no properties and `additionalProperties: false`, needs no body: the template gets none, and there is no warning.

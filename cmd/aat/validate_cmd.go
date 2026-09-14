@@ -224,7 +224,8 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 	if templateErr == nil {
 		validator.WithOutputPaths(engine.OutputExtractPaths(g, registry)).
 			WithSuppliedFields(engine.TemplateSuppliedFields(g, registry)).
-			WithHeaderInputs(engine.TemplateHeaderInputs(g, registry))
+			WithHeaderInputs(engine.TemplateHeaderInputs(g, registry)).
+			WithFormInputFields(engine.TemplateFormInputFields(g, registry))
 	}
 	specPaths := validator.CollectSpecPaths(g)
 	if len(specPaths) > 0 {

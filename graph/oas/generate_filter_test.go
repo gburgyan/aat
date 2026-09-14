@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -87,10 +86,11 @@ func TestGenerate_EmptyFormBodyNoWarning(t *testing.T) {
 	assert.Empty(t, result.Warnings)
 	require.Len(t, result.Templates, 1)
 	assert.Empty(t, result.Templates[0].Request.Body)
+	assert.Nil(t, result.Templates[0].Request.Form)
 	assert.NotContains(t, result.Templates[0].Request.Headers, "Content-Type")
 }
 
-func TestGenerate_FormBodyLinearOptionalFields(t *testing.T) {
+func TestGenerate_FormBodyFields(t *testing.T) {
 	result := writeGenerateSpec(t, `  /refunds:
     post:
       operationId: createRefund
@@ -130,15 +130,17 @@ func TestGenerate_FormBodyLinearOptionalFields(t *testing.T) {
         "200":
           description: The refunds
 `)
-	bodies := map[string]string{}
+	forms := map[string]ScaffoldForm{}
 	for _, tmpl := range result.Templates {
-		bodies[tmpl.Adapter] = tmpl.Request.Body
+		assert.Empty(t, tmpl.Request.Body)
+		assert.NotContains(t, tmpl.Request.Headers, "Content-Type", "request.form sets it")
+		forms[tmpl.Adapter] = tmpl.Request.Form
 	}
-	assert.Equal(t, "orderId={{orderId}}{{?amount}}&amount={{amount}}{{/amount}}{{?note}}&note={{note}}{{/note}}", bodies["createRefund"])
-	assert.Equal(t, "{{?limit}}&limit={{limit}}{{/limit}}{{?status}}&status={{status}}{{/status}}{{?startingAfter}}&startingAfter={{startingAfter}}{{/startingAfter}}", bodies["searchRefunds"])
+	assert.Equal(t, ScaffoldForm{{"orderId", "{{orderId}}"}, {"amount", "{{amount}}"}, {"note", "{{note}}"}}, forms["createRefund"])
+	assert.Equal(t, ScaffoldForm{{"limit", "{{limit}}"}, {"status", "{{status}}"}, {"startingAfter", "{{startingAfter}}"}}, forms["searchRefunds"])
 }
 
-func TestGenerate_FormObjectPropertiesWarn(t *testing.T) {
+func TestGenerate_FormObjectProperties(t *testing.T) {
 	result := writeGenerateSpec(t, `  /refunds:
     post:
       operationId: createRefund
@@ -178,15 +180,47 @@ func TestGenerate_FormObjectPropertiesWarn(t *testing.T) {
         "200":
           description: The refund
 `)
-	var objectWarnings []string
-	for _, w := range result.Warnings {
-		if strings.Contains(w, "object form properties") {
-			objectWarnings = append(objectWarnings, w)
-		}
-	}
-	require.Len(t, objectWarnings, 1, "warnings: %v", result.Warnings)
-	assert.Contains(t, objectWarnings[0], "metadata, shipping, items as JSON text")
-	assert.Contains(t, objectWarnings[0], "metadata[key]=value")
-	assert.NotContains(t, objectWarnings[0], "amount")
-	assert.NotContains(t, objectWarnings[0], "tags")
+	assert.Empty(t, result.Warnings, "request.form sends an object value as bracketed keys")
+	require.Len(t, result.Templates, 1)
+	assert.Equal(t, ScaffoldForm{
+		{"amount", "{{amount}}"},
+		{"metadata", "{{metadata}}"},
+		{"shipping", "{{shipping}}"},
+		{"items", "{{items}}"},
+		{"tags", "{{tags}}"},
+	}, result.Templates[0].Request.Form)
+}
+
+// TestGenerate_FormDeepObjectArrays checks that an array property the spec
+// encodes as a deepObject, as Stripe's spec does, is written with [] and an
+// object property keeps its plain name.
+func TestGenerate_FormDeepObjectArrays(t *testing.T) {
+	result := writeGenerateSpec(t, `  /charges:
+    post:
+      operationId: createCharge
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                expand:
+                  type: array
+                  items:
+                    type: string
+                metadata:
+                  type: object
+            encoding:
+              expand:
+                style: deepObject
+                explode: true
+              metadata:
+                style: deepObject
+                explode: true
+      responses:
+        "200":
+          description: The charge
+`)
+	require.Len(t, result.Templates, 1)
+	assert.Equal(t, ScaffoldForm{{"expand[]", "{{expand}}"}, {"metadata", "{{metadata}}"}}, result.Templates[0].Request.Form)
 }

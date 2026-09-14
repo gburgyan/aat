@@ -1,0 +1,11 @@
+adapter: createRefund
+protocol: http
+request:
+  method: POST
+  path: '/refunds?expand[]=order'
+  headers:
+    Content-Type: application/x-www-form-urlencoded
+  body: 'orderId={{order}}&channel=web{{?refundMetadata}}&metadata={{refundMetadata}}{{/refundMetadata}}'
+response:
+  extract:
+    refundId: refundId

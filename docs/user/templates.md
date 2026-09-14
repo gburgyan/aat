@@ -50,7 +50,7 @@ request:
     X-Custom-Header: "{{customValue}}"
 ```
 
-Headers support `{{placeholder}}` substitution. Static headers like `Content-Type` are set directly; dynamic headers use placeholders resolved from step inputs. A header whose whole value is a conditional block (`{{?requestId}}{{requestId}}{{/requestId}}`) is not sent when the block resolves to nothing. A template header replaces an environment or plan header of the same name, but not the auth credential or a header an overlay sets — see [Header Merge Order](#header-merge-order). To send a generated idempotency key, see [Idempotency Key Header](#idempotency-key-header).
+Headers support `{{placeholder}}` substitution. Static headers like `Content-Type` are set directly; dynamic headers use placeholders resolved from step inputs. A header whose whole value is one placeholder (`{{requestId}}`) is not sent when that input has no value: absent, null, or `""`. Neither is a header whose whole value is a conditional block that resolves to nothing. A placeholder inside other text, such as `Bearer {{token}}`, still fails the request when it has no value. A template header replaces an environment or plan header of the same name, but not the auth credential or a header an overlay sets — see [Header Merge Order](#header-merge-order). To send a generated idempotency key, see [Idempotency Key Header](#idempotency-key-header).
 
 ### Body
 
@@ -70,7 +70,33 @@ request:
 
 The body is a string template with `{{placeholder}}` substitution. In a JSON body, put quotes around a placeholder for a string value, and none around a number, a boolean, or an array or object. AAT escapes each value for where it lands; see [Escaping](#escaping).
 
-A form-encoded body (`Content-Type: application/x-www-form-urlencoded`) is written as the query string it sends. Whitespace around it, such as the final newline a `body: |` block keeps, is removed, so write the pairs on one line. Bracketed keys such as `metadata[source]={{source}}` are sent as written, and an iteration block can write one pair per element (see [Iteration Blocks](#iteration-blocks)):
+A form-encoded body is written as `form:`, a mapping of field names to values, in place of `body:`:
+
+```yaml
+request:
+  method: POST
+  path: /v1/payment_intents
+  form:
+    amount: "{{amount}}"
+    currency: "{{currency}}"
+    payment_method_types[]: card
+    customer: "{{customer}}"
+    description: "Order {{orderId}}"
+    metadata:
+      created_by: aat
+```
+
+- **Content-Type.** The request is sent as `application/x-www-form-urlencoded`, replacing an environment or plan `Content-Type`. A template header can add a charset. A template `Content-Type` of another type is an error, and so is a credential or overlay header that changes it.
+- **Encoding.** Every key and value is URL-encoded, and the brackets of a key are kept.
+- **A value that is one placeholder** sends that input's value, and the field is left out when the input has no value: absent, null, `""`, or an empty list or map. With no `customer`, the request above sends no `customer` pair, so an optional field needs no conditional block.
+- **Lists.** A list value repeats the key as written. With `tags` set to `[a, b]`, `tags[]: "{{tags}}"` sends `tags[]=a&tags[]=b`, and `tags: "{{tags}}"` sends `tags=a&tags=b`. A literal list does the same: `expand[]: [customer, latest_charge]`.
+- **Maps.** A nested mapping writes bracketed keys, so the `metadata` above sends `metadata[created_by]=aat`. An input whose value is a map does the same, in key order, and a map or list inside a list writes indexed keys: `items[0][sku]=s1`.
+- **Other text** is rendered and sent as one value: `description=Order+o-17`. A placeholder in it still needs a value, and a value that holds only conditional blocks is left out when they render to nothing.
+- **Not allowed:** placeholders in field names, iteration blocks, and YAML aliases or merge keys. Duplicate fields, and fields that nesting would send twice, are errors when the template loads.
+
+Validation matches an input to the field it fills, so `customer: "{{customerId}}"` counts `customerId` as the spec's `customer` field (see [OAS Alignment](validation.md#oas-alignment)).
+
+A form body can also be a `body:` string sent with `Content-Type: application/x-www-form-urlencoded`, written as the query string it sends. Whitespace around it, such as the final newline a `body: |` block keeps, is removed, so write the pairs on one line. Bracketed keys such as `metadata[source]={{source}}` are sent as written, and an iteration block can write one pair per element (see [Iteration Blocks](#iteration-blocks)):
 
 ```yaml
 request:
@@ -95,7 +121,8 @@ Each value is escaped for the place it fills, so a value cannot change the shape
 | Path, after the first `?` | URL-encoded as a query component: `a&b` becomes `a%26b`. A list right after `key=` repeats the pair, so `tags={{tags}}` becomes `tags=a&tags=b`, and an empty list sends `tags=`. Anywhere else in the query, a list's elements are joined with commas |
 | JSON body, inside quotes | JSON-escaped, so a quote, backslash, or newline stays inside the string |
 | JSON body, outside quotes | Written as JSON: numbers in plain digits, arrays and objects as JSON, a null value as `null`. A string goes in as it is |
-| Form body (`application/x-www-form-urlencoded`) | URL-encoded. A list right after `key=` repeats the pair, as in a query. Whitespace around the body is removed |
+| `form:` value | URL-encoded, and so is its key, apart from brackets. A value that is one placeholder with no value leaves its field out; see [Body](#body) |
+| Form body string (`application/x-www-form-urlencoded`) | URL-encoded. A list right after `key=` repeats the pair, as in a query. Whitespace around the body is removed |
 | Header, or any other body | Inserted as text |
 
 A body counts as JSON when its `Content-Type` contains `json`, or when it has no `Content-Type` and starts with `{` or `[`. Values that iteration blocks insert are escaped the same way. To send a malformed payload on purpose, give the step a `rawBody`, which replaces the rendered body.
@@ -287,10 +314,10 @@ body: |
 Based on how inputs are used in the template, AAT classifies them as:
 
 - **Required** — appears in a regular `{{key}}` placeholder; must be resolved or the request fails
-- **Conditional** — appears only inside `{{?key}}...{{/key}}` blocks; the block is removed if the input is absent
+- **Conditional** — appears only inside `{{?key}}...{{/key}}` blocks, or as the whole value of a header or `form:` field; the block, header, or field is left out if the input is absent
 - **Iterable** — appears as the array in a `{{#key}}...{{/key}}` block; must be an array value
 
-This classification is used by validation to distinguish genuinely missing inputs from intentionally optional ones.
+This classification is used by validation to distinguish genuinely missing inputs from intentionally optional ones. A header or `form:` field whose whole value names something that isn't an input of the node is an error, since it would never be sent.
 
 ## Response Extraction
 
@@ -530,7 +557,7 @@ request:
   path: /orders
   headers:
     Content-Type: application/json
-    Idempotency-Key: "{{?requestKey}}{{requestKey}}{{/requestKey}}"
+    Idempotency-Key: "{{requestKey}}"
   body: |
     {"cartId": "{{cartId}}"}
 response:
@@ -538,7 +565,7 @@ response:
     orderId: orderId
 ```
 
-A retried step resends the same key, since a step's inputs are resolved once. To replay the request on purpose, give a later step `requestKey: {fromInput: createOrder.requestKey}`. The header is conditional because a cleanup step takes its inputs only from earlier outputs, not from graph defaults, so a node that runs as a cleanup sends no key. See [Generated Values and Timestamps](value-flow.md#generated-values-and-timestamps).
+A retried step resends the same key, since a step's inputs are resolved once. To replay the request on purpose, give a later step `requestKey: {fromInput: createOrder.requestKey}`. A header whose whole value is one placeholder isn't sent when the input has no value, and a cleanup step takes its inputs only from earlier outputs, not from graph defaults, so a node that runs as a cleanup sends no key. See [Generated Values and Timestamps](value-flow.md#generated-values-and-timestamps).
 
 ## Validation
 
@@ -571,6 +598,10 @@ request:
     Header-Name: value       #   supports {{placeholder}} substitution
   body: |                    # optional — request body (typically for POST/PUT)
     template with {{placeholders}}, {{?conditionals}}, and {{#iterations}}
+  form:                      # optional — a form-encoded body, in place of body
+    field: "{{input}}"       #   left out when the input has no value
+    nested:                  #   bracketed keys: nested[key]=value
+      key: value
 
 response:
   extract:                   # optional — output extraction rules
