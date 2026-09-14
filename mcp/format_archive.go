@@ -181,6 +181,9 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 		b.WriteString("**Value Resolutions:**\n\n")
 		for _, r := range resolutions {
 			fmt.Fprintf(&b, "- **%s**: source=%s", r.InputName, r.Source)
+			if r.Layer != "" {
+				fmt.Fprintf(&b, " layer=%s", r.Layer)
+			}
 			if r.FromStep != "" {
 				fmt.Fprintf(&b, " (from %s.%s)", r.FromStep, r.FromOutput)
 			}

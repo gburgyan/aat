@@ -361,3 +361,56 @@ field.
 
 **Open questions:**
 - The live Stripe run of the rewritten templates waits for `STRIPE_TEST_SECRET_KEY` in the session's environment.
+
+## 2026-09-13 — Phase 3a PR B: plans wire themselves
+
+**What:** the Stripe run's findings G and L, and the first half of P25.
+- **G, binding:** a graph or layer default's `from: node.output` reads the nearest earlier step on that node that isn't
+  expected to fail, instead of the node's first step.
+  - A verification step's default reads the last such step, chosen at instantiation before mutations expand.
+  - Verification steps take `values:`.
+- **P25, implied `dependsOn`:** a `from`, a `fromInput`, or a named selection's `from` adds the step it reads to
+  `dependsOn` at instantiation. The three missing-`dependsOn` errors are gone, and a cycle message names the reference
+  that implies a dependency.
+- **L, provenance:**
+  - `ApplyLayers` records the layer on each default it sets, and instantiation records where a merged value came from.
+  - Resolution records read `graph_default` or `layer`, and `layer` names the layer.
+  - `aat run show` and the MCP server print it.
+
+**Decisions:**
+- **One pass decides a default's value and its dependency.** Before, `injectGraphDefaultDeps` and the merge each looked
+  up the node's step. Now every binding is decided before any dependency is added, so a value and its dependency always
+  name the same step.
+- **Nearest earlier, then a fallback that can't make a cycle (design review).** With no earlier step, the default reads
+  the first step on the node that isn't expected to fail and doesn't depend on the consumer. That keeps a reference to
+  the step's own node, such as a paging chain's first page, and forward references working as before.
+- **Verification binds before mutations expand (design review),** into a non-serialized `BoundDefaults`. So an isolated
+  mutation's clone of a prerequisite, which isn't expected to fail, is never chosen. Verification `values` hold only
+  what the plan writes, so only they are validated.
+- **Implied `dependsOn` replaces the error,** rather than accepting a transitive ancestor.
+  - A valid plan already listed every such step, so no valid plan changes, and the rewiring check confirms it.
+  - Composition's `ensureFromDeps` became `plan.InjectReferenceDeps`.
+  - `NearestProducer` moved to `plan` with an `expectFailure` skip, and composition's output map skips those steps too.
+- **Clone collisions are checked after the implied dependencies,** since they widen an isolated mutation's prerequisite
+  closure.
+- **`plan_default` now means a value the plan sets.** A graph default's literal reads `graph_default`, and a layer's
+  reads `layer`. `aat run show` is unreleased, so the change costs nothing.
+
+**Verification:**
+- `make check`, `make docs`, and `make example-shop` pass.
+  - `TestWebServeCommand_Lifecycle` failed in one package run. Alone, it also fails on `main` with `context deadline
+    exceeded`, the flake recorded in LAUNCH-PLAN.
+- **`aat validate --strict`,** compared as sets of lines between `main` (983108d) and the branch, is unchanged for:
+  - the shop (exit 0)
+  - the private project (439 lines, exit 1)
+  - the clones: aat-duffel (exit 0), aat-duffel2 (exit 1), and aat-stripe (exit 0)
+- **Rewiring check:** 95 plans and recipes, from the shop, petstore, the private project, and the three clones,
+  instantiate to the same step dependencies, value references, and verification values on both builds.
+- **The Stripe failure, reconstructed.** This is the negative plan as first written: the charge check is a verification
+  step, and each `dependsOn` lists only the previous step.
+  - On `main`, the verification reads `refundBeforeConfirm.charge`, the refused refund, and `validate --strict`
+    reports 6 missing-`dependsOn` lines.
+  - On the branch, it reads `refund.charge`, and the project validates.
+- **Layers end to end.** The shop's `smoke` recipe ran with `shipping-express` against a sandbox.
+  - `aat run show --step checkout` prints `shippingTier "express" layer shipping-express`.
+  - The resolution record has `"source": "layer"` and `"layer": "shipping-express"`.

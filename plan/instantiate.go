@@ -2,6 +2,8 @@ package plan
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/gburgyan/aat/graph"
@@ -21,14 +23,26 @@ func Instantiate(p *Plan, g *graph.Graph) *Plan {
 // default exists for a (node, input) pair, it takes priority over the graph
 // default. When layeredDefaults is nil, this behaves identically to Instantiate.
 func InstantiateWithLayers(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) *Plan {
+	cp := prepareInstance(p, g, layeredDefaults)
+	if cp == nil {
+		return nil
+	}
+	expandMutations(cp)
+	return cp
+}
+
+// prepareInstance deep-copies p and fills in what the plan leaves implicit: the
+// dependencies its references imply, graph and layer defaults with their
+// references bound to steps, and the steps verification defaults read. It stops
+// short of expanding mutations.
+func prepareInstance(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) *Plan {
 	if p == nil || g == nil {
 		return nil
 	}
-
 	cp := deepCopyPlan(p)
-	injectGraphDefaultDeps(cp, g, layeredDefaults)
+	InjectReferenceDeps(cp, false)
 	mergeGraphDefaultsWithLayers(cp, g, layeredDefaults)
-	expandMutations(cp)
+	bindVerificationDefaults(cp, g, layeredDefaults)
 	return cp
 }
 
@@ -45,16 +59,19 @@ func InstantiateAndValidateWithLayers(p *Plan, g *graph.Graph, layeredDefaults m
 	if errs := validateMutationsSyntax(p); len(errs) > 0 {
 		return nil, &ValidationError{Errors: errs}
 	}
-	// Detect pre-existing step ids that would collide with isolated-mutation
-	// clone ids produced during expansion. Raise early with a specific message
-	// rather than letting the generic "duplicate step id" surface later.
-	if errs := detectCloneIdCollisions(p); len(errs) > 0 {
-		return nil, &ValidationError{Errors: errs}
-	}
-	inst := InstantiateWithLayers(p, g, layeredDefaults)
+	inst := prepareInstance(p, g, layeredDefaults)
 	if inst == nil {
 		return nil, &ValidationError{Errors: []string{"plan or graph is nil"}}
 	}
+	// Detect pre-existing step ids that would collide with isolated-mutation
+	// clone ids produced during expansion. Raise early with a specific message
+	// rather than letting the generic "duplicate step id" surface later. The
+	// clones follow the prerequisite closure, which implied dependencies widen,
+	// so this runs after they are added.
+	if errs := detectCloneIdCollisions(inst); len(errs) > 0 {
+		return nil, &ValidationError{Errors: errs}
+	}
+	expandMutations(inst)
 	if err := Validate(inst, g); err != nil {
 		return nil, err
 	}
@@ -96,50 +113,104 @@ func detectCloneIdCollisions(p *Plan) []string {
 }
 
 // mergeGraphDefaultsWithLayers merges input defaults into step values for any
-// inputs the plan doesn't explicitly specify. When layeredDefaults is non-nil,
-// it takes priority over graph-level defaults. From-references are translated
-// from node names to step IDs for composed plans.
+// inputs the plan doesn't set, a layered default taking priority over the
+// graph's, and records where each came from. A default's reference to a node
+// reads the step it binds to (see DefaultRefStep), which joins the step's
+// dependsOn. Every binding is decided before any dependency is added, so a value
+// and its dependency always name the same step.
 func mergeGraphDefaultsWithLayers(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) {
-	for i, step := range p.Execution.Steps {
+	steps := p.Execution.Steps
+	merged := make([]map[string]StepValue, len(steps))
+	for i, step := range steps {
 		node, ok := g.Nodes[step.Node]
 		if !ok {
 			continue
 		}
-
-		if step.Values == nil {
-			p.Execution.Steps[i].Values = make(map[string]StepValue)
-		}
-
+		merged[i] = make(map[string]StepValue)
 		for _, input := range node.Inputs {
-			if _, exists := p.Execution.Steps[i].Values[input.Name]; exists {
-				// Plan already specifies this value — don't override.
+			if _, exists := step.Values[input.Name]; exists {
+				continue // the plan sets it
+			}
+			d := EffectiveDefault(step.Node, input, layeredDefaults)
+			if d == nil || !d.HasValue() {
 				continue
 			}
-
-			effectiveDefault := EffectiveDefault(step.Node, input, layeredDefaults)
-
-			if effectiveDefault == nil || !effectiveDefault.HasValue() {
-				continue
-			}
-
-			sv := StepValueFromDefault(effectiveDefault)
-
-			// Translate from-ref node names to step IDs for composed plans
+			sv := defaultStepValue(d)
 			if sv.From != "" {
-				sv.From = TranslateFromRef(sv.From, p)
+				sv.From = TranslateFromRefAt(sv.From, p, i)
 			}
+			merged[i][input.Name] = sv
+		}
+	}
 
-			p.Execution.Steps[i].Values[input.Name] = sv
+	stepIDs := make(map[string]bool, len(steps))
+	for i := range steps {
+		stepIDs[steps[i].StepID()] = true
+	}
+	for i, values := range merged {
+		if values == nil {
+			continue
+		}
+		step := &steps[i]
+		if step.Values == nil {
+			step.Values = make(map[string]StepValue, len(values))
+		}
+		for _, name := range slices.Sorted(maps.Keys(values)) {
+			sv := values[name]
+			step.Values[name] = sv
+			dep := splitFromNodeName(sv.From)
+			if sv.From != "" && dep != step.StepID() && stepIDs[dep] && !slices.Contains(step.DependsOn, dep) {
+				step.DependsOn = append(step.DependsOn, dep)
+			}
+		}
+	}
+}
+
+// defaultStepValue converts a graph or layer default into the step value
+// instantiation merges in, recording where it came from.
+func defaultStepValue(d *graph.InputDefault) StepValue {
+	sv := StepValueFromDefault(d)
+	sv.Origin, sv.Layer = "graph", d.Layer
+	if d.Layer != "" {
+		sv.Origin = "layer"
+	}
+	return sv
+}
+
+// bindVerificationDefaults records, for each verification step, the step that
+// each default reference to a node binds to (see VerificationStep.BoundDefaults):
+// the last step on the node that isn't expected to fail. It runs before mutations
+// expand, so a mutation's clone is never chosen.
+func bindVerificationDefaults(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) {
+	for v := range p.Execution.Verification {
+		vs := &p.Execution.Verification[v]
+		node, ok := g.Nodes[vs.Node]
+		if !ok {
+			continue
+		}
+		for _, input := range node.Inputs {
+			if _, set := vs.Values[input.Name]; set {
+				continue
+			}
+			d := EffectiveDefault(vs.Node, input, layeredDefaults)
+			if d == nil || d.From == "" {
+				continue
+			}
+			if vs.BoundDefaults == nil {
+				vs.BoundDefaults = make(map[string]string)
+			}
+			vs.BoundDefaults[input.Name] = verificationRefStep(p.Execution.Steps, splitFromNodeName(d.From))
 		}
 	}
 }
 
 // VerificationSteps converts the plan's verification entries into executable
 // steps. Each step targets the verification node, carries the declared
-// assertions, and receives graph (or layered) input defaults exactly as main
-// steps do at instantiation, with from-references translated to step IDs.
-// Inputs without a default are left unset; the engine matches them by output
-// name against earlier steps. Step IDs are "verify_<node>", suffixed with an
+// assertions and values, and receives graph (or layered) defaults for the inputs
+// its values leave unset. A default's reference to a node reads the step
+// instantiation bound it to: the last step on the node that isn't expected to
+// fail. Inputs without a value or default are left unset; the engine matches
+// them by output name against earlier steps. Step IDs are "verify_<node>", suffixed with an
 // ordinal when the same node is verified more than once.
 func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) []Step {
 	if p == nil || g == nil || len(p.Execution.Verification) == 0 {
@@ -158,17 +229,28 @@ func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*grap
 			Node:        vs.Node,
 			Description: vs.Purpose,
 			Assertions:  vs.Assertions,
-			Values:      make(map[string]StepValue),
+			Values:      make(map[string]StepValue, len(vs.Values)),
+		}
+		for name, sv := range vs.Values {
+			step.Values[name] = deepCopyStepValue(sv)
 		}
 		if node, ok := g.Nodes[vs.Node]; ok {
 			for _, input := range node.Inputs {
+				if _, set := step.Values[input.Name]; set {
+					continue
+				}
 				effectiveDefault := EffectiveDefault(vs.Node, input, layeredDefaults)
 				if effectiveDefault == nil || !effectiveDefault.HasValue() {
 					continue
 				}
-				sv := StepValueFromDefault(effectiveDefault)
+				sv := defaultStepValue(effectiveDefault)
 				if sv.From != "" {
-					sv.From = TranslateFromRef(sv.From, p)
+					nodeName := splitFromNodeName(sv.From)
+					stepID, bound := vs.BoundDefaults[input.Name]
+					if !bound {
+						stepID = verificationRefStep(p.Execution.Steps, nodeName)
+					}
+					sv.From = stepID + sv.From[len(nodeName):]
 				}
 				step.Values[input.Name] = sv
 			}
@@ -231,103 +313,6 @@ func StepValueFromDefault(d *graph.InputDefault) StepValue {
 	}
 
 	return sv
-}
-
-// TranslateFromRef translates a "node.field" from-reference to use step IDs
-// instead of node names. This handles composed plans where step IDs may be
-// prefixed (e.g., "inc0_createItinerary" instead of "createItinerary").
-func TranslateFromRef(fromRef string, p *Plan) string {
-	nodeName := splitFromNodeName(fromRef)
-	if nodeName == "" {
-		return fromRef
-	}
-
-	stepID := resolveNodeToStepID(nodeName, p)
-	if stepID == nodeName {
-		return fromRef // no translation needed
-	}
-
-	// Replace the node name portion with the step ID
-	field := fromRef[len(nodeName):]
-	return stepID + field
-}
-
-// resolveNodeToStepID maps a graph node name to the step ID in a plan.
-// For non-composed plans, step ID == node name (the common case).
-// For composed plans with prefixed step IDs (e.g., "inc0_createItinerary"),
-// it scans for a step whose Node field matches.
-// Falls back to nodeName if no match is found or plan is nil.
-func resolveNodeToStepID(nodeName string, p *Plan) string {
-	if p == nil {
-		return nodeName
-	}
-	for _, step := range p.Execution.Steps {
-		if step.Node == nodeName {
-			return step.StepID()
-		}
-	}
-	return nodeName
-}
-
-// injectGraphDefaultDeps scans plan steps for inputs that rely on graph-level
-// (or layered) default `from` references and auto-adds the referenced step to
-// dependsOn. This ensures topological sort respects implicit data flow from
-// graph defaults. Must be called before topological sort.
-func injectGraphDefaultDeps(p *Plan, g *graph.Graph, layeredDefaults map[string]*graph.InputDefault) {
-	if p == nil || g == nil {
-		return
-	}
-
-	// Build step index: stepID → true
-	stepIDs := make(map[string]bool, len(p.Execution.Steps))
-	for _, step := range p.Execution.Steps {
-		stepIDs[step.StepID()] = true
-	}
-
-	for i, step := range p.Execution.Steps {
-		node := g.Nodes[step.Node]
-		if node == nil {
-			continue
-		}
-
-		depsSet := make(map[string]bool, len(step.DependsOn))
-		for _, dep := range step.DependsOn {
-			depsSet[dep] = true
-		}
-
-		for _, input := range node.Inputs {
-			// Skip if plan provides a value for this input
-			if _, hasPlanValue := step.Values[input.Name]; hasPlanValue {
-				continue
-			}
-
-			effectiveDefault := EffectiveDefault(step.Node, input, layeredDefaults)
-
-			if effectiveDefault == nil || effectiveDefault.From == "" {
-				continue
-			}
-
-			// Extract the node name from the from reference
-			fromNodeName := splitFromNodeName(effectiveDefault.From)
-			if fromNodeName == "" {
-				continue
-			}
-
-			// Resolve to step ID
-			depStepID := resolveNodeToStepID(fromNodeName, p)
-			if depStepID == step.StepID() {
-				continue // self-reference
-			}
-			if !stepIDs[depStepID] {
-				continue // referenced node not in plan
-			}
-
-			if !depsSet[depStepID] {
-				p.Execution.Steps[i].DependsOn = append(p.Execution.Steps[i].DependsOn, depStepID)
-				depsSet[depStepID] = true
-			}
-		}
-	}
 }
 
 // splitFromNodeName extracts the node name from a "node.field" reference.
@@ -652,7 +637,17 @@ func deepCopyPlan(p *Plan) *Plan {
 	// Deep-copy verification steps
 	if len(p.Execution.Verification) > 0 {
 		cp.Execution.Verification = make([]VerificationStep, len(p.Execution.Verification))
-		copy(cp.Execution.Verification, p.Execution.Verification)
+		for i, vs := range p.Execution.Verification {
+			cvs := vs
+			if vs.Values != nil {
+				cvs.Values = make(map[string]StepValue, len(vs.Values))
+				for k, v := range vs.Values {
+					cvs.Values[k] = deepCopyStepValue(v)
+				}
+			}
+			cvs.BoundDefaults = maps.Clone(vs.BoundDefaults)
+			cp.Execution.Verification[i] = cvs
+		}
 	}
 
 	// Deep-copy cleanup steps

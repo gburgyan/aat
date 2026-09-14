@@ -23,6 +23,11 @@ the graph and plan formats may still change before 1.0.
   in both the unknown-input and the required-field checks.
 - `aat validate` and `aat run` report a header or `form:` field whose whole value names no input of the node, which
   would never be sent.
+- Verification steps take `values`, as main steps do, to read a particular step: `values: {charge: {from:
+  firstRefund.charge}}`. A reference names a main step, and `aat validate` checks the input names, the references, and
+  the values' shapes.
+- `--resolutions` and `aat run show --step` name the layer that set a value. A layer's literal value reads `layer`, and
+  the record carries `layer: currency-jpy` for any value a layer set. The MCP server's `inspect_archive` shows it too.
 - `settings.minRequestInterval` paces requests for APIs with rate limits: the starts of any two requests are at
   least that far apart, such as `250ms`. One interval covers everything a command sends, including the plans of
   a parallel batch, retries, verification, and cleanup. `aat prompt` and the MCP server's `execute_plan` honor it
@@ -124,6 +129,17 @@ the graph and plan formats may still change before 1.0.
 - `aat generate` scaffolds a form body as `form:`, one field per property with no `Content-Type` header, and writes an
   array property the spec encodes as a `deepObject` as `name[]`. An object property no longer warns, since a map value
   is sent as bracketed keys. An optional header parameter is a plain placeholder.
+- A `from`, a `fromInput`, or a named selection's `from` adds the step it reads to `dependsOn` when the plan is
+  instantiated, as graph defaults and composition already did. Plan validation no longer reports a reference whose step
+  is missing from `dependsOn`, and a cycle message names the value or selection that implies a dependency. An isolated
+  mutation checks its clone IDs against the dependencies references imply.
+- A graph default's `from: node.output` reads the nearest earlier step on that node that isn't expected to fail, instead
+  of the node's first step. On a verification step it reads the last such step, chosen before mutations expand.
+  - Before, a verification after a refused request on the node read the refused step and failed with `no outputs`, and
+    one after two successful steps read the first.
+  - AUTOWIRE passes over steps expected to fail as well.
+- A graph default's literal value reads `graph_default` in `--resolutions`, where it read `plan_default`, which now
+  means a value the plan sets.
 - Composition wires the AUTOWIRE markers that the slot and addon passes leave, once the plan is complete: a base or
   slot step can take an output that only an addon produces, and a base workflow without slots or addons resolves
   its markers. The final pass takes the nearest earlier producer that does not depend on the step. Markers the
@@ -190,11 +206,8 @@ the graph and plan formats may still change before 1.0.
   rerun still resolves them again.
 - `uuid`, `now`, and `unixtime` are reserved words in expressions, so `{{now}}` no longer refers to an input named
   `now`. An offset in hours or minutes on `today`, or on a reference, is an error that suggests `now` or `unixtime`.
-- The missing-`dependsOn` message names the value that takes the data, as in
-  `value "orderId" has 'from' reference to "createOrder" but does not list it in dependsOn`, so two values from the same
-  step no longer print the same line. Plan validation lists each distinct problem once, `aat validate` prints an error
-  repeated word for word once, and a step's values and selections are checked in name order, so the output is the same
-  on every run.
+- Plan validation lists each distinct problem once, `aat validate` prints an error repeated word for word once, and a
+  step's values and selections are checked in name order, so the output is the same on every run.
 - A registered cleanup no longer runs when a later main step on the cleanup node already released the resource with
   the same inputs, such as an explicit cancel of the order the pairing would cancel. Before, the cleanup ran again
   and usually failed with a 4xx. The skip is recorded, as for a pairing's `releasedBy`.

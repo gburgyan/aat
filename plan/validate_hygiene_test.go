@@ -36,9 +36,9 @@ func TestValidationError_ListsEachProblemOnce(t *testing.T) {
 	assert.Equal(t, []string{"b", "a", "b", "c", "a"}, err.Errors, "the collected errors are left as found")
 }
 
-// TestValidate_MissingDependsOnNamesValue: two values that take data from the
-// same step missing from dependsOn give two lines, each naming its value.
-func TestValidate_MissingDependsOnNamesValue(t *testing.T) {
+// TestInjectReferenceDeps_OncePerStep: two values that take data from the same
+// step add it to dependsOn once, and validation doesn't ask for it.
+func TestInjectReferenceDeps_OncePerStep(t *testing.T) {
 	p := &Plan{Execution: Execution{Steps: []Step{
 		{Node: "createOrder"},
 		{
@@ -50,11 +50,11 @@ func TestValidate_MissingDependsOnNamesValue(t *testing.T) {
 		},
 	}}}
 
-	err := Validate(p, hygieneGraph())
-	require.Error(t, err)
-	msg := err.Error()
-	assert.Contains(t, msg, `value "orderId" has 'from' reference to "createOrder" but does not list it in dependsOn`)
-	assert.Contains(t, msg, `value "region" has 'from' reference to "createOrder" but does not list it in dependsOn`)
+	InjectReferenceDeps(p, false)
+	assert.Equal(t, []string{"createOrder"}, p.Execution.Steps[1].DependsOn, "two references to one step add it once")
+	if err := Validate(p, hygieneGraph()); err != nil {
+		assert.NotContains(t, err.Error(), "dependsOn")
+	}
 }
 
 // TestValidate_ValueErrorsInNameOrder: a step's values are checked in name

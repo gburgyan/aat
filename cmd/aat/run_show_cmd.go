@@ -735,6 +735,12 @@ func describeResolution(r archive.InputResolution) string {
 	case r.FromStep != "" && r.FromInput != "":
 		parts = append(parts, r.FromStep+"."+r.FromInput)
 	}
+	switch {
+	case r.Layer != "" && r.Source == "layer":
+		parts = append(parts, r.Layer)
+	case r.Layer != "":
+		parts = append(parts, "from layer "+r.Layer)
+	}
 	if r.Expression != "" {
 		parts = append(parts, r.Expression)
 	}

@@ -103,12 +103,16 @@ func findWorkflowByName(g *graph.Graph, name string) (graph.Workflow, bool) {
 
 // buildOutputMap scans all parent steps and builds a map of
 // outputName → "stepID.outputName" for all outputs produced by those steps.
-// Last producer wins. All parent outputs are available for auto-wiring
-// because the engine resolves execution order via dependsOn, not step list
-// position. ensureFromDeps ensures the correct dependencies are added.
+// Last producer wins, and a step expected to fail is passed over. All parent
+// outputs are available for auto-wiring because the engine resolves execution
+// order via dependsOn, not step list position. plan.InjectReferenceDeps adds
+// the dependencies.
 func buildOutputMap(p *plan.Plan, g *graph.Graph) map[string]string {
 	outputMap := make(map[string]string)
 	for _, step := range p.Execution.Steps {
+		if step.ExpectFailure != nil {
+			continue
+		}
 		stepID := step.StepID()
 		node := g.Nodes[step.Node]
 		if node != nil {
@@ -128,6 +132,23 @@ func prefixStepRefs(sub *plan.Plan, prefix string) {
 	for _, step := range sub.Execution.Steps {
 		oldID := step.StepID()
 		idMap[oldID] = prefix + oldID
+	}
+
+	// Rewrite references in verification values, which name the sub-workflow's
+	// steps.
+	for v := range sub.Execution.Verification {
+		for name, sv := range sub.Execution.Verification[v].Values {
+			for _, ref := range []*string{&sv.From, &sv.FromInput} {
+				if *ref == "" {
+					continue
+				}
+				fromStep := splitNodeName(*ref)
+				if newID, ok := idMap[fromStep]; ok {
+					*ref = newID + (*ref)[len(fromStep):]
+				}
+			}
+			sub.Execution.Verification[v].Values[name] = sv
+		}
 	}
 
 	for i := range sub.Execution.Steps {
@@ -334,65 +355,6 @@ func mergeVerification(parent, sub *plan.Plan) {
 	parent.Execution.Verification = append(merged, sub.Execution.Verification...)
 }
 
-// ensureFromDeps scans all from references in the plan and ensures that
-// referenced steps are in the referencing step's dependsOn.
-//
-// When externalOnly is true, only references pointing OUTSIDE the plan's step
-// set are added (used per-addon before splice). When false, all valid from
-// references are added (used after slot composition on the flat plan).
-func ensureFromDeps(p *plan.Plan, externalOnly bool) {
-	// Build step ID set.
-	stepIDs := make(map[string]bool, len(p.Execution.Steps))
-	for _, step := range p.Execution.Steps {
-		stepIDs[step.StepID()] = true
-	}
-
-	for i := range p.Execution.Steps {
-		step := &p.Execution.Steps[i]
-
-		depSet := make(map[string]bool)
-		for _, dep := range step.DependsOn {
-			depSet[dep] = true
-		}
-
-		// Collect all from-referenced step IDs.
-		var refs []string
-		for _, sv := range step.Values {
-			if sv.From != "" {
-				refs = append(refs, splitNodeName(sv.From))
-			}
-			if sv.FromInput != "" {
-				refs = append(refs, splitNodeName(sv.FromInput))
-			}
-		}
-		for _, sel := range step.Selections {
-			if sel.From != "" {
-				refs = append(refs, splitNodeName(sel.From))
-			}
-		}
-
-		sid := step.StepID()
-		for _, ref := range refs {
-			if ref == sid || depSet[ref] {
-				continue
-			}
-			if externalOnly {
-				// Only add deps for refs pointing outside the plan.
-				if !stepIDs[ref] {
-					step.DependsOn = append(step.DependsOn, ref)
-					depSet[ref] = true
-				}
-			} else {
-				// Add deps for all valid refs within the plan.
-				if stepIDs[ref] {
-					step.DependsOn = append(step.DependsOn, ref)
-					depSet[ref] = true
-				}
-			}
-		}
-	}
-}
-
 // resolveAfterWire creates a copy of the wire map with $after. prefixes replaced
 // by the actual step ID. For example, if afterStep is "addTraveler_2"
 // and wire has {"travelerId": "$after.travelerIdentifierValue"}, the result
@@ -537,7 +499,7 @@ func fillSlots(parent *plan.Plan, base graph.Workflow, choices map[string]string
 	autoWirePlaceholders(parent, outputMap, nil, g)
 
 	// Ensure all from-referenced steps are in dependsOn.
-	ensureFromDeps(parent, false)
+	plan.InjectReferenceDeps(parent, false)
 
 	return nil
 }
@@ -593,7 +555,7 @@ func composeAddonList(parent *plan.Plan, addons []graph.Workflow, graphDir strin
 		resolvedWire := resolveAfterWire(addon.Wire, afterStep)
 		autoWirePlaceholders(sub, outputMap, resolvedWire, g)
 		addInsertionDeps(sub, afterStep)
-		ensureFromDeps(sub, true)
+		plan.InjectReferenceDeps(sub, true)
 		spliceSteps(parent, sub, afterStep)
 		mergeCleanup(parent, sub)
 		mergeVerification(parent, sub)
@@ -646,7 +608,7 @@ func applyInjectValues(p *plan.Plan, inject map[string]graph.InjectValue, g *gra
 			}
 			sv := plan.StepValueFromDefault(&value.InputDefault)
 			if sv.From != "" {
-				sv.From = plan.TranslateFromRef(sv.From, p)
+				sv.From = plan.TranslateFromRefAt(sv.From, p, i)
 			}
 			step.Values[inputName] = sv
 		}

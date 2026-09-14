@@ -63,7 +63,16 @@ When the referenced output is a scalar, the value is used directly. When the out
 
 ### Dependency Inference
 
-Any `from` reference implies an execution dependency, and the referenced step must appear in the step's `dependsOn`. In a hand-written full plan, list it yourself: `aat validate plan` (and `aat run`) reject a `from`, `fromInput`, or named selection whose step is missing from `dependsOn`. Workflow composition adds the entry for recipes and workflow templates, and plan instantiation adds it for `from` references that come from graph input defaults, so those need no `dependsOn` entry written out.
+Any reference implies an execution dependency. When a plan is instantiated, the step that a `from`, a `fromInput`, or a named selection's `from` reads joins the step's `dependsOn`, whether the plan, a recipe, or a graph default wrote the reference. A reference to a step that runs later reorders the steps, and one that closes a cycle is reported with the value or selection that implies the dependency.
+
+### Which Step a Default Reads
+
+A graph default's `from: node.output` names a node, and a plan can run that node in several steps. It reads:
+
+- **On a main step:** the nearest earlier step on that node that isn't expected to fail. With none earlier, the first such step that doesn't depend on it.
+- **On a verification step:** the last step on that node that isn't expected to fail.
+
+So a check after `createRefund` ran once as a refused request and once successfully reads the successful one. To read a particular step, set the value on the step: `charge: {from: firstRefund.charge}`.
 
 ## Array Selection
 
@@ -211,7 +220,7 @@ steps:
 
 This differs from `from` (which references step *outputs* extracted from API responses). `fromInput` references the *inputs* that were sent to a previous step. This is useful when multiple steps need consistent input values — for example, using the same origin city for both a search and a booking.
 
-The syntax is `stepId.inputName`. The referenced step must be listed directly in `dependsOn` (a transitive dependency is not enough), and the input name must exist on the source step's graph node.
+The syntax is `stepId.inputName`. The referenced step joins `dependsOn`, and the input name must exist on the source step's graph node.
 
 `fromInput` is mutually exclusive with `from`, `fromSelection`, `fromResolved`, `default`, and `pool`.
 
@@ -376,7 +385,8 @@ Every input resolution is recorded in the run archive with a `ValueResolution` e
 | Field | Description |
 |-------|-------------|
 | `inputName` | Which input was resolved |
-| `source` | How it was resolved: `plan_default`, `expression`, `fallback_pool`, `plan_from`, `select_edge`, `named_selection`, `from_resolved`, `from_input`, `graph_default`, or `optional_skip` when an optional input is left out (`AUTOWIRE?`, or `from:` an output the earlier step didn't return) |
+| `source` | How it was resolved: `plan_default` (a value the plan sets), `graph_default` (a graph default), `layer` (a layer's value), `expression`, `fallback_pool`, `plan_from`, `select_edge`, `named_selection`, `from_resolved`, `from_input`, or `optional_skip` when an optional input is left out (`AUTOWIRE?`, or `from:` an output the earlier step didn't return) |
+| `layer` | The layer that set the value, whatever the source, such as an expression a layer wrote |
 | `rawValue` | Value before expression evaluation |
 | `finalValue` | Value after evaluation and type coercion |
 | `expression` | The `{{...}}` template if evaluated |

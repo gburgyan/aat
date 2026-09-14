@@ -177,7 +177,9 @@ type ValueResolution struct {
 	InputName string // input being resolved
 	Source    string // "plan_default", "expression", "plan_from", "select_edge",
 	// "named_selection", "from_input", "from_resolved", "fallback_pool",
-	// "graph_default", "optional_skip", "override_value", "error"
+	// "graph_default", "layer", "optional_skip", "override_value", "error"
+	// Layer names the layer that set the value, when a layer did.
+	Layer        string
 	RawValue     any    // before expression evaluation (nil if N/A)
 	FinalValue   any    // after evaluation + coercion
 	FromStep     string // source step (for edge/select_edge/from_input)

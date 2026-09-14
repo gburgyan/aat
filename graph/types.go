@@ -180,6 +180,9 @@ type InputDefault struct {
 	From         string              `yaml:"from,omitempty"`
 	FromResolved string              `yaml:"fromResolved,omitempty"`
 	Select       *InputDefaultSelect `yaml:"select,omitempty"`
+	// Layer names the layer that set this default, when ApplyLayers put one in
+	// place. It isn't read from YAML.
+	Layer string `yaml:"-" json:"-"`
 }
 
 // InputDefaultSelect describes an array selection within a graph input default.

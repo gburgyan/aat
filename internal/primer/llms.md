@@ -427,7 +427,7 @@ execution:
       runOn: always
 ```
 
-A plan's top-level keys are `metadata` (`created`, `prompt`, `graphVersion`), `graph`, `auth`, `headers`, `intent` (`goal` — the step ID of the `isGoal` step — `description`, and `constraints`), and `execution` (`steps`, `verification`, `cleanup`). Anything else is rejected.
+A plan's top-level keys are `metadata` (`created`, `prompt`, `graphVersion`), `graph`, `auth`, `headers`, `intent` (`goal` — the step ID of the `isGoal` step — `description`, and `constraints`), and `execution` (`steps`, `verification`, `cleanup`). A verification step takes `node`, `purpose`, `assertions`, and `values`. Anything else is rejected.
 
 ### Step Value Forms
 
@@ -1042,7 +1042,8 @@ The archive is the primary debugging artifact. Read it to understand what happen
   "resolutions": [
     {
       "inputName": "string",
-      "source": "plan_default | expression | plan_from | select_edge | named_selection | from_input | from_resolved | fallback_pool | graph_default | optional_skip | override_value | error",
+      "source": "plan_default | graph_default | layer | expression | plan_from | select_edge | named_selection | from_input | from_resolved | fallback_pool | optional_skip | override_value | error",
+      "layer": "the layer that set the value, when one did",
       "rawValue": "any",
       "finalValue": "any",
       "fromStep": "string",
@@ -1186,7 +1187,7 @@ In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts
 | `step N: node "X" not found in graph` | Plan references a node not in the graph | Check node name spelling |
 | `required input "X" has no plan value` / `has no value` | Required input has no value, no default, and no upstream output | Add a value in the plan or a default in the graph |
 | `requires/satisfies cycle detected: A → B → A` | Prerequisite tokens form a circular dependency | Review `requires`/`satisfies` tokens, or mark a node `cycleBreaker: true` |
-| `dependsOn cycle detected involving "A" and "B"` | Plan steps depend on each other | Fix the steps' `dependsOn` lists |
+| `dependsOn cycle detected involving "A" and "B"` | Plan steps depend on each other, through `dependsOn` or through a reference, which the message names | Remove the `dependsOn` entry, or read the value from another step |
 | `unresolved placeholders: X` | A template placeholder had no value at run time | Give the input a value or default, or wrap the placeholder in a `{{?X}}…{{/X}}` block |
 | `extract path "X" (…) not found in response` | The response lacks a path the template extracts | Fix the path, or mark the extract entry `optional: true` |
 | `executing HTTP request: no response within aat's 30s request timeout` | The API took longer than aat's 30-second limit to answer | Check the API; a step `retry` covers `timeout` by default |
@@ -1201,9 +1202,9 @@ In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts
 - **Validate early and often**: run `aat validate` after every change to catch typos before execution.
 - **Use default pools**: graph input defaults with pool lists (`default: ["A", "B", "C"]`) provide varied test data without plan-level overrides.
 - **Prefer recipes over full plans** when a workflow exists — recipes are shorter and easier to maintain.
-- **Graph defaults wire the common case; plans wire the rest**: nodes define what an operation accepts and produces, an input's `default: {from: ...}` names the output it usually takes, and plans override or add wiring for a specific test.
+- **Graph defaults wire the common case; plans wire the rest**: nodes define what an operation accepts and produces, an input's `default: {from: ...}` names the output it usually takes, and plans override or add wiring for a specific test. When a plan runs that node in several steps, a main step's default reads the nearest earlier one that isn't expected to fail, and a verification step's reads the last such step; set `values` on the step, a verification step included, to read another.
 - **Read results with `aat run show`**: after a run, `aat run show latest` lists the steps, and `--step ID` shows one of them: its URL, status, inputs, outputs, and failed assertions. `--response --shape` shows what the API returned without pouring a large body into your context. The same data is in `archive.json`, under `steps[].request`, `steps[].response`, `steps[].validation`, and `steps[].errorClassification`.
-- **Ordering is declared, not wired**: nodes use `requires`/`satisfies` tokens, not explicit edges. If node B needs node A to have run, give A a token that B requires; the MCP tracing tools and `aat validate` use them. A full plan runs its steps in `dependsOn` order, so list dependencies there (composing a recipe adds them from the tokens); data moves through step values (`from`, selections) and graph defaults, not through tokens.
+- **Ordering is declared, not wired**: nodes use `requires`/`satisfies` tokens, not explicit edges. If node B needs node A to have run, give A a token that B requires; the MCP tracing tools and `aat validate` use them. A full plan runs its steps in `dependsOn` order. A step that a `from`, `fromInput`, or selection reads is added to it, so list only ordering the data doesn't show (composing a recipe adds them from the tokens); data moves through step values (`from`, selections) and graph defaults, not through tokens.
 - **Cleanup pairing**: if a node creates a resource, set its `cleanup` field to the deletion node. The engine runs the pairing after the plan even when the plan does not list it. When releasing the resource takes two calls, give the first cleanup node a `cleanup` of its own. The second node runs right after the first succeeds and takes its outputs.
 - **Template placeholders must match node inputs**: every `{{name}}` in a template should correspond to an input on the linked node; a placeholder that gets no value fails the request.
 - **Keep secrets out of files**: credentials use `source: env` to read OS environment variables (`source: literal` exists for demo values only).

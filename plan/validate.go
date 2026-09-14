@@ -182,10 +182,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 
 		sid := step.StepID()
 
-		// Check dependsOn references valid plan steps (by step ID)
-		depsSet := make(map[string]bool, len(step.DependsOn))
+		// Check dependsOn references valid plan steps (by step ID). A reference
+		// adds the dependency it implies at instantiation (InjectReferenceDeps).
 		for _, dep := range step.DependsOn {
-			depsSet[dep] = true
 			if !stepIDs[dep] {
 				errs = append(errs, fmt.Sprintf("step %d (%s): dependsOn references unknown step %q", i, sid, dep))
 			}
@@ -234,11 +233,6 @@ func Validate(p *Plan, g *graph.Graph) error {
 			}
 			if !stepIDs[srcStepID] {
 				errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references unknown step %q", i, sid, selName, srcStepID))
-			} else {
-				// From implies dependsOn
-				if !depsSet[srcStepID] {
-					errs = append(errs, fmt.Sprintf("step %d (%s): selection %q references %q but does not list it in dependsOn", i, sid, selName, srcStepID))
-				}
 			}
 			// Resolve step ID → graph node for output validation
 			srcGraphNode := srcStepID
@@ -355,10 +349,6 @@ func Validate(p *Plan, g *graph.Graph) error {
 					if !stepIDs[srcStepID] {
 						errs = append(errs, fmt.Sprintf("step %d (%s): 'fromInput' reference %q for %q: %q is not a step in this plan", i, sid, sv.FromInput, name, srcStepID))
 					} else {
-						// DependsOn required
-						if !depsSet[srcStepID] {
-							errs = append(errs, fmt.Sprintf("step %d (%s): value %q has 'fromInput' reference to %q but does not list it in dependsOn", i, sid, name, srcStepID))
-						}
 						// Input existence on source step's graph node
 						srcGraphNode := srcStepID
 						if gn, ok := stepIDToNode[srcStepID]; ok {
@@ -396,11 +386,6 @@ func Validate(p *Plan, g *graph.Graph) error {
 						if _, outExists := outs[srcField]; !outExists {
 							errs = append(errs, fmt.Sprintf("step %d (%s): 'from' reference %q for %q: output %q does not exist on node %q", i, sid, sv.From, name, srcField, srcGraphNode))
 						}
-					}
-
-					// Gap 9: From implies dependsOn
-					if stepIDs[srcStepID] && !depsSet[srcStepID] {
-						errs = append(errs, fmt.Sprintf("step %d (%s): value %q has 'from' reference to %q but does not list it in dependsOn", i, sid, name, srcStepID))
 					}
 				}
 			}
@@ -639,10 +624,15 @@ func Validate(p *Plan, g *graph.Graph) error {
 
 	// Gap 5: Validate verification steps
 	for i, vs := range p.Execution.Verification {
-		if _, exists := g.Nodes[vs.Node]; !exists {
+		node, exists := g.Nodes[vs.Node]
+		if !exists {
 			errs = append(errs, fmt.Sprintf("verification step %d: node %q not found in graph", i, vs.Node))
 		}
-		errs = append(errs, validateAssertions(fmt.Sprintf("verification step %d (%s)", i, vs.Node), vs.Assertions)...)
+		where := fmt.Sprintf("verification step %d (%s)", i, vs.Node)
+		errs = append(errs, validateAssertions(where, vs.Assertions)...)
+		if exists {
+			errs = append(errs, validateVerificationValues(where, vs.Node, node, vs.Values, stepIDToNode, g)...)
+		}
 	}
 
 	// Gap 8: Goal consistency validation (uses step IDs)
@@ -675,13 +665,69 @@ func Validate(p *Plan, g *graph.Graph) error {
 	return nil
 }
 
+// validateVerificationValues checks a verification step's values: each names an
+// input of its node, a from or fromInput reference names a main step and what
+// that step's node declares, and a literal fits its input's shape. A
+// verification step has no selections, so fromSelection is an error.
+func validateVerificationValues(where, nodeName string, node *graph.Node, values map[string]StepValue, stepIDToNode map[string]string, g *graph.Graph) []string {
+	var errs []string
+	inputs := make(map[string]graph.Input, len(node.Inputs))
+	for _, in := range node.Inputs {
+		inputs[in.Name] = in
+	}
+	for _, name := range slices.Sorted(maps.Keys(values)) {
+		sv := values[name]
+		in, ok := inputs[name]
+		if !ok {
+			errs = append(errs, fmt.Sprintf("%s: value %q does not match any input on node %q", where, name, nodeName))
+			continue
+		}
+		if sv.FromSelection != "" {
+			errs = append(errs, fmt.Sprintf("%s: value %q uses fromSelection, but a verification step has no selections; use from with select", where, name))
+		}
+		for _, ref := range []struct{ kind, value string }{{"from", sv.From}, {"fromInput", sv.FromInput}} {
+			if ref.value == "" {
+				continue
+			}
+			srcStep, field, err := splitRef(ref.value)
+			if err != nil {
+				errs = append(errs, fmt.Sprintf("%s: invalid '%s' reference %q for %q: %v", where, ref.kind, ref.value, name, err))
+				continue
+			}
+			srcNode, isStep := stepIDToNode[srcStep]
+			if !isStep {
+				errs = append(errs, fmt.Sprintf("%s: '%s' reference %q for %q: %q is not a step in this plan", where, ref.kind, ref.value, name, srcStep))
+				continue
+			}
+			source := g.Nodes[srcNode]
+			if source == nil {
+				continue
+			}
+			if ref.kind == "from" && !producesOutput(source, field) {
+				errs = append(errs, fmt.Sprintf("%s: 'from' reference %q for %q: output %q does not exist on node %q", where, ref.value, name, field, srcNode))
+			}
+			if ref.kind == "fromInput" && !slices.ContainsFunc(source.Inputs, func(in graph.Input) bool { return in.Name == field }) {
+				errs = append(errs, fmt.Sprintf("%s: 'fromInput' reference %q for %q: input %q does not exist on node %q", where, ref.value, name, field, srcNode))
+			}
+		}
+		if marker, _ := AutowireMarker(sv); !marker {
+			if msg := graph.DefaultShapeError(&graph.InputDefault{Value: sv.Default, Pool: sv.Pool}, in.Type); msg != "" {
+				errs = append(errs, fmt.Sprintf("%s: value %q: %s", where, name, msg))
+			}
+		}
+	}
+	return errs
+}
+
 // detectDependsOnCycles checks for cycles in the explicit dependsOn graph.
 // Uses step IDs for cycle detection to support step aliasing.
 func detectDependsOnCycles(p *Plan) []string {
 	// Build adjacency: stepID → dependsOn step IDs
 	adj := make(map[string][]string)
+	byID := make(map[string]Step, len(p.Execution.Steps))
 	for _, step := range p.Execution.Steps {
 		adj[step.StepID()] = step.DependsOn
+		byID[step.StepID()] = step
 	}
 
 	const (
@@ -698,7 +744,7 @@ func detectDependsOnCycles(p *Plan) []string {
 		color[node] = gray
 		for _, dep := range adj[node] {
 			if color[dep] == gray {
-				cycles = append(cycles, fmt.Sprintf("dependsOn cycle detected involving %q and %q", node, dep))
+				cycles = append(cycles, fmt.Sprintf("dependsOn cycle detected involving %q and %q%s", node, dep, referenceNote(byID[node], dep)))
 				return true
 			}
 			if color[dep] == white {

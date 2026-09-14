@@ -428,71 +428,74 @@ func TestInputDefaultToStepValue(t *testing.T) {
 	})
 }
 
-// --- resolveNodeToStepID tests ---
+// --- DefaultRefStep tests ---
 
-func TestResolveNodeToStepID(t *testing.T) {
+func TestDefaultRefStep(t *testing.T) {
+	failing := &ExpectFailure{Status: []int{400}}
 	tests := []struct {
-		name     string
-		nodeName string
-		plan     *Plan
-		want     string
+		name  string
+		steps []Step
+		i     int
+		node  string
+		want  string
 	}{
 		{
-			name:     "direct match",
-			nodeName: "createItinerary",
-			plan: &Plan{
-				Execution: Execution{
-					Steps: []Step{
-						{Node: "createItinerary"},
-					},
-				},
-			},
-			want: "createItinerary",
+			name:  "direct match",
+			steps: []Step{{Node: "createItinerary"}, {Node: "getItinerary"}},
+			i:     1, node: "createItinerary", want: "createItinerary",
 		},
 		{
-			name:     "prefixed step ID",
-			nodeName: "createItinerary",
-			plan: &Plan{
-				Execution: Execution{
-					Steps: []Step{
-						{ID: "inc0_createItinerary", Node: "createItinerary"},
-					},
-				},
-			},
-			want: "inc0_createItinerary",
+			name:  "prefixed step ID",
+			steps: []Step{{ID: "inc0_createItinerary", Node: "createItinerary"}, {Node: "getItinerary"}},
+			i:     1, node: "createItinerary", want: "inc0_createItinerary",
 		},
 		{
-			name:     "no match",
-			nodeName: "unknownNode",
-			plan: &Plan{
-				Execution: Execution{
-					Steps: []Step{
-						{Node: "createItinerary"},
-						{Node: "searchFlights"},
-					},
-				},
-			},
-			want: "unknownNode",
+			name:  "no step on the node",
+			steps: []Step{{Node: "createItinerary"}, {Node: "searchFlights"}},
+			i:     1, node: "unknownNode", want: "unknownNode",
 		},
 		{
-			name:     "nil plan",
-			nodeName: "createItinerary",
-			plan:     nil,
-			want:     "createItinerary",
+			name:  "the nearest earlier step",
+			steps: []Step{{ID: "first", Node: "createRefund"}, {ID: "second", Node: "createRefund"}, {Node: "getCharge"}},
+			i:     2, node: "createRefund", want: "second",
+		},
+		{
+			name:  "a step expected to fail is passed over",
+			steps: []Step{{ID: "refund", Node: "createRefund"}, {ID: "refundTwice", Node: "createRefund", ExpectFailure: failing}, {Node: "getCharge"}},
+			i:     2, node: "createRefund", want: "refund",
+		},
+		{
+			name:  "a later step when none is earlier",
+			steps: []Step{{Node: "getCharge"}, {ID: "refund", Node: "createRefund"}},
+			i:     0, node: "createRefund", want: "refund",
+		},
+		{
+			name:  "a later step that depends on the consumer is passed over",
+			steps: []Step{{Node: "getCharge"}, {ID: "refund", Node: "createRefund", DependsOn: []string{"getCharge"}}, {ID: "other", Node: "createRefund"}},
+			i:     0, node: "createRefund", want: "other",
+		},
+		{
+			name:  "the consumer itself when it is the first on its node",
+			steps: []Step{{ID: "page1", Node: "listOrders"}, {ID: "page2", Node: "listOrders"}},
+			i:     0, node: "listOrders", want: "page1",
+		},
+		{
+			name:  "only steps expected to fail: the first",
+			steps: []Step{{ID: "bad1", Node: "createRefund", ExpectFailure: failing}, {ID: "bad2", Node: "createRefund", ExpectFailure: failing}, {Node: "getCharge"}},
+			i:     2, node: "createRefund", want: "bad1",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := resolveNodeToStepID(tt.nodeName, tt.plan)
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, tt.want, DefaultRefStep(tt.steps, tt.i, tt.node))
 		})
 	}
 }
 
-// --- injectGraphDefaultDeps tests ---
+// --- default dependency tests ---
 
-func TestInjectGraphDefaultDeps(t *testing.T) {
+func TestMergeGraphDefaults_Dependencies(t *testing.T) {
 	t.Run("adds implicit dependency from graph default from ref", func(t *testing.T) {
 		g := &graph.Graph{
 			Version: "1.0.0",
@@ -527,7 +530,7 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 			},
 		}
 
-		injectGraphDefaultDeps(p, g, nil)
+		mergeGraphDefaultsWithLayers(p, g, nil)
 
 		// B should now depend on A
 		assert.Contains(t, p.Execution.Steps[1].DependsOn, "A")
@@ -572,7 +575,7 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 			},
 		}
 
-		injectGraphDefaultDeps(p, g, nil)
+		mergeGraphDefaultsWithLayers(p, g, nil)
 
 		// B should NOT depend on A because plan provides explicit value
 		assert.Empty(t, p.Execution.Steps[1].DependsOn)
@@ -612,17 +615,16 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 			},
 		}
 
-		injectGraphDefaultDeps(p, g, nil)
+		mergeGraphDefaultsWithLayers(p, g, nil)
 
 		// B should NOT depend on A because A is not in the plan
 		assert.Empty(t, p.Execution.Steps[0].DependsOn)
 	})
 
 	t.Run("nil plan and graph are safe", func(t *testing.T) {
-		// Should not panic
-		injectGraphDefaultDeps(nil, nil, nil)
-		injectGraphDefaultDeps(nil, &graph.Graph{}, nil)
-		injectGraphDefaultDeps(&Plan{}, nil, nil)
+		assert.Nil(t, InstantiateWithLayers(nil, nil, nil))
+		assert.Nil(t, InstantiateWithLayers(nil, &graph.Graph{}, nil))
+		assert.Nil(t, InstantiateWithLayers(&Plan{}, nil, nil))
 	})
 
 	t.Run("does not duplicate existing dependency", func(t *testing.T) {
@@ -659,7 +661,7 @@ func TestInjectGraphDefaultDeps(t *testing.T) {
 			},
 		}
 
-		injectGraphDefaultDeps(p, g, nil)
+		mergeGraphDefaultsWithLayers(p, g, nil)
 
 		// B should still have exactly one "A" dependency
 		count := 0
@@ -680,50 +682,22 @@ func TestSplitFromNodeName(t *testing.T) {
 	assert.Equal(t, "", splitFromNodeName(""))
 }
 
-// --- TranslateFromRef tests ---
+// --- TranslateFromRefAt tests ---
 
-func TestTranslateFromRef(t *testing.T) {
-	t.Run("simple plan - no translation needed", func(t *testing.T) {
-		p := &Plan{
-			Execution: Execution{
-				Steps: []Step{
-					{Node: "searchAir"},
-				},
+func TestTranslateFromRefAt(t *testing.T) {
+	p := &Plan{
+		Execution: Execution{
+			Steps: []Step{
+				{ID: "inc0_searchAir", Node: "searchAir"},
+				{Node: "otherNode"},
 			},
-		}
-		result := TranslateFromRef("searchAir.offerings", p)
-		assert.Equal(t, "searchAir.offerings", result)
-	})
-
-	t.Run("composed plan - translates node to step ID", func(t *testing.T) {
-		p := &Plan{
-			Execution: Execution{
-				Steps: []Step{
-					{ID: "inc0_searchAir", Node: "searchAir"},
-				},
-			},
-		}
-		result := TranslateFromRef("searchAir.offerings", p)
-		assert.Equal(t, "inc0_searchAir.offerings", result)
-	})
-
-	t.Run("node not in plan - unchanged", func(t *testing.T) {
-		p := &Plan{
-			Execution: Execution{
-				Steps: []Step{
-					{Node: "otherNode"},
-				},
-			},
-		}
-		result := TranslateFromRef("searchAir.offerings", p)
-		assert.Equal(t, "searchAir.offerings", result)
-	})
-
-	t.Run("empty ref", func(t *testing.T) {
-		p := &Plan{}
-		result := TranslateFromRef("", p)
-		assert.Equal(t, "", result)
-	})
+		},
+	}
+	assert.Equal(t, "inc0_searchAir.offerings", TranslateFromRefAt("searchAir.offerings", p, 1), "a node becomes its step ID")
+	assert.Equal(t, "missing.offerings", TranslateFromRefAt("missing.offerings", p, 1), "a node not in the plan is unchanged")
+	assert.Equal(t, "", TranslateFromRefAt("", p, 1))
+	assert.Equal(t, "searchAir.offerings", TranslateFromRefAt("searchAir.offerings", nil, 0), "a nil plan")
+	assert.Equal(t, "searchAir.offerings", TranslateFromRefAt("searchAir.offerings", p, 5), "an index outside the plan")
 }
 
 // --- InstantiateAndValidate tests ---
