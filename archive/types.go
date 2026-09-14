@@ -31,6 +31,11 @@ type ArchiveMetadata struct {
 	Attempt          int        `json:"attempt,omitempty"`           // 1-indexed attempt number
 	TotalAttempts    int        `json:"totalAttempts,omitempty"`     // total attempts (omitted if 1)
 	Layers           []string   `json:"layers,omitempty" redact:"-"` // effective layers applied to this run
+	// OASValidation is the OpenAPI validation mode the run used (auto, strict,
+	// or off) when its graph references a spec. It is empty for a graph that
+	// references none, for a run the MCP server executed, and in archives
+	// written before the mode was recorded.
+	OASValidation string `json:"oasValidation,omitempty" redact:"-"`
 }
 
 // StepRecord captures the execution trace for a single step.
@@ -237,6 +242,23 @@ type RunSummary struct {
 	TotalAttempts int            `json:"totalAttempts,omitempty"`
 	Layers        []string       `json:"layers,omitempty"`
 	Issues        map[string]int `json:"issues,omitempty"`
+	// OAS is the run's OpenAPI validation, recorded whenever the archive
+	// records a validation mode, a clean run included.
+	OAS *OASSummary `json:"oas,omitempty"`
+}
+
+// OASSummary is a run's OpenAPI validation in summary.json: the mode, and
+// counts over the run's main, verification, and cleanup steps.
+type OASSummary struct {
+	// Mode is auto, strict, or off, as the archive's metadata records it.
+	Mode string `json:"mode"`
+	// ValidatedRequests and ValidatedResponses count the request and response
+	// bodies checked against the spec. A body the validator skipped, such as
+	// one of a type it doesn't read, isn't counted.
+	ValidatedRequests  int `json:"validatedRequests"`
+	ValidatedResponses int `json:"validatedResponses"`
+	// Violations counts the validation errors found, as issues.oas does.
+	Violations int `json:"violations"`
 }
 
 // ArchiveResult captures the overall outcome of a run.

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
@@ -34,12 +35,44 @@ func TestWriteRunArchive_UnredactableWritesNothing(t *testing.T) {
 		}},
 	}
 
-	path, err := writeRunArchive(result, &plan.Plan{}, env, &graph.Graph{Version: "1"}, dir, nil)
+	path, err := writeRunArchive(result, &plan.Plan{}, env, &graph.Graph{Version: "1"}, dir, nil, "auto")
 	require.Error(t, err)
 	assert.Empty(t, path)
 	entries, err := os.ReadDir(dir)
 	require.NoError(t, err)
 	assert.Empty(t, entries, "no run directory is created")
+}
+
+// TestWriteRunArchive_OASMode checks that the archive, and so its summary,
+// records the OAS validation mode when the graph references a spec, and only
+// then.
+func TestWriteRunArchive_OASMode(t *testing.T) {
+	tests := []struct {
+		name  string
+		graph *graph.Graph
+		want  string
+	}{
+		{name: "a graph with a spec", graph: &graph.Graph{Version: "1", OAS: "openapi.yaml"}, want: "strict"},
+		{name: "a graph without one", graph: &graph.Graph{Version: "1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := &engine.RunResult{Outcome: engine.OutcomePassed}
+			path, err := writeRunArchive(result, &plan.Plan{}, &config.Environment{Name: "us"}, tt.graph, t.TempDir(), nil, "strict")
+			require.NoError(t, err)
+
+			a, err := archive.Read(path)
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, a.Metadata.OASValidation)
+			summary, err := archive.ReadSummary(filepath.Join(filepath.Dir(path), "summary.json"))
+			require.NoError(t, err)
+			if tt.want == "" {
+				assert.Nil(t, summary.OAS)
+			} else {
+				assert.Equal(t, &archive.OASSummary{Mode: tt.want}, summary.OAS)
+			}
+		})
+	}
 }
 
 func writeOverlay(t *testing.T, dir, name, contents string) string {

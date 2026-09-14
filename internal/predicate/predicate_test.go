@@ -515,6 +515,17 @@ func TestEval(t *testing.T) {
 	}
 }
 
+// TestEval_UnknownFieldError checks that a field the context doesn't hold is an
+// *UnknownFieldError naming the field as the predicate writes it.
+func TestEval_UnknownFieldError(t *testing.T) {
+	_, err := Eval(`refund.id == "ref_0001"`, map[string]any{"refund": map[string]any{}})
+	var unknown *UnknownFieldError
+	if assert.ErrorAs(t, err, &unknown) {
+		assert.Equal(t, "refund.id", unknown.Name)
+	}
+	assert.EqualError(t, err, `unknown field "refund.id"`)
+}
+
 func TestEval_Errors(t *testing.T) {
 	tests := []struct {
 		name    string

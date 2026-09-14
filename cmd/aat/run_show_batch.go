@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,6 +31,7 @@ type shownBatch struct {
 	ErrorRuns       int                   `json:"error_runs"`
 	AbortedRuns     int                   `json:"aborted_runs,omitempty"`
 	SkippedRuns     int                   `json:"skipped_runs,omitempty"`
+	OAS             *shownOAS             `json:"oas,omitempty"`
 	Runs            []shownBatchRun       `json:"runs"`
 	Cleanup         []shownCleanupNode    `json:"cleanup,omitempty"`
 	CleanupFailures []shownCleanupFailure `json:"cleanup_failures,omitempty"`
@@ -103,8 +106,8 @@ func shownBatchDir(ref string, archiveDir func() (string, error)) (string, bool,
 	return batchDir, true, nil
 }
 
-// showBatch prints a batch: its totals, one row per run, and what cleanup did
-// across its runs.
+// showBatch prints a batch: its totals and OAS validation counts, one row per
+// run, and what cleanup did across its runs.
 func showBatch(out io.Writer, dir string, format showFormat) error {
 	view, err := buildShownBatch(dir)
 	if err != nil {
@@ -124,7 +127,21 @@ func showBatch(out io.Writer, dir string, format showFormat) error {
 	if view.SkippedRuns > 0 {
 		fmt.Fprintf(&b, ", %d skipped as duplicates", view.SkippedRuns)
 	}
-	b.WriteString("\n\n")
+	b.WriteByte('\n')
+	if view.OAS != nil {
+		fmt.Fprintf(&b, "oas: %s", view.OAS.describe())
+		ran := 0
+		for _, r := range view.Runs {
+			if !r.Skipped && r.Run != "" {
+				ran++
+			}
+		}
+		if view.OAS.Runs < ran {
+			fmt.Fprintf(&b, ", recorded by %d of %d runs", view.OAS.Runs, ran)
+		}
+		b.WriteByte('\n')
+	}
+	b.WriteByte('\n')
 	writeShownBatchRuns(&b, view.Runs)
 	if len(view.Cleanup) > 0 {
 		b.WriteString("\ncleanup:\n")
@@ -150,7 +167,8 @@ func showBatch(out io.Writer, dir string, format showFormat) error {
 	return err
 }
 
-// buildShownBatch reads a batch's batch.json and its runs' archives.
+// buildShownBatch reads a batch's batch.json, and its runs' summaries and
+// archives.
 func buildShownBatch(dir string) (shownBatch, error) {
 	b, err := archive.ReadBatch(filepath.Join(dir, "batch.json"))
 	if err != nil {
@@ -173,6 +191,8 @@ func buildShownBatch(dir string) (shownBatch, error) {
 		view.Batch = filepath.Base(dir)
 	}
 
+	var oasTotal shownOAS
+	oasModes := map[string]bool{}
 	cleanup := map[string]*shownCleanupNode{}
 	node := func(name string) *shownCleanupNode {
 		if cleanup[name] == nil {
@@ -196,6 +216,14 @@ func buildShownBatch(dir string) (shownBatch, error) {
 		})
 		if entry.Skipped || entry.RunID == "" {
 			continue
+		}
+		// Summaries are small, and a run's summary.json holds its OAS counts.
+		if summary, err := archive.ReadSummary(filepath.Join(dir, entry.RunID, "summary.json")); err == nil && summary.OAS != nil {
+			oasModes[summary.OAS.Mode] = true
+			oasTotal.Runs++
+			oasTotal.ValidatedRequests += summary.OAS.ValidatedRequests
+			oasTotal.ValidatedResponses += summary.OAS.ValidatedResponses
+			oasTotal.Violations += summary.OAS.Violations
 		}
 		cleanupSteps, skipped, err := readRunCleanup(filepath.Join(dir, entry.RunID, "archive.json"))
 		if err != nil {
@@ -225,6 +253,10 @@ func buildShownBatch(dir string) (shownBatch, error) {
 		}
 	}
 
+	if oasTotal.Runs > 0 {
+		oasTotal.Mode = strings.Join(slices.Sorted(maps.Keys(oasModes)), "/")
+		view.OAS = &oasTotal
+	}
 	names := make([]string, 0, len(cleanup))
 	for name := range cleanup {
 		names = append(names, name)

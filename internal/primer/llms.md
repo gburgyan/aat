@@ -44,7 +44,7 @@ The recommended sequence for building an AAT project:
 1. **Create the manifest** — `aat-project.yaml` with the graph and templates paths
 2. **Define the graph** — nodes (API operations) with typed inputs, outputs, and ordering
 3. **Write templates** — one per node, defining HTTP request shape and response extraction
-4. **Set up the environment** — base URL, auth credentials, secrets
+4. **Set up the environment** — base URL, auth credentials, secrets, and `settings.oasValidation: strict` when the graph has an OpenAPI spec
 5. **Define workflows** (optional) — reusable test patterns declared in the graph
 6. **Write plans or recipes** — concrete test instances
 7. **Validate** — `aat validate` checks the entire project
@@ -160,7 +160,7 @@ default:
 |-------|----------|-------------|
 | `name` | yes | Output name, referenced as `stepId.outputName` in plans (the step ID defaults to the node name) |
 | `type` | yes | Data type |
-| `optional` | no | If true, the template need not extract it |
+| `optional` | no | If true, the template need not extract it. A path the response lacks leaves the step without the output, and a null value is extracted as null; a `predicate` assertion that names either fails (see Predicate syntax under Assertion Types) |
 | `display` | no | Label that prints the value under the step in run output |
 | `elementFields` | no | For array outputs — describes fields on each element |
 
@@ -340,10 +340,12 @@ headers:
   Accept: application/json
 
 settings:
+  oasValidation: strict       # optional: auto (the default), strict, or off
   minRequestInterval: 250ms   # optional: space request starts for a rate-limited API
 ```
 
-`settings.minRequestInterval` needs a unit (`250ms`, `1s`). One interval covers everything a command sends, including every plan of a `--parallel` batch, retries, verification, and cleanup.
+- **`settings.oasValidation`** sets how runs check request and response bodies against the graph's OpenAPI spec: `auto`, the default, only warns about a violation, `strict` fails the step, and `off` skips validation. Set `strict` once, under `shared:` in a multi-environment file, and every run validates strictly without `--oas-validate`, which overrides the setting for one command.
+- **`settings.minRequestInterval`** needs a unit (`250ms`, `1s`). One interval covers everything a command sends, including every plan of a `--parallel` batch, retries, verification, and cleanup.
 
 That is the single-environment format. A multi-environment file has top-level `shared:` and `environments:` instead, with `extends`, `vars` (`${name}` substitution), and `include`; select one with `--env` or the manifest's `defaultEnvironment`.
 
@@ -494,6 +496,10 @@ assertions:
   - dots for nested fields
   - no `null`, arithmetic, or indexing
   - write `!(a == b)`, not `!a == b`
+- **An output the step didn't produce.** A predicate reads outputs by name, and a name the step has no output for fails the assertion with `unknown field "trackingNumber"`; it doesn't read as "not equal". An `optional` output is missing whenever the response lacks its path, and one extracted as null fails too, with `cannot compare type <nil>`. When an output may be absent:
+  - assert presence with `{type: fieldExists, path: trackingNumber}` when the output must be there; it fails on a missing or null output
+  - keep the name out of predicates on steps whose response may not hold it
+  - or set a flag in a transform, so every run has the output: `outputs.shipped = outputs.trackingNumber ~= nil`, with `shipped` declared on the node, then `shipped == false`
 - **Array length:** a predicate can't count, but a path can.
   - Assert the count directly: `{type: fieldEquals, path: products.#, value: 6}`.
   - Or extract it with the rule `productCount: products.#`, declare `productCount` on the node, and compare it in a predicate.
@@ -920,6 +926,8 @@ aat run batch                 # execute all plans in the plans/ directory
 aat run batch orders/         # execute plans in a subdirectory
 ```
 
+When the graph has an OpenAPI spec, every run validates request and response bodies against it, in the mode `--oas-validate` names, else the environment's `settings.oasValidation`, else `auto`, which only warns. Set `settings.oasValidation: strict` once, so a violation fails its step in every run without the flag. Each run's `summary.json` records the result under `oas`, a clean run included: the mode, the request and response bodies validated, and the violations. `aat run show` prints it under the run's header.
+
 ### Read Output
 
 Archives are written to the manifest's `archives` directory (`_output/runs/` when it is not set, or `--output`). The directory structure:
@@ -949,14 +957,14 @@ aat run show latest --step checkout --outputs           # what the template extr
 aat run show latest --step checkout --resolutions       # where each input's value came from, and why one failed
 aat run show latest --json --compact                    # the step list as one JSON line, for a script
 aat run show latest --response --path error.code        # one part of every step that has it
-aat run show batch-20260914-073904-9036c081             # a batch: totals, a row per run, cleanup counts
+aat run show batch-20260914-112520-9e406b57             # a batch: totals, OAS counts, a row per run, cleanup counts
 ```
 
 - **Learn a response with `--shape` before you write extract rules.**
   - Each line is a gjson path, usable in `response.extract` or with `--path`, followed by its type, array sizes, and a sample value.
   - Array elements are merged. `in 3 of 12` marks a key that only some elements hold, and `string|null` marks a value that is sometimes null. Give those extract entries `optional: true`, or handle them in a transform.
-- **The run** is `latest` (runs inside a batch that is still running included), a run ID, `batch-ID/run-ID`, or a path to a run directory, an `archive.json`, or an `.aar` file. `--step` takes a step ID, or the name of a node that ran once.
-- **A batch:** a batch ID, or a path to a batch directory or its `batch.json`, shows the batch instead. It gives the totals, a row per run, and per cleanup node how many steps ran, failed, and were skipped. Use it rather than reading `batch.json` or looping over archives.
+- **The run** is `latest` (runs inside a batch that is still running included), a run ID, `batch-ID/run-ID`, `batch-ID/PLAN` with a plan name as the batch's PLAN column shows it (`batch-ID/negative/state-machine`), or a path to a run directory, an `archive.json`, or an `.aar` file. A plan that ran as several runs of the batch, one per layer permutation, is an error that lists each run ID with its layers, so name the one you want. `--step` takes a step ID, or the name of a node that ran once.
+- **A batch:** a batch ID, or a path to a batch directory or its `batch.json`, shows the batch instead. It gives the totals, the OAS validation mode with the bodies validated and the violations across its runs, a row per run, and per cleanup node how many steps ran, failed, and were skipped. Use it rather than reading `batch.json` or looping over archives.
 - **Without `--step`,** a part flag or `--path` prints that part of every step that has it, one line each. `aat run show latest --response --path error.code` lists each refused request's code. `--shape` needs `--step`.
 - **Printed parts stop at 64 KB**, with a note on stderr. Narrow them with `--path` or `--shape`, or pass `--max-bytes 0`. `--json` prints the step list or a step as JSON, with `snake_case` keys (`step_id`, `duration_ms`). A step's assertion results are `validation`, as in `archive.json`, whose keys are `camelCase` (`stepId`, `durationMs`).
 - **To hand live state to another tool,** run `aat run plan <plan> --stop-after STEP --dump-state state.json`.
@@ -983,7 +991,8 @@ The archive is the primary debugging artifact. Read it to understand what happen
     "toolVersion": "string",
     "attempt": 1,
     "totalAttempts": 2,
-    "layers": ["string"]
+    "layers": ["string"],
+    "oasValidation": "auto | strict | off"
   },
   "steps": [ StepRecord ],
   "cleanup": [ StepRecord ],
@@ -997,7 +1006,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
 }
 ```
 
-`plan` is the plan as loaded (a recipe's reconstituted plan); `instantiatedPlan` is the plan after graph defaults, layers, and mutations were applied. `attempt`, `totalAttempts`, and `layers` are omitted when unused, and so is `cleanupSkipped` when no cleanup was skipped.
+`plan` is the plan as loaded (a recipe's reconstituted plan); `instantiatedPlan` is the plan after graph defaults, layers, and mutations were applied. `attempt`, `totalAttempts`, and `layers` are omitted when unused, and so is `cleanupSkipped` when no cleanup was skipped. `oasValidation` is the OpenAPI validation mode the run used, omitted when the graph references no spec.
 
 **StepRecord** — one per executed step:
 
@@ -1143,9 +1152,12 @@ A lightweight file for scanning run outcomes without reading the full archive:
   "attempt": 1,
   "totalAttempts": 2,
   "layers": ["string"],
-  "issues": { "oas": 2 }
+  "issues": { "oas": 2 },
+  "oas": { "mode": "auto | strict | off", "validatedRequests": 4, "validatedResponses": 7, "violations": 2 }
 }
 ```
+
+`oas` is recorded whenever the run's graph references an OpenAPI spec, a clean run included, so it shows that validation ran: the mode, the request and response bodies validated (cleanup steps included), and the violations, which `issues.oas` counts too.
 
 ### Batch Schema (batch.json)
 
@@ -1193,7 +1205,7 @@ Aggregated results from `aat run batch`:
 }
 ```
 
-In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts`, `layers`, `issues`, `permutation`, `skipped`, `duplicateOf`, `abortedRuns`, and `skippedRuns` are omitted when unused. `skipped` and `duplicateOf` mark a layer permutation that was skipped as a duplicate of another run.
+In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts`, `layers`, `issues`, `oas`, `permutation`, `skipped`, `duplicateOf`, `abortedRuns`, and `skippedRuns` are omitted when unused. `skipped` and `duplicateOf` mark a layer permutation that was skipped as a duplicate of another run.
 
 ### Common Errors
 

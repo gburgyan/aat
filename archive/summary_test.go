@@ -12,6 +12,74 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestBuildRunSummary_OAS checks that a summary records OpenAPI validation
+// whenever the archive records a mode, a clean run included, and still counts
+// violations in issues.
+func TestBuildRunSummary_OAS(t *testing.T) {
+	valid := &OASPayloadRecord{Valid: true}
+	violation := &OASPayloadRecord{Errors: []OASSchemaError{{Path: "/total", Message: "expected integer"}}}
+	checked := func(req, resp *OASPayloadRecord) *OASValidationRecord {
+		return &OASValidationRecord{OperationID: "op", Request: req, Response: resp}
+	}
+	steps := []StepRecord{
+		{Node: "createCart", OASValidation: checked(valid, valid)},
+		{Node: "listProducts", OASValidation: checked(nil, valid)},
+		{Node: "createReturn", OASValidation: checked(&OASPayloadRecord{Skipped: true, SkipReason: "text/xml"}, valid)},
+		{Node: "getShipment", OASValidation: &OASValidationRecord{Skipped: true, SkipReason: "spec not loaded"}},
+		{Node: "getOrder"},
+	}
+	cleanup := []StepRecord{{Node: "deleteCart", OASValidation: checked(nil, valid)}}
+
+	tests := []struct {
+		name       string
+		mode       string
+		steps      []StepRecord
+		cleanup    []StepRecord
+		wantOAS    *OASSummary
+		wantIssues map[string]int
+	}{
+		{
+			name: "a clean strict run", mode: "strict", steps: steps, cleanup: cleanup,
+			wantOAS: &OASSummary{Mode: "strict", ValidatedRequests: 1, ValidatedResponses: 4},
+		},
+		{
+			name: "a run with violations", mode: "auto", cleanup: cleanup,
+			steps:      append([]StepRecord{{Node: "checkoutCart", OASValidation: checked(violation, violation)}}, steps...),
+			wantOAS:    &OASSummary{Mode: "auto", ValidatedRequests: 2, ValidatedResponses: 5, Violations: 2},
+			wantIssues: map[string]int{"oas": 2},
+		},
+		{name: "validation off", mode: "off", steps: []StepRecord{{Node: "getOrder"}}, wantOAS: &OASSummary{Mode: "off"}},
+		{name: "no mode recorded", steps: steps, cleanup: cleanup},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := BuildRunSummary(&Archive{
+				Metadata: ArchiveMetadata{RunID: "run-oas", OASValidation: tt.mode},
+				Steps:    tt.steps,
+				Cleanup:  tt.cleanup,
+				Result:   ArchiveResult{Outcome: "passed"},
+			})
+			assert.Equal(t, tt.wantOAS, s.OAS)
+			assert.Equal(t, tt.wantIssues, s.Issues)
+		})
+	}
+}
+
+// TestWrite_SummaryOASKeys checks the keys summary.json gives a clean run's
+// OpenAPI validation.
+func TestWrite_SummaryOASKeys(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "run-oas")
+	a := &Archive{Metadata: ArchiveMetadata{RunID: "run-oas", OASValidation: "strict"}, Result: ArchiveResult{Outcome: "passed"}}
+	require.NoError(t, Write(a, filepath.Join(dir, "archive.json")))
+
+	data, err := os.ReadFile(filepath.Join(dir, "summary.json"))
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(data, &doc))
+	assert.Equal(t, map[string]any{"mode": "strict", "validatedRequests": 0.0, "validatedResponses": 0.0, "violations": 0.0}, doc["oas"])
+	assert.NotContains(t, doc, "issues")
+}
+
 func TestBuildRunSummary_AllPassed(t *testing.T) {
 	a := &Archive{
 		Metadata: ArchiveMetadata{

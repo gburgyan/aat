@@ -500,3 +500,49 @@ project. The primer carried them to the second run, whose agent reads it in full
   primer, `docs/user`, CHANGELOG, README, and the CLI's Go sources. No name is new since 983108d, the build before the
   first attempt, apart from `refundTwice`: it is the shop plan's own step ID, shown in the regenerated output.
 - **Checks:** `make check` and `make docs` pass.
+
+## 2026-09-14 — Absent outputs in predicates, plan names in run references, and OAS results in summaries
+
+**What:** three smaller findings from a discovery run's review.
+- **Absent outputs in predicates:** the primer says a predicate that names an output the step didn't produce fails with
+  `unknown field`, and one that names an output extracted as null fails with `cannot compare type <nil>`. It gives three
+  ways to handle an output that may be absent, and its Output Fields table points there. The assertion's message adds
+  `the step produced no output "…"`.
+- **Plan names in run references:** `archive.FindRun` resolves `batch-ID/PLAN`, so `aat run show` and the MCP server's
+  run lookups take the plan name the batch view shows.
+- **OAS results:** the archive's metadata records the validation mode as `oasValidation`, and `summary.json` gains
+  `oas`: `mode`, `validatedRequests`, `validatedResponses`, and `violations`. `aat run show` prints an `oas:` line for a
+  run and totals for a batch. The primer names `settings.oasValidation`.
+
+**Decisions:**
+- **A run ID first, then batch.json's plan names.** Only entries whose run has an archive match, so a skipped duplicate
+  never does, and a batch without `batch.json` has no plan names to match. A run ID read from `batch.json` must pass
+  `CheckDirName`, like the reference itself.
+- **Several matches are an error, not a pick.** `AmbiguousRunError` wraps `ErrAmbiguousRun` and lists each run as
+  `batch-ID/run-ID` with its layers. The CLI exits 2 with it, and MCP returns its message.
+- **The mode in the archive, the counts in the summary.** `summary.json` is derived from `archive.json`, and
+  `aat run rebuild-summaries` rebuilds it, so the mode has to be in the archive. It is recorded whenever the graph
+  references a spec, `off` included. Older archives record none, and so do runs of the MCP server's `execute_plan`,
+  which doesn't validate.
+- **Counts follow `issues`.** A body the validator skipped isn't counted as validated, and `violations` equals
+  `issues.oas`, steps expected to fail included. In the shop's layered batch under `auto`, the 2 violations are the
+  add-item mutations' zero quantity and malformed body.
+- **The batch view sums each run's `summary.json`,** which is small, rather than reading more of each archive. A run
+  whose summary has no `oas` isn't counted, and the line then says `recorded by N of M runs`.
+- **The hint is added where assertions run.** `internal/predicate` returns an `*UnknownFieldError` with the same
+  message. Only the engine's evaluator for assertions over outputs adds the hint, and only when the name's first segment
+  isn't an output. Selection filters, constraints, cleanup `when`, and `raw: true` assertions keep the plain message.
+- **The null case was measured, not assumed.** gjson treats null as present, so an optional rule extracts it as null;
+  only a missing path leaves the output out. The primer names both errors.
+
+**Verification:**
+- `make check`, `make docs`, and `make example-shop` pass.
+- The sweep for discovery-project names in the published sources exits 0.
+- **Against the offline sandbox,** from a scratch shop copy:
+  - `smoke` records `auto`, 4 requests, 7 responses, and 0 violations.
+  - The layered batch's 27 runs total 161 requests, 330 responses, and 2 violations.
+  - `batch-…/full-lifecycle` exits 2 and lists 6 runs, and `batch-…/negative/state-machine` resolves to its one run.
+  - The docs examples are that output.
+
+**Deferred:** the web UI doesn't display `oas` yet, though the run list API carries it. The `--json` run summary and
+`batch.json` don't carry the counts.

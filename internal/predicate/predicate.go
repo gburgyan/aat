@@ -18,6 +18,17 @@ type Predicate struct {
 	root node
 }
 
+// UnknownFieldError reports a predicate that names a field its context doesn't
+// hold. Name is the field as the predicate writes it, dots included.
+type UnknownFieldError struct {
+	Name string
+}
+
+// Error returns `unknown field "name"`.
+func (e *UnknownFieldError) Error() string {
+	return fmt.Sprintf("unknown field %q", e.Name)
+}
+
 // Parse parses expr.
 func Parse(expr string) (*Predicate, error) {
 	tokens, err := tokenize(expr)
@@ -840,7 +851,7 @@ func resolveField(name string, ctx map[string]any) (any, error) {
 		}
 		val, exists := m[part]
 		if !exists {
-			return nil, fmt.Errorf("unknown field %q", name)
+			return nil, &UnknownFieldError{Name: name}
 		}
 		current = val
 	}

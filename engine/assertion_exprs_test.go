@@ -53,6 +53,22 @@ func TestExecuteStep_PredicateLiteralExpands(t *testing.T) {
 	assert.True(t, v.Passed, "%+v", v.Results)
 }
 
+// TestExecuteStep_PredicateNamesMissingOutput checks that a predicate naming an
+// output the step didn't produce says so, while one reading the raw body keeps
+// the predicate's own message.
+func TestExecuteStep_PredicateNamesMissingOutput(t *testing.T) {
+	v := runAssertions(t,
+		plan.MechanicalAssertion{Type: "predicate", Expr: `trackingNumber == "TRK-0001"`},
+		plan.MechanicalAssertion{Type: "predicate", Expr: `sku.code == "SKU-1"`},
+		plan.MechanicalAssertion{Type: "predicate", Expr: `trackingNumber == "TRK-0001"`, Raw: true},
+	)
+	assert.False(t, v.Passed)
+	require.Len(t, v.Results, 3)
+	assert.Equal(t, `predicate evaluation error: unknown field "trackingNumber": the step produced no output "trackingNumber" (an optional output is absent when the response doesn't hold it)`, v.Results[0].Message)
+	assert.NotContains(t, v.Results[1].Message, "produced no output", "sku is an output")
+	assert.Equal(t, `predicate evaluation error: unknown field "trackingNumber"`, v.Results[2].Message)
+}
+
 func TestExecuteStep_AssertionExpressionErrorFailsAssertion(t *testing.T) {
 	v := runAssertions(t,
 		plan.MechanicalAssertion{Type: "fieldEquals", Path: "sku", Value: "{{missingInput}}"},

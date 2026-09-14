@@ -754,6 +754,7 @@ func summaryToRunListEntry(s *archive.RunSummary) RunListEntry {
 		TotalAttempts: s.TotalAttempts,
 		Layers:        s.Layers,
 		Issues:        s.Issues,
+		OAS:           s.OAS,
 	}
 }
 

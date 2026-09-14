@@ -7,6 +7,22 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- `aat run show batch-ID/PLAN` names a plan's run in a batch by the plan name the batch view's PLAN column shows, such
+  as `batch-…/negative/state-machine`. Before, only `batch-ID/run-ID` worked.
+  - A run ID of the batch wins over a plan of the same name, and a permutation skipped as a duplicate doesn't count.
+  - A plan that ran as several runs, such as its layer permutations, exits with code 2 and lists each run as
+    `batch-ID/run-ID` with its layers.
+  - The MCP server's run lookups accept the same, in `get_sample_response`, `inspect_archive`, `analyze_failure`, and
+    `diff_archives`.
+- `summary.json` records a run's OpenAPI validation under `oas` whenever the graph references a spec, a clean run
+  included: `mode`, `validatedRequests` and `validatedResponses` (cleanup steps included), and `violations`. Before,
+  only violations were recorded, in `issues`.
+  - The archive records the mode as `metadata.oasValidation`.
+  - `aat run show` prints an `oas:` line under a run's header, and a batch's totals across its runs under its totals
+    line. `--json` prints them as `oas`.
+  - The web server's run list passes `oas` on.
+- A predicate assertion that names an output the step didn't produce says so, as in `unknown field "trackingNumber":
+  the step produced no output "trackingNumber"`, since an optional output the response didn't hold is absent.
 - `aat run show <batch-id>`, or a path to a batch directory or its `batch.json`, shows the batch. Before, a batch
   reference was an error.
   - It shows the totals, and one row per permutation with its layers, outcome, and step counts.

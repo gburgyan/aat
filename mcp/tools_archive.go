@@ -285,7 +285,7 @@ func (s *Server) registerSampleResponseTool() {
 				mcp.Required(),
 			),
 			mcp.WithString("run_id",
-				mcp.Description("Run to get the response from: a run ID, a batch ID and run ID joined by a slash, or latest (optional — defaults to searching recent archives)"),
+				mcp.Description("Run to get the response from: a run ID, a batch ID joined by a slash to a run ID or to the name of a plan the batch ran, or latest (optional — defaults to searching recent archives)"),
 			),
 			mcp.WithString("path",
 				mcp.Description("gjson path selecting part of the response body, such as data.items.0 or data.items.#.id (optional)"),
@@ -535,18 +535,22 @@ func (s *Server) formatNoArchiveFallback(nodeName string, node *graph.Node) stri
 }
 
 // loadArchive loads a run's archive from the archive directory: by run ID, by
-// batch ID and run ID joined by a slash, or latest.
+// batch ID joined by a slash to a run ID or a plan name, or latest.
 func loadArchive(archiveDir, runID string) (*archive.Archive, error) {
 	_, a, err := loadRun(archiveDir, runID)
 	return a, err
 }
 
 // loadRun resolves runID with archive.FindRun, which never leaves the archive
-// directory, and reads the run's archive.
+// directory, and reads the run's archive. A plan name with several runs in its
+// batch returns FindRun's error, which lists them.
 func loadRun(archiveDir, runID string) (archive.RunRef, *archive.Archive, error) {
 	run, err := archive.FindRun(archiveDir, runID)
 	if errors.Is(err, archive.ErrRunNotFound) {
 		return run, nil, fmt.Errorf("archive %q not found", runID)
+	}
+	if errors.Is(err, archive.ErrAmbiguousRun) {
+		return run, nil, err
 	}
 	if err != nil {
 		return run, nil, fmt.Errorf("reading archive: %v", err)
