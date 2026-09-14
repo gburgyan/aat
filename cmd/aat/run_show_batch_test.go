@@ -84,6 +84,91 @@ func TestRunShow_BatchView(t *testing.T) {
 	assert.Contains(t, err.Error(), "is a batch, which has no steps of its own")
 }
 
+// writeOASBatch writes a batch of three runs: two layer permutations of the
+// checkout plan, one clean and one with a violation under strict OpenAPI
+// validation, and a smoke run from before the mode was recorded.
+func writeOASBatch(t *testing.T, dir string) {
+	t.Helper()
+	batchDir := filepath.Join(dir, showBatchID)
+	valid := &archive.OASPayloadRecord{Valid: true}
+
+	clean := showTestArchive()
+	clean.Metadata.OASValidation = "strict"
+	clean.Steps[0].OASValidation = &archive.OASValidationRecord{Request: valid, Response: valid}
+	clean.Steps[1].OASValidation = &archive.OASValidationRecord{Request: valid, Response: valid}
+	writeShowArchive(t, batchDir, "run-20260912-110000-aaaa0001", clean)
+
+	violating := showTestArchive()
+	violating.Metadata.OASValidation = "strict"
+	violating.Steps[1].OASValidation = &archive.OASValidationRecord{
+		Response: &archive.OASPayloadRecord{Errors: []archive.OASSchemaError{{Path: "/total", Message: "expected integer"}}},
+	}
+	writeShowArchive(t, batchDir, "run-20260912-110001-aaaa0002", violating)
+
+	writeShowArchive(t, batchDir, "run-20260912-110002-aaaa0003", showTestArchive())
+
+	b := &archive.BatchArchive{
+		Metadata: archive.BatchMetadata{BatchID: showBatchID},
+		Runs: []archive.BatchRunEntry{
+			{PlanName: "checkout", RunID: "run-20260912-110000-aaaa0001", Outcome: "passed", StepCount: 3, PassedCount: 3, Layers: []string{"shipping-standard"}},
+			{PlanName: "checkout", RunID: "run-20260912-110001-aaaa0002", Outcome: "failed", StepCount: 3, PassedCount: 2, FailedCount: 1, Layers: []string{"shipping-express"}},
+			{PlanName: "smoke", RunID: "run-20260912-110002-aaaa0003", Outcome: "passed", StepCount: 3, PassedCount: 3},
+		},
+		Result: archive.BatchResult{Outcome: "failed", TotalRuns: 3, PassedRuns: 2, FailedRuns: 1},
+	}
+	require.NoError(t, archive.WriteBatch(b, filepath.Join(batchDir, "batch.json")))
+}
+
+// TestRunShow_BatchViewOAS checks the batch view's OpenAPI validation totals,
+// summed from its runs' summaries, and a run's oas line.
+func TestRunShow_BatchViewOAS(t *testing.T) {
+	dir := t.TempDir()
+	writeOASBatch(t, dir)
+
+	out, _, err := runShow(t, dir, showBatchID, showOptions{})
+	require.NoError(t, err)
+	assert.Contains(t, out, "runs: 3, 2 passed, 1 failed, 0 errors\n"+
+		"oas: strict, 2 requests and 3 responses validated, 1 violation, recorded by 2 of 3 runs\n\n")
+
+	jsonOut, _, err := runShow(t, dir, showBatchID, showOptions{JSON: true})
+	require.NoError(t, err)
+	var view shownBatch
+	require.NoError(t, json.Unmarshal([]byte(jsonOut), &view))
+	assert.Equal(t, &shownOAS{Mode: "strict", ValidatedRequests: 2, ValidatedResponses: 3, Violations: 1, Runs: 2}, view.OAS)
+
+	runOut, _, err := runShow(t, dir, showBatchID+"/run-20260912-110001-aaaa0002", showOptions{})
+	require.NoError(t, err)
+	assert.Contains(t, runOut, "oas: strict, 0 requests and 1 response validated, 1 violation\n")
+
+	runJSON, _, err := runShow(t, dir, showBatchID+"/run-20260912-110000-aaaa0001", showOptions{JSON: true})
+	require.NoError(t, err)
+	var list shownRunList
+	require.NoError(t, json.Unmarshal([]byte(runJSON), &list))
+	assert.Equal(t, &shownOAS{Mode: "strict", ValidatedRequests: 2, ValidatedResponses: 2}, list.OAS)
+}
+
+// TestRunShow_PlanInBatch names a batch's run by its plan: a plan with one run
+// resolves, and one with several is an error that lists each with its layers.
+func TestRunShow_PlanInBatch(t *testing.T) {
+	dir := t.TempDir()
+	writeOASBatch(t, dir)
+
+	out, _, err := runShow(t, dir, showBatchID+"/smoke", showOptions{})
+	require.NoError(t, err)
+	assert.Regexp(t, `^`+showBatchID+`/run-20260912-110002-aaaa0003  PASSED`, out)
+	assert.NotContains(t, out, "oas:", "a run from before the mode was recorded")
+
+	_, _, err = runShow(t, dir, showBatchID+"/checkout", showOptions{Step: "checkout"})
+	require.ErrorIs(t, err, archive.ErrAmbiguousRun)
+	assert.EqualError(t, err, `plan "checkout" ran as 2 runs in batch `+showBatchID+`; name one of them:
+  `+showBatchID+`/run-20260912-110000-aaaa0001  layers shipping-standard
+  `+showBatchID+`/run-20260912-110001-aaaa0002  layers shipping-express`)
+
+	_, _, err = runShow(t, dir, showBatchID+"/full-lifecycle", showOptions{})
+	require.ErrorIs(t, err, archive.ErrRunNotFound)
+	assert.Contains(t, err.Error(), "batch-ID/plan-name")
+}
+
 func TestRunShow_PartAcrossSteps(t *testing.T) {
 	dir := t.TempDir()
 	writeShowArchive(t, dir, showRunID, showTestArchive())

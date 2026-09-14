@@ -55,7 +55,31 @@ func BuildRunSummary(a *Archive) *RunSummary {
 		TotalAttempts: a.Metadata.TotalAttempts,
 		Layers:        a.Metadata.Layers,
 		Issues:        issues,
+		OAS:           buildOASSummary(a.Metadata.OASValidation, allSteps, issues["oas"]),
 	}
+}
+
+// buildOASSummary counts the OpenAPI validation of steps, which found
+// violations errors, under mode. It returns nil when mode is empty: the graph
+// references no spec, or the archive predates the mode.
+func buildOASSummary(mode string, steps []StepRecord, violations int) *OASSummary {
+	if mode == "" {
+		return nil
+	}
+	s := &OASSummary{Mode: mode, Violations: violations}
+	for _, step := range steps {
+		v := step.OASValidation
+		if v == nil || v.Skipped {
+			continue
+		}
+		if v.Request != nil && !v.Request.Skipped {
+			s.ValidatedRequests++
+		}
+		if v.Response != nil && !v.Response.Skipped {
+			s.ValidatedResponses++
+		}
+	}
+	return s
 }
 
 // WriteSummary writes a RunSummary as JSON to the given path.

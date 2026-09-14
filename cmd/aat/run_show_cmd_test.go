@@ -275,5 +275,5 @@ func TestRunShow_Batch(t *testing.T) {
 func TestRunShow_RunNotFound(t *testing.T) {
 	_, _, err := runShow(t, t.TempDir(), "run-missing", showOptions{})
 	require.ErrorIs(t, err, archive.ErrRunNotFound)
-	assert.Contains(t, err.Error(), "a run is latest, a run ID, batch-ID/run-ID, or a path")
+	assert.Contains(t, err.Error(), "a run is latest, a run ID, batch-ID/run-ID, batch-ID/plan-name, or a path")
 }

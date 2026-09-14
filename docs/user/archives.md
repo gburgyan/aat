@@ -39,7 +39,7 @@ Directory names are `run-` or `batch-`, the local date and time (`YYYYMMDD-HHMMS
 |------|----------|
 | `archive.json` | The full record of the run. With `--retries`, the final attempt |
 | `attempt-NN.json` | An earlier attempt that `--retries` retried (`attempt-01.json`, `attempt-02.json`, …), in the same format as `archive.json`. Present only when the run was retried |
-| `summary.json` | A small summary the web UI reads for its lists: run ID, timestamp, outcome, step counts, duration, plan name, attempt numbers, layers, and `issues` counts. Derived from `archive.json`; see [Rebuilding Summaries](#rebuilding-summaries-aat-run-rebuild-summaries) |
+| `summary.json` | A small summary the web UI reads for its lists: run ID, timestamp, outcome, step counts, duration, plan name, attempt numbers, layers, `issues` counts, and `oas`: the [OpenAPI validation](running.md#oas-validation) `mode`, `validatedRequests` and `validatedResponses`, and `violations`, recorded whenever the graph references a spec, a clean run included. Derived from `archive.json`; see [Rebuilding Summaries](#rebuilding-summaries-aat-run-rebuild-summaries) |
 | `batch.json` | Batch metadata (batch ID, source directory, layers, layer groups), one entry per run including skipped duplicates (plan name, run ID, outcome, counts, layers, permutation, `duplicateOf`), and the aggregate result |
 
 ## What an Archive Contains
@@ -48,7 +48,7 @@ Directory names are `run-` or `batch-`, the local date and time (`YYYYMMDD-HHMMS
 
 | Key | Contents |
 |-----|----------|
-| `metadata` | Run ID, timestamp, environment name, graph version, AAT version, the plan as loaded (`plan`), the plan after graph defaults and layers were merged in (`instantiatedPlan`), the layers applied, and `attempt`/`totalAttempts` for retried runs |
+| `metadata` | Run ID, timestamp, environment name, graph version, AAT version, the plan as loaded (`plan`), the plan after graph defaults and layers were merged in (`instantiatedPlan`), the layers applied, `attempt`/`totalAttempts` for retried runs, and `oasValidation`, the OpenAPI validation mode, when the graph references a spec |
 | `steps` | One record per main and verification step (see below) |
 | `cleanup` | Cleanup step records in the same format; absent when no cleanup ran |
 | `cleanupSkipped` | Registered cleanups that did not run because they were no longer needed: `node`, `cleanupFor`, `reason` (`released` or `when`), and `releasedBy` or `when`. See [API Graphs: Cleanup](graphs.md#cleanup). Absent when none were skipped |
@@ -136,17 +136,19 @@ The run is one of:
 - `latest`: the newest run, runs inside batches included, even those of a batch that is still running
 - a run ID, such as `run-20260910-225958-d819f460`, looked up at the top of the archive directory and then inside each batch
 - a batch ID and a run ID joined by a slash, such as `batch-20260910-225919-0754c0ea/run-20260910-225919-5a04ca45`
+- a batch ID and a plan name joined by a slash, as the batch view's PLAN column shows the plan, such as `batch-20260910-225919-0754c0ea/negative/state-machine`: the plan's run in that batch. A run ID of the batch wins over a plan of the same name, and a permutation skipped as a duplicate has no run. A plan that ran as several runs, such as its layer permutations, exits with code `2` and lists them (see [A Batch](#a-batch))
 - a path to a run directory, an `archive.json` or `attempt-NN.json`, or an exported `.aar` file
 - a batch ID, such as `batch-20260910-225919-0754c0ea`, or a path to a batch directory or its `batch.json`, which shows the batch instead of a run (see [A Batch](#a-batch))
 
 IDs are looked up in the archive directory, as [Where Archives Go](#where-archives-go) describes.
 
-Without `--step`, it lists the steps: ID, node, HTTP status, pass or fail, duration, and output names, then the verification steps and the cleanup steps, each with the step it releases. After the shop's `smoke` recipe:
+Without `--step`, it lists the steps: ID, node, HTTP status, pass or fail, duration, and output names, then the verification steps and the cleanup steps, each with the step it releases. Above them, the header names the plan and the archive, and, when the graph references an OpenAPI spec, what validation checked. After the shop's `smoke` recipe:
 
 ```
-run-20260912-224235-0842d2b8  PASSED  2ms
+run-20260914-112509-419e1d5f  PASSED  2ms
 plan: Buy one in-stock product and pay by card
-archive: /path/to/shop/_output/runs/run-20260912-224235-0842d2b8/archive.json
+archive: /path/to/shop/_output/runs/run-20260914-112509-419e1d5f/archive.json
+oas: auto, 4 requests and 7 responses validated, 0 violations
 
   #  STEP           NODE           STATUS  RESULT     TIME  OUTPUTS
   1  listProducts   listProducts      200  pass        0ms  currency, products
@@ -248,17 +250,20 @@ A path that matches nothing, an unknown step, or an unknown run exits with code 
 
 ### A Batch
 
-A batch ID, or a path to a batch directory or its `batch.json`, shows the batch: its totals from `batch.json`, one row per permutation, and what cleanup did across its runs.
+A batch ID, or a path to a batch directory or its `batch.json`, shows the batch: its totals from `batch.json`, OpenAPI validation totals across its runs, one row per permutation, and what cleanup did across its runs.
 
 ```
-$ aat run show batch-20260914-073904-9036c081
-batch-20260914-073904-9036c081  PASSED  27.8s
-batch: _output/runs/batch-20260914-073904-9036c081/batch.json
+$ aat run show batch-20260914-112520-9e406b57
+batch-20260914-112520-9e406b57  PASSED  27.4s
+batch: _output/runs/batch-20260914-112520-9e406b57/batch.json
 runs: 63, 27 passed, 0 failed, 0 errors, 36 skipped as duplicates
+oas: auto, 161 requests and 330 responses validated, 2 violations
 
   #  RUN                           PLAN                         LAYERS                                             RESULT  STEPS     TIME
-  1  run-20260914-073904-22298000  full-lifecycle               -                                                  pass    15/15     2.5s
-  2  run-20260914-073906-46cef92e  full-lifecycle               basket-apparel                                     pass    15/15     2.1s
+  1  run-20260914-112520-74bbc499  full-lifecycle               -                                                  pass    15/15     2.5s
+  2  run-20260914-112523-9369a809  full-lifecycle               basket-apparel                                     pass    15/15     2.2s
+  ...
+ 14  run-20260914-112546-ff31eb17  negative/state-machine       -                                                  pass    16/16      3ms
   ...
  28  -                             full-lifecycle               shipping-standard,basket-apparel                   skip        -        -  duplicate of full-lifecycle [basket-apparel]
   ...
@@ -273,7 +278,33 @@ cleanup:
 - **RELEASED** and **WHEN** count the pairings skipped: because a step released the resource, or because the pairing's `when` was false.
 - **Cleanup failures:** a `cleanup failures:` list names each failed cleanup step by run, with its status or error.
 - **`--json`** prints the same as a document with `snake_case` keys.
-- **Steps:** a batch has no steps of its own, so `--step` and the part flags need a run: `batch-ID/run-ID`.
+- **OAS:** the `oas:` line sums the `oas` counts in the runs' `summary.json` files: the mode, the request and response bodies validated, and the violations. It appears when a run recorded them, and ends `recorded by N of M runs` when not every run did, such as a run from before AAT recorded them. `--json` prints it as `oas`, with `runs`.
+  - Violations include those of steps expected to fail, which never fail a step. The 2 above are the shop's add-item mutations, which send a zero quantity and a malformed body on purpose.
+- **Steps:** a batch has no steps of its own, so `--step` and the part flags need a run: `batch-ID/run-ID`, or `batch-ID/PLAN` for a plan with one run in the batch.
+
+A plan name from the PLAN column names the plan's run:
+
+```
+$ aat run show batch-20260914-112520-9e406b57/negative/state-machine
+batch-20260914-112520-9e406b57/run-20260914-112546-ff31eb17  PASSED  3ms
+plan: The order state machine refuses out-of-order transitions
+archive: /path/to/shop/_output/runs/batch-20260914-112520-9e406b57/run-20260914-112546-ff31eb17/archive.json
+oas: auto, 12 requests and 18 responses validated, 0 violations
+...
+```
+
+A plan that ran as several runs, such as the permutations of a layered batch, exits with code `2` and lists them:
+
+```
+$ aat run show batch-20260914-112520-9e406b57/full-lifecycle --step checkout
+aat: plan "full-lifecycle" ran as 6 runs in batch batch-20260914-112520-9e406b57; name one of them:
+  batch-20260914-112520-9e406b57/run-20260914-112520-74bbc499  no layers
+  batch-20260914-112520-9e406b57/run-20260914-112523-9369a809  layers basket-apparel
+  batch-20260914-112520-9e406b57/run-20260914-112525-46a3dd76  layers shipping-express,basket-apparel
+  batch-20260914-112520-9e406b57/run-20260914-112527-60ccacd7  layers basket-gear
+  batch-20260914-112520-9e406b57/run-20260914-112529-32fa0acc  layers shipping-express,basket-gear
+  batch-20260914-112520-9e406b57/run-20260914-112531-f9449320  layers shipping-express
+```
 
 ## Exporting and Importing
 

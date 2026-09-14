@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	aat "github.com/gburgyan/aat"
+	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/internal/sandbox/shop"
@@ -315,6 +316,20 @@ func TestShopExample(t *testing.T) {
 		out.Reset()
 		require.NoError(t, runShowCommand("latest", archiveDir, showOptions{Step: "checkout", Part: "outputs", Path: "orderId"}, &out, io.Discard))
 		assert.Regexp(t, `^"ord_\w+"\n$`, out.String())
+
+		// A clean strict run records its OpenAPI validation, not only violations.
+		summary, err := archive.ReadSummary(filepath.Join(filepath.Dir(res.archivePath), "summary.json"))
+		require.NoError(t, err)
+		require.NotNil(t, summary.OAS)
+		assert.Equal(t, "strict", summary.OAS.Mode)
+		assert.Positive(t, summary.OAS.ValidatedRequests)
+		assert.Positive(t, summary.OAS.ValidatedResponses)
+		assert.Zero(t, summary.OAS.Violations)
+		assert.Empty(t, summary.Issues)
+
+		out.Reset()
+		require.NoError(t, runShowCommand("latest", archiveDir, showOptions{}, &out, io.Discard))
+		assert.Regexp(t, `(?m)^oas: strict, \d+ requests? and \d+ responses? validated, 0 violations$`, out.String())
 	})
 
 	t.Run("published kit", func(t *testing.T) {

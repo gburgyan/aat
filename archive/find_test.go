@@ -114,6 +114,85 @@ func TestFindRun(t *testing.T) {
 	}
 }
 
+// TestFindRun_PlanInBatch resolves a batch ID and a plan name, as batch.json
+// records it, to the plan's run in the batch.
+func TestFindRun_PlanInBatch(t *testing.T) {
+	dir := t.TempDir()
+	const batch = "batch-20260912-110000-bbbb0001"
+	const (
+		smokeRun    = "run-20260912-110001-aaaa0001"
+		standardRun = "run-20260912-110002-aaaa0002"
+		expressRun  = "run-20260912-110003-aaaa0003"
+		oddRun      = "run-20260912-110004-aaaa0004"
+		fullRun     = "run-20260912-110005-aaaa0005"
+	)
+	for _, id := range []string{smokeRun, standardRun, expressRun, oddRun, fullRun} {
+		writeFindRun(t, dir, batch+"/"+id, at(11))
+	}
+	writeFindRun(t, dir, "run-20260912-100000-aaaa0009", at(10))
+	b := &BatchArchive{
+		Metadata: BatchMetadata{BatchID: batch},
+		Runs: []BatchRunEntry{
+			{PlanName: "smoke", RunID: smokeRun, Outcome: "passed"},
+			{PlanName: "negative/state-machine", RunID: standardRun, Outcome: "passed", Layers: []string{"shipping-standard"}},
+			{PlanName: "negative/state-machine", RunID: expressRun, Outcome: "failed", Layers: []string{"shipping-express"}},
+			{PlanName: "full-lifecycle", RunID: fullRun, Outcome: "passed", Layers: []string{"shipping-standard"}},
+			{PlanName: "full-lifecycle", Outcome: "skipped", Layers: []string{"shipping-express"}, Skipped: true, DuplicateOf: "full-lifecycle [shipping-standard]"},
+			// A plan named like another run's ID.
+			{PlanName: smokeRun, RunID: oddRun, Outcome: "passed"},
+			// A run whose directory holds no archive, and one outside the batch.
+			{PlanName: "resilience", RunID: "run-20260912-110006-aaaa0006", Outcome: "error"},
+			{PlanName: "escape", RunID: "../run-20260912-100000-aaaa0009", Outcome: "passed"},
+		},
+	}
+	require.NoError(t, WriteBatch(b, filepath.Join(dir, batch, "batch.json")))
+
+	tests := []struct {
+		name      string
+		ref       string
+		want      string   // the run's reference, when one is found
+		ambiguous []string // the run IDs an ambiguous reference lists
+		notFound  bool
+	}{
+		{name: "a plan with one run", ref: batch + "/smoke", want: batch + "/" + smokeRun},
+		{name: "a skipped duplicate doesn't count", ref: batch + "/full-lifecycle", want: batch + "/" + fullRun},
+		{name: "a run ID wins over a plan name", ref: batch + "/" + smokeRun, want: batch + "/" + smokeRun},
+		{name: "a plan with several runs", ref: batch + "/negative/state-machine", ambiguous: []string{standardRun, expressRun}},
+		{name: "no such plan", ref: batch + "/checkout", notFound: true},
+		{name: "a plan whose run has no archive", ref: batch + "/resilience", notFound: true},
+		{name: "a run outside the batch", ref: batch + "/escape", notFound: true},
+		{name: "an empty plan name", ref: batch + "/", notFound: true},
+		{name: "a batch without batch.json", ref: "batch-20260912-120000-bbbb0002/smoke", notFound: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run, err := FindRun(dir, tt.ref)
+			switch {
+			case tt.notFound:
+				assert.ErrorIs(t, err, ErrRunNotFound)
+			case tt.ambiguous != nil:
+				var ambiguous *AmbiguousRunError
+				require.ErrorAs(t, err, &ambiguous)
+				assert.ErrorIs(t, err, ErrAmbiguousRun)
+				ids := make([]string, 0, len(ambiguous.Runs))
+				for _, r := range ambiguous.Runs {
+					ids = append(ids, r.RunID)
+				}
+				assert.Equal(t, tt.ambiguous, ids)
+			default:
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, run.Ref())
+				assert.FileExists(t, run.ArchivePath)
+			}
+		})
+	}
+
+	_, err := FindRun(dir, batch+"/negative/state-machine")
+	assert.EqualError(t, err, `plan "negative/state-machine" ran as 2 runs in batch `+batch+`; name one of them:
+  `+batch+`/`+standardRun+`  layers shipping-standard
+  `+batch+`/`+expressRun+`  layers shipping-express`)
+}
+
 func TestFindRun_LatestWithoutRuns(t *testing.T) {
 	_, err := FindRun(t.TempDir(), "latest")
 	assert.ErrorIs(t, err, ErrRunNotFound)

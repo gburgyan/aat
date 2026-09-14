@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/gburgyan/aat/archive"
 )
 
 // Sentinel errors for service methods.
@@ -15,20 +17,21 @@ var (
 
 // RunListEntry is a summary of a single run for list display.
 type RunListEntry struct {
-	RunID         string         `json:"runId"`
-	Timestamp     time.Time      `json:"timestamp"`
-	Outcome       string         `json:"outcome"`
-	StepCount     int            `json:"stepCount"`
-	PassedCount   int            `json:"passedCount"`
-	FailedCount   int            `json:"failedCount"`
-	DurationMs    int64          `json:"durationMs"`
-	PlanName      string         `json:"planName,omitempty"`
-	BatchID       string         `json:"batchId,omitempty"`
-	Attempt       int            `json:"attempt,omitempty"`
-	TotalAttempts int            `json:"totalAttempts,omitempty"`
-	Name          string         `json:"name,omitempty"`
-	Layers        []string       `json:"layers,omitempty"`
-	Issues        map[string]int `json:"issues,omitempty"`
+	RunID         string              `json:"runId"`
+	Timestamp     time.Time           `json:"timestamp"`
+	Outcome       string              `json:"outcome"`
+	StepCount     int                 `json:"stepCount"`
+	PassedCount   int                 `json:"passedCount"`
+	FailedCount   int                 `json:"failedCount"`
+	DurationMs    int64               `json:"durationMs"`
+	PlanName      string              `json:"planName,omitempty"`
+	BatchID       string              `json:"batchId,omitempty"`
+	Attempt       int                 `json:"attempt,omitempty"`
+	TotalAttempts int                 `json:"totalAttempts,omitempty"`
+	Name          string              `json:"name,omitempty"`
+	Layers        []string            `json:"layers,omitempty"`
+	Issues        map[string]int      `json:"issues,omitempty"`
+	OAS           *archive.OASSummary `json:"oas,omitempty"` // the run's OpenAPI validation, from summary.json
 }
 
 // RunDetail is the full overview of a single run.

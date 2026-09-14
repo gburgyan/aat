@@ -44,6 +44,16 @@ func loadOASCache(g *graph.Graph, graphPath, mode string, warn io.Writer) (*oas.
 	return cache, nil
 }
 
+// archiveOASMode returns the OAS validation mode a run's archive records: mode
+// when the graph references an OpenAPI spec, whether or not the spec loads, and
+// nothing when it references none, since no step could be validated.
+func archiveOASMode(g *graph.Graph, mode string) string {
+	if len(collectOASSpecPaths(g)) == 0 {
+		return ""
+	}
+	return mode
+}
+
 // specOperationIDs returns the operationIds of the graph's nodes that use the
 // spec at specRef, sorted. Only these operations are validated at run time.
 func specOperationIDs(g *graph.Graph, specRef string) []string {

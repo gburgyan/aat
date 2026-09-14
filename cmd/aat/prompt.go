@@ -440,7 +440,7 @@ func executePlan(ctx context.Context, p *plan.Plan, g *graph.Graph, args *prompt
 	result := eng.Run(ctx, p)
 
 	// Write archive
-	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir, effectiveLayers, autoOverlay)
+	archivePath, archiveErr := writeRunArchive(result, p, env, g, args.OutputDir, effectiveLayers, oasMode, autoOverlay)
 	if archiveErr != nil {
 		return archiveErr
 	}

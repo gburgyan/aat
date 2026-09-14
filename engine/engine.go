@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/internal/httpstatus"
+	"github.com/gburgyan/aat/internal/predicate"
 	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 )
@@ -874,10 +876,10 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 			}
 		}
 
-		normalBody := resp.Body
+		normalBody, normalEval := resp.Body, predicateEval
 		if result.Outputs != nil {
 			if ob, err := json.Marshal(result.Outputs); err == nil {
-				normalBody = ob
+				normalBody, normalEval = ob, namingMissingOutputs(predicateEval)
 			}
 		}
 
@@ -885,7 +887,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 
 		if len(normalAssertions) > 0 {
 			nr := validate.RunMechanical(resp.StatusCode, normalBody,
-				withDisplayedExprs(convertAssertions(normalAssertions), ectx), predicateEval, schemaCheck)
+				withDisplayedExprs(convertAssertions(normalAssertions), ectx), normalEval, schemaCheck)
 			merged.Results = append(merged.Results, nr.Results...)
 			if !nr.Passed {
 				merged.Passed = false
@@ -903,6 +905,24 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	}
 
 	return result
+}
+
+// namingMissingOutputs wraps the predicate evaluator of assertions that read a
+// step's outputs. When a predicate names an output the step didn't produce,
+// such as an optional one the response didn't hold, the error says so, since
+// the predicate package's own message doesn't know its fields are outputs.
+func namingMissingOutputs(eval validate.PredicateEvalFunc) validate.PredicateEvalFunc {
+	return func(expr string, outputs map[string]any) (bool, error) {
+		ok, err := eval(expr, outputs)
+		var unknown *predicate.UnknownFieldError
+		if errors.As(err, &unknown) {
+			name, _, _ := strings.Cut(unknown.Name, ".")
+			if _, produced := outputs[name]; !produced {
+				return ok, fmt.Errorf("%w: the step produced no output %q (an optional output is absent when the response doesn't hold it)", err, name)
+			}
+		}
+		return ok, err
+	}
 }
 
 // buildSchemaCheck returns a SchemaCheckFunc that reports the OAS response

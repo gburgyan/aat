@@ -20,6 +20,15 @@ export interface RunListEntry {
   name?: string;
   layers?: string[];
   issues?: Record<string, number>;
+  oas?: OASSummary;
+}
+
+/** A run's OpenAPI validation, from summary.json: the mode and what was checked. */
+export interface OASSummary {
+  mode: string;
+  validatedRequests: number;
+  validatedResponses: number;
+  violations: number;
 }
 
 export interface RunDetail {

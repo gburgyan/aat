@@ -405,20 +405,22 @@ func addHostOverrides(ctx context.Context, router *engine.ExecutorRouter, apiBas
 }
 
 // writeRunArchive creates a run archive in the output directory and returns
-// the archive path. The secrets of the environment, the plan, and any overlays
-// the run used (nil entries are skipped) are redacted.
-func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string, layers []string, overlays ...*config.OverlayFile) (string, error) {
+// the archive path. oasMode is the run's OAS validation mode, recorded when the
+// graph references a spec. The secrets of the environment, the plan, and any
+// overlays the run used (nil entries are skipped) are redacted.
+func writeRunArchive(result *engine.RunResult, p *plan.Plan, env *config.Environment, g *graph.Graph, outputDir string, layers []string, oasMode string, overlays ...*config.OverlayFile) (string, error) {
 	secrets := config.RunSecrets(env, p.Auth, overlays...)
 	runID := archive.GenerateRunID()
 	meta := archive.ArchiveMetadata{
-		Version:      "1.0.0",
-		RunID:        runID,
-		Timestamp:    time.Now(),
-		Plan:         p,
-		Environment:  env.Name,
-		GraphVersion: g.Version,
-		ToolVersion:  version.Effective(),
-		Layers:       layers,
+		Version:       "1.0.0",
+		RunID:         runID,
+		Timestamp:     time.Now(),
+		Plan:          p,
+		Environment:   env.Name,
+		GraphVersion:  g.Version,
+		ToolVersion:   version.Effective(),
+		Layers:        layers,
+		OASValidation: archiveOASMode(g, oasMode),
 	}
 	arc, err := engine.ToArchive(result, meta, env.APIBaseURL, secrets)
 	if err != nil {
@@ -1010,6 +1012,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		Attempt:       attempt,
 		TotalAttempts: totalAttempts,
 		Layers:        effectiveLayers,
+		OASValidation: archiveOASMode(rctx.Graph, rctx.OASValidateMode),
 	}
 	archivePath := filepath.Join(runDir, "archive.json")
 	arc, archiveErr := engine.ToArchive(result, meta, rctx.Env.APIBaseURL, secrets)

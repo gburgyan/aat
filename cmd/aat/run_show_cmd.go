@@ -27,7 +27,7 @@ const defaultShowMaxBytes = 64 * 1024
 
 // runShowCmd prints what a run archive recorded, without a browser.
 var runShowCmd = &cobra.Command{
-	Use:   "show <run-id|batch-id|batch-id/run-id|latest|path>",
+	Use:   "show <run-id|batch-id|batch-id/run-id|batch-id/plan|latest|path>",
 	Short: "Show a run's steps, or one step's request, response, inputs, or outputs",
 	Long: `Show what a run archive recorded.
 
@@ -43,10 +43,13 @@ instead of its values: each path with its type, array sizes, and a sample
 value, which is the way to learn a large response.
 
 The run is latest (the newest run, runs inside batches included), a run ID, a
-batch ID and a run ID joined by a slash, or a path to a run directory, an
-archive.json, or an exported .aar file. A batch ID, or a path to a batch
-directory or its batch.json, shows the batch: its totals, a row per run, and
-what cleanup did across its runs. IDs are looked up in the archive
+batch ID and a run ID joined by a slash, a batch ID and a plan name as the
+batch's PLAN column shows it (batch-ID/negative/state-machine), or a path to a
+run directory, an archive.json, or an exported .aar file. A plan that ran as
+several runs of the batch, such as its layer permutations, is an error that
+lists them. A batch ID, or a path to a batch directory or its batch.json,
+shows the batch: its totals, OAS validation counts, a row per run, and what
+cleanup did across its runs. IDs are looked up in the archive
 directory: --output, else the manifest's archives, else _output/runs. Archives
 are redacted when they are written, and show prints only what the archive
 holds.`,
@@ -56,7 +59,8 @@ holds.`,
   aat run show latest --step checkout --response --path orderId
   aat run show latest --step checkout --resolutions
   aat run show latest --response --path error.code
-  aat run show batch-20260914-073904-9036c081
+  aat run show batch-20260914-112520-9e406b57
+  aat run show batch-20260914-112520-9e406b57/negative/state-machine --response --path error.code
   aat run show _output/runs/run-20260910-230852-8b2139bc/archive.json --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -183,7 +187,7 @@ func runShowCommand(ref string, archiveDir func() (string, error), opts showOpti
 	}
 	if isBatch {
 		if opts.Step != "" || opts.Part != "" {
-			return fmt.Errorf("%s is a batch, which has no steps of its own; name one of its runs as batch-ID/run-ID", ref)
+			return fmt.Errorf("%s is a batch, which has no steps of its own; name one of its runs as batch-ID/run-ID or batch-ID/plan-name", ref)
 		}
 		return showBatch(out, batchDir, opts.format())
 	}
@@ -225,7 +229,7 @@ func loadShownArchive(ref string, archiveDir func() (string, error)) (*archive.A
 	}
 	run, err := archive.FindRun(dir, ref)
 	if errors.Is(err, archive.ErrRunNotFound) {
-		return nil, shownRun{}, fmt.Errorf("%w (a run is latest, a run ID, batch-ID/run-ID, or a path to a run directory, archive.json, or .aar file)", err)
+		return nil, shownRun{}, fmt.Errorf("%w (a run is latest, a run ID, batch-ID/run-ID, batch-ID/plan-name, or a path to a run directory, archive.json, or .aar file)", err)
 	}
 	if err != nil {
 		return nil, shownRun{}, err
@@ -377,9 +381,37 @@ type shownRunList struct {
 	Attempt        int                  `json:"attempt,omitempty"`
 	TotalAttempts  int                  `json:"total_attempts,omitempty"`
 	OtherAttempts  []string             `json:"other_attempts,omitempty"`
+	OAS            *shownOAS            `json:"oas,omitempty"`
 	Steps          []shownStepRow       `json:"steps"`
 	Cleanup        []shownStepRow       `json:"cleanup,omitempty"`
 	CleanupSkipped []CleanupSkipSummary `json:"cleanup_skipped,omitempty"`
+}
+
+// shownOAS is a run's OpenAPI validation, or its sum across a batch's runs, as
+// aat run show prints it.
+type shownOAS struct {
+	Mode               string `json:"mode"`
+	ValidatedRequests  int    `json:"validated_requests"`
+	ValidatedResponses int    `json:"validated_responses"`
+	Violations         int    `json:"violations"`
+	// Runs, in a batch, counts the runs whose summaries record OAS validation.
+	Runs int `json:"runs,omitempty"`
+}
+
+// newShownOAS returns a run summary's OAS validation as aat run show prints
+// it, or nil when the summary records none.
+func newShownOAS(s *archive.OASSummary) *shownOAS {
+	if s == nil {
+		return nil
+	}
+	return &shownOAS{Mode: s.Mode, ValidatedRequests: s.ValidatedRequests, ValidatedResponses: s.ValidatedResponses, Violations: s.Violations}
+}
+
+// describe says what OAS validation checked, as in "strict, 4 requests and 7
+// responses validated, 0 violations".
+func (o *shownOAS) describe() string {
+	return fmt.Sprintf("%s, %s and %s validated, %s", o.Mode,
+		pluralize(o.ValidatedRequests, "request"), pluralize(o.ValidatedResponses, "response"), pluralize(o.Violations, "violation"))
 }
 
 // showRun prints a run's step list.
@@ -407,6 +439,9 @@ func showRun(out io.Writer, a *archive.Archive, src shownRun, format showFormat)
 	}
 	if len(list.OtherAttempts) > 0 {
 		fmt.Fprintf(&b, "other attempts: %s\n", strings.Join(list.OtherAttempts, ", "))
+	}
+	if list.OAS != nil {
+		fmt.Fprintf(&b, "oas: %s\n", list.OAS.describe())
 	}
 	if list.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", list.Error)
@@ -451,6 +486,7 @@ func buildShownRunList(a *archive.Archive, src shownRun) shownRunList {
 		Attempt:       a.Metadata.Attempt,
 		TotalAttempts: a.Metadata.TotalAttempts,
 		OtherAttempts: src.Attempts,
+		OAS:           newShownOAS(summary.OAS),
 		Steps:         []shownStepRow{},
 	}
 	verificationNodes := map[string]bool{}
