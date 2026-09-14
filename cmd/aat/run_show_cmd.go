@@ -56,7 +56,7 @@ holds.`,
   aat run show latest --step checkout --response --path orderId
   aat run show latest --step checkout --resolutions
   aat run show latest --response --path error.code
-  aat run show batch-20260910-230852-4a6502e8
+  aat run show batch-20260914-073904-9036c081
   aat run show _output/runs/run-20260910-230852-8b2139bc/archive.json --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

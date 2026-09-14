@@ -536,15 +536,15 @@ A cleanup node can have its own `cleanup:`, which makes a chain. The second node
 When a plan may release the resource itself, or leave it in a state the cleanup can't handle, give the pairing as a mapping:
 
 ```yaml
-createPayment:
-  adapter: createPayment
+checkoutCart:
+  adapter: checkoutCart
   cleanup:
-    node: voidPayment
-    when: 'status == "authorized"'   # a predicate over createPayment's outputs
-    releasedBy: [capturePayment]
+    node: cancelOrder
+    when: 'status == "created"'   # a predicate over checkoutCart's outputs
+    releasedBy: [shipOrder]
 ```
 
-- **Released.** The cleanup is skipped when a main step after the creating one succeeded on the cleanup node itself, or on a `releasedBy` node, and sent the same value for every input it shares with the cleanup. An explicit `voidPayment` step needs no `releasedBy`. A step expected to fail, a verification step, and a step for another resource don't count.
+- **Released.** The cleanup is skipped when a main step after the creating one succeeded on the cleanup node itself, or on a `releasedBy` node, and sent the same value for every input it shares with the cleanup. An explicit `cancelOrder` step needs no `releasedBy`. A step expected to fail, a verification step, and a step for another resource don't count.
 - **`when`.** The cleanup is skipped when the predicate is false. It reads only the creating step's outputs, or, for a chained cleanup, the outputs of the cleanup step before it. If it can't be evaluated, the cleanup runs, and its record carries `whenError`.
 - **Skipped.** A skipped cleanup's chain doesn't run. Skips are recorded in the archive's `cleanupSkipped` and show under `cleanup skipped:` in `aat run show`.
 - **Caution.** List in `releasedBy` only nodes whose success always ends the resource. If an API reports a failed release in a successful response, give that node `errorDetection`.
@@ -552,14 +552,14 @@ createPayment:
 To cancel only what is still open when the run ends, chain a read in front of the cancel. In a chain, `when` reads the outputs of the cleanup step before it, so the read supplies the current state:
 
 ```yaml
-createPaymentIntent:
+checkoutCart:
   cleanup:
-    node: reconcilePaymentIntent   # a read that only cleanup uses
-    releasedBy: [capturePaymentIntent, cancelPaymentIntent]
-reconcilePaymentIntent:
+    node: getOrderForCleanup   # a read that only cleanup uses
+    releasedBy: [cancelOrder, shipOrder]
+getOrderForCleanup:
   cleanup:
-    node: cancelPaymentIntent
-    when: 'status in ["requires_payment_method", "requires_capture"]'
+    node: cancelOrder
+    when: 'status in ["created", "paid"]'
 ```
 
 Give that read a node of its own. A main step on a pairing's cleanup node counts as releasing the resource, so reusing a read node that plans call would skip the cleanup whenever a plan reads the resource.
@@ -949,7 +949,7 @@ aat run show latest --step checkout --outputs           # what the template extr
 aat run show latest --step checkout --resolutions       # where each input's value came from, and why one failed
 aat run show latest --json --compact                    # the step list as one JSON line, for a script
 aat run show latest --response --path error.code        # one part of every step that has it
-aat run show batch-20260913-160341-4a6502e8             # a batch: totals, a row per run, cleanup counts
+aat run show batch-20260914-073904-9036c081             # a batch: totals, a row per run, cleanup counts
 ```
 
 - **Learn a response with `--shape` before you write extract rules.**

@@ -401,7 +401,7 @@ name: credit-card
 description: Credit card payment method
 inputs:
   ProcessPayment.method: "credit_card"
-  ProcessPayment.provider: "stripe"
+  ProcessPayment.provider: "card-gateway"
 ```
 
 ```yaml

@@ -75,26 +75,25 @@ A form-encoded body is written as `form:`, a mapping of field names to values, i
 ```yaml
 request:
   method: POST
-  path: /v1/payment_intents
+  path: /returns
   form:
-    amount: "{{amount}}"
-    currency: "{{currency}}"
-    payment_method_types[]: card
-    customer: "{{customer}}"
-    description: "Order {{orderId}}"
-    metadata:
-      created_by: aat
+    order_id: "{{orderId}}"
+    reason: "{{reason}}"
+    skus[]: "{{skus}}"
+    note: "Return for {{orderId}}"
+    source:
+      channel: web
 ```
 
 - **Content-Type.** The request is sent as `application/x-www-form-urlencoded`, replacing an environment or plan `Content-Type`. A template header can add a charset. A template `Content-Type` of another type is an error, and so is a credential or overlay header that changes it.
 - **Encoding.** Every key and value is URL-encoded, and the brackets of a key are kept.
-- **A value that is one placeholder** sends that input's value, and the field is left out when the input has no value: absent, null, `""`, or an empty list or map. With no `customer`, the request above sends no `customer` pair, so an optional field needs no conditional block.
-- **Lists.** A list value repeats the key as written. With `tags` set to `[a, b]`, `tags[]: "{{tags}}"` sends `tags[]=a&tags[]=b`, and `tags: "{{tags}}"` sends `tags=a&tags=b`. A literal list does the same: `expand[]: [customer, latest_charge]`.
-- **Maps.** A nested mapping writes bracketed keys, so the `metadata` above sends `metadata[created_by]=aat`. An input whose value is a map does the same, in key order, and a map or list inside a list writes indexed keys: `items[0][sku]=s1`.
-- **Other text** is rendered and sent as one value: `description=Order+o-17`. A placeholder in it still needs a value, and a value that holds only conditional blocks is left out when they render to nothing.
+- **A value that is one placeholder** sends that input's value, and the field is left out when the input has no value: absent, null, `""`, or an empty list or map. With no `reason`, the request above sends no `reason` pair, so an optional field needs no conditional block.
+- **Lists.** A list value repeats the key as written. With `tags` set to `[a, b]`, `tags[]: "{{tags}}"` sends `tags[]=a&tags[]=b`, and `tags: "{{tags}}"` sends `tags=a&tags=b`. A literal list does the same: `fields[]: [status, total]`.
+- **Maps.** A nested mapping writes bracketed keys, so the `source` above sends `source[channel]=web`. An input whose value is a map does the same, in key order, and a map or list inside a list writes indexed keys: `items[0][sku]=s1`.
+- **Other text** is rendered and sent as one value: `note=Return+for+ord_0017`. A placeholder in it still needs a value, and a value that holds only conditional blocks is left out when they render to nothing.
 - **Not allowed:** placeholders in field names, iteration blocks, and YAML aliases or merge keys. Duplicate fields, and fields that nesting would send twice, are errors when the template loads.
 
-Validation matches an input to the field it fills, so `customer: "{{customerId}}"` counts `customerId` as the spec's `customer` field (see [OAS Alignment](validation.md#oas-alignment)).
+Validation matches an input to the field it fills, so `order_id: "{{orderId}}"` counts `orderId` as the spec's `order_id` field (see [OAS Alignment](validation.md#oas-alignment)).
 
 A form body can also be a `body:` string sent with `Content-Type: application/x-www-form-urlencoded`, written as the query string it sends. Whitespace around it, such as the final newline a `body: |` block keeps, is removed, so write the pairs on one line. Bracketed keys such as `metadata[source]={{source}}` are sent as written, and an iteration block can write one pair per element (see [Iteration Blocks](#iteration-blocks)):
 

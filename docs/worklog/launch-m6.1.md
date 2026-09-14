@@ -468,3 +468,35 @@ field.
 - **A manifest naming missing directories,** validated from a subdirectory:
   - `main` fails with `workflows dir not found: ../../../workflows`.
   - The branch notes `workflows dir workflows doesn't exist yet`.
+
+## 2026-09-14 — Neutral examples: discovery-project material out of the published docs
+
+**What:** the second Stripe discovery run's review found that Phase 3a's docs drew examples from the first run's
+project. The primer carried them to the second run, whose agent reads it in full. Every such example now uses the shop:
+- **The primer:** the cleanup mapping and the read-then-cancel chain use `checkoutCart`, `cancelOrder`, `shipOrder`, and
+  a cleanup-only `getOrderForCleanup`. The batch-view example names a shop batch.
+- **`archives.md`:** the part-across-steps and batch-view examples are real output, from the shop's state-machine plan
+  and a layered shop batch.
+- **`templates.md`:** the `form:` example posts a return.
+- **`value-flow.md`, `plans.md`, and CHANGELOG:** the step-binding examples read `firstCheckout.orderId`, and the layer
+  example names `shipping-express`.
+- **`graphs.md`:** the cleanup example cancels an order.
+- **`generate.md` and `batch-layers.md`:** neither names Stripe any more.
+- **The CLI and code comments:** `aat run show --help` names the same shop batch, and two code comments drop their Stripe
+  examples.
+
+**Decisions:**
+- **Published sources name no discovery project.** A rerun's agent reads the primer and can fetch any docs page, so an
+  example taken from an earlier attempt's project hands the next attempt that design.
+  - The rule that kept Duffel names out of the docs now covers every API with a discovery run.
+  - Tests and fixtures, which no run can read, keep their names.
+  - The roadmap's one-line mention of planned examples stays.
+- **The payment cleanup examples move to orders too,** although they predate the Stripe runs. An authorize, capture, and
+  void pairing is the cleanup a payments API needs, so a payments example would hand that design to a payments run.
+- **Example output is regenerated, not edited,** from the offline sandbox. Only the batch path is shown relative.
+
+**Verification:**
+- **Sweep:** both Stripe attempts' node names, step IDs, layer, plan, and workflow names, and batch IDs, searched in the
+  primer, `docs/user`, CHANGELOG, README, and the CLI's Go sources. No name is new since 983108d, the build before the
+  first attempt, apart from `refundTwice`: it is the shop plan's own step ID, shown in the regenerated output.
+- **Checks:** `make check` and `make docs` pass.

@@ -210,9 +210,16 @@ Without `--step`, a part flag or `--path` prints that part of every step that ha
 
 ```
 $ aat run show latest --response --path error.code
-STEP                  NODE                  VALUE
-captureBeforeConfirm  capturePaymentIntent  "payment_intent_unexpected_state"
-refundTwice           createRefund          "charge_already_refunded"
+STEP                  NODE           VALUE
+unknownCoupon         applyCoupon    "COUPON_INVALID"
+addAfterCheckout      addItem        "CART_NOT_OPEN"
+shipBeforePay         shipOrder      "INVALID_TRANSITION"
+returnBeforeDelivery  createReturn   "INVALID_TRANSITION"
+refundBeforePay       paymentRefund  "PAYMENT_NOT_REFUNDABLE"
+declinedCard          paymentCharge  "CARD_DECLINED"
+payTwice              paymentCharge  "INVALID_TRANSITION"
+shipCancelled         shipOrder      "INVALID_TRANSITION"
+refundTwice           paymentRefund  "PAYMENT_NOT_REFUNDABLE"
 ```
 
 With `--json` or `--compact`, it prints a JSON array of `step_id`, `node`, and `value`. `--shape` still needs `--step`.
@@ -244,21 +251,22 @@ A path that matches nothing, an unknown step, or an unknown run exits with code 
 A batch ID, or a path to a batch directory or its `batch.json`, shows the batch: its totals from `batch.json`, one row per permutation, and what cleanup did across its runs.
 
 ```
-$ aat run show batch-20260913-160341-4a6502e8
-batch-20260913-160341-4a6502e8  PASSED  4m30s
-batch: _output/runs/batch-20260913-160341-4a6502e8/batch.json
-runs: 220, 94 passed, 0 failed, 0 errors, 126 skipped as duplicates
+$ aat run show batch-20260914-073904-9036c081
+batch-20260914-073904-9036c081  PASSED  27.8s
+batch: _output/runs/batch-20260914-073904-9036c081/batch.json
+runs: 63, 27 passed, 0 failed, 0 errors, 36 skipped as duplicates
 
-  #  RUN                           PLAN         LAYERS                  RESULT  STEPS     TIME
-  1  run-20260913-160341-5a04ca45  full-refund  card-visa,currency-usd  pass      9/9     1.2s
-  2  -                             full-refund  card-visa,currency-eur  skip        -        -  duplicate of full-refund [card-visa,currency-usd]
+  #  RUN                           PLAN                         LAYERS                                             RESULT  STEPS     TIME
+  1  run-20260914-073904-22298000  full-lifecycle               -                                                  pass    15/15     2.5s
+  2  run-20260914-073906-46cef92e  full-lifecycle               basket-apparel                                     pass    15/15     2.1s
+  ...
+ 28  -                             full-lifecycle               shipping-standard,basket-apparel                   skip        -        -  duplicate of full-lifecycle [basket-apparel]
   ...
 
 cleanup:
-  NODE                    RAN  FAILED  RELEASED  WHEN
-  cancelPaymentIntent       8       0         0    24
-  deleteCustomer           93       0         1     0
-  reconcilePaymentIntent   32       0        61     0
+  NODE          RAN  FAILED  RELEASED  WHEN
+  deleteCart     27       0         0     0
+  deleteOrder    26       0         0     0
 ```
 
 - **RAN** and **FAILED** count cleanup steps across the runs.

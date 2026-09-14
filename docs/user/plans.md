@@ -691,9 +691,9 @@ An input without a value takes its graph default. A default's `from: node.output
 
 ```yaml
   verification:
-    - node: getCharge
+    - node: getOrder
       values:
-        charge: {from: firstRefund.charge}
+        orderId: {from: firstCheckout.orderId}
 ```
 
 ### Cleanup Steps
