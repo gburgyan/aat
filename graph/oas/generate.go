@@ -346,9 +346,8 @@ func buildPairs(fields []templateField, lead, sep string) string {
 // buildForm returns a request.form with one field per body property, in spec
 // order, each sending its input. A field is left out when its input has no
 // value, so required and optional properties are written alike. An array
-// property the spec encodes as a deepObject, as Stripe's are, is written
-// name[]; any other repeats its plain name. An object value is sent as
-// bracketed keys.
+// property the spec encodes as a deepObject is written name[]; any other
+// repeats its plain name. An object value is sent as bracketed keys.
 func buildForm(body requestBody) ScaffoldForm {
 	form := make(ScaffoldForm, len(body.props))
 	for i, p := range body.props {

@@ -71,8 +71,8 @@ func (v *Validator) WithHeaderInputs(inputs HeaderInputs) *Validator {
 }
 
 // WithFormInputFields makes the input checks match an input to the form field
-// the node's template sends it as, so an input named paymentMethodTypes and sent
-// as payment_method_types[] counts as the payment_method_types field.
+// the node's template sends it as, so an input named returnedSkus and sent as
+// skus[] counts as the skus field.
 func (v *Validator) WithFormInputFields(fields FormInputFields) *Validator {
 	v.formInputFields = fields
 	return v

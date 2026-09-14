@@ -31,15 +31,16 @@ the graph and plan formats may still change before 1.0.
   - A credential or overlay header that changes the Content-Type fails the request.
   - The MCP server's template view shows the form.
 - `aat validate` matches an input that is the whole value of a `form:` field to that field, so a graph can name its
-  inputs its own way: `payment_method_types[]: "{{paymentMethodTypes}}"` counts as the spec's `payment_method_types`,
-  in both the unknown-input and the required-field checks.
+  inputs its own way: `order_id: "{{orderId}}"` counts as the spec's `order_id`, in both the unknown-input and the
+  required-field checks.
 - `aat validate` and `aat run` report a header or `form:` field whose whole value names no input of the node, which
   would never be sent.
-- Verification steps take `values`, as main steps do, to read a particular step: `values: {charge: {from:
-  firstRefund.charge}}`. A reference names a main step, and `aat validate` checks the input names, the references, and
-  the values' shapes.
+- Verification steps take `values`, as main steps do, to read a particular step: `values: {orderId: {from:
+  firstCheckout.orderId}}`. A reference names a main step, and `aat validate` checks the input names, the references,
+  and the values' shapes.
 - `--resolutions` and `aat run show --step` name the layer that set a value. A layer's literal value reads `layer`, and
-  the record carries `layer: currency-jpy` for any value a layer set. The MCP server's `inspect_archive` shows it too.
+  the record carries `layer: shipping-express` for any value a layer set. The MCP server's `inspect_archive` shows it
+  too.
 - `settings.minRequestInterval` paces requests for APIs with rate limits: the starts of any two requests are at
   least that far apart, such as `250ms`. One interval covers everything a command sends, including the plans of
   a parallel batch, retries, verification, and cleanup. `aat prompt` and the MCP server's `execute_plan` honor it

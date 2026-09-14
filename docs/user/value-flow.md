@@ -72,7 +72,7 @@ A graph default's `from: node.output` names a node, and a plan can run that node
 - **On a main step:** the nearest earlier step on that node that isn't expected to fail. With none earlier, the first such step that doesn't depend on it.
 - **On a verification step:** the last step on that node that isn't expected to fail.
 
-So a check after `createRefund` ran once as a refused request and once successfully reads the successful one. To read a particular step, set the value on the step: `charge: {from: firstRefund.charge}`.
+So a check after `checkoutCart` ran once as a refused request and once successfully reads the successful one. To read a particular step, set the value on the step: `orderId: {from: firstCheckout.orderId}`.
 
 ## Array Selection
 

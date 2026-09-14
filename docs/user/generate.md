@@ -214,7 +214,7 @@ Its body is the same as the hand-written one in `examples/shop/templates/payment
 
 An object property is typed `object` and placed as `"shipping": {{shipping}}`. Give it a map, such as a plan value `shipping: {default: {city: Austin}}`, or JSON text. Either one is sent as a nested object.
 
-A **form body** is a [`form:` mapping](templates.md#body) with one field per property, in spec order, such as `orderId: '{{orderId}}'`. AAT leaves a field out when its input has no value, so optional properties need nothing more, and the request is sent as `application/x-www-form-urlencoded` without a `Content-Type` header in the template. An object value, such as a plan value `shipping: {default: {city: Austin}}`, is sent as bracketed keys: `shipping[city]=Austin`. A list value repeats its field, and an array property the spec encodes as a `deepObject`, as Stripe's spec does, is written `name[]`.
+A **form body** is a [`form:` mapping](templates.md#body) with one field per property, in spec order, such as `orderId: '{{orderId}}'`. AAT leaves a field out when its input has no value, so optional properties need nothing more, and the request is sent as `application/x-www-form-urlencoded` without a `Content-Type` header in the template. An object value, such as a plan value `shipping: {default: {city: Austin}}`, is sent as bracketed keys: `shipping[city]=Austin`. A list value repeats its field, and an array property the spec encodes as a `deepObject` is written `name[]`.
 
 These bodies are left for you to write, each with a warning:
 
