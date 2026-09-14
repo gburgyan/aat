@@ -117,7 +117,7 @@ func TestExitCodes(t *testing.T) {
 		{name: "run plan --dump-state-secrets without --dump-state", dir: empty, args: []string{"run", "plan", "smoke", "--dump-state-secrets"}, code: 2, stderr: "--dump-state-secrets requires --dump-state"},
 		{name: "run plan --oas-validate strict with a spec that doesn't load", dir: noSpec, args: []string{"run", "plan", "get-order", "--oas-validate", "strict"}, code: 2, stderr: "strict OAS validation"},
 		{name: "run plan --json --oas-validate strict with a spec that doesn't load", dir: noSpec, args: []string{"run", "plan", "get-order", "--oas-validate", "strict", "--json"}, code: 2, stdout: `"outcome": "error"`},
-		{name: "run show a part without --step", dir: empty, args: []string{"run", "show", "latest", "--response"}, code: 2, stderr: "need --step"},
+		{name: "run show --shape without --step", dir: empty, args: []string{"run", "show", "latest", "--shape"}, code: 2, stderr: "--shape needs --step"},
 		{name: "run show two parts", dir: empty, args: []string{"run", "show", "latest", "--step", "checkout", "--request", "--response"}, code: 2, stderr: "choose one part"},
 		{name: "run show an unknown run", dir: empty, args: []string{"run", "show", "run-missing"}, code: 2, stderr: "run not found"},
 		{name: "run batch with a bad --var", dir: empty, args: []string{"run", "batch", "--var", "novalue"}, code: 2},

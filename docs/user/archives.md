@@ -137,6 +137,7 @@ The run is one of:
 - a run ID, such as `run-20260910-225958-d819f460`, looked up at the top of the archive directory and then inside each batch
 - a batch ID and a run ID joined by a slash, such as `batch-20260910-225919-0754c0ea/run-20260910-225919-5a04ca45`
 - a path to a run directory, an `archive.json` or `attempt-NN.json`, or an exported `.aar` file
+- a batch ID, such as `batch-20260910-225919-0754c0ea`, or a path to a batch directory or its `batch.json`, which shows the batch instead of a run (see [A Batch](#a-batch))
 
 IDs are looked up in the archive directory, as [Where Archives Go](#where-archives-go) describes.
 
@@ -202,8 +203,19 @@ These flags print one part of the step instead:
 | `--path PATH` | Only what a [gjson path](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) selects: `lines.0.sku`, or `lines.#.sku` for every element. The `$.lines[0].sku` form works too. Without a part flag, it reads the response body |
 | `--shape` | The part's structure instead of its values. Without a part flag, the response body's |
 | `--max-bytes N` | Cut a printed part after `N` bytes, 65536 by default, with a note on stderr; `0` prints everything |
-| `--json` | The step list or the step as JSON with `snake_case` keys, or the shape as a JSON array. A step's JSON includes `resolutions` and `warnings` |
+| `--json` | The step list or the step as JSON with `snake_case` keys, or the shape as a JSON array. A step's JSON includes `resolutions`, `warnings`, and `validation`, its assertion results as `archive.json` names them (`archive.json` itself uses `camelCase` keys) |
 | `--compact` | JSON on one line, for a script or `jq`: a part, with or without `--path`, and with `--json` the step list, the step, or the shape. With `--shape`, or without a part, it needs `--json` |
+
+Without `--step`, a part flag or `--path` prints that part of every step that has it, cleanup steps included, one line each. One command then answers a question about the whole run:
+
+```
+$ aat run show latest --response --path error.code
+STEP                  NODE                  VALUE
+captureBeforeConfirm  capturePaymentIntent  "payment_intent_unexpected_state"
+refundTwice           createRefund          "charge_already_refunded"
+```
+
+With `--json` or `--compact`, it prints a JSON array of `step_id`, `node`, and `value`. `--shape` still needs `--step`.
 
 `--shape` is the way to learn a large response. It prints one line per path: the path's type, an array's item count, how many objects hold a key when not all of them do, and a sample value. The elements of an array are merged, so a key that only some elements hold, or a value that is sometimes `null` (`string|null`), shows up. Each path works as an extract rule in a [template](templates.md) and as `--path`:
 
@@ -226,6 +238,34 @@ createdAt          string  "2026-09-13T03:42:35Z"
 Archives several hundred megabytes in size still list their steps in under a second, and so does the shape of a response tens of megabytes long.
 
 A path that matches nothing, an unknown step, or an unknown run exits with code `2`, and the message says what does exist: the top-level keys, the step IDs, or the forms a run reference takes. Archives are redacted when they are written, so `aat run show` prints only what the archive holds; see [What Is Redacted, and What Is Not](#what-is-redacted-and-what-is-not). The MCP server's `get_sample_response` takes the same `path` and `shape`; see [MCP Server](mcp-server.md).
+
+### A Batch
+
+A batch ID, or a path to a batch directory or its `batch.json`, shows the batch: its totals from `batch.json`, one row per permutation, and what cleanup did across its runs.
+
+```
+$ aat run show batch-20260913-160341-4a6502e8
+batch-20260913-160341-4a6502e8  PASSED  4m30s
+batch: _output/runs/batch-20260913-160341-4a6502e8/batch.json
+runs: 220, 94 passed, 0 failed, 0 errors, 126 skipped as duplicates
+
+  #  RUN                           PLAN         LAYERS                  RESULT  STEPS     TIME
+  1  run-20260913-160341-5a04ca45  full-refund  card-visa,currency-usd  pass      9/9     1.2s
+  2  -                             full-refund  card-visa,currency-eur  skip        -        -  duplicate of full-refund [card-visa,currency-usd]
+  ...
+
+cleanup:
+  NODE                    RAN  FAILED  RELEASED  WHEN
+  cancelPaymentIntent       8       0         0    24
+  deleteCustomer           93       0         1     0
+  reconcilePaymentIntent   32       0        61     0
+```
+
+- **RAN** and **FAILED** count cleanup steps across the runs.
+- **RELEASED** and **WHEN** count the pairings skipped: because a step released the resource, or because the pairing's `when` was false.
+- **Cleanup failures:** a `cleanup failures:` list names each failed cleanup step by run, with its status or error.
+- **`--json`** prints the same as a document with `snake_case` keys.
+- **Steps:** a batch has no steps of its own, so `--step` and the part flags need a run: `batch-ID/run-ID`.
 
 ## Exporting and Importing
 

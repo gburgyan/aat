@@ -414,3 +414,57 @@ field.
 - **Layers end to end.** The shop's `smoke` recipe ran with `shipping-express` against a sandbox.
   - `aat run show --step checkout` prints `shippingTier "express" layer shipping-express`.
   - The resolution record has `"source": "layer"` and `"layer": "shipping-express"`.
+
+## 2026-09-13 — Phase 3a PR C: reading runs, and the Stripe run's smaller findings
+
+**What:** the rest of the Stripe run's findings, K, H, I, and J, and a primer note on gating a cleanup on current state.
+- **K, `aat run show` across steps and runs:**
+  - **The batch view.** A batch ID, or a path to a batch directory or its `batch.json`, shows the batch: the totals and
+    a row per permutation. Per cleanup node, it counts the steps that ran and failed and the pairings skipped as
+    released or by `when`, and it lists each failed cleanup step.
+  - **Parts across steps.** Without `--step`, a part flag or `--path` prints that part of every step that has it, one
+    line each, or a JSON array.
+  - **Naming.** A step's `--json` names its assertion results `validation`, shaped like the archive's record.
+- **H, assertion expressions:** a predicate's message shows the expressions in its literals expanded, and the primer's
+  stale "Values are compared literally" bullet is gone.
+- **I, manifest directories:**
+  - A workflows, layers, or plans directory that doesn't exist yet is a note, and it reads as empty.
+  - Manifest messages print paths relative to the manifest.
+  - A missing layers directory loads no layers.
+- **J, cleanup OAS validation:** cleanup exchanges are validated and recorded. Under `strict`, a violation fails the
+  cleanup step, and its chain still runs.
+
+**Decisions:**
+- **The batch view reads only each run's cleanup records.**
+  - Decoding every run's full archive peaked at 1.5 GB of memory on aat-duffel's 2.4 GB final batch, in 2.97 s.
+  - Reading just the `cleanup` and `cleanupSkipped` keys with gjson took 1.44 s and 839 MB, with identical output.
+- **A part across steps skips a step that lacks the part or the path,** and the command says so when no step has it.
+  `--shape` stays a single step's view, since one shape merged across different nodes would mislead.
+- **`validation`, not `assertions`,** matches `archive.json` and the primer. Keys stay `snake_case`, as in every
+  `--json` output, and the primer names both conventions. `aat run show` is unreleased, so the rename costs nothing.
+- **The expanded predicate is rebuilt from tokens,** so its spacing is normalized. The result's `expr` keeps the
+  predicate as written; only the message changes.
+- **A cleanup chain goes on after a strict OAS failure** when the exchange itself succeeded, since releasing resources
+  matters more than the shape of a cleanup response.
+- **Manifest-relative paths are confined to the manifest section.** Other sections keep paths relative to the working
+  directory, which is also how they open files.
+
+**Verification:**
+- `make check`, `make docs`, and `make example-shop` pass. The example runs the shop's batches under
+  `--oas-validate strict`, so its cleanup exchanges are validated too.
+- **`aat validate --strict` output,** compared as sets of lines between `main` (1c0a7c0) and the branch, is unchanged
+  for the shop, the private project, and the three discovery-project clones.
+- **The Stripe run's own archives, read in place:**
+  - **The final batch:** 220 runs, 94 passed and 126 skipped. Its cleanup counts match the transcript review's
+    recount:
+    - `deleteCustomer`: 93 ran, 1 released
+    - `reconcilePaymentIntent`: 32 ran, 61 released
+    - `cancelPaymentIntent`: 8 ran, 24 skipped by `when`
+    - none failed
+  - **One call instead of `jq`:** `--response --path error.code` across the negative plan's run lists each refusal's
+    code, which the agent had assembled with `jq`.
+- **Duffel batches.** aat-duffel2's final batch shows 24 failed `startCancellation` and 24 failed `confirmCancellation`
+  steps: the 48 cleanup 422s that attempt 2's scorecard counted. It shows in 0.51 s with 202 MB.
+- **A manifest naming missing directories,** validated from a subdirectory:
+  - `main` fails with `workflows dir not found: ../../../workflows`.
+  - The branch notes `workflows dir workflows doesn't exist yet`.

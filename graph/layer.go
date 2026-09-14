@@ -119,6 +119,11 @@ func ParseLayerFile(path string) (*Layer, error) {
 // define layers with the same name.
 func LoadLayersFromDir(dir string) (map[string]*Layer, error) {
 	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		// A layers directory a manifest names before any layer is written holds
+		// no layers yet.
+		return map[string]*Layer{}, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("reading layers directory %s: %w", dir, err)
 	}
@@ -167,6 +172,11 @@ func ResolveLayerNames(names []string, dir string) (map[string]*Layer, error) {
 	result := make(map[string]*Layer, len(names))
 	for _, name := range names {
 		layer, ok := all[name]
+		if !ok && len(all) == 0 {
+			if _, statErr := os.Stat(dir); errors.Is(statErr, os.ErrNotExist) {
+				return nil, fmt.Errorf("layer %q not found: the layers directory %s doesn't exist", name, dir)
+			}
+		}
 		if !ok {
 			available := make([]string, 0, len(all))
 			for k := range all {

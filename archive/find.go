@@ -133,6 +133,22 @@ func FindRun(archiveDir, ref string) (RunRef, error) {
 	return RunRef{}, notFound
 }
 
+// FindBatch resolves ref, a batch ID, to the batch's directory in archiveDir:
+// a directory named ref that holds batch.json. ref must be a single directory
+// name (see CheckDirName). A reference that matches no batch returns an error
+// wrapping ErrRunNotFound.
+func FindBatch(archiveDir, ref string) (string, error) {
+	notFound := fmt.Errorf("%w: no batch %q in %s", ErrRunNotFound, ref, archiveDir)
+	if CheckDirName(ref) != nil {
+		return "", notFound
+	}
+	dir := filepath.Join(archiveDir, ref)
+	if info, err := os.Stat(filepath.Join(dir, "batch.json")); err != nil || !info.Mode().IsRegular() {
+		return "", notFound
+	}
+	return dir, nil
+}
+
 // runInDir returns the run in dir when dir holds an archive.json file.
 func runInDir(dir, id, batchID string) (RunRef, bool) {
 	path := filepath.Join(dir, "archive.json")

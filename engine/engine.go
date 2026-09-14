@@ -553,20 +553,30 @@ func (e *Engine) checkpointResult(step plan.Step, stepResults []StepResult, p *p
 // schema compilation warnings never fail a step, and expected-failure steps
 // are exempt because their error responses are the point of the test.
 func (e *Engine) oasStrictError(step plan.Step, result *StepResult) error {
-	if !e.oasStrict || step.ExpectFailure != nil || result.OASValidation == nil || result.OASValidation.Skipped {
+	if !e.oasStrict || step.ExpectFailure != nil {
 		return nil
 	}
-	var n int
-	if r := result.OASValidation.Request; r != nil {
-		n += len(r.Errors)
-	}
-	if r := result.OASValidation.Response; r != nil {
-		n += len(r.Errors)
-	}
+	n := oasErrorCount(result.OASValidation)
 	if n == 0 {
 		return nil
 	}
 	return fmt.Errorf("step %s: OAS validation failed in strict mode (%d error(s))", stepRef(step), n)
+}
+
+// oasErrorCount returns how many request and response violations a validation
+// found. A skipped validation, or none, counts zero.
+func oasErrorCount(v *oas.ValidationResult) int {
+	if v == nil || v.Skipped {
+		return 0
+	}
+	n := 0
+	if v.Request != nil {
+		n += len(v.Request.Errors)
+	}
+	if v.Response != nil {
+		n += len(v.Response.Errors)
+	}
+	return n
 }
 
 // stepRef names a step in an error message by its ID, which is what
@@ -875,7 +885,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 
 		if len(normalAssertions) > 0 {
 			nr := validate.RunMechanical(resp.StatusCode, normalBody,
-				convertAssertions(normalAssertions), predicateEval, schemaCheck)
+				withDisplayedExprs(convertAssertions(normalAssertions), ectx), predicateEval, schemaCheck)
 			merged.Results = append(merged.Results, nr.Results...)
 			if !nr.Passed {
 				merged.Passed = false
@@ -883,7 +893,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		}
 		if len(rawAssertions) > 0 {
 			rr := validate.RunMechanical(resp.StatusCode, resp.Body,
-				convertAssertions(rawAssertions), predicateEval, schemaCheck)
+				withDisplayedExprs(convertAssertions(rawAssertions), ectx), predicateEval, schemaCheck)
 			merged.Results = append(merged.Results, rr.Results...)
 			if !rr.Passed {
 				merged.Passed = false
@@ -967,6 +977,21 @@ func (e *Engine) buildResolveContext(node *graph.Node) *ResolveContext {
 }
 
 // convertAssertions bridges plan.MechanicalAssertion to validate.MechanicalAssertion.
+// withDisplayedExprs fills in the text a predicate's message shows: the
+// predicate with the {{…}} expressions in its literals expanded, so the message,
+// and the archive, say what was compared.
+func withDisplayedExprs(assertions []validate.MechanicalAssertion, ectx plan.ExprContext) []validate.MechanicalAssertion {
+	for i, a := range assertions {
+		if a.Type != validate.AssertPredicate || !plan.ContainsExpr(a.Expr) {
+			continue
+		}
+		if text, err := plan.ExpandPredicateText(a.Expr, ectx); err == nil {
+			assertions[i].Display = text
+		}
+	}
+	return assertions
+}
+
 func convertAssertions(planAssertions []plan.MechanicalAssertion) []validate.MechanicalAssertion {
 	result := make([]validate.MechanicalAssertion, len(planAssertions))
 	for i, pa := range planAssertions {

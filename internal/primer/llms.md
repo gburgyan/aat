@@ -76,7 +76,7 @@ When the API publishes an OpenAPI 3.0 or 3.1 spec, scaffold from it, and let AAT
 
   The warnings list what each template leaves to write by hand, such as a multipart body. A form body becomes a `form:` mapping. Specs with circular references load. See [Large Specs](https://gburgyan.github.io/aat/generate/#large-specs).
 - **Validate the project against it.** `aat validate --strict` checks that each node's `operationId` exists, that its inputs are parameters or body properties (an input the template sends only in a header, such as an idempotency key, is exempt, and an input that is the whole value of a `form:` field counts as that field), that required fields are inputs or written by the template, and that outputs exist in the 2xx response schema.
-- **Validate every run against it.** `--oas-validate strict` checks each step's request body, JSON or form-encoded, and its response body against the schema for its status code or the spec's `default` response, and fails a step on a violation. A request body of another type, or a schema the validator can't compile, shows `OAS: request not validated` or `OAS: response not validated` and never fails a step. Under `strict`, a spec that fails to load stops the run with exit code 2. Only the operations the graph's nodes name are compiled, so a large spec loads quickly. See [OAS Validation](https://gburgyan.github.io/aat/running/#oas-validation).
+- **Validate every run against it.** `--oas-validate strict` checks each step's request body, JSON or form-encoded, and its response body against the schema for its status code or the spec's `default` response, and fails a step on a violation. Cleanup steps are checked too: an invalid exchange fails the cleanup step, and the rest of its cleanup chain still runs. A request body of another type, or a schema the validator can't compile, shows `OAS: request not validated` or `OAS: response not validated` and never fails a step. Under `strict`, a spec that fails to load stops the run with exit code 2. Only the operations the graph's nodes name are compiled, so a large spec loads quickly. See [OAS Validation](https://gburgyan.github.io/aat/running/#oas-validation).
 
 ## Graph Schema
 
@@ -487,7 +487,6 @@ assertions:
       expr: 'orderStatus == "confirmed"'
 ```
 
-- **Values are compared literally.** `{{…}}` is not expanded in `expect`, `value`, or `expr`: `value: "{{today}}"` compares against the text `{{today}}`. Compute the value in a transform output, and assert on that output.
 - **Predicate syntax:**
   - comparisons `== != < > <= >=`, and `&&`, `||`, `!`
   - `in`, as in `currency in ["USD", "EUR"]`
@@ -549,6 +548,21 @@ createPayment:
 - **`when`.** The cleanup is skipped when the predicate is false. It reads only the creating step's outputs, or, for a chained cleanup, the outputs of the cleanup step before it. If it can't be evaluated, the cleanup runs, and its record carries `whenError`.
 - **Skipped.** A skipped cleanup's chain doesn't run. Skips are recorded in the archive's `cleanupSkipped` and show under `cleanup skipped:` in `aat run show`.
 - **Caution.** List in `releasedBy` only nodes whose success always ends the resource. If an API reports a failed release in a successful response, give that node `errorDetection`.
+
+To cancel only what is still open when the run ends, chain a read in front of the cancel. In a chain, `when` reads the outputs of the cleanup step before it, so the read supplies the current state:
+
+```yaml
+createPaymentIntent:
+  cleanup:
+    node: reconcilePaymentIntent   # a read that only cleanup uses
+    releasedBy: [capturePaymentIntent, cancelPaymentIntent]
+reconcilePaymentIntent:
+  cleanup:
+    node: cancelPaymentIntent
+    when: 'status in ["requires_payment_method", "requires_capture"]'
+```
+
+Give that read a node of its own. A main step on a pairing's cleanup node counts as releasing the resource, so reusing a read node that plans call would skip the cleanup whenever a plan reads the resource.
 
 Cross-ref: [Plans and Recipes](https://gburgyan.github.io/aat/plans/)
 
@@ -934,13 +948,17 @@ aat run show latest --step checkout --response --path lines.0.sku
 aat run show latest --step checkout --outputs           # what the template extracted
 aat run show latest --step checkout --resolutions       # where each input's value came from, and why one failed
 aat run show latest --json --compact                    # the step list as one JSON line, for a script
+aat run show latest --response --path error.code        # one part of every step that has it
+aat run show batch-20260913-160341-4a6502e8             # a batch: totals, a row per run, cleanup counts
 ```
 
 - **Learn a response with `--shape` before you write extract rules.**
   - Each line is a gjson path, usable in `response.extract` or with `--path`, followed by its type, array sizes, and a sample value.
   - Array elements are merged. `in 3 of 12` marks a key that only some elements hold, and `string|null` marks a value that is sometimes null. Give those extract entries `optional: true`, or handle them in a transform.
 - **The run** is `latest` (runs inside a batch that is still running included), a run ID, `batch-ID/run-ID`, or a path to a run directory, an `archive.json`, or an `.aar` file. `--step` takes a step ID, or the name of a node that ran once.
-- **Printed parts stop at 64 KB**, with a note on stderr. Narrow them with `--path` or `--shape`, or pass `--max-bytes 0`. `--json` prints the step list or a step as JSON.
+- **A batch:** a batch ID, or a path to a batch directory or its `batch.json`, shows the batch instead. It gives the totals, a row per run, and per cleanup node how many steps ran, failed, and were skipped. Use it rather than reading `batch.json` or looping over archives.
+- **Without `--step`,** a part flag or `--path` prints that part of every step that has it, one line each. `aat run show latest --response --path error.code` lists each refused request's code. `--shape` needs `--step`.
+- **Printed parts stop at 64 KB**, with a note on stderr. Narrow them with `--path` or `--shape`, or pass `--max-bytes 0`. `--json` prints the step list or a step as JSON, with `snake_case` keys (`step_id`, `duration_ms`). A step's assertion results are `validation`, as in `archive.json`, whose keys are `camelCase` (`stepId`, `durationMs`).
 - **To hand live state to another tool,** run `aat run plan <plan> --stop-after STEP --dump-state state.json`.
   - The dump holds each step's IDs, base URL, headers, inputs, and outputs.
   - Cleanup is skipped, so the resources stay alive.

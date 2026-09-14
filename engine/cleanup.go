@@ -9,6 +9,7 @@ import (
 
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/graph/oas"
 )
 
 // CleanupEntry records a cleanup node to execute and the step that registered it.
@@ -121,9 +122,15 @@ func (e *Engine) runCleanupChain(ctx context.Context, entry CleanupEntry, cleanu
 	result.WhenError = whenErr
 	result.StepID = run.nextID(entry.NodeName)
 	result.CleanupFor = cleanupFor
+	// The chain goes on when the exchange released the resource, even when
+	// strict OAS validation fails the step for what the exchange looked like.
+	succeeded := cleanupSucceeded(result)
+	if err := e.oasStrictCleanupError(result); err != nil {
+		result.Error = err
+	}
 	results := []StepResult{result}
 
-	if node == nil || node.Cleanup.Node == "" || !cleanupSucceeded(result) {
+	if node == nil || node.Cleanup.Node == "" || !succeeded {
 		return results
 	}
 	next := node.Cleanup.Node
@@ -222,5 +229,27 @@ func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, no
 		result.ResponseBodyError = CheckErrorDetection(effectiveErrorRules(node, e.graph), resp.Body)
 	}
 
+	// Under --oas-validate, a cleanup exchange is checked against the spec as a
+	// main step's is.
+	if e.oasCache != nil && node.OAS != nil {
+		result.OASValidation = oas.ValidateStep(
+			node, e.graphOAS, e.oasCache,
+			req.Method, req.Path, req.Headers, req.Body,
+			resp.StatusCode, resp.Headers, resp.Body,
+		)
+	}
+
 	return result
+}
+
+// oasStrictCleanupError returns an error when strict OAS validation is enabled
+// and a cleanup step's request or response violated the spec.
+func (e *Engine) oasStrictCleanupError(result StepResult) error {
+	if !e.oasStrict {
+		return nil
+	}
+	if n := oasErrorCount(result.OASValidation); n > 0 {
+		return fmt.Errorf("cleanup step %s: OAS validation failed in strict mode (%d error(s))", result.StepID, n)
+	}
+	return nil
 }

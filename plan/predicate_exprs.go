@@ -13,7 +13,20 @@ import (
 // to a number or a boolean becomes that value. Selection filters and cleanup
 // conditions use predicate.Eval, where such a literal stays text.
 func EvalPredicateWithExprs(expr string, context map[string]any, ectx ExprContext) (bool, error) {
-	return predicate.EvalExpanding(expr, context, func(literal string) (any, bool, error) {
+	return predicate.EvalExpanding(expr, context, exprExpander(ectx))
+}
+
+// ExpandPredicateText returns expr with the {{…}} expressions in its quoted
+// literals replaced by their values, as EvalPredicateWithExprs compares them, so
+// an assertion message can show what was compared.
+func ExpandPredicateText(expr string, ectx ExprContext) (string, error) {
+	return predicate.ExpandText(expr, exprExpander(ectx))
+}
+
+// exprExpander evaluates a quoted predicate literal that holds a {{…}}
+// expression, and leaves any other literal as it is.
+func exprExpander(ectx ExprContext) func(literal string) (any, bool, error) {
+	return func(literal string) (any, bool, error) {
 		if !ContainsExpr(literal) {
 			return nil, false, nil
 		}
@@ -22,7 +35,7 @@ func EvalPredicateWithExprs(expr string, context map[string]any, ectx ExprContex
 			return nil, false, fmt.Errorf("evaluating %q: %w", literal, err)
 		}
 		return v, true, nil
-	})
+	}
 }
 
 // ValidatePredicateExprs checks the syntax of the {{…}} expressions in a

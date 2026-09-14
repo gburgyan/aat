@@ -27,7 +27,7 @@ const defaultShowMaxBytes = 64 * 1024
 
 // runShowCmd prints what a run archive recorded, without a browser.
 var runShowCmd = &cobra.Command{
-	Use:   "show <run-id|batch-id/run-id|latest|path>",
+	Use:   "show <run-id|batch-id|batch-id/run-id|latest|path>",
 	Short: "Show a run's steps, or one step's request, response, inputs, or outputs",
 	Long: `Show what a run archive recorded.
 
@@ -36,14 +36,17 @@ duration, and output names, then its verification and cleanup steps. --step
 shows one step, named by its step ID or by a node that ran once, with where
 each input's value came from. --request, --response, --inputs, --outputs, and
 --resolutions print that part of the step as JSON; --resolutions says how each
-input got its value. --path narrows the part with a gjson path, such as
-items.0.sku, and --shape prints its structure instead of its values: each path
-with its type, array sizes, and a sample value, which is the way to learn a
-large response.
+input got its value. Without --step, a part flag or --path prints that part of
+every step that has it, one line each. --path narrows the part with a gjson
+path, such as items.0.sku, and --shape prints one step's part as its structure
+instead of its values: each path with its type, array sizes, and a sample
+value, which is the way to learn a large response.
 
 The run is latest (the newest run, runs inside batches included), a run ID, a
 batch ID and a run ID joined by a slash, or a path to a run directory, an
-archive.json, or an exported .aar file. IDs are looked up in the archive
+archive.json, or an exported .aar file. A batch ID, or a path to a batch
+directory or its batch.json, shows the batch: its totals, a row per run, and
+what cleanup did across its runs. IDs are looked up in the archive
 directory: --output, else the manifest's archives, else _output/runs. Archives
 are redacted when they are written, and show prints only what the archive
 holds.`,
@@ -52,6 +55,8 @@ holds.`,
   aat run show latest --step checkout --response --shape
   aat run show latest --step checkout --response --path orderId
   aat run show latest --step checkout --resolutions
+  aat run show latest --response --path error.code
+  aat run show batch-20260910-230852-4a6502e8
   aat run show _output/runs/run-20260910-230852-8b2139bc/archive.json --json`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -153,8 +158,8 @@ func showOptionsFromFlags(cmd *cobra.Command) (showOptions, error) {
 			opts.Part = part
 		}
 	}
-	if opts.Step == "" && (opts.Part != "" || opts.Path != "" || opts.Shape) {
-		return opts, errors.New("--request, --response, --inputs, --outputs, --resolutions, --path, and --shape need --step")
+	if opts.Step == "" && opts.Shape {
+		return opts, errors.New("--shape needs --step: it describes one step's part")
 	}
 	if opts.Part == "" && (opts.Path != "" || opts.Shape) {
 		opts.Part = "response"
@@ -172,11 +177,24 @@ func showOptionsFromFlags(cmd *cobra.Command) (showOptions, error) {
 // archiveDir resolves the archive directory; it is called only when ref is not
 // a path.
 func runShowCommand(ref string, archiveDir func() (string, error), opts showOptions, out, errOut io.Writer) error {
+	batchDir, isBatch, err := shownBatchDir(ref, archiveDir)
+	if err != nil {
+		return err
+	}
+	if isBatch {
+		if opts.Step != "" || opts.Part != "" {
+			return fmt.Errorf("%s is a batch, which has no steps of its own; name one of its runs as batch-ID/run-ID", ref)
+		}
+		return showBatch(out, batchDir, opts.format())
+	}
 	a, src, err := loadShownArchive(ref, archiveDir)
 	if err != nil {
 		return err
 	}
 	if opts.Step == "" {
+		if opts.Part != "" {
+			return showStepParts(out, errOut, a, opts)
+		}
 		return showRun(out, a, src, opts.format())
 	}
 	step, id, cleanup, err := findShownStep(a, opts.Step)
@@ -551,11 +569,18 @@ type shownStep struct {
 	Error             string                    `json:"error,omitempty"`
 	Inputs            map[string]any            `json:"inputs,omitempty"`
 	Outputs           map[string]any            `json:"outputs,omitempty"`
-	Assertions        []shownAssertion          `json:"assertions,omitempty"`
+	Validation        *shownValidation          `json:"validation,omitempty"`
 	RequestBodyBytes  int                       `json:"request_body_bytes,omitempty"`
 	ResponseBodyBytes int                       `json:"response_body_bytes,omitempty"`
 	Resolutions       []archive.InputResolution `json:"resolutions,omitempty"`
 	Warnings          []string                  `json:"warnings,omitempty"`
+}
+
+// shownValidation is a shown step's assertion results, named and shaped as in
+// the archive's validation record.
+type shownValidation struct {
+	Passed  bool             `json:"passed"`
+	Results []shownAssertion `json:"results"`
 }
 
 // shownAssertion is one assertion result of a shown step.
@@ -608,9 +633,9 @@ func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup bool, 
 	}
 	writeShownInputs(&b, view.Inputs, view.Resolutions)
 	writeShownValues(&b, "outputs", view.Outputs)
-	if len(view.Assertions) > 0 {
+	if view.Validation != nil && len(view.Validation.Results) > 0 {
 		var passed, failed, skipped int
-		for _, as := range view.Assertions {
+		for _, as := range view.Validation.Results {
 			switch {
 			case as.Skipped:
 				skipped++
@@ -625,7 +650,7 @@ func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup bool, 
 			fmt.Fprintf(&b, ", %d skipped", skipped)
 		}
 		b.WriteByte('\n')
-		for _, as := range view.Assertions {
+		for _, as := range view.Validation.Results {
 			if !as.Passed && !as.Skipped {
 				fmt.Fprintf(&b, "  FAIL %s: %s\n", as.Type, as.Message)
 			}
@@ -669,8 +694,9 @@ func buildShownStep(step *archive.StepRecord, id string, cleanup bool) shownStep
 		view.ResponseBodyBytes = compactSize(step.Response.Body)
 	}
 	if step.Validation != nil {
+		view.Validation = &shownValidation{Passed: step.Validation.Passed, Results: []shownAssertion{}}
 		for _, r := range step.Validation.Results {
-			view.Assertions = append(view.Assertions, shownAssertion{Type: r.Type, Passed: r.Passed, Skipped: r.Skipped, Message: r.Message})
+			view.Validation.Results = append(view.Validation.Results, shownAssertion{Type: r.Type, Passed: r.Passed, Skipped: r.Skipped, Message: r.Message})
 		}
 	}
 	view.Resolutions = archive.StepResolutions(step)
