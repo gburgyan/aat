@@ -71,6 +71,7 @@ type sectionResult struct {
 	Status string // "OK", "WARN" (issues that fail only under --strict), "FAILED"
 	Detail string // e.g. "(59 nodes)"
 	Errors []string
+	Notes  []string // printed whatever the status; never fail validation
 }
 
 // validateCommand runs full project validation. It returns 0 when the project
@@ -115,37 +116,35 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 	}
 	shortenManifestPaths(m)
 
-	// Validate referenced files exist on disk
-	var manifestErrors []string
+	// Validate referenced files exist on disk. Paths print relative to the
+	// manifest, whatever directory the command runs in.
+	shown := func(path string) string { return manifestRelPath(resolved.ManifestPath, path) }
+	var manifestErrors, manifestNotes []string
 	if _, err := os.Stat(m.GraphPath); err != nil {
-		manifestErrors = append(manifestErrors, fmt.Sprintf("graph file not found: %s", m.GraphPath))
+		manifestErrors = append(manifestErrors, fmt.Sprintf("graph file not found: %s", shown(m.GraphPath)))
 	}
 	if _, err := os.Stat(m.TemplatesPath); err != nil {
-		manifestErrors = append(manifestErrors, fmt.Sprintf("templates dir not found: %s", m.TemplatesPath))
+		manifestErrors = append(manifestErrors, fmt.Sprintf("templates dir not found: %s", shown(m.TemplatesPath)))
 	}
 	if m.DomainPath != "" {
 		if _, err := os.Stat(m.DomainPath); err != nil {
-			manifestErrors = append(manifestErrors, fmt.Sprintf("domain file not found: %s", m.DomainPath))
+			manifestErrors = append(manifestErrors, fmt.Sprintf("domain file not found: %s", shown(m.DomainPath)))
 		}
 	}
 	if m.EnvPath != "" {
 		if _, err := os.Stat(m.EnvPath); err != nil {
-			manifestErrors = append(manifestErrors, fmt.Sprintf("environment file not found: %s", m.EnvPath))
+			manifestErrors = append(manifestErrors, fmt.Sprintf("environment file not found: %s", shown(m.EnvPath)))
 		}
 	}
-	if m.WorkflowsDir != "" {
-		if _, err := os.Stat(m.WorkflowsDir); err != nil {
-			manifestErrors = append(manifestErrors, fmt.Sprintf("workflows dir not found: %s", m.WorkflowsDir))
-		}
-	}
-	if m.LayersDir != "" {
-		if _, err := os.Stat(m.LayersDir); err != nil {
-			manifestErrors = append(manifestErrors, fmt.Sprintf("layers dir not found: %s", m.LayersDir))
-		}
-	}
-	for _, pd := range m.PlanDirs {
-		if _, err := os.Stat(pd); err != nil {
-			manifestErrors = append(manifestErrors, fmt.Sprintf("plans dir not found: %s", pd))
+	// A directory the manifest names before anything is written to it reads as
+	// empty, so a project can be built one piece at a time.
+	for _, dir := range optionalManifestDirs(m) {
+		switch _, err := os.Stat(dir.path); {
+		case err == nil:
+		case errors.Is(err, os.ErrNotExist):
+			manifestNotes = append(manifestNotes, fmt.Sprintf("%s dir %s doesn't exist yet; it reads as empty", dir.kind, shown(dir.path)))
+		default:
+			manifestErrors = append(manifestErrors, fmt.Sprintf("%s dir %s: %v", dir.kind, shown(dir.path), err))
 		}
 	}
 
@@ -167,6 +166,7 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		Name:   "Manifest",
 		Status: "OK",
 		Detail: detail,
+		Notes:  manifestNotes,
 	})
 
 	// 2. Files that stand alone: environment, domain, visualizers
@@ -328,7 +328,7 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 	}
 
 	// 7. Workflows validation
-	if m.WorkflowsDir != "" {
+	if m.WorkflowsDir != "" && manifestDirExists(m.WorkflowsDir) {
 		graphDir := filepath.Dir(m.GraphPath)
 		wfTemplates := workflowTemplatePaths(g, graphDir)
 		pvr := validateWorkflows(m.WorkflowsDir, g, wfTemplates)
@@ -361,7 +361,7 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 	}
 
 	// 8. Layers validation
-	if m.LayersDir != "" {
+	if m.LayersDir != "" && manifestDirExists(m.LayersDir) {
 		sections = append(sections, validateLayers(m.LayersDir, g))
 	}
 
@@ -625,6 +625,51 @@ func shortenManifestPaths(m *config.ProjectManifest) {
 	}
 }
 
+// manifestDir is a directory a manifest names, with what it holds.
+type manifestDir struct {
+	kind string // "workflows", "layers", or "plans"
+	path string
+}
+
+// optionalManifestDirs lists the directories a manifest may name before
+// anything is written to them: workflows, layers, and each plans directory.
+func optionalManifestDirs(m *config.ProjectManifest) []manifestDir {
+	var dirs []manifestDir
+	if m.WorkflowsDir != "" {
+		dirs = append(dirs, manifestDir{"workflows", m.WorkflowsDir})
+	}
+	if m.LayersDir != "" {
+		dirs = append(dirs, manifestDir{"layers", m.LayersDir})
+	}
+	for _, pd := range m.PlanDirs {
+		dirs = append(dirs, manifestDir{"plans", pd})
+	}
+	return dirs
+}
+
+// manifestDirExists reports whether path is a directory.
+func manifestDirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
+
+// manifestRelPath returns path relative to the manifest's directory, or
+// absolute when it lies outside that directory.
+func manifestRelPath(manifestPath, path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	base, err := filepath.Abs(filepath.Dir(manifestPath))
+	if err != nil {
+		return abs
+	}
+	if rel, err := filepath.Rel(base, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return rel
+	}
+	return abs
+}
+
 // pluralize renders a count with its noun: pluralize(1, "file") is "1 file",
 // pluralize(2, "file") is "2 files". Every noun aat validate counts takes "s".
 func pluralize(n int, noun string) string {
@@ -667,6 +712,9 @@ func printSections(out io.Writer, sections []sectionResult) {
 					}
 				}
 			}
+		}
+		for _, note := range s.Notes {
+			_, _ = fmt.Fprintf(out, "  note: %s\n", note)
 		}
 	}
 }

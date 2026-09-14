@@ -148,6 +148,67 @@ func Literals(expr string) ([]string, error) {
 	return literals, nil
 }
 
+// ExpandText returns expr with each quoted string literal that expand replaces
+// written as the value it returns, as EvalExpanding compares it: a number or a
+// boolean bare, and anything else quoted. Tokens are rejoined with single
+// spaces, except inside brackets and before commas, so the text shows the
+// expression that was evaluated rather than its original spacing.
+func ExpandText(expr string, expand func(literal string) (any, bool, error)) (string, error) {
+	tokens, err := tokenize(expr)
+	if err != nil {
+		return "", fmt.Errorf("tokenize: %w", err)
+	}
+	var b strings.Builder
+	var prev token
+	for i, tok := range tokens {
+		if tok.kind == tokenEOF {
+			break
+		}
+		if tok.kind == tokenString {
+			v, replaced, err := expand(tok.value)
+			if err != nil {
+				return "", err
+			}
+			if replaced {
+				tok = literalToken(v)
+			}
+		}
+		if i > 0 && spaceBetween(prev, tok) {
+			b.WriteByte(' ')
+		}
+		b.WriteString(tokenText(tok))
+		prev = tok
+	}
+	return b.String(), nil
+}
+
+// spaceBetween reports whether rejoined expression text puts a space between two
+// tokens: none after an opening bracket or a unary !, and none before a closing
+// bracket or a comma.
+func spaceBetween(prev, next token) bool {
+	switch {
+	case prev.kind == tokenLParen, prev.kind == tokenLBracket:
+		return false
+	case prev.kind == tokenOperator && prev.value == "!":
+		return false
+	case next.kind == tokenRParen, next.kind == tokenRBracket, next.kind == tokenComma:
+		return false
+	}
+	return true
+}
+
+// tokenText writes a token as expression text, quoting a string literal with
+// double quotes, or single quotes when it holds a double quote.
+func tokenText(tok token) string {
+	if tok.kind != tokenString {
+		return tok.value
+	}
+	if strings.Contains(tok.value, `"`) {
+		return "'" + tok.value + "'"
+	}
+	return `"` + tok.value + `"`
+}
+
 // --- Token types ---
 
 type tokenKind int

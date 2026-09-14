@@ -267,10 +267,9 @@ func TestRunShow_Batch(t *testing.T) {
 	require.NoError(t, err)
 	assert.Regexp(t, `^batch-20260912-100000-bbbb0001/run-20260912-100000-aaaa0001  PASSED`, out)
 
-	_, _, err = runShow(t, dir, batchDir, showOptions{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "is a batch; show one of its runs:")
-	assert.Contains(t, err.Error(), filepath.Join(batchDir, showRunID))
+	out, _, err = runShow(t, dir, batchDir, showOptions{})
+	require.NoError(t, err)
+	assert.Contains(t, out, "runs: 0, 0 passed, 0 failed, 0 errors")
 }
 
 func TestRunShow_RunNotFound(t *testing.T) {

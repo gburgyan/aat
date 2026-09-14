@@ -7,6 +7,18 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- `aat run show <batch-id>`, or a path to a batch directory or its `batch.json`, shows the batch. Before, a batch
+  reference was an error.
+  - It shows the totals, and one row per permutation with its layers, outcome, and step counts.
+  - It shows what cleanup did across the runs: per cleanup node, the steps that ran and failed, and the pairings skipped
+    as released or by `when`, plus each failed cleanup step.
+  - `--json` prints the same.
+- Without `--step`, a part flag or `--path` prints that part of every step that has it, cleanup steps included, as in
+  `aat run show latest --response --path error.code`. It prints one line each, or a JSON array with `--json`.
+- A predicate assertion's message shows the expressions in its literals expanded, as in
+  `predicate "amountReceived == 1000" is true`. The result's `expr` keeps the predicate as written.
+- Under `--oas-validate`, cleanup exchanges are checked against the spec and recorded in `oasValidation`. Under
+  `strict`, an invalid one fails the cleanup step, and its cleanup chain still runs.
 - Form bodies can be written as `form:`, a mapping of field names to values, in place of a `body:` query string.
   - The request is sent as `application/x-www-form-urlencoded`, and every key and value is URL-encoded, keeping the
     brackets of a key.
@@ -123,6 +135,12 @@ the graph and plan formats may still change before 1.0.
   generates its own value, and a retried step resends the values its first attempt generated.
 
 ### Changed
+- `aat run show --step --json` names a step's assertion results `validation` (`{passed, results}`), as `archive.json`
+  does, where it said `assertions`.
+- `aat validate` notes a workflows, layers, or plans directory that the manifest names but that doesn't exist yet. It
+  reads as empty, where before it failed the manifest check.
+  - Manifest messages print paths relative to the manifest.
+  - A missing layers directory loads no layers. A run that asks for a layer says the directory doesn't exist.
 - A header whose whole value is one placeholder, such as `Idempotency-Key: "{{requestKey}}"`, isn't sent when that
   input has no value, instead of failing with `unresolved placeholders`. The `{{?requestKey}}…{{/requestKey}}` wrapper
   still works, and a placeholder inside other text still needs a value.

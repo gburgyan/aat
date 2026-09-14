@@ -78,7 +78,7 @@ A manifest that exists but fails to load is an error for every command that disc
 
 | Section | What It Validates |
 |---------|-------------------|
-| Manifest | Manifest discovery, all referenced files and directories exist |
+| Manifest | Manifest discovery, and the graph, templates, domain, and environment files exist. A workflows, layers, or plans directory that doesn't exist yet is a note and reads as empty. Paths print relative to the manifest |
 | Environment | Every non-abstract environment loads: `extends` chains, `${var}` substitution, auth and override rules |
 | Domain | The domain file parses and its concepts, types, and value pools are well formed |
 | Visualizers | `visualizers.yaml` parses and each visualizer's HTML file exists |

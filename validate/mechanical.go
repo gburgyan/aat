@@ -29,6 +29,10 @@ type MechanicalAssertion struct {
 	Value  any
 	Expr   string
 	Raw    bool
+	// Display is a predicate as its message shows it, with the {{…}}
+	// expressions in its literals expanded. The message shows Expr when it is
+	// empty.
+	Display string
 }
 
 // AssertionResult records the outcome of a single assertion.
@@ -230,11 +234,15 @@ func checkPredicate(body []byte, a MechanicalAssertion, predicateEval PredicateE
 		return ar
 	}
 
+	shown := a.Expr
+	if a.Display != "" {
+		shown = a.Display
+	}
 	ar.Passed = result
 	if result {
-		ar.Message = fmt.Sprintf("predicate %q is true", a.Expr)
+		ar.Message = fmt.Sprintf("predicate %q is true", shown)
 	} else {
-		ar.Message = fmt.Sprintf("predicate %q is false", a.Expr)
+		ar.Message = fmt.Sprintf("predicate %q is false", shown)
 	}
 	return ar
 }
