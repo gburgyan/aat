@@ -789,10 +789,14 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 			result.Error = fmt.Errorf("extracting outputs: %w", err)
 			return result
 		}
+		tmpl, hasTemplate := e.registry.GetTemplate(node.Adapter)
+		if hasTemplate {
+			convertHeaderOutputs(outputs, node, tmpl)
+		}
 		result.Outputs = outputs
 
 		// Record transform script if present
-		if tmpl, ok := e.registry.GetTemplate(node.Adapter); ok && tmpl.HasTransform() {
+		if hasTemplate && tmpl.HasTransform() {
 			result.TransformScript = tmpl.Response.Transform
 		}
 

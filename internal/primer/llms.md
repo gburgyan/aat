@@ -221,6 +221,7 @@ response:
 - `response.extract` is a map from output name to a gjson path into the response JSON (`$.` prefixes are accepted). A path can count an array, `productCount: products.#`, or query it: `'orders.#(status=="open")#'` for every match, `#(…)` without the last `#` for the first, and `|#` after a query for how many. Match a null or missing field with `==~null` and a present, non-null one with `!=~null`; `==null` compares a string and never matches a JSON `null`
 - For array extraction, give the output a `path` and a `fields` map from element field name to a path within each element
 - A rule whose path may be missing takes `optional: true`, which leaves the output out, or `default:`, the value to use when the path is missing or `null`: `nextCursor: {path: meta.after, default: ""}`. A rule takes one of them, and with `fields` a default is a list, usually `[]`
+- A rule can read a response header in place of a body path: `requestId: {header: X-Request-Id}`. Names match in any case; the value is converted to the output's `integer`, `float`, or `boolean` type; `optional:` and `default:` work as for a path; and a template whose rules all read headers needs no JSON body, so a `204` works
 - `{{#key}}…{{/key}}` repeats its body once per element of the list input `key`. `{{.}}` is the element, `{{.field}}` is a field of it, and `{{@index}}` is its position from 0. The copies are joined with commas, except in a form body or a query string: there a body that writes a whole `key=value` pair is joined with `&` (`{{#tags}}tags[]={{.}}{{/tags}}`), and a body that starts with `&` is repeated with nothing between. Wrap an optional list in `{{?key}}…{{/key}}`
 
 ```yaml
@@ -313,6 +314,7 @@ response:
 - **What it sees:**
   - `outputs`: the extracted values
   - `json_path(path)`: a gjson lookup into the raw response body; `nil` when the path is missing
+  - `header(name)`: a response header's value as a string, matched in any case; `nil` when the response has none
   - `print(...)`: writes to stderr
   - only the base, `table`, `string`, and `math` libraries
 - **What it can't see:** the step's inputs or any other step. There is no `inputs` global: reading `inputs.x` fails with `attempt to index a non-table object(nil) with key 'x'`.

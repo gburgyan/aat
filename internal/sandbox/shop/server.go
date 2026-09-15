@@ -31,6 +31,7 @@ type Server struct {
 	now    func() time.Time
 	seed   int64
 	tokens *tokenStore
+	limits *rateLimits
 
 	mu     sync.RWMutex
 	stores map[string]*store
@@ -50,6 +51,7 @@ func New(opts Options) *Server {
 	}
 	s := &Server{opts: opts, now: opts.Now, seed: seed}
 	s.tokens = newTokenStore(seed, opts.Now)
+	s.limits = &rateLimits{}
 	s.resetStores()
 	s.api = s.buildAPI()
 	s.pay = s.buildPayments()
@@ -121,7 +123,7 @@ func (s *Server) buildAPI() http.Handler {
 	v1.HandleFunc("GET /{region}/v1/shipments/{shipmentId}", s.handleGetShipment)
 	v1.HandleFunc("POST /{region}/v1/shipments/{shipmentId}/deliver", s.handleDeliverShipment)
 	v1.HandleFunc("/{region}/v1/", handleNotFound)
-	mux.Handle("/{region}/v1/", requireRegion(s.requireBearer(v1)))
+	mux.Handle("/{region}/v1/", requireRegion(s.requireBearer(s.reportRateLimit(v1))))
 	return mux
 }
 

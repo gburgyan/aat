@@ -527,7 +527,7 @@ func (s *Server) formatNoArchiveFallback(nodeName string, node *graph.Node) stri
 		sort.Strings(keys)
 		for _, k := range keys {
 			rule := tmpl.Response.Extract[k]
-			fmt.Fprintf(&b, "| %s | %s |\n", k, rule.Path)
+			fmt.Fprintf(&b, "| %s | %s |\n", k, rule.Source())
 		}
 	}
 

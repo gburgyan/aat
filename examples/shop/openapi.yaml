@@ -53,6 +53,19 @@ paths:
       responses:
         '200':
           description: Products, optionally filtered
+          headers:
+            RateLimit-Limit:
+              description: Requests the bearer token may make per minute
+              schema:
+                type: integer
+            RateLimit-Remaining:
+              description: Requests the token has left in the current minute
+              schema:
+                type: integer
+            RateLimit-Reset:
+              description: Seconds until the current minute ends
+              schema:
+                type: integer
           content:
             application/json:
               schema:

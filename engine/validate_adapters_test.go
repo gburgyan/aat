@@ -38,6 +38,23 @@ func TestOutputExtractPaths(t *testing.T) {
 	assert.Equal(t, want, map[string]map[string]string(OutputExtractPaths(g, registry)))
 }
 
+func TestOutputExtractPaths_HeaderRule(t *testing.T) {
+	g := &graph.Graph{Nodes: map[string]*graph.Node{
+		"createCart": {Name: "createCart", Adapter: "createCart", Outputs: []graph.Output{{Name: "cartId"}, {Name: "cartUrl"}}},
+	}}
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("createCart", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "createCart",
+		Response: adapter.TemplateResponse{Extract: map[string]adapter.ExtractRule{
+			"cartId":  {Path: "id"},
+			"cartUrl": {Header: "Location"},
+		}},
+	})))
+
+	want := map[string]map[string]string{"createCart": {"cartId": "id", "cartUrl": ""}}
+	assert.Equal(t, want, map[string]map[string]string(OutputExtractPaths(g, registry)), "a header output isn't in the body schema")
+}
+
 func TestValidateAdapterOutputs_DefaultShape(t *testing.T) {
 	g := &graph.Graph{Nodes: map[string]*graph.Node{
 		"listOrders": {Name: "listOrders", Adapter: "listOrders", Outputs: []graph.Output{

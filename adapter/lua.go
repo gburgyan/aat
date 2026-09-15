@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -17,18 +18,20 @@ import (
 // to run before being cancelled.
 const transformTimeout = 5 * time.Second
 
-// runTransform executes a Lua transform script against the extracted outputs.
-// The script receives the outputs as a mutable Lua table and a json_path()
-// function that queries the full response body via gjson. The script must
-// return the (possibly modified) outputs table. print() writes to stderr.
+// runTransform executes a Lua transform script against the extracted outputs,
+// for a response with no headers. The script receives the outputs as a mutable
+// Lua table and a json_path() function that queries the full response body via
+// gjson. The script must return the (possibly modified) outputs table. print()
+// writes to stderr.
 func runTransform(script string, outputs map[string]any, responseBody string) (map[string]any, error) {
-	return runTransformWithLog(script, outputs, responseBody, os.Stderr)
+	return runTransformWithLog(script, outputs, responseBody, nil, os.Stderr)
 }
 
-// runTransformWithLog is runTransform with print() output sent to log. The
-// base library's print writes to stdout, which would corrupt --json and
+// runTransformWithLog is runTransform with the response's headers, which the
+// script reads with header(), and with print() output sent to log. The base
+// library's print writes to stdout, which would corrupt --json and
 // --dump-state - output, so it is replaced.
-func runTransformWithLog(script string, outputs map[string]any, responseBody string, log io.Writer) (map[string]any, error) {
+func runTransformWithLog(script string, outputs map[string]any, responseBody string, headers http.Header, log io.Writer) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), transformTimeout)
 	defer cancel()
 
@@ -75,8 +78,9 @@ func runTransformWithLog(script string, outputs map[string]any, responseBody str
 	// Set context for timeout enforcement.
 	ls.SetContext(ctx)
 
-	// Register json_path global function.
+	// Register the json_path and header global functions.
 	ls.SetGlobal("json_path", makeJsonPathFn(ls, responseBody))
+	ls.SetGlobal("header", makeHeaderFn(ls, headers))
 
 	// Convert outputs to Lua table and set as global.
 	ls.SetGlobal("outputs", goToLua(ls, outputs))
@@ -222,6 +226,22 @@ func makeJsonPathFn(ls *lua.LState, responseBody string) *lua.LFunction {
 			return 1
 		}
 		ls.Push(goToLua(ls, result.Value()))
+		return 1
+	})
+}
+
+// makeHeaderFn creates a Lua function that reads a response header, matched in
+// any case. The function signature in Lua is: header(name) → string, or nil
+// when the response has no such header. A header sent more than once gives its
+// values joined with ", ".
+func makeHeaderFn(ls *lua.LState, headers http.Header) *lua.LFunction {
+	return ls.NewFunction(func(ls *lua.LState) int {
+		values := headerValues(headers, ls.CheckString(1))
+		if len(values) == 0 {
+			ls.Push(lua.LNil)
+			return 1
+		}
+		ls.Push(lua.LString(strings.Join(values, ", ")))
 		return 1
 	})
 }

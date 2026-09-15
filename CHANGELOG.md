@@ -7,6 +7,17 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- An extract rule can read a response header, as in `requestId: {header: X-Request-Id}`, and Lua transforms get
+  `header(name)`.
+  - Names match in any case, and a header sent more than once gives its values joined with `, `.
+  - A header value is converted to its graph output's `integer`, `float`, or `boolean` type, so a predicate such as
+    `rateLimitRemaining > 5` compares numbers.
+  - `optional:` and `default:` work as for a path. A template whose rules all read headers needs no JSON body, so a
+    `204 No Content` still gives outputs.
+  - The MCP server shows a header rule as `header X-Request-Id` where it shows extract paths.
+- The shop sandbox sends `RateLimit-Limit`, `RateLimit-Remaining`, and `RateLimit-Reset` on its API responses. It counts
+  each bearer token's requests per minute and never refuses one. The shop example reads the first two on
+  `listProducts`, and Quick Purchase asserts that its request was counted.
 - An extract rule can take `default:`, the output's value when the path is missing or holds `null`, as in
   `nextCursor: {path: meta.after, default: ""}`. A rule takes `default:` or `optional: true`, not both, and a rule with
   `fields` takes a list default. `aat validate` reports a default whose shape doesn't fit the output's type.

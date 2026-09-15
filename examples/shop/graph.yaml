@@ -49,6 +49,14 @@ nodes:
             type: integer
           - name: inStock
             type: boolean
+      - name: rateLimitLimit
+        type: integer
+        description: Requests the bearer token may make per minute, read from the RateLimit-Limit response header
+      - name: rateLimitRemaining
+        type: integer
+        description: >-
+          Requests the token has left this minute, read from the RateLimit-Remaining response header. The
+          sandbox counts requests but never refuses one.
     satisfies: [catalogBrowsed]
 
   checkInventory:

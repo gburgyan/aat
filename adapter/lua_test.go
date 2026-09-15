@@ -294,7 +294,7 @@ func TestRunTransform_PrintGoesToLog(t *testing.T) {
 	result, err := runTransformWithLog(`
 		print("joined", 3, outputs.x)
 		return outputs
-	`, map[string]any{"x": "y"}, "{}", &log)
+	`, map[string]any{"x": "y"}, "{}", nil, &log)
 	require.NoError(t, err)
 	assert.Equal(t, "y", result["x"])
 	assert.Equal(t, "joined\t3\ty\n", log.String(), "print must not write to stdout, which carries --json output")

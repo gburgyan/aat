@@ -532,7 +532,7 @@ func (s *Server) handleGetResponseShape(_ context.Context, req mcp.CallToolReque
 		if tmpl, ok := s.ctx.Registry.GetTemplate(node.Adapter); ok {
 			extractRules = make(map[string]string)
 			for name, rule := range tmpl.Response.Extract {
-				extractRules[name] = rule.Path
+				extractRules[name] = rule.Source()
 			}
 		}
 	}
@@ -688,7 +688,7 @@ func (s *Server) handleExplainField(_ context.Context, req mcp.CallToolRequest) 
 				if node.Adapter != "" {
 					if tmpl, ok := s.ctx.Registry.GetTemplate(node.Adapter); ok {
 						if rule, ok := tmpl.Response.Extract[fieldName]; ok {
-							fmt.Fprintf(&b, "\n**Extract Path:** `%s`\n", rule.Path)
+							fmt.Fprintf(&b, "\n**Extract Path:** `%s`\n", rule.Source())
 						}
 					}
 				}

@@ -381,6 +381,30 @@ The template flattens deeply nested paths so plans and selection strategies refe
 
 When `fields` is omitted, the array elements are stored as-is (raw JSON objects). Selection strategies still work but must use gjson paths to access nested fields.
 
+### Header Extraction
+
+A rule with `header:` in place of `path:` reads a response header:
+
+```yaml
+response:
+  extract:
+    cartId: "id"
+    cartUrl:
+      header: Location
+    rateLimitRemaining:
+      header: RateLimit-Remaining
+    requestId:
+      header: X-Request-Id
+      optional: true
+```
+
+- **Names match in any case,** and a header sent more than once gives its values joined with `, `.
+- **Typed like the output.** A header value is a string. For an output the graph declares `integer`, `float`, or `boolean`, it is converted, so a predicate such as `rateLimitRemaining > 5` compares numbers. A value that doesn't parse stays a string.
+- **`optional:` and `default:`** work as they do for a path. A missing header without either fails the step with `extract header "requestId" (X-Request-Id) not found in response`.
+- **No body needed.** A template whose rules all read headers extracts from any response, a `204 No Content` included. A rule that reads the body still needs a JSON body.
+- **Archived like any output.** A header value, such as a session token an API returns in a header, is kept in the run archive unless it is a configured credential, as a value from the body is.
+- **One source per rule.** A rule takes `path` or `header`, not both, and a header rule takes no `fields`.
+
 ### Path Syntax
 
 Extraction paths use [gjson](https://github.com/tidwall/gjson) syntax with some normalization:
@@ -423,7 +447,7 @@ If an extract path doesn't match anything in the response:
 extract path "orderId" (id) not found in response; mark the rule optional: true or give it a default
 ```
 
-The response body must be valid JSON for extraction to work. Non-JSON responses produce:
+Rules that read the body need it to be valid JSON; [header rules](#header-extraction) don't. A non-JSON body produces:
 
 ```
 response body is not valid JSON
@@ -648,6 +672,8 @@ response:
     defaultedOutput:         #   object form with default: a missing or null path takes the default
       path: "path.to.field"
       default: ""
+    headerOutput:            #   object form with header: a response header in place of a body path
+      header: "X-Request-Id"
   transform: |               # optional — Lua post-processing script
     -- receives `outputs` table and `json_path()` function
     return outputs

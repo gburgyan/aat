@@ -75,3 +75,40 @@ Each gap the package runs into becomes its own AAT branch and PR. In order:
 **Open questions:**
 - **Empty bodies.** A rule with a default still needs a JSON body. A 204 with no body fails extraction as before. PR 3
   (header extraction) takes up bodies that only header rules read.
+
+## 2026-09-14 — Response-header extraction
+
+**What:**
+- **Header rules:** an extract rule's `header:` reads a response header. `header(name)` gives Lua transforms the same.
+- **Types:** header outputs are converted to their graph output's integer, float, or boolean type.
+- **Empty bodies:** a template whose rules all read headers needs no JSON body.
+- **MCP:** the server shows a header rule as `header <name>`.
+- **Sandbox:** the shop sandbox reports `RateLimit-*` headers per bearer token. The shop reads them on `listProducts`,
+  and Quick Purchase asserts on them.
+
+**Decisions:**
+- **Credential headers aren't refused,** a change from the gap design.
+  - **Why:** some APIs return a session token in a response header, and later steps need it. Refusing `X-Auth-Token` or
+    `Set-Cookie` would block that flow.
+  - **Redaction:** a token an API issues in a body isn't redacted from archives either, since only configured
+    credentials and the run's OAuth token are known secrets. So a header value is treated the same, and the docs say so.
+  - **Dependencies:** a refusal would also have copied `archive`'s header list into the leaf `adapter` package.
+- **The engine converts types, not the adapter.** The adapter doesn't know graph types. `convertHeaderOutputs` reuses
+  `coerceValue`, and it runs after a transform, so a transform that replaces a header output with a string is converted
+  too.
+- **Matching in any case,** with a fallback for header maps whose keys aren't canonical. Test doubles and custom
+  executors can build such maps, where `http.Header.Values` would miss a key.
+- **Joined values.** A header sent more than once gives its values joined with `, `, the HTTP list form. That keeps an
+  output a string, where a list would need a selection.
+- **OAS static check.** Header outputs map to `""` in `OutputExtractPaths`, so rule 7 doesn't look for them in the body
+  schema.
+- **The sandbox counts but never refuses.**
+  - **Why not refuse:** a 429 would throttle matrix batches.
+  - **What the shop's check proves:** `rateLimitRemaining < rateLimitLimit` shows the header was read as a number and
+    that the request was counted.
+  - **The counts:** they're per token per minute, from the injected clock, so tests are deterministic.
+
+**Open questions:**
+- **`Link` cursors:** a pagination cursor in a `Link` header needs a transform to parse out `rel="next"`, or a dedicated
+  rule later.
+- **429s:** extraction doesn't run on a 429, so `RateLimit-Reset` there is only read by retry, as before.

@@ -48,8 +48,9 @@ func ValidateAdapterOutputs(g *graph.Graph, registry *adapter.Registry) error {
 
 // OutputExtractPaths maps each templated node's outputs to the GJSON paths its
 // template extracts them from, for the static OAS output check (see
-// oas.Validator.WithOutputPaths). An output the template does not extract but
-// a Lua transform may compute maps to "". Nodes without a template adapter are
+// oas.Validator.WithOutputPaths). An output read from a response header, or
+// one the template does not extract but a Lua transform may compute, maps to
+// "", since it isn't in the body schema. Nodes without a template adapter are
 // left out, so the check falls back to output names for them.
 func OutputExtractPaths(g *graph.Graph, registry *adapter.Registry) oas.OutputPaths {
 	paths := make(oas.OutputPaths, len(g.Nodes))
@@ -60,9 +61,11 @@ func OutputExtractPaths(g *graph.Graph, registry *adapter.Registry) oas.OutputPa
 		}
 		outputs := make(map[string]string, len(node.Outputs))
 		for _, out := range node.Outputs {
-			if rule, ok := tmpl.Response.Extract[out.Name]; ok {
+			rule, extracted := tmpl.Response.Extract[out.Name]
+			switch {
+			case extracted && rule.Header == "":
 				outputs[out.Name] = rule.GJSONPath()
-			} else if tmpl.HasTransform() {
+			case extracted, tmpl.HasTransform():
 				outputs[out.Name] = ""
 			}
 		}
