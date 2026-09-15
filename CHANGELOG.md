@@ -308,6 +308,10 @@ the graph and plan formats may still change before 1.0.
   object after an expected failure.
 
 ### Fixed
+- A conditional block around an iteration block of the same list renders, as in the templates guide:
+  `{{?ids}}, "ids": [{{#ids}}"{{.}}"{{/ids}}]{{/ids}}`. Both blocks close with `{{/ids}}`, and each block took the first
+  one, so an absent list failed with `unresolved placeholders` and a present list rendered malformed JSON, such as
+  `["p"],"q"]`, without an error. A closing tag now closes the innermost open block with its name.
 - A plan with a list or map step value reads back after it's saved, as by `aat prompt --save` or the MCP server's
   `save_plan`. A list was written bare, which the parser rejected, and a map was written as the step value's own keys;
   a map is now written under `default:`.

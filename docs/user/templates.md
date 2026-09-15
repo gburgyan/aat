@@ -290,7 +290,7 @@ If `itemIds` is `["item-1", "item-2", "item-3"]`, this produces:
 }
 ```
 
-Iteration blocks can be combined with conditional blocks — a conditional wrapping an iteration, or vice versa:
+Iteration blocks can be combined with conditional blocks — a conditional wrapping an iteration, or vice versa. They can name the same list, as below: each closing tag closes the innermost open block with its name.
 
 ```yaml
 body: |
