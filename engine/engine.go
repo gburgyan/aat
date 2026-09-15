@@ -832,7 +832,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		)
 	}
 
-	e.runStepAssertions(step, node, &result, inputs, resolvedAt)
+	e.runStepAssertions(step, node, state, &result, inputs, resolvedAt)
 	return result
 }
 
@@ -842,14 +842,15 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 // HTTP response body. Normal assertions evaluate against serialized extracted
 // outputs when available, falling back to the raw body (e.g., on 4xx
 // responses).
-func (e *Engine) runStepAssertions(step plan.Step, node *graph.Node, result *StepResult, inputs map[string]any, resolvedAt time.Time) {
+func (e *Engine) runStepAssertions(step plan.Step, node *graph.Node, state *RunState, result *StepResult, inputs map[string]any, resolvedAt time.Time) {
 	resp := result.Response
 	if resp != nil && step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
 		merged := &validate.MechanicalResult{Passed: true}
 		// Expressions in a fieldEquals value or a quoted predicate string read
-		// the step's inputs, as step values do, and the time they were resolved,
-		// so a retry compares with the dates it resent.
-		ectx := e.assertionExprContext(node, inputs, resolvedAt)
+		// the step's inputs, as step values do, earlier steps' outputs, and the
+		// time the inputs were resolved, so a retry compares with the dates it
+		// resent.
+		ectx := e.assertionExprContext(node, state, inputs, resolvedAt)
 		predicateEval := func(expr string, fields map[string]any) (bool, error) {
 			return plan.EvalPredicateWithExprs(expr, fields, ectx)
 		}
@@ -919,10 +920,15 @@ func (e *Engine) runStepAssertions(step plan.Step, node *graph.Node, result *Ste
 }
 
 // assertionExprContext is the expression context of a step's assertions and of
-// its repeat condition: its inputs, and the time they were resolved.
-func (e *Engine) assertionExprContext(node *graph.Node, inputs map[string]any, resolvedAt time.Time) plan.ExprContext {
+// its repeat condition: its inputs, the time they were resolved, and, through
+// state, the outputs of the steps that ran before it.
+func (e *Engine) assertionExprContext(node *graph.Node, state *RunState, inputs map[string]any, resolvedAt time.Time) plan.ExprContext {
 	rctx := e.buildResolveContext(node)
-	return plan.ExprContext{Now: resolvedAt, Env: rctx.EnvLookup, Values: inputs, Random: rctx.Random}
+	ectx := plan.ExprContext{Now: resolvedAt, Env: rctx.EnvLookup, Values: inputs, Random: rctx.Random}
+	if state != nil {
+		ectx.Outputs = state.OutputValue
+	}
+	return ectx
 }
 
 // displayOutputs returns the outputs node tags for display, in the order the

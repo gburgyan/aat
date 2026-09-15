@@ -131,7 +131,8 @@ func dependsOnStep(steps []Step, from, to string) bool {
 }
 
 // InjectReferenceDeps adds to each step's dependsOn the steps its values and
-// named selections read through from, fromInput, or a selection's from, so a
+// named selections read through from, fromInput, or a selection's from, and
+// those its assertions and repeat condition read through {{step.output}}, so a
 // reference implies its dependency. A reference to the step itself is left
 // alone, and so is one to a step the plan doesn't have, which validation
 // reports. With externalOnly, only references to steps outside the plan are
@@ -154,9 +155,9 @@ func InjectReferenceDeps(p *Plan, externalOnly bool) {
 	}
 }
 
-// referencedSteps returns the IDs of the steps that a step's values and named
-// selections read, each once, in value name order and then selection name
-// order.
+// referencedSteps returns the IDs of the steps that a step's values, named
+// selections, and {{step.output}} references read, each once, in value name
+// order, then selection name order, then the order the references appear.
 func referencedSteps(step Step) []string {
 	var refs []string
 	add := func(ref string) {
@@ -178,6 +179,11 @@ func referencedSteps(step Step) []string {
 			add(from)
 		}
 	}
+	for _, ref := range StepOutputRefs(step.Assertions, step.Repeat) {
+		if !slices.Contains(refs, ref.Step) {
+			refs = append(refs, ref.Step)
+		}
+	}
 	return refs
 }
 
@@ -196,6 +202,17 @@ func referenceNote(step Step, dep string) string {
 		if from := step.Selections[name].From; from != "" && splitFromNodeName(from) == dep {
 			names = append(names, fmt.Sprintf("selection %q", name))
 		}
+	}
+	readsDep := func(r OutputRef) bool { return r.Step == dep }
+	if step.Assertions != nil {
+		for j, a := range step.Assertions.Mechanical {
+			if slices.ContainsFunc(AssertionOutputRefs(a), readsDep) {
+				names = append(names, fmt.Sprintf("assertion %d", j))
+			}
+		}
+	}
+	if step.Repeat != nil && slices.ContainsFunc(PredicateOutputRefs(step.Repeat.Until), readsDep) {
+		names = append(names, "repeat.until")
 	}
 	if len(names) == 0 {
 		return ""

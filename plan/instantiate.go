@@ -514,6 +514,8 @@ func rewriteStepRefs(s *Step, idMap map[string]string) {
 			s.Selections[name] = sel
 		}
 	}
+	s.Assertions = RewriteAssertionRefs(s.Assertions, idMap)
+	s.Repeat = RewriteRepeatRefs(s.Repeat, idMap)
 }
 
 // rewriteQualifiedRef splits a "stepId.field" reference and replaces the

@@ -242,7 +242,7 @@ The syntax is `stepId.inputName`. The referenced step joins `dependsOn`, and the
 
 Expressions use `{{...}}` delimiters and are evaluated at execution time. Where they work:
 - step values, pools, graph defaults, layers, recipe overrides, and slot `inject` values
-- a `fieldEquals` `value` and a quoted `predicate` string in an assertion, which can name the step's inputs (see [Plans: Assertions](plans.md))
+- a `fieldEquals` `value` and a quoted `predicate` string in an assertion, and a quoted string in `repeat.until`, which can name the step's inputs and read an earlier step's output as `{{step.output}}` (see [Plans: Assertions](plans.md))
 
 `aat validate` checks their syntax in step values, pools, and assertions.
 
@@ -383,6 +383,7 @@ Predicate expressions are used in selection filters, value `constraint`s, and `p
 - **Booleans**: `true`, `false`
 - **Identifiers**: `fieldName`, `nested.path` (dot notation through nested objects; no array indexes or queries)
 - **Parentheses**: `(a || b) && c`
+- **Numbers written as text**: `<`, `>`, `<=`, and `>=` compare two strings that are both decimal numbers, such as `"999.50"` and `"1000.00"`, as numbers. `==` and `!=` compare text, and other strings, dates included, order as text.
 
 Predicates evaluate against a context map:
 

@@ -38,6 +38,21 @@ func (s *RunState) GetOutput(nodeName, outputName string) (any, error) {
 	return val, nil
 }
 
+// OutputValue returns an output of a step that already ran, as a
+// {{step.output}} reference in an assertion reads it, with an error that says
+// why the value is missing.
+func (s *RunState) OutputValue(stepID, output string) (any, error) {
+	outputs, ok := s.outputs[stepID]
+	if !ok {
+		return nil, fmt.Errorf("step %q stored no outputs (a step stores them once it succeeds, and one with expectFailure stores none)", stepID)
+	}
+	v, ok := outputs[output]
+	if !ok {
+		return nil, fmt.Errorf("step %q produced no output %q (an optional output is absent when the response doesn't hold it)", stepID, output)
+	}
+	return v, nil
+}
+
 // GetAllOutputs returns all outputs for a completed step.
 func (s *RunState) GetAllOutputs(nodeName string) (map[string]any, bool) {
 	outputs, ok := s.outputs[nodeName]

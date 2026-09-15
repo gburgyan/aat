@@ -124,8 +124,10 @@ func buildOutputMap(p *plan.Plan, g *graph.Graph) map[string]string {
 	return outputMap
 }
 
-// prefixStepRefs prefixes all step IDs, dependsOn, from refs, and
-// fromSelection refs within a sub-workflow plan.
+// prefixStepRefs prefixes all step IDs, dependsOn, from refs, fromSelection
+// refs, and the {{step.output}} references in assertions and repeat conditions
+// within a sub-workflow plan. A reference to a step outside the sub-workflow,
+// such as a base workflow's step, is left as it is.
 func prefixStepRefs(sub *plan.Plan, prefix string) {
 	// Build old→new ID map for the sub-workflow steps.
 	idMap := make(map[string]string)
@@ -149,6 +151,8 @@ func prefixStepRefs(sub *plan.Plan, prefix string) {
 			}
 			sub.Execution.Verification[v].Values[name] = sv
 		}
+		sub.Execution.Verification[v].Assertions = plan.RewriteAssertionRefs(sub.Execution.Verification[v].Assertions, idMap)
+		sub.Execution.Verification[v].Repeat = plan.RewriteRepeatRefs(sub.Execution.Verification[v].Repeat, idMap)
 	}
 
 	for i := range sub.Execution.Steps {
@@ -197,6 +201,11 @@ func prefixStepRefs(sub *plan.Plan, prefix string) {
 				}
 			}
 		}
+
+		// Rewrite {{step.output}} references in assertions and the repeat
+		// condition.
+		step.Assertions = plan.RewriteAssertionRefs(step.Assertions, idMap)
+		step.Repeat = plan.RewriteRepeatRefs(step.Repeat, idMap)
 	}
 
 	// Prefix cleanup nodes are not prefixed — they reference graph node names.

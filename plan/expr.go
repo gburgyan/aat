@@ -2,6 +2,7 @@ package plan
 
 import (
 	crand "crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -20,6 +21,10 @@ type ExprContext struct {
 	Env    func(string) string // env var lookup (default: os.Getenv)
 	Values map[string]any      // already-resolved inputs for relative refs
 	Random io.Reader           // source for "uuid" and "random N" (default: crypto/rand)
+	// Outputs looks up an earlier step's output for a {{step.output}}
+	// reference. Assertions and repeat conditions set it; where it is nil, such
+	// a reference is an error.
+	Outputs func(stepID, output string) (any, error)
 }
 
 // defaults fills in zero-valued fields with production defaults.
@@ -221,6 +226,7 @@ const (
 	exprRandom                   // "random N"
 	exprNow                      // "now" optionally with a time offset
 	exprUnixtime                 // "unixtime" optionally with a time offset
+	exprOutput                   // "step.output", an earlier step's output
 )
 
 // parsedExpr is an intermediate representation of a single expression.
@@ -228,6 +234,8 @@ type parsedExpr struct {
 	kind     exprKind
 	envVar   string        // for exprEnv
 	refName  string        // for exprRef
+	stepID   string        // for exprOutput
+	output   string        // for exprOutput
 	offset   int           // days offset (positive or negative)
 	hasArith bool          // whether arithmetic was specified
 	length   int           // for exprRandom
@@ -240,6 +248,9 @@ const maxRandomLength = 64
 // Regex for expression parsing.
 var (
 	exprEnvRe       = regexp.MustCompile(`^env\.([A-Za-z_][A-Za-z0-9_]*)$`)
+	exprOutputRe    = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)$`)
+	exprDashedRefRe = regexp.MustCompile(`^[A-Za-z0-9_]*-[A-Za-z0-9_-]*\.[A-Za-z_][A-Za-z0-9_]*$`)
+	exprOutputRefRe = regexp.MustCompile(`\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`)
 	exprArithRe     = regexp.MustCompile(`^(\S+)\s*([+-])\s*(\d+)\s+days?$`)
 	exprIdentOnlyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	exprClockRe     = regexp.MustCompile(`^(now|unixtime)(?:\s*([+-])\s*(\d+)\s+([A-Za-z]+))?$`)
@@ -253,6 +264,15 @@ func parseExprInner(inner string) (*parsedExpr, error) {
 	// env.VAR
 	if m := exprEnvRe.FindStringSubmatch(inner); m != nil {
 		return &parsedExpr{kind: exprEnv, envVar: m[1]}, nil
+	}
+
+	// step.output, an earlier step's output. env.NAME above always means the
+	// environment.
+	if m := exprOutputRe.FindStringSubmatch(inner); m != nil {
+		return &parsedExpr{kind: exprOutput, stepID: m[1], output: m[2]}, nil
+	}
+	if exprDashedRefRe.MatchString(inner) {
+		return nil, fmt.Errorf("invalid expression syntax: %q; step IDs in {{step.output}} use letters, digits, and underscores, so give the step such an id", inner)
 	}
 
 	// now and unixtime, optionally +/- N seconds, minutes, hours, or days
@@ -392,9 +412,115 @@ func evalOneExpr(inner string, ctx ExprContext) (any, error) {
 		d := t.AddDate(0, 0, pe.offset)
 		return d.Format("2006-01-02"), nil
 
+	case exprOutput:
+		if ctx.Outputs == nil {
+			return nil, fmt.Errorf("{{%s.%s}} reads a step's output, which only assertions and repeat.until can; in a step value use from: %s.%s",
+				pe.stepID, pe.output, pe.stepID, pe.output)
+		}
+		v, err := ctx.Outputs(pe.stepID, pe.output)
+		if err != nil {
+			return nil, err
+		}
+		return outputExprValue(pe.stepID, pe.output, v)
+
 	default:
 		return nil, fmt.Errorf("unknown expression kind %d", pe.kind)
 	}
+}
+
+// outputExprValue returns a step's output as a {{step.output}} reference reads
+// it: a number, a boolean, or text. An extracted json.Number becomes an int64 or
+// a float64. A null, list, or object output is an error, since an assertion
+// compares a single value.
+func outputExprValue(stepID, output string, v any) (any, error) {
+	switch x := v.(type) {
+	case nil:
+		return nil, fmt.Errorf("step %q output %q is null", stepID, output)
+	case json.Number:
+		if i, err := x.Int64(); err == nil {
+			return i, nil
+		}
+		if f, err := x.Float64(); err == nil {
+			return f, nil
+		}
+		return x.String(), nil
+	case []any:
+		return nil, fmt.Errorf("step %q output %q is a list; an assertion compares a string, number, or boolean", stepID, output)
+	case map[string]any:
+		return nil, fmt.Errorf("step %q output %q is an object; an assertion compares a string, number, or boolean", stepID, output)
+	}
+	return v, nil
+}
+
+// OutputRef names an earlier step's output that a {{step.output}} expression
+// reads.
+type OutputRef struct {
+	Step   string
+	Output string
+}
+
+// String returns the reference as it is written, as {{step.output}}.
+func (r OutputRef) String() string { return "{{" + r.Step + "." + r.Output + "}}" }
+
+// ExprOutputRefs returns the {{step.output}} references among raw's
+// expressions, in order. Text that doesn't parse holds none; ValidateExpr
+// reports why.
+func ExprOutputRefs(raw string) []OutputRef {
+	if !ContainsExpr(raw) {
+		return nil
+	}
+	segments, err := splitExprSegments(raw)
+	if err != nil {
+		return nil
+	}
+	var refs []OutputRef
+	for _, seg := range segments {
+		if !seg.isExpr {
+			continue
+		}
+		if pe, err := parseExprInner(seg.text); err == nil && pe.kind == exprOutput {
+			refs = append(refs, OutputRef{Step: pe.stepID, Output: pe.output})
+		}
+	}
+	return refs
+}
+
+// ExprValueOutputRefs returns the {{step.output}} references in v: a string's,
+// or those in the items of a list or map, at any depth.
+func ExprValueOutputRefs(v any) []OutputRef {
+	switch t := v.(type) {
+	case string:
+		return ExprOutputRefs(t)
+	case []any:
+		var refs []OutputRef
+		for _, item := range t {
+			refs = append(refs, ExprValueOutputRefs(item)...)
+		}
+		return refs
+	case map[string]any:
+		var refs []OutputRef
+		for _, key := range slices.Sorted(maps.Keys(t)) {
+			refs = append(refs, ExprValueOutputRefs(t[key])...)
+		}
+		return refs
+	}
+	return nil
+}
+
+// RewriteExprRefs renames the steps that s's {{step.output}} expressions read,
+// as idMap maps old step IDs to new ones. {{env.NAME}} and references to steps
+// idMap doesn't name are left as they are.
+func RewriteExprRefs(s string, idMap map[string]string) string {
+	if !ContainsExpr(s) {
+		return s
+	}
+	return exprOutputRefRe.ReplaceAllStringFunc(s, func(m string) string {
+		sub := exprOutputRefRe.FindStringSubmatch(m)
+		if newID, ok := idMap[sub[1]]; ok && sub[1] != "env" {
+			return "{{" + newID + "." + sub[2] + "}}"
+		}
+		return m
+	})
 }
 
 // offsetDuration converts an offset of number units, as written in expression

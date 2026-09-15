@@ -690,6 +690,12 @@ func validateValueConstraints(resp *TargetedResponse, unfedSet map[string]bool, 
 					Kind:    "invalid_expression",
 					Message: fmt.Sprintf("%s: invalid expression syntax %q: %v", key, strVal, err),
 				})
+			} else if refs := plan.ExprOutputRefs(strVal); len(refs) > 0 {
+				issues = append(issues, TargetedValidationIssue{
+					Key:     key,
+					Kind:    "invalid_expression",
+					Message: fmt.Sprintf("%s: %s reads a step's output, which only assertions and repeat.until can; use from: %s.%s", key, refs[0], refs[0].Step, refs[0].Output),
+				})
 			}
 			continue
 		}

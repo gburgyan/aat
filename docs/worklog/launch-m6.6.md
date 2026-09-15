@@ -227,3 +227,38 @@ combined with `bodyContains` and `node` using AND, and it counts as a match crit
 - **`Link` headers and page numbers.** A cursor inside a `Link` header, or a page number that needs arithmetic, isn't an
   output `next` can send; those still need chained steps or a transform.
 - **Web UI.** A paging step shows its last page only, until PR 4b's Iterations tab.
+
+## 2026-09-15 — `{{step.output}}` in assertions (PR 8)
+
+**What:**
+- **References:** a `fieldEquals` value, a quoted literal in a predicate, and a quoted literal in `repeat.until` can read
+  an earlier step's output as `{{step.output}}`, as in `amount == "{{checkout.total}}"`.
+- **Ordering:** `< > <= >=` compare two decimal numbers written as text as numbers, so `"1000.00" > "999.50"`.
+- **Validation:** `aat validate` checks that a reference names a main step and a single-value output its node declares.
+  It rejects a reference to the step's own output, to a step that expects failure, from a verification step to another
+  verification step, and in a step value, where the message points to `from:`.
+- **Wiring:** a reference implies `dependsOn`. Addon composition renames references to the addon's own steps, and
+  isolated mutation clones rename theirs.
+- **Shop:** the full-lifecycle plan checks that checkout keeps the cart's subtotal, and that the refund and the returned
+  order match checkout's total.
+
+**Decisions:**
+- **Assertions only.** Step values already have `from:`, which records its resolution and implies the dependency, and a
+  second wiring syntax would bypass both. Cleanup `when` stays a plain predicate, since a graph pairing can't name a
+  plan's step IDs.
+- **`{{env.NAME}}` wins.** The environment form is matched first, so a step with the ID `env` can't be read this way.
+  A hyphenated step ID, such as a mutation's `pay--declined`, gets a hint.
+- **Values keep their type.** An extracted `json.Number` becomes an int64 or a float64, so a number output compares
+  with a number field. A null, list, or object output fails the assertion instead of comparing as text.
+- **A missing value fails the assertion, not the run.** A step that stored no outputs, or an optional output the
+  response left out, fails with a message that says which, as an unresolved `{{input}}` already did.
+- **Decimal text orders as numbers; equality stays text.** Two strings that are both decimal numbers compare exactly,
+  through `big.Rat`. `==` still compares text, so `"1.0" == "1.00"` stays false and no existing equality can flip, and
+  dates keep text order. The change reaches selection filters, constraints, and `when` too, where numeric text in
+  lexicographic order was never meant, so the CHANGELOG lists it under Changed.
+- **No arithmetic.** The Duffel checks compare totals the API returns, and sums stay in transforms, as integer cents.
+- **Verification reads main steps.** Verification steps run after the main steps, each on its own, so reading another
+  verification step can wait for a case that needs it.
+
+**Open questions:**
+- **Arithmetic,** such as a held total plus a change fee, if a check appears that no returned total covers.

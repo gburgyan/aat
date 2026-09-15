@@ -98,7 +98,7 @@ func (e *Engine) executeStepRepeated(ctx context.Context, step plan.Step, node *
 		if rc.Until != "" {
 			var fields map[string]any
 			if fields, evalErr = predicateFields(result.Outputs); evalErr == nil {
-				met, evalErr = plan.EvalPredicateWithExprs(rc.Until, fields, e.assertionExprContext(node, prepared.inputs, prepared.now))
+				met, evalErr = plan.EvalPredicateWithExprs(rc.Until, fields, e.assertionExprContext(node, state, prepared.inputs, prepared.now))
 			}
 		}
 		it.UntilMet = met
@@ -187,7 +187,7 @@ func (e *Engine) executeStepRepeated(ctx context.Context, step plan.Step, node *
 		result.Outputs = merged
 		result.DisplayOutputs = displayOutputs(node, merged)
 	}
-	e.runStepAssertions(step, node, &result, first.inputs, first.now)
+	e.runStepAssertions(step, node, state, &result, first.inputs, first.now)
 	if failure != "" {
 		if result.Validation == nil {
 			result.Validation = &validate.MechanicalResult{}

@@ -7,6 +7,16 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- An assertion can compare with an earlier step's output, written `{{step.output}}`: `amount == "{{checkout.total}}"` in a
+  predicate, `value: "{{checkout.total}}"` in `fieldEquals`, and a quoted literal in `repeat.until`.
+  - A main step reads the main steps before it, and a verification step reads the main steps. A reference implies
+    `dependsOn`, and addon composition and isolated mutation clones rename the steps it names.
+  - An extracted number compares as a number. A null or list output, a step that stored no outputs, or an output the
+    response left out fails the assertion, with a message saying which.
+  - `aat validate` reports a reference to an unknown step or output, to the step's own output, to a list output, or to a
+    step that expects failure, and one in a step value, where `from:` reads an earlier step.
+  - The shop's full-lifecycle plan checks that checkout keeps the cart's subtotal and that the refund and the returned
+    order match checkout's total.
 - A step can read every page of a listing with `repeat.next`, which sends each response's cursor as the next request's
   input, as in `repeat: {next: {after: nextCursor}, collect: [orders, orderCount], max: 50}`.
   - The step passes when every cursor comes back missing, `null`, or `""`, and `until` becomes optional. It fails when
@@ -206,6 +216,10 @@ the graph and plan formats may still change before 1.0.
   generates its own value, and a retried step resends the values its first attempt generated.
 
 ### Changed
+- A predicate's `<`, `>`, `<=`, and `>=` compare two strings that are both decimal numbers as numbers, so
+  `"1000.00" > "999.50"` holds; before, they compared as text. `==` and `!=` still compare text, and dates and other
+  strings still order as text. This applies wherever predicates are read: assertions, selection filters, constraints,
+  and cleanup `when`.
 - `aat run show --step --json` names a step's assertion results `validation` (`{passed, results}`), as `archive.json`
   does, where it said `assertions`.
 - `aat validate` notes a workflows, layers, or plans directory that the manifest names but that doesn't exist yet. It
