@@ -309,14 +309,19 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 			raw := def.Value
 			res := defaultResolution(input.Name, def)
 			val := raw
-			if s, ok := raw.(string); ok && plan.ContainsExpr(s) && ectx != nil {
+			if plan.ContainsExprValue(raw) && ectx != nil {
 				evaluated, err := plan.EvalExpr(raw, *ectx)
 				if err != nil {
-					return nil, nil, nil, fmt.Errorf("evaluating graph default %q: %w", s, err)
+					if s, ok := raw.(string); ok {
+						return nil, nil, nil, fmt.Errorf("evaluating graph default %q: %w", s, err)
+					}
+					return nil, nil, nil, fmt.Errorf("evaluating graph default %v: %w", raw, err)
 				}
 				val = evaluated
 				res.RawValue = raw
-				res.Expression = s
+				if s, ok := raw.(string); ok {
+					res.Expression = s
+				}
 			}
 			res.FinalValue = val
 			return val, nil, res, nil
@@ -677,9 +682,9 @@ func extractField(element any, field string) (any, error) {
 	return result.Value(), nil
 }
 
-// evaluateValue applies expression evaluation if the raw value is a string
-// containing {{...}} templates. Returns the value unchanged if no expressions
-// are found or if raw is not a string.
+// evaluateValue applies expression evaluation to a string containing {{...}}
+// templates, and to the items of a list or map. Returns the value unchanged if
+// no expressions are found.
 func evaluateValue(raw any, ectx plan.ExprContext) (any, error) {
 	return plan.EvalExpr(raw, ectx)
 }
@@ -844,10 +849,10 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 	return nil, nil, nil, fmt.Errorf("required input %q has no value", inputName)
 }
 
-// isExpression returns true if the value is a string containing {{...}} templates.
+// isExpression reports whether the value holds a {{...}} expression, in a string
+// or in an item of a list or map.
 func isExpression(v any) bool {
-	s, ok := v.(string)
-	return ok && plan.ContainsExpr(s)
+	return plan.ContainsExprValue(v)
 }
 
 // coerceValue normalizes a resolved value based on the graph input's declared type.

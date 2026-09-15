@@ -7,6 +7,15 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- A step value can be a YAML list, which is the list itself, as it already was in a slot's `inject`: `skus: [SKU-1004,
+  SKU-1006]`, or a list of maps for a template's `{{#lineItems}}…{{.sku}}…{{/lineItems}}`. Before, a bare list was an
+  error, and a list had to be written `{default: [...]}`, which still works.
+  - `{value: …}` in a step value means the same as `{default: …}`, so the literal form of graph defaults, layers, and
+    `inject` works in a plan too. A step value with both keys is an error.
+  - Strings inside a list or map value are evaluated as expressions, at any depth, wherever expressions are evaluated.
+    A new list or map is built each run, so the plan keeps its expressions.
+  - `aat validate` checks expression syntax inside lists and maps in step values, pools, and `fieldEquals` values, and
+    names the item, as in `invalid expression for "skus": item 1: random takes a length from 1 to 64`.
 - `aat run show batch-ID/PLAN` names a plan's run in a batch by the plan name the batch view's PLAN column shows, such
   as `batch-…/negative/state-machine`. Before, only `batch-ID/run-ID` worked.
   - A run ID of the batch wins over a plan of the same name, and a permutation skipped as a duplicate doesn't count.
@@ -266,6 +275,9 @@ the graph and plan formats may still change before 1.0.
   object after an expected failure.
 
 ### Fixed
+- A plan with a list or map step value reads back after it's saved, as by `aat prompt --save` or the MCP server's
+  `save_plan`. A list was written bare, which the parser rejected, and a map was written as the step value's own keys;
+  a map is now written under `default:`.
 - OpenAPI specs with circular references load. A schema that refers back to itself, directly or through another
   schema, used to fail with `infinite circular reference detected`, so `aat generate`, `aat validate`, and the MCP
   server rejected the spec, and `aat run` skipped OAS validation. Large published specs have such cycles. Other

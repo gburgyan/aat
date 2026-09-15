@@ -82,3 +82,17 @@ func TestValidate_StepValueShape(t *testing.T) {
 		assert.NotContains(t, err.Error(), "takes a")
 	}
 }
+
+func TestValidate_ExpressionsInListValues(t *testing.T) {
+	g := &graph.Graph{Version: "1.0.0", Nodes: map[string]*graph.Node{
+		"addItem": {Name: "addItem", Inputs: []graph.Input{{Name: "skus", Type: "string[]"}}},
+	}}
+	p := &Plan{Execution: Execution{Steps: []Step{{Node: "addItem", Values: map[string]StepValue{
+		"skus": {Default: []any{"SKU-{{random 4}}", "SKU-{{random 0}}"}},
+	}}}}}
+
+	err := Validate(p, g)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `step 0 (addItem): invalid expression for "skus": item 1: random takes a length from 1 to 64`)
+}

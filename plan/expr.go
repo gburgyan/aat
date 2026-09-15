@@ -4,9 +4,11 @@ import (
 	crand "crypto/rand"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -42,6 +44,24 @@ func ContainsExpr(s string) bool {
 	return strings.Contains(s, "{{")
 }
 
+// ContainsExprValue reports whether v holds a {{...}} expression: a string that
+// contains one, or a list or map with one in an item, at any depth.
+func ContainsExprValue(v any) bool {
+	switch t := v.(type) {
+	case string:
+		return ContainsExpr(t)
+	case []any:
+		return slices.ContainsFunc(t, ContainsExprValue)
+	case map[string]any:
+		for _, item := range t {
+			if ContainsExprValue(item) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ValidateExpr checks that all {{...}} expressions in raw are syntactically valid
 // without evaluating them.
 func ValidateExpr(raw string) error {
@@ -59,9 +79,67 @@ func ValidateExpr(raw string) error {
 	return nil
 }
 
-// EvalExpr evaluates expression templates in raw. If raw is not a string or
-// contains no {{...}} delimiters, it is returned unchanged.
+// ValidateExprValue checks the expressions in v the way ValidateExpr checks a
+// string, in the items of lists and maps too, at any depth. An error names the
+// item.
+func ValidateExprValue(v any) error {
+	switch t := v.(type) {
+	case string:
+		if ContainsExpr(t) {
+			return ValidateExpr(t)
+		}
+	case []any:
+		for i, item := range t {
+			if err := ValidateExprValue(item); err != nil {
+				return fmt.Errorf("item %d: %w", i, err)
+			}
+		}
+	case map[string]any:
+		for _, key := range slices.Sorted(maps.Keys(t)) {
+			if err := ValidateExprValue(t[key]); err != nil {
+				return fmt.Errorf("key %q: %w", key, err)
+			}
+		}
+	}
+	return nil
+}
+
+// EvalExpr evaluates expression templates in raw. A string without {{...}}
+// delimiters, and any other scalar, is returned unchanged. A list or map is
+// evaluated item by item, at any depth, into a new list or map, so the plan's
+// own value keeps its expressions for the next run; a list or map without
+// expressions is returned as it is.
 func EvalExpr(raw any, ctx ExprContext) (any, error) {
+	switch t := raw.(type) {
+	case []any:
+		if !ContainsExprValue(t) {
+			return raw, nil
+		}
+		out := make([]any, len(t))
+		for i, item := range t {
+			v, err := EvalExpr(item, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("item %d: %w", i, err)
+			}
+			out[i] = v
+		}
+		return out, nil
+	case map[string]any:
+		if !ContainsExprValue(t) {
+			return raw, nil
+		}
+		out := make(map[string]any, len(t))
+		// Sorted keys draw generated values in the same order every run.
+		for _, key := range slices.Sorted(maps.Keys(t)) {
+			v, err := EvalExpr(t[key], ctx)
+			if err != nil {
+				return nil, fmt.Errorf("key %q: %w", key, err)
+			}
+			out[key] = v
+		}
+		return out, nil
+	}
+
 	s, ok := raw.(string)
 	if !ok {
 		return raw, nil

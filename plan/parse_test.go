@@ -148,6 +148,36 @@ execution:
 	assert.Equal(t, true, sv.Default)
 }
 
+func TestStepValue_ListsAndValueKey(t *testing.T) {
+	data := []byte(`
+execution:
+  steps:
+    - node: createOrder
+      values:
+        skus: [SKU-1004, SKU-1006]
+        lineItems:
+          - {sku: SKU-1004, quantity: 2}
+          - {sku: SKU-1006, note: "{{today}}"}
+        tiers: {value: [standard, express]}
+        quantity: {value: 2}
+        tags: {default: [gift]}
+        none: []
+`)
+	p, err := Parse(data)
+	require.NoError(t, err)
+	values := p.Execution.Steps[0].Values
+
+	assert.Equal(t, StepValue{Default: []any{"SKU-1004", "SKU-1006"}}, values["skus"], "a bare list is the list itself")
+	assert.Equal(t, StepValue{Default: []any{
+		map[string]any{"sku": "SKU-1004", "quantity": 2},
+		map[string]any{"sku": "SKU-1006", "note": "{{today}}"},
+	}}, values["lineItems"])
+	assert.Equal(t, StepValue{Default: []any{"standard", "express"}}, values["tiers"], "value: reads as default:")
+	assert.Equal(t, StepValue{Default: 2}, values["quantity"])
+	assert.Equal(t, StepValue{Default: []any{"gift"}}, values["tags"])
+	assert.Equal(t, StepValue{Default: []any{}}, values["none"])
+}
+
 func TestStepValue_FullStruct(t *testing.T) {
 	data := []byte(`
 execution:
@@ -666,9 +696,14 @@ func TestParse_UnknownKeys(t *testing.T) {
 			want: `line 6: unknown key "values" in cleanup step (valid keys: node, runOn)`,
 		},
 		{
-			name: "list as a step value",
-			yaml: "execution:\n  steps:\n    - node: a\n      values:\n        origin: [DEN, SFO]\n",
-			want: `line 5: a step value must be a scalar or a mapping, found a list`,
+			name: "value and default in one step value",
+			yaml: "execution:\n  steps:\n    - node: a\n      values:\n        skus: {value: [A], default: [B]}\n",
+			want: `line 5: a step value takes value or default, not both`,
+		},
+		{
+			name: "misspelled key beside value",
+			yaml: "execution:\n  steps:\n    - node: a\n      values:\n        skus: {value: [A], constraint: x, pol: [B]}\n",
+			want: `line 5: unknown key "pol" in step value (did you mean "pool"?)`,
 		},
 	}
 	for _, tt := range tests {

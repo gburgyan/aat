@@ -265,7 +265,7 @@ Inside the block:
 
 Blocks don't nest: a block inside another is not repeated for each element of the outer one.
 
-The input must exist and be an array; otherwise the request fails. Wrap the block in a conditional when the input is optional, as in the second example below.
+The input must exist and be an array; otherwise the request fails. Wrap the block in a conditional when the input is optional, as in the second example below. A plan sets a list as `itemIds: [item-1, item-2]`, or as a list of maps for `{{.fieldName}}` (see [Literal Values](value-flow.md#literal-values)).
 
 ```yaml
 body: |

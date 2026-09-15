@@ -39,6 +39,20 @@ values:
 
 YAML type inference applies: quoted strings remain strings, unquoted numbers become integers or floats, `true`/`false` become booleans. When the graph declares a specific type for the input, the engine coerces the value (see [Type Coercion](#type-coercion)).
 
+A YAML list in a step value is a literal list, and its items can be maps:
+
+```yaml
+values:
+  skus: [SKU-1004, SKU-1006]
+  lineItems:
+    - {sku: SKU-1004, quantity: 2}
+    - {sku: SKU-1006, giftNote: "Ordered {{today}}"}
+```
+
+- **Expressions in items.** Strings inside a list or map are evaluated like any other value, at any depth, so `giftNote` above sends the run's date. Each run evaluates them again, and the plan keeps the expressions as written.
+- **Other spellings.** `{value: [...]}` and `{default: [...]}` mean the same in a step value; one step value can't take both keys.
+- **Graph defaults and layers.** A bare list there is a [pool](#fallback-pools), one element picked per run, so a literal list is written `{value: [...]}`. That form reads the same in a step value, a graph default, a layer, and a slot's `inject`.
+
 To explicitly mark an optional input as absent — preventing it from being filled by graph defaults or auto-wiring — use an empty map:
 
 ```yaml
