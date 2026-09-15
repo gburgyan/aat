@@ -154,3 +154,16 @@ Each gap the package runs into becomes its own AAT branch and PR. In order:
 - **`next`.** PR 5 adds it to the same loop.
 - **Retry-After on success.** A server that sends `Retry-After` on a 200 to pace polling is honored up to 60 s. A longer
   request is capped, not treated as a failure as retries treat it, since the poll hasn't failed.
+
+## 2026-09-14 — Visualizer `match.bodyPath` (PR 6)
+
+**What:** `match.bodyPath` is a gjson path that must reach a value other than `null` in the response body. It is
+combined with `bodyContains` and `node` using AND, and it counts as a match criterion.
+
+**Decisions:**
+- **Exists and not null.** An enveloped API often returns the same object shape with a field `null` until it applies,
+  such as a booking reference. A visualizer for the booking view shouldn't open on those responses.
+- **A new key.** `bodyContains` keeps its top-level meaning. A nested reading would change which tabs existing projects
+  show, and a dotted `bodyContains` would be ambiguous with a key that contains a dot.
+- **gjson as written, with no `$.` normalization.** The path is data that the matcher checks, so it follows gjson syntax
+  exactly, as the docs say.

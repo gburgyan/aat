@@ -44,6 +44,12 @@ visualizers:
     file: reservation-detail.html
     match:
       node: CreateReservation
+
+  - id: order-receipt
+    name: Order Receipt
+    file: order-receipt.html
+    match:
+      bodyPath: data.receipt_number
 ```
 
 `aat validate` loads this file strictly (unknown keys are errors) and checks that every referenced HTML file exists.
@@ -56,15 +62,17 @@ visualizers:
 | `name` | no | Display name (defaults to `id` if omitted) |
 | `file` | yes | Path to the HTML file, relative to the visualizers directory |
 | `match.bodyContains` | no* | Top-level JSON key that must exist in the response body |
+| `match.bodyPath` | no* | [gjson](https://github.com/tidwall/gjson) path that must reach a value other than `null` in the response body, such as `data.receipt_number` |
 | `match.node` | no* | Graph node name that the step must match |
 
-*Give at least one match criterion (`bodyContains` or `node`): a visualizer with neither loads without error but never matches. When both are specified, both must match (AND logic). A step with an empty response body matches nothing.
+*Give at least one match criterion (`bodyContains`, `bodyPath`, or `node`): a visualizer with none loads without error but never matches. When several are specified, all must match (AND logic). A step with an empty response body matches nothing.
 
 ### Match Rules
 
 - **`bodyContains`** — checks whether the response body has a top-level JSON key with the given name. This is the most common match rule: API responses typically wrap their payload under a known root key.
+- **`bodyPath`** — checks whether a gjson path reaches a value other than `null`, such as `data.receipt_number` or `data.0.cabins`. Use it for an API that wraps every response in the same envelope, where the top-level key is always `data` and only a nested field tells the responses apart.
 - **`node`** — matches the graph node name of the step. Use this when the response structure doesn't have a distinctive key but you know which operation produces it.
-- **Both specified** — both conditions must be true (AND). Use this to narrow matches when multiple nodes share similar response shapes.
+- **Several specified** — all of them must be true (AND). Use this to narrow matches when multiple nodes share similar response shapes.
 
 ## Writing a Visualizer
 
@@ -214,7 +222,8 @@ iframe.contentWindow.postMessage({
 
 If the visualizer appears but shows nothing, check:
 
-- The `bodyContains` key matches a top-level key in the response (not a nested key)
+- The `bodyContains` key matches a top-level key in the response (not a nested key); use `bodyPath` for a nested one
+- The `bodyPath` reaches a value in this response, and that value isn't `null`
 - The `node` name matches the graph node (not the step ID)
 - The JavaScript `render()` function handles the response structure correctly
 - The `aat-visualizer-ready` message is sent on load

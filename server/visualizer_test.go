@@ -67,6 +67,35 @@ func TestMatchVisualizers_CombinedMatch(t *testing.T) {
 	assert.Empty(t, hits)
 }
 
+func TestMatchVisualizers_BodyPath(t *testing.T) {
+	defs := []config.VisualizerDef{
+		{ID: "booking", Name: "Booking", Match: config.VisualizerMatch{BodyPath: "data.booking_reference"}},
+		{ID: "seats", Name: "Seats", Match: config.VisualizerMatch{Node: "getSeatMaps", BodyPath: "data.0.cabins"}},
+	}
+
+	tests := []struct {
+		name string
+		node string
+		body string
+		want []string
+	}{
+		{name: "nested key present", node: "getOrder", body: `{"data": {"booking_reference": "RZPNX8"}}`, want: []string{"booking"}},
+		{name: "nested key null", node: "getOrder", body: `{"data": {"booking_reference": null}}`},
+		{name: "nested key missing", node: "getOffer", body: `{"data": {"id": "off_1"}}`},
+		{name: "path into a list, with the node", node: "getSeatMaps", body: `{"data": [{"cabins": []}]}`, want: []string{"seats"}},
+		{name: "path matches but the node doesn't", node: "getOrder", body: `{"data": [{"cabins": []}]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ids []string
+			for _, hit := range matchVisualizers(defs, tt.node, json.RawMessage(tt.body)) {
+				ids = append(ids, hit.ID)
+			}
+			assert.Equal(t, tt.want, ids)
+		})
+	}
+}
+
 func TestMatchVisualizers_EmptyDefs(t *testing.T) {
 	body := json.RawMessage(`{"Foo":{}}`)
 	hits := matchVisualizers(nil, "Node", body)

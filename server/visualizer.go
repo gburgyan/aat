@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/tidwall/gjson"
+
 	"github.com/gburgyan/aat/config"
 )
 
@@ -43,8 +45,16 @@ func matchesVisualizer(def config.VisualizerDef, stepNode string, responseBody j
 		}
 	}
 
+	// bodyPath: the gjson path must reach a value other than null, so an API
+	// that wraps every response in the same envelope can still be told apart.
+	if def.Match.BodyPath != "" {
+		if r := gjson.GetBytes(responseBody, def.Match.BodyPath); !r.Exists() || r.Type == gjson.Null {
+			return false
+		}
+	}
+
 	// At least one match criterion must be specified.
-	if def.Match.Node == "" && def.Match.BodyContains == "" {
+	if def.Match.Node == "" && def.Match.BodyContains == "" && def.Match.BodyPath == "" {
 		return false
 	}
 
