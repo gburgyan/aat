@@ -167,3 +167,27 @@ combined with `bodyContains` and `node` using AND, and it counts as a match crit
   show, and a dotted `bodyContains` would be ambiguous with a key that contains a dot.
 - **gjson as written, with no `$.` normalization.** The path is data that the matcher checks, so it follows gjson syntax
   exactly, as the docs say.
+
+## 2026-09-15 — Blocks of the same key nest (PR 7)
+
+**What:**
+- **The bug:** a conditional that wraps an iteration of the same list, as in the templates guide, didn't render. An
+  absent list failed with `unresolved placeholders: /ids`, and a present one rendered `["p"],"q"]` without an error.
+  The aat-duffel price action found it in Phase 2; the package sent `[]` as a workaround.
+- **The fix:** `findBlockClose` finds the closing tag that matches a block, counting the `{{?key}}` and `{{#key}}` blocks
+  opened inside it for the same key. Rendering, `withoutBlocks`, input classification, and a form value's check use it.
+- **The package:** aat-duffel's `priceOffer` leaves `intended_services` out when no services are given, with no default.
+
+**Decisions:**
+- **Both kinds of block count.** A conditional and an iteration close with the same `{{/key}}`, so a block of either
+  kind opened inside for that key takes the next closing tag first. Tags for other keys are skipped, so a template
+  without same-key nesting renders as before.
+- **A compound key is one name.** `{{?a|b}}` closes with `{{/a|b}}`, so an `{{#a}}…{{/a}}` inside it doesn't change its
+  depth.
+- **The tests fail on the old lookup.** A `go test -overlay` build with the first-tag lookup fails the rendering,
+  `withoutBlocks`, and templates-guide tests. Input classification already treated the list as optional; its test
+  passes both ways and stays as a guard.
+
+**Open questions:**
+- **Iteration inside iteration.** An inner block still isn't repeated for each element of the outer one ("Blocks don't
+  nest" in the templates guide). Duffel's seat-per-passenger pairing stays in Lua.

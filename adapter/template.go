@@ -160,6 +160,34 @@ var iterOpenRe = regexp.MustCompile(`\{\{#([\w-]+)\}\}`)
 // Keys may contain hyphens.
 var condOpenRe = regexp.MustCompile(`\{\{\?([\w|-]+)\}\}`)
 
+// blockTagRe matches a tag that opens or closes a block: {{?key}}, {{#key}}, or
+// {{/key}}. The key of a compound conditional, such as a|b, is one name.
+var blockTagRe = regexp.MustCompile(`\{\{([?#/])([\w|-]+)\}\}`)
+
+// findBlockClose returns the index in s of the {{/key}} tag that closes a block
+// for key, where s starts just after the block's opening tag, or -1 when the
+// block isn't closed. A conditional and an iteration for the same key both close
+// with {{/key}}, so a block of either kind opened inside it for that key takes
+// the next closing tag first: {{?ids}}[{{#ids}}…{{/ids}}]{{/ids}} closes the
+// conditional at its second tag.
+func findBlockClose(s, key string) int {
+	depth := 0
+	for _, m := range blockTagRe.FindAllStringSubmatchIndex(s, -1) {
+		if s[m[4]:m[5]] != key {
+			continue
+		}
+		if s[m[2]] != '/' {
+			depth++
+			continue
+		}
+		if depth == 0 {
+			return m[0]
+		}
+		depth--
+	}
+	return -1
+}
+
 // ParseTemplate parses YAML bytes into a Template and validates required
 // fields. Keys that no template field accepts are errors.
 func ParseTemplate(data []byte) (*Template, error) {
@@ -478,7 +506,7 @@ func expandConditionalBlocks(tmpl string, inputs map[string]any) (string, error)
 		key := match[1]
 
 		closeTag := "{{/" + key + "}}"
-		closeIdx := strings.Index(result[loc[1]:], closeTag)
+		closeIdx := findBlockClose(result[loc[1]:], key)
 		if closeIdx < 0 {
 			return "", fmt.Errorf("unclosed conditional block: {{?%s}}", key)
 		}
@@ -536,9 +564,8 @@ func expandIterationBlocks(tmpl string, inputs map[string]any, elements *[]any, 
 		match := iterOpenRe.FindStringSubmatch(result[loc[0]:loc[1]])
 		key := match[1]
 
-		// Build closing tag pattern for this specific key
 		closeTag := "{{/" + key + "}}"
-		closeIdx := strings.Index(result[loc[1]:], closeTag)
+		closeIdx := findBlockClose(result[loc[1]:], key)
 		if closeIdx < 0 {
 			return "", fmt.Errorf("unclosed iteration block: {{#%s}}", key)
 		}
@@ -760,7 +787,7 @@ func withoutBlocks(s string) string {
 			}
 			key := s[loc[2]:loc[3]]
 			closeTag := "{{/" + key + "}}"
-			closeIdx := strings.Index(s[loc[1]:], closeTag)
+			closeIdx := findBlockClose(s[loc[1]:], key)
 			if closeIdx < 0 {
 				break
 			}
@@ -899,7 +926,7 @@ func classifySource(src string, iterKeys, condKeys, condInnerKeys, allKeys map[s
 		match := iterOpenRe.FindStringSubmatch(remaining[loc[0]:loc[1]])
 		key := match[1]
 		closeTag := "{{/" + key + "}}"
-		closeIdx := strings.Index(remaining[loc[1]:], closeTag)
+		closeIdx := findBlockClose(remaining[loc[1]:], key)
 		if closeIdx < 0 {
 			break
 		}
@@ -918,7 +945,7 @@ func classifySource(src string, iterKeys, condKeys, condInnerKeys, allKeys map[s
 		match := condOpenRe.FindStringSubmatch(remaining[loc[0]:loc[1]])
 		key := match[1]
 		closeTag := "{{/" + key + "}}"
-		closeIdx := strings.Index(remaining[loc[1]:], closeTag)
+		closeIdx := findBlockClose(remaining[loc[1]:], key)
 		if closeIdx < 0 {
 			break
 		}
@@ -940,7 +967,7 @@ func classifySource(src string, iterKeys, condKeys, condInnerKeys, allKeys map[s
 			imatch := iterOpenRe.FindStringSubmatch(innerBody[iloc[0]:iloc[1]])
 			ikey := imatch[1]
 			icloseTag := "{{/" + ikey + "}}"
-			icloseIdx := strings.Index(innerBody[iloc[1]:], icloseTag)
+			icloseIdx := findBlockClose(innerBody[iloc[1]:], ikey)
 			if icloseIdx < 0 {
 				break
 			}
