@@ -218,8 +218,9 @@ response:
 
 - `adapter` must match a graph node's `adapter` field; the file name does not matter
 - `{{placeholder}}` in path, headers, and body are replaced with resolved input values; a placeholder with no value fails the request (`unresolved placeholders: …`), so wrap optional parts in `{{?name}}…{{/name}}`. A header or `form:` field whose whole value is one placeholder is left out instead when that input has no value (absent, null, or `""`)
-- `response.extract` is a map from output name to a gjson path into the response JSON (`$.` prefixes are accepted). A path can count an array: `productCount: products.#`
-- For array extraction, give the output a `path` and a `fields` map from element field name to a path within each element; add `optional: true` to an entry whose path may be missing
+- `response.extract` is a map from output name to a gjson path into the response JSON (`$.` prefixes are accepted). A path can count an array, `productCount: products.#`, or query it: `'orders.#(status=="open")#'` for every match, `#(…)` without the last `#` for the first, and `|#` after a query for how many. Match a null or missing field with `==~null` and a present, non-null one with `!=~null`; `==null` compares a string and never matches a JSON `null`
+- For array extraction, give the output a `path` and a `fields` map from element field name to a path within each element
+- A rule whose path may be missing takes `optional: true`, which leaves the output out, or `default:`, the value to use when the path is missing or `null`: `nextCursor: {path: meta.after, default: ""}`. A rule takes one of them, and with `fields` a default is a list, usually `[]`
 - `{{#key}}…{{/key}}` repeats its body once per element of the list input `key`. `{{.}}` is the element, `{{.field}}` is a field of it, and `{{@index}}` is its position from 0. The copies are joined with commas, except in a form body or a query string: there a body that writes a whole `key=value` pair is joined with `&` (`{{#tags}}tags[]={{.}}{{/tags}}`), and a body that starts with `&` is repeated with nothing between. Wrap an optional list in `{{?key}}…{{/key}}`
 
 ```yaml
@@ -1219,7 +1220,7 @@ In `summary.json` and `batch.json`, optional fields such as `attempt`, `attempts
 | `requires/satisfies cycle detected: A → B → A` | Prerequisite tokens form a circular dependency | Review `requires`/`satisfies` tokens, or mark a node `cycleBreaker: true` |
 | `dependsOn cycle detected involving "A" and "B"` | Plan steps depend on each other, through `dependsOn` or through a reference, which the message names | Remove the `dependsOn` entry, or read the value from another step |
 | `unresolved placeholders: X` | A template placeholder had no value at run time | Give the input a value or default, or wrap the placeholder in a `{{?X}}…{{/X}}` block |
-| `extract path "X" (…) not found in response` | The response lacks a path the template extracts | Fix the path, or mark the extract entry `optional: true` |
+| `extract path "X" (…) not found in response` | The response lacks a path the template extracts | Fix the path, or give the rule `optional: true` or a `default:` |
 | `executing HTTP request: no response within aat's 30s request timeout` | The API took longer than aat's 30-second limit to answer | Check the API; a step `retry` covers `timeout` by default |
 | `invalid expression syntax: …`, `random takes a length from 1 to 64`, `today counts days` | A malformed `{{…}}` expression | Fix it; see [Expressions](#expressions) |
 | `strict OAS validation: reading OAS spec …` | `--oas-validate strict` with a spec that doesn't load | Fix the graph's `oas:` path, or run with `--oas-validate auto` |

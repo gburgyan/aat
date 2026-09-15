@@ -38,6 +38,28 @@ func TestOutputExtractPaths(t *testing.T) {
 	assert.Equal(t, want, map[string]map[string]string(OutputExtractPaths(g, registry)))
 }
 
+func TestValidateAdapterOutputs_DefaultShape(t *testing.T) {
+	g := &graph.Graph{Nodes: map[string]*graph.Node{
+		"listOrders": {Name: "listOrders", Adapter: "listOrders", Outputs: []graph.Output{
+			{Name: "orderIds", Type: "string[]"}, {Name: "nextCursor", Type: "string"},
+		}},
+	}}
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("listOrders", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "listOrders",
+		Response: adapter.TemplateResponse{Extract: map[string]adapter.ExtractRule{
+			"orderIds":   {Path: "orders.#.id", Default: ""},
+			"nextCursor": {Path: "meta.after", Default: ""},
+		}},
+	})))
+
+	err := ValidateAdapterOutputs(g, registry)
+
+	require.Error(t, err)
+	assert.Equal(t, "adapter output validation failed:\n"+
+		`  - node "listOrders": output "orderIds" default: a single value, where string[] takes a list`, err.Error())
+}
+
 func TestValidateAdapterOutputs(t *testing.T) {
 	tests := []struct {
 		name        string
