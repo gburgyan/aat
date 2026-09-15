@@ -440,10 +440,10 @@ A plan's top-level keys are `metadata` (`created`, `prompt`, `graphVersion`), `g
 | Selection | `productId: {from: list.products, select: {strategy: first, field: productId}}` | Pick from array |
 | Expression | `date: "{{today + 7 days}}"` | Computed when the step runs (see [Expressions](#expressions)) |
 | Pool | `shippingTier: {pool: [standard, express]}` | One element, picked per run |
-| List | `skus: {default: [SKU-1001, SKU-1006]}` | The list itself, for an input a template repeats over with `{{#skus}}…{{/skus}}` |
+| List | `skus: [SKU-1001, SKU-1006]` | The list itself, for an input a template repeats over with `{{#skus}}…{{/skus}}`. Items can be maps, read with `{{.sku}}`, and strings in them can be expressions |
 | Absent | `deliveryDate: {}` | Nothing fills the input: no graph default, layer, or auto-wiring |
 
-- **Lists:** a bare YAML list is an error in a step value (`a step value must be a scalar or a mapping, found a list`), and `value:` is not a step-value key. Write a list as `{default: [...]}`.
+- **Lists:** a bare YAML list in a step value is the list itself, as in a slot's `inject`. `{value: [...]}` means the same, and so does `{default: [...]}`; a step value can't take both keys. In a graph default or a layer, a bare list is a pool, so a literal list there is written `{value: [...]}`, the form that works in all four places.
 - **`{}` is for optional inputs.** An optional input marked `{}` is left out of the request. A required input marked `{}` still takes its default when that default is a plain value, with its expressions evaluated; a layer that sets the input wins over the graph default, as it does without `{}`. With no default, the step fails with `required input has no value (empty step value)`. Over a default with a pool, `from`, `select`, or a constraint, `{}` leaves a required input out too, so its template must send it inside a `{{?name}}…{{/name}}` block, or the request fails on the unresolved placeholder.
 
 ### Expressions
@@ -462,9 +462,9 @@ A string containing `{{…}}` is an expression.
 
 - **Types.** A value that is one whole expression keeps the result's type. Mixed text, such as `"Deliver on {{deliveryDate}}"`, becomes a string.
 - **Generated values.** Each occurrence is its own value, so two inputs set to `{{uuid}}` differ; reuse one with `fromResolved` or `fromInput`. A step's values are resolved once, so a retried step resends the same ones, and a new run generates new ones. `uuid`, `now`, and `unixtime` are reserved words, and `{{today}}` counts days only.
-- **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`. Also a `fieldEquals` `value` and a quoted string in a `predicate` `expr`, where they can name the step's inputs: `expr: 'quantity == "{{quantity}}"'`. A quoted expression that yields a number or a boolean compares as one.
+- **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`, including strings inside a list or map value, at any depth. Also a `fieldEquals` `value` and a quoted string in a `predicate` `expr`, where they can name the step's inputs: `expr: 'quantity == "{{quantity}}"'`. A quoted expression that yields a number or a boolean compares as one.
 - **Where they are not:** templates (where `{{name}}` is a placeholder for an input), overlay `values:`, `rawBody`, selection filters, and cleanup `when`.
-- **Checking.** `aat validate` checks expression syntax in step values, pools, and assertions. An expression that fails to evaluate fails its step, or its assertion.
+- **Checking.** `aat validate` checks expression syntax in step values (list and map items included), pools, and assertions. An expression that fails to evaluate fails its step, or its assertion.
 
 ### Assertion Types
 

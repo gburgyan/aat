@@ -300,6 +300,18 @@ values:
   departureDate: "{{today + 7 days}}"
 ```
 
+**List** — a literal list, for an input a template repeats over with `{{#key}}…{{/key}}`. Items can be maps, and strings in them can be expressions:
+
+```yaml
+values:
+  skus: [SKU-1004, SKU-1006]
+  lineItems:
+    - {sku: SKU-1004, quantity: 2}
+    - {sku: SKU-1006, giftNote: "Ordered {{today}}"}
+```
+
+`{value: [...]}` means the same, and so does `{default: [...]}`. In a graph default or a layer, a bare list is a pool, so `{value: [...]}` is the form that reads as a literal list everywhere (see [Literal Values](value-flow.md#literal-values)).
+
 **Step output reference** — pull a value from a previous step's output:
 
 ```yaml

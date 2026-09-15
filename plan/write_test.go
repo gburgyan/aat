@@ -111,6 +111,26 @@ func TestMarshalRoundTrip_FullFeatured(t *testing.T) {
 	assert.Equal(t, original.Execution.Cleanup[0].Node, parsed.Execution.Cleanup[0].Node)
 }
 
+func TestMarshalRoundTrip_ListAndMapValues(t *testing.T) {
+	p := &Plan{Execution: Execution{Steps: []Step{{
+		Node: "createOrder",
+		Values: map[string]StepValue{
+			"skus":      {Default: []any{"SKU-1004", "SKU-1006"}},
+			"lineItems": {Default: []any{map[string]any{"sku": "SKU-1004", "quantity": 2}}},
+			"address":   {Default: map[string]any{"city": "Austin", "postalCode": "78701"}},
+		},
+	}}}}
+
+	data, err := Marshal(p)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "skus:\n", "a list is written bare")
+	assert.Regexp(t, `address:\s+default:`, string(data), "a map stays under default:")
+
+	parsed, err := Parse(data)
+	require.NoError(t, err, "a plan with list and map values reads back:\n%s", data)
+	assert.Equal(t, p.Execution.Steps[0].Values, parsed.Execution.Steps[0].Values)
+}
+
 func TestWriteFile_CreatesDirectories(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "dir", "plan.yaml")

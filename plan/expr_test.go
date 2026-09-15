@@ -204,6 +204,53 @@ func TestEvalExpr(t *testing.T) {
 	}
 }
 
+func TestEvalExpr_ListsAndMaps(t *testing.T) {
+	ctx := ExprContext{Now: fixedTime(), Env: testEnv}
+	raw := []any{
+		map[string]any{"sku": "SKU-1004", "deliverOn": "{{today + 1 days}}"},
+		"{{env.MY_VAR}}",
+		[]any{"plain", "{{today}}"},
+		7,
+	}
+
+	got, err := EvalExpr(raw, ctx)
+
+	require.NoError(t, err)
+	assert.Equal(t, []any{
+		map[string]any{"sku": "SKU-1004", "deliverOn": "2026-02-09"},
+		"my-value",
+		[]any{"plain", "2026-02-08"},
+		7,
+	}, got)
+	assert.Equal(t, "{{today + 1 days}}", raw[0].(map[string]any)["deliverOn"], "the plan's own value keeps its expressions")
+
+	plain := []any{"a", map[string]any{"b": 1}}
+	got, err = EvalExpr(plain, ctx)
+	require.NoError(t, err)
+	assert.Equal(t, plain, got)
+
+	_, err = EvalExpr([]any{"ok", map[string]any{"ref": "{{random 0}}"}}, ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `item 1: key "ref": random takes a length from 1 to 64`)
+}
+
+func TestContainsExprValue(t *testing.T) {
+	assert.True(t, ContainsExprValue("{{uuid}}"))
+	assert.True(t, ContainsExprValue([]any{"a", map[string]any{"b": []any{"{{uuid}}"}}}))
+	assert.False(t, ContainsExprValue([]any{"a", map[string]any{"b": 1}}))
+	assert.False(t, ContainsExprValue(42))
+	assert.False(t, ContainsExprValue(nil))
+}
+
+func TestValidateExprValue(t *testing.T) {
+	require.NoError(t, ValidateExprValue([]any{"{{today}}", map[string]any{"ref": "{{uuid}}"}}))
+	require.NoError(t, ValidateExprValue(3))
+
+	err := ValidateExprValue([]any{"ok", map[string]any{"ref": "{{random 0}}"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `item 1: key "ref": random takes a length from 1 to 64`)
+}
+
 func TestContainsExpr(t *testing.T) {
 	tests := []struct {
 		input string

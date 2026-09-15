@@ -94,10 +94,8 @@ func validateAssertions(prefix string, assertions *Assertions) []string {
 				errs = append(errs, fmt.Sprintf("%s: invalid expression in predicate assertion %d: %v", prefix, j, err))
 			}
 		case ma.Type == "fieldEquals":
-			if s, ok := ma.Value.(string); ok && ContainsExpr(s) {
-				if err := ValidateExpr(s); err != nil {
-					errs = append(errs, fmt.Sprintf("%s: invalid expression in fieldEquals assertion %d: %v", prefix, j, err))
-				}
+			if err := ValidateExprValue(ma.Value); err != nil {
+				errs = append(errs, fmt.Sprintf("%s: invalid expression in fieldEquals assertion %d: %v", prefix, j, err))
 			}
 		}
 	}
@@ -546,16 +544,12 @@ func Validate(p *Plan, g *graph.Graph) error {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, sid, name, err))
 				}
 			}
-			if s, ok := sv.Default.(string); ok && ContainsExpr(s) {
-				if err := ValidateExpr(s); err != nil {
-					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
-				}
+			if err := ValidateExprValue(sv.Default); err != nil {
+				errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
 			}
 			for k, entry := range sv.Pool {
-				if s, ok := entry.(string); ok && ContainsExpr(s) {
-					if err := ValidateExpr(s); err != nil {
-						errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression in pool entry %d for %q: %v", i, sid, k, name, err))
-					}
+				if err := ValidateExprValue(entry); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression in pool entry %d for %q: %v", i, sid, k, name, err))
 				}
 			}
 		}

@@ -178,3 +178,47 @@ func TestRetry_ResendsSameGeneratedValue(t *testing.T) {
 	assert.Equal(t, bodies[0], bodies[1])
 	assert.Regexp(t, regexp.MustCompile(`"ref": "[0-9a-f-]{36}"`), bodies[0])
 }
+
+// TestEngine_Run_ListValueOfMapsWithExpressions sends a plan's list of maps
+// through an iteration block, with an expression in each item.
+func TestEngine_Run_ListValueOfMapsWithExpressions(t *testing.T) {
+	srv, bodies := recordingServer(t)
+	g := &graph.Graph{
+		Version: "1.0.0",
+		Nodes: map[string]*graph.Node{
+			"createOrder": {Name: "createOrder", Adapter: "test.createOrder", Inputs: []graph.Input{{Name: "lineItems", Type: "lineItem[]"}}},
+		},
+	}
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.createOrder", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter:  "createOrder",
+		Protocol: "http",
+		Request: adapter.TemplateRequest{
+			Method:  "POST",
+			Path:    "/createOrder",
+			Headers: map[string]string{"Content-Type": "application/json"},
+			Body:    `{"lineItems": [{{#lineItems}}{"sku": "{{.sku}}", "ref": "{{.ref}}"}{{/lineItems}}]}`,
+		},
+	})))
+	eng := NewEngine(g, registry, NewExecutorRouter(adapter.NewHTTPExecutor(srv.URL), &adapter.EnvironmentConfig{}))
+	p, err := plan.Parse([]byte(`
+metadata: {graphVersion: "1.0.0"}
+execution:
+  steps:
+    - node: createOrder
+      values:
+        lineItems:
+          - {sku: SKU-1004, ref: "a-{{random 6}}"}
+          - {sku: SKU-1006, ref: "b-{{random 6}}"}
+`))
+	require.NoError(t, err)
+
+	result := eng.Run(context.Background(), p)
+
+	require.Equal(t, OutcomePassed, result.Outcome, "error: %v", result.Error)
+	got := bodies()
+	require.Len(t, got, 1)
+	assert.Regexp(t, `^\{"lineItems": \[\{"sku": "SKU-1004", "ref": "a-[0-9a-z]{6}"\},\s*\{"sku": "SKU-1006", "ref": "b-[0-9a-z]{6}"\}\]\}$`, got[0])
+	items := p.Execution.Steps[0].Values["lineItems"].Default.([]any)
+	assert.Equal(t, "a-{{random 6}}", items[0].(map[string]any)["ref"], "the plan keeps its expressions for the next run")
+}
