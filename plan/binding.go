@@ -179,10 +179,26 @@ func referencedSteps(step Step) []string {
 			add(from)
 		}
 	}
-	for _, ref := range StepOutputRefs(step.Assertions, step.Repeat) {
+	for _, ref := range append(StepOutputRefs(step.Assertions, step.Repeat), FilterOutputRefs(step)...) {
 		if !slices.Contains(refs, ref.Step) {
 			refs = append(refs, ref.Step)
 		}
+	}
+	return refs
+}
+
+// FilterOutputRefs returns the {{step.output}} references in the filters of a
+// step's value selections, in value name order, then in the filters of its
+// named selections, in selection name order.
+func FilterOutputRefs(step Step) []OutputRef {
+	var refs []OutputRef
+	for _, name := range slices.Sorted(maps.Keys(step.Values)) {
+		if sel := step.Values[name].Select; sel != nil {
+			refs = append(refs, PredicateOutputRefs(sel.Filter)...)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(step.Selections)) {
+		refs = append(refs, PredicateOutputRefs(step.Selections[name].Filter)...)
 	}
 	return refs
 }

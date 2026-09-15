@@ -243,6 +243,7 @@ The syntax is `stepId.inputName`. The referenced step joins `dependsOn`, and the
 Expressions use `{{...}}` delimiters and are evaluated at execution time. Where they work:
 - step values, pools, graph defaults, layers, recipe overrides, and slot `inject` values
 - a `fieldEquals` `value` and a quoted `predicate` string in an assertion, and a quoted string in `repeat.until`, which can name the step's inputs and read an earlier step's output as `{{step.output}}` (see [Plans: Assertions](plans.md))
+- a quoted string in a selection `filter`, which can read an earlier step's output the same way, as in `filter: 'objectId == "{{create.customerId}}"'`
 
 `aat validate` checks their syntax in step values, pools, and assertions.
 

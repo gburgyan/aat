@@ -142,7 +142,7 @@ Available fields:
 | Field | Description |
 |-------|-------------|
 | `strategy` | Selection strategy (`first`, `last`, `index`, `random`, `min`, `max`, `match`) |
-| `filter` | Predicate expression to narrow the array before selection |
+| `filter` | Predicate expression to narrow the array before selection; a quoted string can read an earlier step's output, as in `objectId == "{{create.customerId}}"` |
 | `sortField` | Field name for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | Element index for `index` strategy |
 | `onTie` | For `min`/`max`, what a tie does: `first` takes the first of the elements that share the value without a warning, and `fail` fails the step |
@@ -416,7 +416,7 @@ Named selections ensure coordinated multi-field extraction — all three values 
 |-------|------|----------|-------------|
 | `from` | string | yes | `stepId.outputName` — the array to select from |
 | `strategy` | string | no | Selection strategy (default: `first`) |
-| `filter` | string | no | Predicate expression to narrow the array |
+| `filter` | string | no | Predicate expression to narrow the array; a quoted string can read an earlier step's output, as in `objectId == "{{create.customerId}}"` |
 | `sortField` | string | no | Field for `min`/`max` comparison: a number, or a string that holds one |
 | `index` | int | no | Element index for `index` strategy |
 | `onTie` | string | no | For `min`/`max`, what a tie does: `first` takes the first tied element without a warning, and `fail` fails the step. Without it, the first is taken and the step warns |
@@ -475,12 +475,12 @@ assertions:
 
 **Expressions in assertions.** A `fieldEquals` `value`, and a quoted string in a `predicate` `expr`, can hold `{{…}}` [expressions](value-flow.md#dynamic-expressions), such as `value: "{{today + 3 days}}"` or `expr: 'quantity == "{{quantity}}"'`.
 - They are evaluated when the step's assertions run, and they can name the step's inputs. `today`, `now`, and `unixtime` read the time the inputs were resolved, so a retried step's `{{today}}` is the date it resent.
-- They can read an earlier step's output as `{{step.output}}`, as in `expr: 'amount == "{{checkout.total}}"'`, and so can `repeat.until`. A main step reads the main steps before it, and a verification step reads the main steps. The reference implies `dependsOn`, as `from:` does. A step value reads an earlier step with `from:` instead.
+- They can read an earlier step's output as `{{step.output}}`, as in `expr: 'amount == "{{checkout.total}}"'`, and so can `repeat.until` and a selection `filter`. A main step reads the main steps before it, and a verification step reads the main steps. The reference implies `dependsOn`, as `from:` does. A step value reads an earlier step with `from:` instead.
 - A quoted expression that evaluates to a number or a boolean compares as one, and an extracted number read with `{{step.output}}` is a number.
 - `<`, `>`, `<=`, and `>=` compare two decimal numbers written as text as numbers, so `"1000.00" > "999.50"`. `==` and `!=` compare text.
 - An expression that can't be evaluated fails its assertion, and so does a `{{step.output}}` whose step stored no outputs, whose output the response left out, or whose value is null or a list.
 - `aat validate` checks their syntax, and that each `{{step.output}}` names a main step of the plan and a single-value output its node declares.
-- Selection filters and cleanup `when` conditions don't evaluate expressions.
+- A selection `filter` expands the expressions in its quoted strings the same way before it narrows the array, so `filter: 'objectId == "{{create.customerId}}"'` picks the element about the object an earlier step made. An expression that can't be evaluated fails the step. Cleanup `when` conditions don't evaluate expressions.
 
 `status` and `schema` are unaffected by `raw` — they always look at the HTTP status and the full response body respectively.
 
