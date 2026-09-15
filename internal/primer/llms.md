@@ -530,14 +530,15 @@ assertions:
 
 ### Repeat
 
-`repeat: {until: 'status == "complete"', collect: [items], interval: 2s, max: 30, timeout: 2m}` sends a step's request until `until` holds over a response's outputs, as when polling a background job.
+`repeat: {until: 'status == "complete"', collect: [items], interval: 2s, max: 30, timeout: 2m}` sends a step's request until `until` holds over a response's outputs, as when polling a background job. `repeat: {next: {after: nextCursor}, collect: [orders, orderCount], max: 50}` reads every page of a listing instead.
 
-- **Defaults:** `until` is required. `interval` is 1s, lengthened by a response's `Retry-After` up to 60 s. `max` is 50, at most 1000. There is no default `timeout`.
-- **Same request:** the inputs are resolved once, and each request is retried under `retry:`.
+- **Defaults:** `until` is required unless `next` is set. `interval` is 1s, or none with `next`, lengthened by a response's `Retry-After` up to 60 s. `max` is 50, at most 1000. There is no default `timeout`.
+- **Same request:** the inputs are resolved once, and each request is retried under `retry:`. With `next`, each request after the first sends the previous response's cursor output as that input; an empty cursor removes the input.
 - **Outputs:** the last response's, with each `collect` output gathered across the responses: lists are appended, and integers and floats added. The step's assertions run once, on those. `until` reads each response's own outputs, so an output a response leaves out needs `default:` on its extract rule.
 - **Failure:** reaching `max` or `timeout` before `until` holds fails the step with a `repeat` assertion result. A request that errors or returns 400 or more ends the repeats.
+- **Paging:** with `next`, the step passes when every cursor comes back missing, `null`, or `""` (`exhausted`). Reaching `max` or `timeout` with a cursor left fails it, and so does a cursor an earlier request already sent (`loop`). The step's inputs are the first page's.
 - **Not allowed:** with `expectFailure`, or on a node with a cleanup pairing. Verification steps can repeat.
-- **Archive:** each request under `iterations` (request, response, outputs, `untilMet`), and why it stopped under `repeatStop`.
+- **Archive:** each request under `iterations` (request, response, outputs, `untilMet`, and `inputs` when paging), and why it stopped under `repeatStop`.
 
 ### Cleanup
 
@@ -588,12 +589,25 @@ Cross-ref: [Plans and Recipes](https://gburgyan.github.io/aat/plans/)
 
 ### Lists and Pagination
 
-A step sends one request and reads one response, and plans have no loop, so a list step reads one page.
+A list step reads one page. To read every page, give it `repeat.next`, which sends each response's cursor as the next request's input:
+
+```yaml
+- node: listOrders
+  values: {limit: 100}
+  repeat:
+    next: {after: nextCursor}    # input ← the same node's cursor output, extracted with default: ""
+    collect: [orders, orderCount, liveOrderCount]
+    max: 50
+  assertions:
+    mechanical:
+      - type: predicate
+        expr: orderCount > 0 && liveOrderCount == 0
+```
 
 - **Narrow the list to what you need:** filter by a reference the plan generated (`reference: "order-{{random 8}}"`), by a time window (`createdAfter: "{{unixtime - 1 hours}}"`), or by the parent resource, and raise the page size.
-- **Pick elements** with a `select` of strategy `match` and a `filter`.
-- **For a fixed number of pages,** chain list steps: the second takes the first page's cursor with `from: listOrders.nextCursor`.
-- **When you assert that nothing is left,** also assert that the listing covered everything: that it returned items, and that it wasn't cut off, with an output such as `hasMore == false`.
+- **Pick elements** with a `select` of strategy `match` and a `filter`, from a collected list or a single page.
+- **When you assert that nothing is left,** also assert that the listing covered everything: that it returned items, and that every page was read. With `next`, a listing cut off by `max` or `timeout` fails the step.
+- **Cursors `next` can't follow,** such as one inside a `Link` header or a page number that needs arithmetic: chain list steps, the second taking the first page's cursor with `from: listOrders.nextCursor`.
 
 ## Depth and Negative Testing Primitives
 

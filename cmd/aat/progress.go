@@ -231,8 +231,8 @@ func oasWarningCount(steps []engine.StepResult) int {
 }
 
 // repeatNote summarizes the requests of a step with a repeat block, such as
-// "5 requests", adding why it stopped when its condition didn't hold. It is
-// empty for a step without one.
+// "5 requests", adding why it stopped when neither its condition held nor its
+// listing ran out of pages. It is empty for a step without one.
 func repeatNote(result engine.StepResult) string {
 	n := len(result.Iterations)
 	if n == 0 {
@@ -242,7 +242,7 @@ func repeatNote(result engine.StepResult) string {
 	if n == 1 {
 		note = "1 request"
 	}
-	if result.RepeatStop != "" && result.RepeatStop != engine.RepeatStopUntil {
+	if result.RepeatStop != "" && result.RepeatStop != engine.RepeatStopUntil && result.RepeatStop != engine.RepeatStopExhausted {
 		note += ", stopped: " + result.RepeatStop
 	}
 	return note

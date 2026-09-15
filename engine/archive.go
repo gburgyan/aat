@@ -145,6 +145,7 @@ func convertIteration(it IterationResult, baseURL string) archive.IterationRecor
 		StartTime:  it.StartTime,
 		DurationMs: it.Duration.Milliseconds(),
 		Outputs:    it.Outputs,
+		Inputs:     it.Inputs,
 		UntilMet:   it.UntilMet,
 		RetryCount: it.RetryCount,
 		Error:      errString(it.Error),

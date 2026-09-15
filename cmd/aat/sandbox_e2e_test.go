@@ -375,7 +375,7 @@ func TestShopExample(t *testing.T) {
 		// An integrator's AI tool loads the whole API from the kit alone.
 		mcpCtx, err := aatmcp.BuildServerContextWithVars(kit.m, kit.vars())
 		require.NoError(t, err)
-		assert.Len(t, mcpCtx.Graph.Nodes, 17)
+		assert.Len(t, mcpCtx.Graph.Nodes, 18)
 		assert.NotEmpty(t, mcpCtx.OASSpecs, "the graph's OpenAPI spec is in the kit")
 	})
 }

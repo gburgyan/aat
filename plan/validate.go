@@ -55,9 +55,9 @@ func validateRetryConfig(prefix string, rc *RetryConfig) []string {
 }
 
 // validateRepeatConfig checks a step's repeat block against its node: until is
-// a predicate that reads only the node's outputs, collect names list or number
-// outputs, the limits are in range, and the step is a read that expects to
-// succeed.
+// a predicate that reads only the node's outputs, next maps the node's inputs
+// to its cursor outputs, collect names list or number outputs, the limits are
+// in range, and the step is a read that expects to succeed.
 func validateRepeatConfig(prefix string, rc *RepeatConfig, expectsFailure bool, node *graph.Node) []string {
 	if rc == nil {
 		return nil
@@ -70,7 +70,9 @@ func validateRepeatConfig(prefix string, rc *RepeatConfig, expectsFailure bool, 
 
 	var errs []string
 	if strings.TrimSpace(rc.Until) == "" {
-		errs = append(errs, fmt.Sprintf("%s: repeat.until is required: a predicate over each response's outputs that ends the repeats, such as status == \"complete\"", prefix))
+		if len(rc.Next) == 0 {
+			errs = append(errs, fmt.Sprintf("%s: repeat.until is required unless repeat.next is set: a predicate over each response's outputs that ends the repeats, such as status == \"complete\"", prefix))
+		}
 	} else {
 		if err := predicate.Validate(rc.Until); err != nil {
 			errs = append(errs, fmt.Sprintf("%s: invalid repeat.until %q: %v", prefix, rc.Until, err))
@@ -81,6 +83,26 @@ func validateRepeatConfig(prefix string, rc *RepeatConfig, expectsFailure bool, 
 			name, _, _ := strings.Cut(field, ".")
 			if _, ok := outputs[name]; !ok {
 				errs = append(errs, fmt.Sprintf("%s: repeat.until reads %q, which is not an output of %s (outputs: %s)", prefix, name, node.Name, outputList))
+			}
+		}
+	}
+	if len(rc.Next) > 0 {
+		inputs := make(map[string]bool, len(node.Inputs))
+		for _, in := range node.Inputs {
+			inputs[in.Name] = true
+		}
+		inputList := strings.Join(slices.Sorted(maps.Keys(inputs)), ", ")
+		for _, input := range slices.Sorted(maps.Keys(rc.Next)) {
+			if !inputs[input] {
+				errs = append(errs, fmt.Sprintf("%s: repeat.next sets %q, which is not an input of %s (inputs: %s)", prefix, input, node.Name, inputList))
+			}
+			name := rc.Next[input]
+			out, ok := outputs[name]
+			switch {
+			case !ok:
+				errs = append(errs, fmt.Sprintf("%s: repeat.next reads %q, which is not an output of %s (outputs: %s)", prefix, name, node.Name, outputList))
+			case !cursorType(out.Type):
+				errs = append(errs, fmt.Sprintf("%s: repeat.next can't send %q, a %s output: a cursor is a string or integer output, such as nextCursor: {path: meta.after, default: \"\"}", prefix, name, out.Type))
 			}
 		}
 	}
@@ -125,6 +147,16 @@ func collectable(typ string) bool {
 		return false
 	}
 	return ft.IsArray || (ft.Kind == graph.TypeScalar && (ft.Name == "integer" || ft.Name == "float"))
+}
+
+// cursorType reports whether repeat.next can send an output of type typ as a
+// cursor: a single string or integer.
+func cursorType(typ string) bool {
+	ft, err := graph.ParseFieldType(typ)
+	if err != nil {
+		return false
+	}
+	return !ft.IsArray && ft.Kind == graph.TypeScalar && (ft.Name == "string" || ft.Name == "integer")
 }
 
 // ValidationError collects all validation errors for a plan.

@@ -115,6 +115,7 @@ func (s *Server) buildAPI() http.Handler {
 	v1.HandleFunc("POST /{region}/v1/carts/{cartId}/items", s.handleAddItem)
 	v1.HandleFunc("POST /{region}/v1/carts/{cartId}/coupon", s.handleApplyCoupon)
 	v1.HandleFunc("POST /{region}/v1/carts/{cartId}/checkout", s.handleCheckout)
+	v1.HandleFunc("GET /{region}/v1/orders", s.handleListOrders)
 	v1.HandleFunc("GET /{region}/v1/orders/{orderId}", s.handleGetOrder)
 	v1.HandleFunc("DELETE /{region}/v1/orders/{orderId}", s.handleDeleteOrder)
 	v1.HandleFunc("POST /{region}/v1/orders/{orderId}/cancel", s.handleCancelOrder)

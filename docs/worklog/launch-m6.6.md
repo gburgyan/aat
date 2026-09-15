@@ -191,3 +191,39 @@ combined with `bodyContains` and `node` using AND, and it counts as a match crit
 **Open questions:**
 - **Iteration inside iteration.** An inner block still isn't repeated for each element of the outer one ("Blocks don't
   nest" in the templates guide). Duffel's seat-per-passenger pairing stays in Lua.
+
+## 2026-09-15 — `repeat` with `next` (PR 5)
+
+**What:**
+- **The block:** `repeat.next` maps an input of the step's node to one of its outputs, as in `after: nextCursor`. Each
+  request after the first sends the previous response's output as that input, so a step reads every page of a listing.
+- **Stops:** the step passes when every cursor comes back missing, `null`, or `""` (`exhausted`), or when `until`, now
+  optional, holds. It fails when `max` or `timeout` comes with a cursor left, or when a response gives cursors an
+  earlier request already sent (`loop`).
+- **Archive:** each iteration of a paging step records its `inputs`, and `repeatStop` gains `exhausted` and `loop`.
+- **Shop:** the sandbox serves `GET /orders` a page at a time, the graph reads it as `listOrders`, and the state-machine
+  plan's verification pages through its customer's orders at `limit: 1`.
+
+**Decisions:**
+- **Running out of pages passes, and `until` stops early.** Assertions over the collected outputs decide the result. That
+  serves both "find one" (`until: count > 0`, then assert the collected count) and "none left" audits, where failing on
+  exhaustion would serve only the first.
+- **A listing cut off by a limit fails.** Reaching `max` or `timeout` with a cursor left fails even without `until`, so
+  an audit can't pass on part of a listing.
+- **A repeated cursor stops as `loop`, not `error`.** `error` reads as a failed request in `aat run show`. A cursor the
+  plan gave, to start a listing partway, counts as sent by the first request.
+- **The step keeps its first page's inputs.** `Inputs`, `Resolutions`, and what `fromInput` reads are the query, not a
+  cursor that is stale once the pages run out. Each iteration records the inputs it sent instead, and `until` literals
+  read the inputs of the request being evaluated.
+- **No wait by default.** `interval` defaults to none with `next`, while `Retry-After` and `minRequestInterval` still
+  apply. Each page's inputs are prepared before its first attempt, so a retry resends that page's cursor.
+- **Cursors are sent as extracted.** A `json.Number` renders as its digits, so no conversion is needed. `cursorKey`
+  compares values through `%v`, which reads `json.Number("2")` and `2` alike.
+- **The shop's demo adds no plan.** A verification step in an existing plan leaves the plan, matrix, and kit counts as
+  they were; only the node count moves to 18. A full page always returns a cursor, so a listing that fills its last
+  page ends on an empty one, as many cursor APIs do.
+
+**Open questions:**
+- **`Link` headers and page numbers.** A cursor inside a `Link` header, or a page number that needs arithmetic, isn't an
+  output `next` can send; those still need chained steps or a transform.
+- **Web UI.** A paging step shows its last page only, until PR 4b's Iterations tab.

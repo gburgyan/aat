@@ -1,0 +1,21 @@
+adapter: listOrders
+protocol: http
+
+request:
+  method: GET
+  path: /orders?limit={{limit}}{{?customerEmail}}&customerEmail={{customerEmail}}{{/customerEmail}}{{?after}}&after={{after}}{{/after}}
+
+response:
+  extract:
+    orders:
+      path: orders
+      fields:
+        orderId: orderId
+        status: status
+        paymentStatus: paymentStatus
+        total: total
+    orderCount: 'orders.#'
+    liveOrderCount: 'orders.#(status!="cancelled")#|#'
+    nextCursor:
+      path: meta.after
+      default: ""

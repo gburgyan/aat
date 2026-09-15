@@ -25,9 +25,9 @@ Manifest:               OK (project: shop)
 Environment:            OK (2 environments: eu, us)
 Domain:                 OK (3 concepts, 3 types, 6 value pools)
 Visualizers:            OK (1 visualizer)
-Graph structure:        OK (17 nodes)
+Graph structure:        OK (18 nodes)
 OAS validation:         OK
-Adapter outputs:        OK (17 templates)
+Adapter outputs:        OK (18 templates)
 Template inputs:        OK
 Workflow compatibility: OK (11 workflows)
 Workflows:              OK (10 files, 10 templates)
@@ -55,9 +55,9 @@ Environment:            OK (2 environments: eu, us)
 Domain:                 FAILED
   domain.yaml: line 44: unknown key "valuePool" in knowledge base (did you mean "valuePools"?)
 Visualizers:            OK (1 visualizer)
-Graph structure:        OK (17 nodes)
+Graph structure:        OK (18 nodes)
 OAS validation:         OK
-Adapter outputs:        OK (17 templates)
+Adapter outputs:        OK (18 templates)
 Template inputs:        OK
 Workflow compatibility: OK (11 workflows)
 Workflows:              OK (10 files, 10 templates)

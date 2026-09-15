@@ -7,6 +7,18 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- A step can read every page of a listing with `repeat.next`, which sends each response's cursor as the next request's
+  input, as in `repeat: {next: {after: nextCursor}, collect: [orders, orderCount], max: 50}`.
+  - The step passes when every cursor comes back missing, `null`, or `""`, and `until` becomes optional. It fails when
+    `max` or `timeout` comes with a cursor left, so an audit can't pass on a listing that was cut off, and when a
+    response gives cursors an earlier request already sent.
+  - Pages are requested without a wait unless `interval` is set, and a retry resends that page's cursor.
+  - The step's inputs are its first page's. Each request under the archive's `iterations` records the inputs it sent,
+    and `repeatStop` can be `exhausted` or `loop`.
+  - `aat validate` checks that `next` maps the node's inputs to its string or integer outputs.
+- The shop sandbox lists orders a page at a time with `GET /orders` (`limit`, `after`, `customerEmail`), which the shop
+  graph reads as `listOrders`. The state-machine plan's verification pages through its customer's orders and asserts
+  that none is left open.
 - A visualizer can match a nested field with `match.bodyPath`, a gjson path that must reach a value other than `null`,
   such as `data.receipt_number`. It tells apart the responses of an API that wraps every body in the same envelope,
   where `bodyContains` sees only the shared top-level key.

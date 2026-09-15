@@ -397,6 +397,65 @@ func TestListProducts(t *testing.T) {
 	assert.Equal(t, "€82.79", first["priceDisplay"])
 }
 
+func TestListOrders(t *testing.T) {
+	e := newEnv(t, Options{})
+	orderFor := func(email string) string {
+		cartID := e.must(e.shop("POST", "/us/v1/carts", map[string]any{"customerEmail": email}), 201).str("cartId")
+		e.must(e.addItem("us", cartID, "SKU-1001", 1), 201)
+		return e.must(e.checkout("us", cartID, "standard"), 201).str("orderId")
+	}
+	a1, a2, a3 := orderFor("a@example.com"), orderFor("a@example.com"), orderFor("a@example.com")
+	b1 := orderFor("b@example.com")
+
+	tests := []struct {
+		name  string
+		query string
+		want  []string
+		limit int
+		after any // the next page's cursor, nil on the last page
+	}{
+		{name: "a full page gives its last order as the cursor", query: "limit=2&customerEmail=a@example.com", want: []string{a1, a2}, limit: 2, after: a2},
+		{name: "a shorter page is the last", query: "limit=2&customerEmail=a@example.com&after=" + a2, want: []string{a3}, limit: 2},
+		{name: "a full page still gives a cursor when nothing follows", query: "limit=1&customerEmail=b@example.com", want: []string{b1}, limit: 1, after: b1},
+		{name: "which leads to an empty last page", query: "limit=1&customerEmail=b@example.com&after=" + b1, want: []string{}, limit: 1},
+		{name: "every customer, with the default limit", query: "", want: []string{a1, a2, a3, b1}, limit: 20},
+		{name: "a customer with no orders", query: "customerEmail=nobody@example.com", want: []string{}, limit: 20},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := e.must(e.shop("GET", "/us/v1/orders?"+tt.query, nil), 200)
+			ids := []string{}
+			for _, o := range r.Body["orders"].([]any) {
+				ids = append(ids, o.(map[string]any)["orderId"].(string))
+			}
+			assert.Equal(t, tt.want, ids)
+			meta := r.Body["meta"].(map[string]any)
+			assert.EqualValues(t, tt.limit, meta["limit"])
+			assert.Equal(t, tt.after, meta["after"])
+		})
+	}
+
+	t.Run("a deleted order still works as the cursor", func(t *testing.T) {
+		e.must(e.shop("DELETE", "/us/v1/orders/"+a2, nil), 204)
+		r := e.must(e.shop("GET", "/us/v1/orders?customerEmail=a@example.com&after="+a2, nil), 200)
+		require.Len(t, r.Body["orders"], 1)
+		assert.Equal(t, a3, r.Body["orders"].([]any)[0].(map[string]any)["orderId"])
+	})
+
+	for _, limit := range []string{"0", "101", "x"} {
+		t.Run("limit "+limit+" is refused", func(t *testing.T) {
+			r := e.must(e.shop("GET", "/us/v1/orders?limit="+limit, nil), 400)
+			assert.Equal(t, CodeValidation, r.errCode())
+		})
+	}
+}
+
+func TestCompareIDs(t *testing.T) {
+	assert.Negative(t, compareIDs("ord_0009", "ord_0010"))
+	assert.Negative(t, compareIDs("ord_9999", "ord_10000"), "a longer sequence number comes later")
+	assert.Zero(t, compareIDs("ord_0001", "ord_0001"))
+}
+
 func TestCheckInventory_StaleReadOncePerToken(t *testing.T) {
 	e := newEnv(t, Options{})
 	r := e.must(e.shop("GET", "/us/v1/inventory/SKU-1004", nil), 200)
