@@ -2,6 +2,7 @@ package plan
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/gburgyan/aat/internal/predicate"
 )
@@ -36,6 +37,97 @@ func exprExpander(ectx ExprContext) func(literal string) (any, bool, error) {
 		}
 		return v, true, nil
 	}
+}
+
+// PredicateOutputRefs returns the {{step.output}} references in a predicate's
+// quoted string literals, in order.
+func PredicateOutputRefs(expr string) []OutputRef {
+	if !ContainsExpr(expr) {
+		return nil
+	}
+	literals, err := predicate.Literals(expr)
+	if err != nil {
+		return nil
+	}
+	var refs []OutputRef
+	for _, literal := range literals {
+		refs = append(refs, ExprOutputRefs(literal)...)
+	}
+	return refs
+}
+
+// AssertionOutputRefs returns the {{step.output}} references an assertion
+// reads: in a predicate's quoted literals, or in a fieldEquals value.
+func AssertionOutputRefs(a MechanicalAssertion) []OutputRef {
+	switch a.Type {
+	case "predicate":
+		return PredicateOutputRefs(a.Expr)
+	case "fieldEquals":
+		return ExprValueOutputRefs(a.Value)
+	}
+	return nil
+}
+
+// StepOutputRefs returns the {{step.output}} references a step reads in its
+// assertions and its repeat condition.
+func StepOutputRefs(assertions *Assertions, repeat *RepeatConfig) []OutputRef {
+	var refs []OutputRef
+	if assertions != nil {
+		for _, a := range assertions.Mechanical {
+			refs = append(refs, AssertionOutputRefs(a)...)
+		}
+	}
+	if repeat != nil {
+		refs = append(refs, PredicateOutputRefs(repeat.Until)...)
+	}
+	return refs
+}
+
+// RewriteAssertionRefs returns a copy of assertions whose {{step.output}}
+// references name the steps idMap maps their old IDs to, or assertions itself
+// when none changes.
+func RewriteAssertionRefs(assertions *Assertions, idMap map[string]string) *Assertions {
+	if assertions == nil {
+		return nil
+	}
+	var out *Assertions
+	for i, a := range assertions.Mechanical {
+		expr := RewriteExprRefs(a.Expr, idMap)
+		value := a.Value
+		if s, ok := a.Value.(string); ok {
+			value = RewriteExprRefs(s, idMap)
+		}
+		if expr == a.Expr && value == a.Value {
+			continue
+		}
+		if out == nil {
+			cp := *assertions
+			cp.Mechanical = slices.Clone(assertions.Mechanical)
+			out = &cp
+		}
+		out.Mechanical[i].Expr = expr
+		out.Mechanical[i].Value = value
+	}
+	if out == nil {
+		return assertions
+	}
+	return out
+}
+
+// RewriteRepeatRefs returns a copy of repeat whose condition's {{step.output}}
+// references name the steps idMap maps their old IDs to, or repeat itself when
+// none changes.
+func RewriteRepeatRefs(repeat *RepeatConfig, idMap map[string]string) *RepeatConfig {
+	if repeat == nil {
+		return nil
+	}
+	until := RewriteExprRefs(repeat.Until, idMap)
+	if until == repeat.Until {
+		return repeat
+	}
+	cp := repeat.Clone()
+	cp.Until = until
+	return cp
 }
 
 // ValidatePredicateExprs checks the syntax of the {{…}} expressions in a

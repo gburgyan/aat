@@ -59,7 +59,7 @@ execution:
       assertions:
         mechanical:
           - type: predicate
-            expr: total > 0 && tax > 0
+            expr: 'total > 0 && tax > 0 && subtotal == "{{getCart.subtotal}}"'
 
     - node: paymentCharge
       dependsOn: [checkout]
@@ -90,14 +90,18 @@ execution:
       dependsOn: [createReturn]
       isGoal: true
       description: Refund the whole payment
-
-  verification:
-    - node: getOrder
-      purpose: The order ends returned with its payment fully refunded
       assertions:
         mechanical:
           - type: predicate
-            expr: 'status == "returned" && paymentStatus == "refunded"'
+            expr: 'amount == "{{checkout.total}}"'
+
+  verification:
+    - node: getOrder
+      purpose: The order ends returned with its payment fully refunded, at the total checkout charged
+      assertions:
+        mechanical:
+          - type: predicate
+            expr: 'status == "returned" && paymentStatus == "refunded" && total == "{{checkout.total}}"'
 
   cleanup:
     - node: deleteOrder

@@ -475,9 +475,11 @@ assertions:
 
 **Expressions in assertions.** A `fieldEquals` `value`, and a quoted string in a `predicate` `expr`, can hold `{{…}}` [expressions](value-flow.md#dynamic-expressions), such as `value: "{{today + 3 days}}"` or `expr: 'quantity == "{{quantity}}"'`.
 - They are evaluated when the step's assertions run, and they can name the step's inputs. `today`, `now`, and `unixtime` read the time the inputs were resolved, so a retried step's `{{today}}` is the date it resent.
-- A quoted expression that evaluates to a number or a boolean compares as one.
-- An expression that can't be evaluated fails its assertion.
-- `aat validate` checks their syntax.
+- They can read an earlier step's output as `{{step.output}}`, as in `expr: 'amount == "{{checkout.total}}"'`, and so can `repeat.until`. A main step reads the main steps before it, and a verification step reads the main steps. The reference implies `dependsOn`, as `from:` does. A step value reads an earlier step with `from:` instead.
+- A quoted expression that evaluates to a number or a boolean compares as one, and an extracted number read with `{{step.output}}` is a number.
+- `<`, `>`, `<=`, and `>=` compare two decimal numbers written as text as numbers, so `"1000.00" > "999.50"`. `==` and `!=` compare text.
+- An expression that can't be evaluated fails its assertion, and so does a `{{step.output}}` whose step stored no outputs, whose output the response left out, or whose value is null or a list.
+- `aat validate` checks their syntax, and that each `{{step.output}}` names a main step of the plan and a single-value output its node declares.
 - Selection filters and cleanup `when` conditions don't evaluate expressions.
 
 `status` and `schema` are unaffected by `raw` — they always look at the HTTP status and the full response body respectively.

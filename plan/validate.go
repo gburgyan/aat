@@ -207,6 +207,88 @@ func validateAssertions(prefix string, assertions *Assertions) []string {
 	return errs
 }
 
+// valueOutputRefError says why a step value can't read a {{step.output}}
+// reference, and what to write instead.
+func valueOutputRefError(ref OutputRef) string {
+	return fmt.Sprintf("%s reads a step's output, which only assertions and repeat.until can; use from: %s.%s", ref, ref.Step, ref.Output)
+}
+
+// outputRefScope checks the {{step.output}} references in a plan's assertions
+// and repeat conditions against the plan's main steps and their nodes.
+type outputRefScope struct {
+	steps        map[string]*Step // main steps by ID
+	verification map[string]bool  // verification step IDs, such as verify_getOrder
+	graph        *graph.Graph
+}
+
+func newOutputRefScope(p *Plan, g *graph.Graph) outputRefScope {
+	sc := outputRefScope{steps: map[string]*Step{}, verification: map[string]bool{}, graph: g}
+	for i := range p.Execution.Steps {
+		sc.steps[p.Execution.Steps[i].StepID()] = &p.Execution.Steps[i]
+	}
+	for _, vs := range p.Execution.Verification {
+		sc.verification["verify_"+vs.Node] = true
+	}
+	return sc
+}
+
+// check describes what is wrong with ref, read by the step stepID ("" for a
+// verification step), or returns "". The description starts with the
+// punctuation that joins it to "reads {{step.output}}".
+func (sc outputRefScope) check(ref OutputRef, stepID string) string {
+	if stepID != "" && ref.Step == stepID {
+		return fmt.Sprintf(", the step's own output: name it directly, as %s", ref.Output)
+	}
+	step, ok := sc.steps[ref.Step]
+	if !ok {
+		if stepID == "" && sc.verification[ref.Step] {
+			return ": a verification step reads main steps only"
+		}
+		return fmt.Sprintf(": %q is not a step in this plan", ref.Step)
+	}
+	if step.ExpectFailure != nil {
+		return fmt.Sprintf(": %s expects failure, so it stores no outputs", ref.Step)
+	}
+	if sc.graph == nil || sc.graph.Nodes[step.Node] == nil {
+		return "" // a missing node is reported on its own step
+	}
+	node := sc.graph.Nodes[step.Node]
+	for _, out := range node.Outputs {
+		if out.Name != ref.Output {
+			continue
+		}
+		if ft, err := graph.ParseFieldType(out.Type); err == nil && ft.IsArray {
+			return fmt.Sprintf(", a %s output: an assertion compares a string, number, or boolean", out.Type)
+		}
+		return ""
+	}
+	return fmt.Sprintf(": output %q does not exist on node %s", ref.Output, step.Node)
+}
+
+// validateOutputRefs checks the {{step.output}} references in a step's
+// assertions and repeat condition. stepID is the main step that reads them, or
+// "" for a verification step.
+func (sc outputRefScope) validateOutputRefs(prefix, stepID string, assertions *Assertions, repeat *RepeatConfig) []string {
+	var errs []string
+	if assertions != nil {
+		for j, a := range assertions.Mechanical {
+			for _, ref := range AssertionOutputRefs(a) {
+				if msg := sc.check(ref, stepID); msg != "" {
+					errs = append(errs, fmt.Sprintf("%s: assertion %d reads %s%s", prefix, j, ref, msg))
+				}
+			}
+		}
+	}
+	if repeat != nil {
+		for _, ref := range PredicateOutputRefs(repeat.Until) {
+			if msg := sc.check(ref, stepID); msg != "" {
+				errs = append(errs, fmt.Sprintf("%s: repeat.until reads %s%s", prefix, ref, msg))
+			}
+		}
+	}
+	return errs
+}
+
 // onTieError describes what is wrong with a selection's onTie, or returns "".
 // onTie takes first or fail, and only the min and max strategies can tie.
 func onTieError(onTie, strategy string) string {
@@ -256,6 +338,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 	// stepIDToNode: stepID → graph node name (for output validation)
 	stepIDs := make(map[string]bool, len(p.Execution.Steps))
 	stepIDToNode := make(map[string]string, len(p.Execution.Steps))
+	refScope := newOutputRefScope(p, g)
 	for _, step := range p.Execution.Steps {
 		sid := step.StepID()
 		if stepIDs[sid] {
@@ -651,14 +734,19 @@ func Validate(p *Plan, g *graph.Graph) error {
 			}
 			if err := ValidateExprValue(sv.Default); err != nil {
 				errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
+			} else if refs := ExprValueOutputRefs(sv.Default); len(refs) > 0 {
+				errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %s", i, sid, name, valueOutputRefError(refs[0])))
 			}
 			for k, entry := range sv.Pool {
 				if err := ValidateExprValue(entry); err != nil {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression in pool entry %d for %q: %v", i, sid, k, name, err))
+				} else if refs := ExprValueOutputRefs(entry); len(refs) > 0 {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression in pool entry %d for %q: %s", i, sid, k, name, valueOutputRefError(refs[0])))
 				}
 			}
 		}
 		errs = append(errs, validateAssertions(fmt.Sprintf("step %d (%s)", i, sid), step.Assertions)...)
+		errs = append(errs, refScope.validateOutputRefs(fmt.Sprintf("step %d (%s)", i, sid), sid, step.Assertions, step.Repeat)...)
 
 		// Validate expectFailure
 		errs = append(errs, validateRetryConfig(fmt.Sprintf("step %d (%s)", i, step.StepID()), step.Retry)...)
@@ -732,6 +820,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 		where := fmt.Sprintf("verification step %d (%s)", i, vs.Node)
 		errs = append(errs, validateAssertions(where, vs.Assertions)...)
+		errs = append(errs, refScope.validateOutputRefs(where, "", vs.Assertions, vs.Repeat)...)
 		if exists {
 			errs = append(errs, validateVerificationValues(where, vs.Node, node, vs.Values, stepIDToNode, g)...)
 			errs = append(errs, validateRepeatConfig(where, vs.Repeat, false, node)...)

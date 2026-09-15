@@ -6,7 +6,10 @@
 package predicate
 
 import (
+	"encoding/json"
 	"fmt"
+	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -102,6 +105,8 @@ func literalToken(v any) token {
 		return token{tokenNumber, strconv.FormatInt(x, 10)}
 	case float64:
 		return token{tokenNumber, strconv.FormatFloat(x, 'f', -1, 64)}
+	case json.Number:
+		return token{tokenNumber, x.String()}
 	default:
 		return token{tokenString, fmt.Sprint(v)}
 	}
@@ -821,23 +826,47 @@ func compareFloat(a, b float64, op string) (bool, error) {
 	}
 }
 
+// compareString compares two strings: == and != as text, and the ordering
+// operators as numbers when both are decimal numbers, such as the amounts an
+// API returns as strings, so that "1000.00" > "999.50". Other text, dates
+// included, orders as text.
 func compareString(a, b string, op string) (bool, error) {
 	switch op {
 	case "==":
 		return a == b, nil
 	case "!=":
 		return a != b, nil
+	}
+	c := strings.Compare(a, b)
+	if x, y, ok := decimalPair(a, b); ok {
+		c = x.Cmp(y)
+	}
+	switch op {
 	case "<":
-		return a < b, nil
+		return c < 0, nil
 	case ">":
-		return a > b, nil
+		return c > 0, nil
 	case "<=":
-		return a <= b, nil
+		return c <= 0, nil
 	case ">=":
-		return a >= b, nil
+		return c >= 0, nil
 	default:
 		return false, fmt.Errorf("unknown operator %s", op)
 	}
+}
+
+// decimalRe matches a decimal number written as text: an optional minus sign,
+// digits, and an optional fraction.
+var decimalRe = regexp.MustCompile(`^-?[0-9]+(\.[0-9]+)?$`)
+
+// decimalPair parses a and b as exact decimal numbers, when both are.
+func decimalPair(a, b string) (x, y *big.Rat, ok bool) {
+	if !decimalRe.MatchString(a) || !decimalRe.MatchString(b) {
+		return nil, nil, false
+	}
+	x, okX := new(big.Rat).SetString(a)
+	y, okY := new(big.Rat).SetString(b)
+	return x, y, okX && okY
 }
 
 // resolveField splits an identifier on "." and traverses nested maps.
