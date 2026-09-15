@@ -7,6 +7,19 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- A step can repeat its request until a condition over the response holds, as when polling a background job:
+  `repeat: {until: 'status == "complete"', interval: 2s, max: 30, timeout: 2m}`.
+  - Every request sends the inputs resolved for the first, and each is retried under the step's `retry:` block. A
+    response's `Retry-After` lengthens the wait, up to 60 s.
+  - `collect` gathers outputs across the responses: a list's items are appended, and an integer or float is added.
+    The step's assertions run once, on the last response's outputs with the collected ones.
+  - Reaching `max` (default 50, at most 1000) or `timeout` before `until` holds fails the step with a `repeat`
+    assertion result.
+  - `aat validate` checks that `until` reads the node's outputs, that `collect` names lists or numbers, and that the
+    step isn't an `expectFailure` step or on a node with a cleanup pairing.
+  - The archive records each request under `iterations` and why the step stopped under `repeatStop`. OpenAPI
+    validation counts every request. The progress line and `aat run show` give the number of requests, and the MCP
+    server's step details do too.
 - An extract rule can read a response header, as in `requestId: {header: X-Request-Id}`, and Lua transforms get
   `header(name)`.
   - Names match in any case, and a header sent more than once gives its values joined with `, `.

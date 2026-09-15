@@ -127,7 +127,37 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 	if s.OASValidation != nil {
 		rec.OASValidation = convertOASValidation(s.OASValidation)
 	}
+	if len(s.Iterations) > 0 {
+		rec.Iterations = make([]archive.IterationRecord, len(s.Iterations))
+		for i, it := range s.Iterations {
+			rec.Iterations[i] = convertIteration(it, baseURL)
+		}
+		rec.RepeatStop = s.RepeatStop
+	}
 
+	return rec
+}
+
+// convertIteration converts one request of a repeated step.
+func convertIteration(it IterationResult, baseURL string) archive.IterationRecord {
+	rec := archive.IterationRecord{
+		Index:      it.Index,
+		StartTime:  it.StartTime,
+		DurationMs: it.Duration.Milliseconds(),
+		Outputs:    it.Outputs,
+		UntilMet:   it.UntilMet,
+		RetryCount: it.RetryCount,
+		Error:      errString(it.Error),
+	}
+	if it.Request != nil {
+		rec.Request = convertRequest(it.Request, it.ActualBaseURL, baseURL, it.OriginalPath)
+	}
+	if it.Response != nil {
+		rec.Response = convertResponse(it.Response)
+	}
+	if it.OASValidation != nil {
+		rec.OASValidation = convertOASValidation(it.OASValidation)
+	}
 	return rec
 }
 

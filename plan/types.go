@@ -74,6 +74,7 @@ type Step struct {
 	Selections    map[string]StepSelection `yaml:"selections,omitempty" json:"selections,omitempty"`
 	Values        map[string]StepValue     `yaml:"values,omitempty" json:"values,omitempty"`
 	Retry         *RetryConfig             `yaml:"retry,omitempty" json:"retry,omitempty"`
+	Repeat        *RepeatConfig            `yaml:"repeat,omitempty" json:"repeat,omitempty"` // send the request until a condition holds (see RepeatConfig)
 	Assertions    *Assertions              `yaml:"assertions,omitempty" json:"assertions,omitempty"`
 	ExpectFailure *ExpectFailure           `yaml:"expectFailure,omitempty" json:"expectFailure,omitempty"`
 	// RawBody, when non-empty, replaces the adapter-built request body at
@@ -237,6 +238,9 @@ type VerificationStep struct {
 	// Values set the verification step's inputs, as a step's values do. A
 	// reference names a main step.
 	Values map[string]StepValue `yaml:"values,omitempty" json:"values,omitempty"`
+	// Repeat, when set, sends the request until a condition over its response
+	// holds, as a main step's repeat does.
+	Repeat *RepeatConfig `yaml:"repeat,omitempty" json:"repeat,omitempty"`
 	// BoundDefaults maps each input whose default reads another node's output
 	// to the step that reference binds to. Instantiation sets it before
 	// mutations expand, so a mutation's clone is never chosen.

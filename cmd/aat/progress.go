@@ -172,6 +172,9 @@ func resultStepID(result engine.StepResult) string {
 // failed assertions, and OpenAPI violations.
 func stepMarks(result engine.StepResult, color bool) string {
 	marks := ""
+	if note := repeatNote(result); note != "" {
+		marks += "  " + colorize(note, colorDim, color)
+	}
 	if note := retryNote(result); note != "" {
 		marks += "  " + colorize(note, colorYellow, color)
 	}
@@ -207,15 +210,42 @@ func oasSkipNote(result engine.StepResult) string {
 	return ""
 }
 
-// oasWarningCount totals the OpenAPI violations across steps.
+// oasWarningCount totals the OpenAPI violations across steps, and across every
+// request of a repeated step.
 func oasWarningCount(steps []engine.StepResult) int {
 	n := 0
 	for _, step := range steps {
+		if len(step.Iterations) > 0 {
+			for _, it := range step.Iterations {
+				if it.OASValidation != nil {
+					n += it.OASValidation.ErrorCount()
+				}
+			}
+			continue
+		}
 		if step.OASValidation != nil {
 			n += step.OASValidation.ErrorCount()
 		}
 	}
 	return n
+}
+
+// repeatNote summarizes the requests of a step with a repeat block, such as
+// "5 requests", adding why it stopped when its condition didn't hold. It is
+// empty for a step without one.
+func repeatNote(result engine.StepResult) string {
+	n := len(result.Iterations)
+	if n == 0 {
+		return ""
+	}
+	note := fmt.Sprintf("%d requests", n)
+	if n == 1 {
+		note = "1 request"
+	}
+	if result.RepeatStop != "" && result.RepeatStop != engine.RepeatStopUntil {
+		note += ", stopped: " + result.RepeatStop
+	}
+	return note
 }
 
 // retryNote summarizes the retries behind a step, such as

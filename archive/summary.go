@@ -68,18 +68,33 @@ func buildOASSummary(mode string, steps []StepRecord, violations int) *OASSummar
 	}
 	s := &OASSummary{Mode: mode, Violations: violations}
 	for _, step := range steps {
-		v := step.OASValidation
-		if v == nil || v.Skipped {
-			continue
-		}
-		if v.Request != nil && !v.Request.Skipped {
-			s.ValidatedRequests++
-		}
-		if v.Response != nil && !v.Response.Skipped {
-			s.ValidatedResponses++
+		for _, v := range StepOASValidations(step) {
+			if v == nil || v.Skipped {
+				continue
+			}
+			if v.Request != nil && !v.Request.Skipped {
+				s.ValidatedRequests++
+			}
+			if v.Response != nil && !v.Response.Skipped {
+				s.ValidatedResponses++
+			}
 		}
 	}
 	return s
+}
+
+// StepOASValidations returns a step's OpenAPI validation records: one for each
+// request of a repeated step, whose own record is its last request's, or the
+// step's own.
+func StepOASValidations(s StepRecord) []*OASValidationRecord {
+	if len(s.Iterations) == 0 {
+		return []*OASValidationRecord{s.OASValidation}
+	}
+	records := make([]*OASValidationRecord, len(s.Iterations))
+	for i, it := range s.Iterations {
+		records[i] = it.OASValidation
+	}
+	return records
 }
 
 // WriteSummary writes a RunSummary as JSON to the given path.
@@ -121,15 +136,17 @@ func ReadSummary(path string) (*RunSummary, error) {
 func countIssues(steps []StepRecord) map[string]int {
 	var issues map[string]int
 	for _, s := range steps {
-		if s.OASValidation == nil || s.OASValidation.Skipped {
-			continue
-		}
 		n := 0
-		if s.OASValidation.Request != nil {
-			n += len(s.OASValidation.Request.Errors)
-		}
-		if s.OASValidation.Response != nil {
-			n += len(s.OASValidation.Response.Errors)
+		for _, v := range StepOASValidations(s) {
+			if v == nil || v.Skipped {
+				continue
+			}
+			if v.Request != nil {
+				n += len(v.Request.Errors)
+			}
+			if v.Response != nil {
+				n += len(v.Response.Errors)
+			}
 		}
 		if n > 0 {
 			if issues == nil {

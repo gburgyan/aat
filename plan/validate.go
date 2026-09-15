@@ -54,6 +54,79 @@ func validateRetryConfig(prefix string, rc *RetryConfig) []string {
 	return errs
 }
 
+// validateRepeatConfig checks a step's repeat block against its node: until is
+// a predicate that reads only the node's outputs, collect names list or number
+// outputs, the limits are in range, and the step is a read that expects to
+// succeed.
+func validateRepeatConfig(prefix string, rc *RepeatConfig, expectsFailure bool, node *graph.Node) []string {
+	if rc == nil {
+		return nil
+	}
+	outputs := make(map[string]graph.Output, len(node.Outputs))
+	for _, out := range node.Outputs {
+		outputs[out.Name] = out
+	}
+	outputList := strings.Join(slices.Sorted(maps.Keys(outputs)), ", ")
+
+	var errs []string
+	if strings.TrimSpace(rc.Until) == "" {
+		errs = append(errs, fmt.Sprintf("%s: repeat.until is required: a predicate over each response's outputs that ends the repeats, such as status == \"complete\"", prefix))
+	} else {
+		if err := predicate.Validate(rc.Until); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: invalid repeat.until %q: %v", prefix, rc.Until, err))
+		} else if err := ValidatePredicateExprs(rc.Until); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: invalid expression in repeat.until %q: %v", prefix, rc.Until, err))
+		}
+		for _, field := range predicate.Fields(rc.Until) {
+			name, _, _ := strings.Cut(field, ".")
+			if _, ok := outputs[name]; !ok {
+				errs = append(errs, fmt.Sprintf("%s: repeat.until reads %q, which is not an output of %s (outputs: %s)", prefix, name, node.Name, outputList))
+			}
+		}
+	}
+	for _, name := range rc.Collect {
+		out, ok := outputs[name]
+		switch {
+		case !ok:
+			errs = append(errs, fmt.Sprintf("%s: repeat.collect names %q, which is not an output of %s (outputs: %s)", prefix, name, node.Name, outputList))
+		case !collectable(out.Type):
+			errs = append(errs, fmt.Sprintf("%s: repeat.collect can't gather %q, a %s output: it appends lists and adds integers and floats", prefix, name, out.Type))
+		}
+	}
+	if rc.Max < 0 || rc.Max > MaxRepeatRequests {
+		errs = append(errs, fmt.Sprintf("%s: repeat.max must be from 1 to %d, or left out for %d", prefix, MaxRepeatRequests, DefaultRepeatMax))
+	}
+	interval, intervalErr := rc.IntervalDuration()
+	if intervalErr != nil {
+		errs = append(errs, fmt.Sprintf("%s: %v", prefix, intervalErr))
+	}
+	timeout, timeoutErr := rc.TimeoutDuration()
+	if timeoutErr != nil {
+		errs = append(errs, fmt.Sprintf("%s: %v", prefix, timeoutErr))
+	}
+	if intervalErr == nil && timeoutErr == nil && timeout > 0 && timeout < interval {
+		errs = append(errs, fmt.Sprintf("%s: repeat.timeout %s is shorter than repeat.interval %s, so the step could send only one request", prefix, timeout, interval))
+	}
+	if expectsFailure {
+		errs = append(errs, fmt.Sprintf("%s: repeat can't be combined with expectFailure: it waits for a response that succeeds", prefix))
+	}
+	if !node.Cleanup.IsZero() {
+		errs = append(errs, fmt.Sprintf("%s: repeat is for reads, but %s has a cleanup pairing (%s), so each request could create a resource", prefix, node.Name, node.Cleanup))
+	}
+	return errs
+}
+
+// collectable reports whether repeat.collect can gather an output of type typ:
+// a list, whose items are appended, or an integer or float, whose values are
+// added.
+func collectable(typ string) bool {
+	ft, err := graph.ParseFieldType(typ)
+	if err != nil {
+		return false
+	}
+	return ft.IsArray || (ft.Kind == graph.TypeScalar && (ft.Name == "integer" || ft.Name == "float"))
+}
+
 // ValidationError collects all validation errors for a plan.
 type ValidationError struct {
 	Errors []string
@@ -557,6 +630,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 
 		// Validate expectFailure
 		errs = append(errs, validateRetryConfig(fmt.Sprintf("step %d (%s)", i, step.StepID()), step.Retry)...)
+		if node, ok := g.Nodes[step.Node]; ok {
+			errs = append(errs, validateRepeatConfig(fmt.Sprintf("step %d (%s)", i, sid), step.Repeat, step.ExpectFailure != nil, node)...)
+		}
 
 		if step.ExpectFailure != nil {
 			if len(step.ExpectFailure.Status) == 0 {
@@ -626,6 +702,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 		errs = append(errs, validateAssertions(where, vs.Assertions)...)
 		if exists {
 			errs = append(errs, validateVerificationValues(where, vs.Node, node, vs.Values, stepIDToNode, g)...)
+			errs = append(errs, validateRepeatConfig(where, vs.Repeat, false, node)...)
 		}
 	}
 

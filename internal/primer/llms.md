@@ -528,6 +528,17 @@ assertions:
 - **Request timeout:** aat's client waits 30 s for each response. A request that takes longer fails with `no response within aat's 30s request timeout`, in the `timeout` category, which retries by default. The limit isn't configurable.
 - **Known rate limits:** set `settings.minRequestInterval` (`250ms`, `1s`) in the environment file. It spaces the start of every request one command sends, `--parallel` plans included, but not OAuth token requests.
 
+### Repeat
+
+`repeat: {until: 'status == "complete"', collect: [items], interval: 2s, max: 30, timeout: 2m}` sends a step's request until `until` holds over a response's outputs, as when polling a background job.
+
+- **Defaults:** `until` is required. `interval` is 1s, lengthened by a response's `Retry-After` up to 60 s. `max` is 50, at most 1000. There is no default `timeout`.
+- **Same request:** the inputs are resolved once, and each request is retried under `retry:`.
+- **Outputs:** the last response's, with each `collect` output gathered across the responses: lists are appended, and integers and floats added. The step's assertions run once, on those. `until` reads each response's own outputs, so an output a response leaves out needs `default:` on its extract rule.
+- **Failure:** reaching `max` or `timeout` before `until` holds fails the step with a `repeat` assertion result. A request that errors or returns 400 or more ends the repeats.
+- **Not allowed:** with `expectFailure`, or on a node with a cleanup pairing. Verification steps can repeat.
+- **Archive:** each request under `iterations` (request, response, outputs, `untilMet`), and why it stopped under `repeatStop`.
+
 ### Cleanup
 
 Cleanup steps run after the plan completes (success or failure) to release resources:

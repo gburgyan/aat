@@ -365,6 +365,7 @@ type shownStepRow struct {
 	Status       int      `json:"status,omitempty"`
 	Passed       bool     `json:"passed"`
 	DurationMs   int64    `json:"duration_ms"`
+	Requests     int      `json:"requests,omitempty"` // requests a repeated step sent
 	Outputs      []string `json:"outputs,omitempty"`
 	Verification bool     `json:"verification,omitempty"`
 	CleanupFor   string   `json:"cleanup_for,omitempty"`
@@ -519,6 +520,7 @@ func newShownStepRow(index int, id string, s archive.StepRecord) shownStepRow {
 		Node:       s.Node,
 		Passed:     shownStepPassed(s),
 		DurationMs: s.DurationMs,
+		Requests:   len(s.Iterations),
 	}
 	if s.Response != nil {
 		row.Status = s.Response.Status
@@ -567,7 +569,11 @@ func writeShownSteps(b *strings.Builder, rows []shownStepRow, last string) {
 		if last == "FOR" {
 			rest = row.CleanupFor
 		}
-		line(strconv.Itoa(row.Index), row.StepID, row.Node, status, result, formatDuration(time.Duration(row.DurationMs)*time.Millisecond), rest)
+		took := formatDuration(time.Duration(row.DurationMs) * time.Millisecond)
+		if row.Requests > 0 {
+			took += " ×" + strconv.Itoa(row.Requests)
+		}
+		line(strconv.Itoa(row.Index), row.StepID, row.Node, status, result, took, rest)
 	}
 }
 
@@ -602,6 +608,8 @@ type shownStep struct {
 	DurationMs        int64                     `json:"duration_ms"`
 	Retries           int                       `json:"retries,omitempty"`
 	RetriedOn         []string                  `json:"retried_on,omitempty"`
+	Requests          int                       `json:"requests,omitempty"`    // requests a repeated step sent
+	RepeatStop        string                    `json:"repeat_stop,omitempty"` // why a repeated step stopped
 	Error             string                    `json:"error,omitempty"`
 	Inputs            map[string]any            `json:"inputs,omitempty"`
 	Outputs           map[string]any            `json:"outputs,omitempty"`
@@ -663,6 +671,9 @@ func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup bool, 
 	if view.Retries > 0 {
 		fmt.Fprintf(&b, "  retried %d times (%s)", view.Retries, strings.Join(view.RetriedOn, ", "))
 	}
+	if view.Requests > 0 {
+		fmt.Fprintf(&b, "  %d requests (stopped: %s)", view.Requests, view.RepeatStop)
+	}
 	b.WriteByte('\n')
 	if view.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", view.Error)
@@ -717,6 +728,8 @@ func buildShownStep(step *archive.StepRecord, id string, cleanup bool) shownStep
 		DurationMs: step.DurationMs,
 		Retries:    step.RetryCount,
 		RetriedOn:  step.RetriedOn,
+		Requests:   len(step.Iterations),
+		RepeatStop: step.RepeatStop,
 		Error:      step.Error,
 		Inputs:     step.Inputs,
 		Outputs:    step.Outputs,

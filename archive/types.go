@@ -66,6 +66,29 @@ type StepRecord struct {
 	// WhenError, on a cleanup step, says why its pairing's when condition could
 	// not be evaluated. The cleanup ran anyway.
 	WhenError string `json:"whenError,omitempty"`
+	// Iterations, on a step with a repeat block, records each request it sent,
+	// in order. The step's own request and response are its last request's, and
+	// its outputs are that request's with the collected outputs gathered across
+	// all of them.
+	Iterations []IterationRecord `json:"iterations,omitempty"`
+	// RepeatStop says why a repeated step stopped sending requests: "until" when
+	// its condition held, "max" or "timeout" when a limit ended it first, and
+	// "error" when a request failed or the condition couldn't be evaluated.
+	RepeatStop string `json:"repeatStop,omitempty" redact:"-"`
+}
+
+// IterationRecord is one request of a repeated step.
+type IterationRecord struct {
+	Index         int                  `json:"index"`
+	StartTime     time.Time            `json:"startTime,omitempty"`
+	DurationMs    int64                `json:"durationMs"`
+	Request       *RequestRecord       `json:"request,omitempty"`
+	Response      *ResponseRecord      `json:"response,omitempty"`
+	Outputs       map[string]any       `json:"outputs,omitempty"`
+	UntilMet      bool                 `json:"untilMet"`
+	RetryCount    int                  `json:"retryCount,omitempty"`
+	Error         string               `json:"error,omitempty"`
+	OASValidation *OASValidationRecord `json:"oasValidation,omitempty"`
 }
 
 // CleanupSkipRecord is a registered cleanup that did not run because it was no

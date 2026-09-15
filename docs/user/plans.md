@@ -529,6 +529,47 @@ When `on` is omitted, the default retries `transient`, `timeout`, and `server` f
 
 To keep a rate-limited API from answering 429 in the first place, set [`settings.minRequestInterval`](environments.md#request-pacing).
 
+#### Repeat
+
+`repeat` sends a step's request again and again until a condition over its response holds, as when polling a job that finishes in the background:
+
+```yaml
+  - node: getExport
+    values:
+      exportId: {from: createExport.exportId}
+    repeat:
+      until: status == "complete"
+      interval: 2s
+      max: 30
+      timeout: 2m
+```
+
+| Field | Description |
+|-------|-------------|
+| `repeat.until` | A predicate over each response's outputs, in the syntax of a `predicate` assertion. The step stops as soon as it holds. Required |
+| `repeat.collect` | Outputs gathered across the responses: a list output's items are appended in order, and an integer or float output's values are added |
+| `repeat.interval` | The wait between requests, such as `500ms` or `2s`. Default `1s`. A response's `Retry-After` header lengthens it, up to 60 seconds |
+| `repeat.max` | The most requests the step sends, up to 1000. Default 50 |
+| `repeat.timeout` | The most time the step spends repeating, such as `3m`. No default |
+
+- **The same request each time.** The step's inputs are resolved once, so every request sends the same values. Each request is retried under the step's `retry:` block, as any step is.
+- **When it stops.** The step passes on the request whose outputs make `until` true. It fails when `max` requests or the `timeout` come first, with a `repeat` result among its assertions, such as `repeat.until "status == \"complete\"" is still false after 30 requests (repeat.max)`. A request that fails, with an error or a status of 400 or more, ends the repeats at once.
+- **What later steps see.** The step's request, response, and outputs are its last request's, with each `collect` output gathered across all of them. Its assertions run once, on those outputs, while `until` reads each response's own. A field `until` reads that a response leaves out fails the step, so give its extract rule a [`default:`](templates.md#extraction-errors).
+- **In the archive.** The step records every request under `iterations`, and why it stopped under `repeatStop` (see [Archives](archives.md#layout)). The progress line and `aat run show` give the number of requests.
+- **Reads only.** A node with a cleanup pairing, or a step with `expectFailure`, can't repeat. A verification step can.
+
+Gathering a job's results as they arrive:
+
+```yaml
+  - node: getSearchResults
+    values:
+      searchId: {from: startSearch.searchId}
+    repeat:
+      until: remainingBatches == 0
+      collect: [items, itemCount]
+      interval: 0s
+```
+
 #### Negative Testing (expectFailure)
 
 Steps can declare that failure is the *expected* outcome:

@@ -18,6 +18,9 @@ const (
 	AssertFieldExists AssertionType = "fieldExists"
 	AssertFieldEquals AssertionType = "fieldEquals"
 	AssertPredicate   AssertionType = "predicate"
+	// AssertRepeat is the result a repeated step records when its repeat.until
+	// condition never held or couldn't be evaluated. A plan can't declare it.
+	AssertRepeat AssertionType = "repeat"
 )
 
 // MechanicalAssertion describes a structured check on a response.

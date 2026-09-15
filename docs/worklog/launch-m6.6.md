@@ -112,3 +112,45 @@ Each gap the package runs into becomes its own AAT branch and PR. In order:
 - **`Link` cursors:** a pagination cursor in a `Link` header needs a transform to parse out `rel="next"`, or a dedicated
   rule later.
 - **429s:** extraction doesn't run on a 429, so `RateLimit-Reset` there is only read by retry, as before.
+
+## 2026-09-14 — `repeat` with `until` (PR 4a)
+
+**What:**
+- **The block:** `repeat: {until, collect, interval, max, timeout}` on a main or verification step sends the request
+  until `until` holds over a response's outputs.
+- **Inputs and retries:** every request resends the first request's resolved inputs, and each request goes through the
+  step's retries.
+- **`collect`:** it appends lists and adds numbers across the responses.
+- **Assertions:** they run once, on the last response's outputs plus the collected ones.
+- **Archive:** it records `iterations` and `repeatStop`, and OpenAPI counts cover every request.
+- **Output:** the progress line, `aat run show`, and MCP step details show the request count.
+
+**Decisions:**
+- **Split in two.** This PR carries the engine, plan, archive, CLI, and docs. PR 4b carries the web UI's Iterations tab,
+  `aat run show --iteration N`, and a sandbox job endpoint with a shop plan, which changes the example-shop counts. That
+  keeps each PR reviewable.
+- **A poll that never converges fails the step; it isn't an error.** Reaching `max` or `timeout`, or an `until` that
+  can't be evaluated, adds a `repeat` assertion result (`validate.AssertRepeat`). So the run is `failed`, as for a check
+  that didn't hold, and `ContinueOnAssertionFailure` applies. `OutcomeError` stays for failures to execute.
+- **A failed request ends the repeats.** An error, a status of 400 or more, or an `errorDetection` match returns the
+  result as a single step would. `Run` reports it with its status, and assertions don't run. A poll that expects a 404
+  until something exists isn't supported; `expectFailure` is rejected with `repeat`.
+- **Assertions are split out of `executeStepWith`.** `runStepAssertions` runs them. The loop runs its requests with a
+  copy of the step whose `Assertions` is nil, then calls it once. This needed no flag on `stepInputs`, and single steps
+  behave exactly as before.
+- **Shared inputs.** `executeStepWithRetry` takes the `*stepInputs` the loop owns, so a retry inside a request and every
+  later request resend the first resolution: generated values, pool picks, dates.
+- **`until` reads each response's own outputs, through JSON.** That is the same round trip as assertions, so an extracted
+  `json.Number` compares as a number. The first engine tests caught `cannot compare type json.Number` on raw outputs.
+  The collected values are for the assertions and later steps.
+- **Waits.** `interval` defaults to 1 s. A `Retry-After` lengthens it, capped at the 60 s retry cap. A `timeout` stops
+  the step before a wait that would pass it, rather than sleeping past it.
+- **Reads only.** A node with a cleanup pairing is rejected, since the engine registers one cleanup per step, not per
+  request. Verification steps may repeat, which is where PR 5's full-listing audits belong.
+- **Counts.** `collect` gives an `int` when both values are whole numbers, and a float otherwise.
+  `archive.StepOASValidations` makes the summary count each request's validation instead of the step's copy of the last.
+
+**Open questions:**
+- **`next`.** PR 5 adds it to the same loop.
+- **Retry-After on success.** A server that sends `Retry-After` on a 200 to pace polling is honored up to 60 s. A longer
+  request is capped, not treated as a failure as retries treat it, since the poll hasn't failed.
