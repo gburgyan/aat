@@ -11,8 +11,9 @@ import (
 // expanding each quoted string literal that holds a {{…}} expression with ectx,
 // so an assertion can compare a field with a computed value, as in
 // `deliveryDate == "{{today + 3 days}}"`. A literal whose expression evaluates
-// to a number or a boolean becomes that value. Selection filters and cleanup
-// conditions use predicate.Eval, where such a literal stays text.
+// to a number or a boolean becomes that value. A selection filter's literals
+// are expanded the same way, with ExpandPredicateText, before it is evaluated;
+// cleanup conditions use predicate.Eval, where such a literal stays text.
 func EvalPredicateWithExprs(expr string, context map[string]any, ectx ExprContext) (bool, error) {
 	return predicate.EvalExpanding(expr, context, exprExpander(ectx))
 }

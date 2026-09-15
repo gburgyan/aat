@@ -458,7 +458,7 @@ A string containing `{{…}}` is an expression.
 | `{{today}}`, `{{today + 7 days}}`, `{{today - 7 days}}` | A `YYYY-MM-DD` date in the local time zone of the machine running `aat` |
 | `{{env.KEY}}` | The OS environment variable `KEY`, else the environment file's `values:` entry; fails when both are empty |
 | `{{name}}`, `{{name + 3 days}}` | Another input of the same step, declared earlier on the node; date arithmetic needs a `YYYY-MM-DD` value |
-| `{{step.output}}` | An earlier main step's output, such as `{{checkout.total}}`, in assertions and `repeat.until` only; a step value uses `from:` |
+| `{{step.output}}` | An earlier main step's output, such as `{{checkout.total}}`, in assertions, `repeat.until`, and selection filters; a step value uses `from:` |
 | `{{uuid}}` | A random version 4 UUID |
 | `{{random N}}` | `N` random characters from `0-9a-z`, with `N` from 1 to 64 |
 | `{{now}}`, `{{now + 90 minutes}}` | The time in UTC, RFC 3339 to the second. Units: `seconds`, `minutes`, `hours`, `days` |
@@ -466,8 +466,8 @@ A string containing `{{…}}` is an expression.
 
 - **Types.** A value that is one whole expression keeps the result's type. Mixed text, such as `"Deliver on {{deliveryDate}}"`, becomes a string.
 - **Generated values.** Each occurrence is its own value, so two inputs set to `{{uuid}}` differ; reuse one with `fromResolved` or `fromInput`. A step's values are resolved once, so a retried step resends the same ones, and a new run generates new ones. `uuid`, `now`, and `unixtime` are reserved words, and `{{today}}` counts days only.
-- **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`, including strings inside a list or map value, at any depth. Also a `fieldEquals` `value` and a quoted string in a `predicate` `expr` or `repeat.until`, where they can name the step's inputs and read earlier steps' outputs: `expr: 'quantity == "{{quantity}}"'`, `expr: 'amount == "{{checkout.total}}"'`. A quoted expression that yields a number or a boolean compares as one. A `{{step.output}}` implies `dependsOn`; a step that stored no outputs, a missing output, or a null or list value fails the assertion.
-- **Where they are not:** templates (where `{{name}}` is a placeholder for an input), overlay `values:`, `rawBody`, selection filters, and cleanup `when`.
+- **Where they are evaluated:** step values, pools, graph defaults, layers, recipe overrides, slot `inject`, and mutation `set`, including strings inside a list or map value, at any depth. Also a `fieldEquals` `value` and a quoted string in a `predicate` `expr` or `repeat.until`, where they can name the step's inputs and read earlier steps' outputs: `expr: 'quantity == "{{quantity}}"'`, `expr: 'amount == "{{checkout.total}}"'`. A quoted expression that yields a number or a boolean compares as one. A `{{step.output}}` implies `dependsOn`; a step that stored no outputs, a missing output, or a null or list value fails the assertion. A selection `filter` expands its quoted strings the same way before it narrows the array: `filter: 'objectId == "{{create.customerId}}"'`.
+- **Where they are not:** templates (where `{{name}}` is a placeholder for an input), overlay `values:`, `rawBody`, and cleanup `when`.
 - **Checking.** `aat validate` checks expression syntax in step values (list and map items included), pools, and assertions. An expression that fails to evaluate fails its step, or its assertion.
 
 ### Assertion Types

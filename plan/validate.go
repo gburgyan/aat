@@ -210,7 +210,7 @@ func validateAssertions(prefix string, assertions *Assertions) []string {
 // valueOutputRefError says why a step value can't read a {{step.output}}
 // reference, and what to write instead.
 func valueOutputRefError(ref OutputRef) string {
-	return fmt.Sprintf("%s reads a step's output, which only assertions and repeat.until can; use from: %s.%s", ref, ref.Step, ref.Output)
+	return fmt.Sprintf("%s reads a step's output, which only assertions, repeat.until, and selection filters can; use from: %s.%s", ref, ref.Step, ref.Output)
 }
 
 // outputRefScope checks the {{step.output}} references in a plan's assertions
@@ -654,6 +654,13 @@ func Validate(p *Plan, g *graph.Graph) error {
 			if sel.Filter != "" {
 				if err := predicate.Validate(sel.Filter); err != nil {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for selection %q: %v", i, sid, selName, err))
+				} else if err := ValidatePredicateExprs(sel.Filter); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression in the filter for selection %q: %v", i, sid, selName, err))
+				}
+				for _, ref := range PredicateOutputRefs(sel.Filter) {
+					if msg := refScope.check(ref, sid); msg != "" {
+						errs = append(errs, fmt.Sprintf("step %d (%s): filter for selection %q reads %s%s", i, sid, selName, ref, msg))
+					}
 				}
 			}
 			if strategy == "min" || strategy == "max" {
@@ -710,6 +717,13 @@ func Validate(p *Plan, g *graph.Graph) error {
 				if sel.Filter != "" {
 					if err := predicate.Validate(sel.Filter); err != nil {
 						errs = append(errs, fmt.Sprintf("step %d (%s): invalid filter expression for %q: %v", i, sid, name, err))
+					} else if err := ValidatePredicateExprs(sel.Filter); err != nil {
+						errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression in the filter for %q: %v", i, sid, name, err))
+					}
+					for _, ref := range PredicateOutputRefs(sel.Filter) {
+						if msg := refScope.check(ref, sid); msg != "" {
+							errs = append(errs, fmt.Sprintf("step %d (%s): filter for %q reads %s%s", i, sid, name, ref, msg))
+						}
 					}
 				}
 				if sel.Strategy == "min" || sel.Strategy == "max" {

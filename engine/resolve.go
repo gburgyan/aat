@@ -202,14 +202,20 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 		strategy = "first"
 	}
 
-	// Build a SelectionConfig for reuse with existing infrastructure
-	selCfg := &plan.SelectionConfig{
+	// Build a SelectionConfig for reuse with existing infrastructure, its
+	// filter's expressions expanded; the entry and the decision record the
+	// expanded filter
+	selCfg, err := expandFilter(&plan.SelectionConfig{
 		Strategy:  strategy,
 		Filter:    sel.Filter,
 		Index:     sel.Index,
 		SortField: sel.SortField,
 		OnTie:     sel.OnTie,
+	}, state, rctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
 	}
+	sel.Filter = selCfg.Filter
 
 	// Resolve elementField names in SortField
 	resolvedSel := resolveSelectionFields(selCfg, rctx, g, fromNode, fromField)
@@ -521,11 +527,39 @@ func missingOptionalOutput(inputName, fromStep, fromOutput string) *ValueResolut
 	return &ValueResolution{InputName: inputName, Source: "optional_skip", FromStep: fromStep, FromOutput: fromOutput, PoolIndex: -1}
 }
 
+// expandFilter returns sel with the {{…}} expressions in its filter's quoted
+// literals replaced by their values, as an assertion's are, so a filter can
+// pick the element about an object an earlier step made:
+// objectId == "{{create.customerId}}". Earlier steps' outputs come from state.
+// A filter without expressions comes back as it is.
+func expandFilter(sel *plan.SelectionConfig, state *RunState, rctx *ResolveContext) (*plan.SelectionConfig, error) {
+	if sel == nil || !plan.ContainsExpr(sel.Filter) {
+		return sel, nil
+	}
+	var ectx plan.ExprContext
+	if rctx != nil {
+		ectx.Now, ectx.Env, ectx.Random = rctx.Now, rctx.EnvLookup, rctx.Random
+	}
+	if state != nil {
+		ectx.Outputs = state.OutputValue
+	}
+	text, err := plan.ExpandPredicateText(sel.Filter, ectx)
+	if err != nil {
+		return nil, fmt.Errorf("filter %q: %w", sel.Filter, err)
+	}
+	expanded := *sel
+	expanded.Filter = text
+	return &expanded, nil
+}
+
 // resolveSelectValue handles plan-defined "from" + "select" value resolution.
 func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName string, sel *plan.SelectionConfig, g *graph.Graph, state *RunState, dedupCache map[string]*selectionResult, rctx *ResolveContext) (any, *SelectionDecision, error) {
 	arr, err := getArrayFromState(fromNode, fromField, state)
 	if err != nil {
 		return nil, nil, err
+	}
+	if sel, err = expandFilter(sel, state, rctx); err != nil {
+		return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, err)
 	}
 
 	// Resolve elementField names to extraction keys for applySelection (min/max SortField)

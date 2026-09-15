@@ -44,6 +44,13 @@ func TestValidate_OutputRefs(t *testing.T) {
 	repeatReadsUnknownStep.Execution.Steps[3].Repeat = &RepeatConfig{Until: `amount >= "{{chekout.total}}"`}
 	stepValue := outputRefsPlan(nil, nil, nil)
 	stepValue.Execution.Steps[3].Values = map[string]StepValue{"amount": {Default: "{{checkout.total}}"}}
+	selectFilter := func(filter string) *Plan {
+		p := outputRefsPlan(nil, nil, nil)
+		p.Execution.Steps[3].Values = map[string]StepValue{"amount": {From: "getCart.lines", Select: &SelectionConfig{Strategy: "first", Field: "price", Filter: filter}}}
+		return p
+	}
+	namedSelectionFilter := outputRefsPlan(nil, nil, nil)
+	namedSelectionFilter.Execution.Steps[3].Selections = map[string]StepSelection{"line": {From: "getCart.lines", Filter: `sku == "{{chekout.total}}"`}}
 
 	tests := []struct {
 		name string
@@ -96,7 +103,21 @@ func TestValidate_OutputRefs(t *testing.T) {
 		{
 			name: "a step value",
 			plan: stepValue,
-			want: `step 3 (refund): invalid expression for "amount": {{checkout.total}} reads a step's output, which only assertions and repeat.until can; use from: checkout.total`,
+			want: `step 3 (refund): invalid expression for "amount": {{checkout.total}} reads a step's output, which only assertions, repeat.until, and selection filters can; use from: checkout.total`,
+		},
+		{
+			name: "a selection filter reads an earlier step",
+			plan: selectFilter(`sku == "{{checkout.total}}"`),
+		},
+		{
+			name: "a selection filter that reads an unknown step",
+			plan: selectFilter(`sku == "{{chekout.total}}"`),
+			want: `step 3 (refund): filter for "amount" reads {{chekout.total}}: "chekout" is not a step in this plan`,
+		},
+		{
+			name: "a named selection's filter",
+			plan: namedSelectionFilter,
+			want: `step 3 (refund): filter for selection "line" reads {{chekout.total}}: "chekout" is not a step in this plan`,
 		},
 	}
 	for _, tt := range tests {
@@ -126,6 +147,19 @@ func TestInstantiate_OutputRefsImplyDependsOn(t *testing.T) {
 		inst, err := InstantiateAndValidate(p, g)
 		require.NoError(t, err)
 		assert.Equal(t, []string{"checkout", "getCart"}, inst.Execution.Steps[2].DependsOn)
+	})
+
+	t.Run("a selection filter adds the step it reads", func(t *testing.T) {
+		p := &Plan{Execution: Execution{Steps: []Step{
+			{Node: "getCart"},
+			{ID: "checkout", Node: "checkoutCart"},
+			{ID: "refund", Node: "paymentRefund", Values: map[string]StepValue{
+				"amount": {From: "getCart.lines", Select: &SelectionConfig{Strategy: "first", Field: "price", Filter: `sku == "{{checkout.total}}"`}},
+			}},
+		}}}
+		inst, err := InstantiateAndValidate(p, g)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"getCart", "checkout"}, inst.Execution.Steps[2].DependsOn)
 	})
 
 	t.Run("one that closes a cycle says so", func(t *testing.T) {
