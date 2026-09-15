@@ -33,7 +33,7 @@ func TestValidate_UnknownAssertionType(t *testing.T) {
 
 	err := Validate(p, assertionGraph())
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), `step 0 (getCart): assertion 0 has unknown type "fieldEqual" (use status, fieldExists, fieldEquals, predicate, schema)`)
+	assert.Contains(t, err.Error(), `step 0 (getCart): assertion 0 has unknown type "fieldEqual" (use status, fieldExists, fieldAbsent, fieldEquals, predicate, schema)`)
 	assert.Contains(t, err.Error(), `verification step 0 (getCart): assertion 1 has unknown type "jsonSchema"`)
 }
 

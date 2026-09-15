@@ -2,6 +2,7 @@ package validate
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -189,6 +190,62 @@ func TestCheckFieldExists(t *testing.T) {
 			assert.Equal(t, tt.path, ar.Path)
 		})
 	}
+}
+
+func TestCheckFieldAbsent(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		path       string
+		passed     bool
+		msgContain string
+	}{
+		{name: "field absent", body: `{"name": "Alice"}`, path: "age", passed: true, msgContain: `field "age" is absent`},
+		{name: "field null", body: `{"name": null}`, path: "name", passed: true, msgContain: "is absent"},
+		{
+			name:       "left out of an error body",
+			body:       `{"error": {"type": "idempotency_error", "message": "Keys for idempotent requests..."}}`,
+			path:       "error.code",
+			passed:     true,
+			msgContain: `field "error.code" is absent`,
+		},
+		{name: "dollar prefix stripped", body: `{"error": {}}`, path: "$.error.code", passed: true, msgContain: "is absent"},
+		{name: "empty body", body: "", path: "name", passed: true, msgContain: "is absent"},
+		{name: "field present", body: `{"name": "Alice"}`, path: "name", passed: false, msgContain: `field "name" is present: "Alice"`},
+		{name: "boolean false is present", body: `{"active": false}`, path: "active", passed: false, msgContain: "is present: false"},
+		{name: "empty string is present", body: `{"name": ""}`, path: "name", passed: false, msgContain: `is present: ""`},
+		{
+			name:       "a long value is shortened",
+			body:       `{"error": {"code": "` + strings.Repeat("x", 100) + `"}}`,
+			path:       "error",
+			passed:     false,
+			msgContain: "...",
+		},
+		{name: "empty path", body: `{"name": "Alice"}`, path: "", passed: false, msgContain: "requires a non-empty path"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := MechanicalAssertion{Type: AssertFieldAbsent, Path: tt.path}
+			ar := checkFieldAbsent([]byte(tt.body), a)
+			assert.Equal(t, tt.passed, ar.Passed)
+			assert.Contains(t, ar.Message, tt.msgContain)
+			assert.Equal(t, AssertFieldAbsent, ar.Type)
+			assert.Equal(t, tt.path, ar.Path)
+		})
+	}
+
+	t.Run("RunMechanical dispatches fieldAbsent", func(t *testing.T) {
+		body := []byte(`{"error": {"type": "idempotency_error"}}`)
+		result := RunMechanical(400, body, []MechanicalAssertion{
+			{Type: AssertFieldAbsent, Path: "error.code"},
+			{Type: AssertFieldAbsent, Path: "error.type"},
+		}, nil, nil)
+		require.Len(t, result.Results, 2)
+		assert.True(t, result.Results[0].Passed)
+		assert.False(t, result.Results[1].Passed)
+		assert.False(t, result.Passed)
+	})
 }
 
 func TestCheckFieldEquals(t *testing.T) {

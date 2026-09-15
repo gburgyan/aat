@@ -230,6 +230,8 @@ func formatMechanicalAssertion(m MechanicalAssertion) string {
 		return fmt.Sprintf("status %v", m.Expect)
 	case "fieldExists":
 		return fmt.Sprintf("fieldExists %s", m.Path)
+	case "fieldAbsent":
+		return fmt.Sprintf("fieldAbsent %s", m.Path)
 	case "fieldEquals":
 		return fmt.Sprintf("fieldEquals %s=%v", m.Path, m.Value)
 	case "predicate":

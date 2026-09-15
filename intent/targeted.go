@@ -517,8 +517,8 @@ func sanitizeAssertions(assertions []TargetedAssertion) []plan.MechanicalAsserti
 				continue
 			}
 
-		case "fieldExists":
-			// fieldExists requires a non-empty path.
+		case "fieldExists", "fieldAbsent":
+			// fieldExists and fieldAbsent require a non-empty path.
 			if a.Path == "" {
 				continue
 			}

@@ -7,6 +7,8 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- A `fieldAbsent` assertion passes when its path is missing or null, the counterpart of `fieldExists`. A plan can assert
+  that a response leaves a field out, such as an error body without a `code`, which a predicate can't name.
 - An assertion can compare with an earlier step's output, written `{{step.output}}`: `amount == "{{checkout.total}}"` in a
   predicate, `value: "{{checkout.total}}"` in `fieldEquals`, and a quoted literal in `repeat.until`.
   - A main step reads the main steps before it, and a verification step reads the main steps. A reference implies

@@ -16,6 +16,7 @@ const (
 	AssertStatus      AssertionType = "status"
 	AssertSchema      AssertionType = "schema"
 	AssertFieldExists AssertionType = "fieldExists"
+	AssertFieldAbsent AssertionType = "fieldAbsent"
 	AssertFieldEquals AssertionType = "fieldEquals"
 	AssertPredicate   AssertionType = "predicate"
 	// AssertRepeat is the result a repeated step records when its repeat.until
@@ -79,6 +80,8 @@ func RunMechanical(statusCode int, body []byte, assertions []MechanicalAssertion
 			ar = checkSchema(a, schemaCheck)
 		case AssertFieldExists:
 			ar = checkFieldExists(body, a)
+		case AssertFieldAbsent:
+			ar = checkFieldAbsent(body, a)
 		case AssertFieldEquals:
 			ar = checkFieldEquals(body, a)
 		case AssertPredicate:
@@ -176,6 +179,34 @@ func checkFieldExists(body []byte, a MechanicalAssertion) AssertionResult {
 		ar.Passed = true
 		ar.Message = fmt.Sprintf("field %q exists", a.Path)
 	}
+	return ar
+}
+
+// checkFieldAbsent verifies that a field is missing or null in the response
+// body, the counterpart of checkFieldExists, such as the code an error body
+// leaves out.
+func checkFieldAbsent(body []byte, a MechanicalAssertion) AssertionResult {
+	ar := AssertionResult{Type: AssertFieldAbsent, Path: a.Path}
+
+	path := NormalizeJSONPath(a.Path)
+	if path == "" {
+		ar.Passed = false
+		ar.Message = "fieldAbsent assertion requires a non-empty path"
+		return ar
+	}
+
+	r := gjson.GetBytes(body, path)
+	if !r.Exists() || r.Type == gjson.Null {
+		ar.Passed = true
+		ar.Message = fmt.Sprintf("field %q is absent", a.Path)
+		return ar
+	}
+	value := r.Raw
+	if len(value) > 80 {
+		value = value[:77] + "..."
+	}
+	ar.Passed = false
+	ar.Message = fmt.Sprintf("field %q is present: %s", a.Path, value)
 	return ar
 }
 

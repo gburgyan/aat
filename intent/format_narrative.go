@@ -241,6 +241,8 @@ func formatTargetedAssertion(a TargetedAssertion) string {
 		return fmt.Sprintf("status %v", a.Expect)
 	case "fieldExists":
 		return fmt.Sprintf("fieldExists %s", a.Path)
+	case "fieldAbsent":
+		return fmt.Sprintf("fieldAbsent %s", a.Path)
 	case "fieldEquals":
 		return fmt.Sprintf("fieldEquals %s=%v", a.Path, a.Value)
 	case "predicate":

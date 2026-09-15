@@ -431,6 +431,7 @@ Assertions validate the step's response. They are listed under `mechanical` (a b
 |------|--------|-------------|
 | `status` | `expect` (int or class) | HTTP status equals the code (`201`) or falls in the class (`2xx`, `4xx`) |
 | `fieldExists` | `path` (string) | The path exists and is not null |
+| `fieldAbsent` | `path` (string) | The path is missing or null, such as the `code` an API leaves out of an error body |
 | `fieldEquals` | `path` (string), `value` (any) | The value at the path equals `value` |
 | `predicate` | `expr` (string) | The [predicate expression](value-flow.md#predicate-expression-syntax) evaluates to true |
 | `schema` | — | Validate the response body against the node's OAS response schema. Requires OAS specs wired into the graph; otherwise the assertion is reported as `skipped`. |
@@ -452,7 +453,7 @@ assertions:
       expr: "order.totalPrice > 0 && order.totalPrice < 10000"
 ```
 
-**What `path` and `expr` see.** By default, `fieldExists`, `fieldEquals`, and `predicate` are evaluated against the step's **extracted outputs** — the values the node's template pulled out of the response, keyed by output name — not the raw HTTP body. That keeps assertions stable when the API's envelope changes, and it means a Lua-transformed output is asserted in its transformed shape. Only on a response with status 400 or above, where nothing is extracted, does the check fall back to the raw body; a 2xx step whose template extracts nothing is checked against an empty object.
+**What `path` and `expr` see.** By default, `fieldExists`, `fieldAbsent`, `fieldEquals`, and `predicate` are evaluated against the step's **extracted outputs** — the values the node's template pulled out of the response, keyed by output name — not the raw HTTP body. That keeps assertions stable when the API's envelope changes, and it means a Lua-transformed output is asserted in its transformed shape. Only on a response with status 400 or above, where nothing is extracted, does the check fall back to the raw body; a 2xx step whose template extracts nothing is checked against an empty object.
 
 Set `raw: true` on an assertion to evaluate it against the raw response body instead. Use it for fields the template does not extract, or to assert on the envelope itself:
 
@@ -471,7 +472,7 @@ assertions:
       raw: true
 ```
 
-`path` is a [gjson](https://github.com/tidwall/gjson) path, so `fieldExists` and `fieldEquals` can index arrays (`items.0.id`) and query them (`items.#(sku=="ABC")`); a leading `$.` and `[0]` bracket indexes are accepted too. A predicate `expr` is simpler: it reads dotted field names only, with no array indexes or queries.
+`path` is a [gjson](https://github.com/tidwall/gjson) path, so `fieldExists`, `fieldAbsent`, and `fieldEquals` can index arrays (`items.0.id`) and query them (`items.#(sku=="ABC")`); a leading `$.` and `[0]` bracket indexes are accepted too. A predicate `expr` is simpler: it reads dotted field names only, with no array indexes or queries.
 
 **Expressions in assertions.** A `fieldEquals` `value`, and a quoted string in a `predicate` `expr`, can hold `{{…}}` [expressions](value-flow.md#dynamic-expressions), such as `value: "{{today + 3 days}}"` or `expr: 'quantity == "{{quantity}}"'`.
 - They are evaluated when the step's assertions run, and they can name the step's inputs. `today`, `now`, and `unixtime` read the time the inputs were resolved, so a retried step's `{{today}}` is the date it resent.
