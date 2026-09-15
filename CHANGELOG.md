@@ -7,6 +7,12 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- An extract rule can take `default:`, the output's value when the path is missing or holds `null`, as in
+  `nextCursor: {path: meta.after, default: ""}`. A rule takes `default:` or `optional: true`, not both, and a rule with
+  `fields` takes a list default. `aat validate` reports a default whose shape doesn't fit the output's type.
+  - The `not found in response` error names both remedies.
+  - The template docs and the AI assistant primer show gjson counts and queries in extract paths. They include
+    `==~null` for a null or missing field, since `==null` compares a string and never matches a JSON `null`.
 - A step value can be a YAML list, which is the list itself, as it already was in a slot's `inject`: `skus: [SKU-1004,
   SKU-1006]`, or a list of maps for a template's `{{#lineItems}}…{{.sku}}…{{/lineItems}}`. Before, a bare list was an
   error, and a list had to be written `{default: [...]}`, which still works.

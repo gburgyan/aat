@@ -175,6 +175,17 @@ func validateAdapterOutputsForNodes(g *graph.Graph, registry *adapter.Registry, 
 			}
 		}
 
+		// A rule's default stands in for the output, so it must fit the output's type.
+		for _, out := range node.Outputs {
+			rule, ok := tmpl.Response.Extract[out.Name]
+			if !ok || rule.Default == nil {
+				continue
+			}
+			if msg := graph.ValueShapeError(rule.Default, out.Type); msg != "" {
+				errs = append(errs, fmt.Sprintf("node %q: output %q default: %s", name, out.Name, msg))
+			}
+		}
+
 		// Cross-validate template extract fields vs graph elementFields.
 		errs = append(errs, validateElementFields(name, node, tmpl)...)
 	}

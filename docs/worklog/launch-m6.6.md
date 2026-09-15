@@ -48,3 +48,30 @@ Each gap the package runs into becomes its own AAT branch and PR. In order:
 - **Name zipping:** pairing an API's per-passenger IDs with plan-supplied names by index still needs a Lua transform,
   because placeholders read flat inputs. A primitive for it would need evidence beyond one API.
 - **JSON input:** a JSON-encoded step value (the web UI, MCP) has no `value` synonym, because only YAML decoding reads it.
+
+## 2026-09-14 — Extract `default:` (P27)
+
+**What:**
+- **The default:** an extract rule's `default:` is the output's value when the path is missing or holds `null`.
+- **Rules:** it can't be combined with `optional: true`, and a rule with `fields` takes a list default. `aat validate`
+  checks the default's shape against the output type.
+- **Error text:** the `not found in response` error names both remedies.
+- **Docs:** they teach gjson counts and queries, and a test pins every form they show.
+
+**Decisions:**
+- **Null counts as missing, for a rule with a default only.** Paging cursors and optional objects come back as
+  explicit `null`, and a default is written for exactly that case. Without a default, a `null` still extracts as a
+  present `nil`, as before.
+- **The default isn't mapped through `fields`.** It is written in the output's shape. The common case, `[]`, is the
+  same either way.
+- **No `null` default.** `default: null` decodes the same as no default, and `optional: true` already covers leaving
+  the output out.
+- **No copy of list defaults.** An output's value is read downstream, never changed in place, so the rule's `[]` is
+  handed out as is.
+- **A gjson trap found while writing the docs.** A probe showed that `#(field==null)#` matches nothing. gjson compares
+  `null` there as a string, so a guard such as "no unshipped orders" built on it would always pass. `==~null` (null or
+  missing) and `!=~null` are the working forms. The docs and primer say so, and a test pins the broken form as 0.
+
+**Open questions:**
+- **Empty bodies.** A rule with a default still needs a JSON body. A 204 with no body fails extraction as before. PR 3
+  (header extraction) takes up bodies that only header rules read.

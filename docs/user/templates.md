@@ -400,12 +400,27 @@ AAT normalizes paths before evaluation:
 
 So `$.items[0].name`, `items[0].name`, and `items.0.name` all work equivalently.
 
+Counts and queries are gjson syntax too, and save a transform:
+
+```yaml
+response:
+  extract:
+    lineCount: 'lines.#'                               # how many elements
+    openOrderIds: 'orders.#(status=="open")#.id'       # the id of every order whose status is "open"
+    firstOpenOrderId: 'orders.#(status=="open").id'    # the first one only
+    openOrderCount: 'orders.#(status=="open")#|#'      # how many there are
+    unshippedCount: 'orders.#(shippedAt==~null)#|#'    # shippedAt is null or missing
+```
+
+- **`#(…)#` returns every match, and `#(…)` the first.** A query can compare with `==`, `!=`, `<`, `<=`, `>`, `>=`, and `%` (a `*` pattern).
+- **Null takes `~null`.** `shippedAt==null` compares against the string `null`, so it never matches a JSON `null`, and a count built on it is always 0. `==~null` matches a field that is null or missing, `!=~null` one that is present and not null, and `==~*` one that is present.
+
 ### Extraction Errors
 
 If an extract path doesn't match anything in the response:
 
 ```
-extract path "orderId" (id) not found in response
+extract path "orderId" (id) not found in response; mark the rule optional: true or give it a default
 ```
 
 The response body must be valid JSON for extraction to work. Non-JSON responses produce:
@@ -423,6 +438,24 @@ response:
       path: "shipment.tracking"
       optional: true
 ```
+
+Give a rule a `default:` instead when the output should always have a value, even where the response leaves the field out or sends `null`:
+
+```yaml
+response:
+  extract:
+    nextCursor:
+      path: "meta.after"
+      default: ""          # the last page sends "after": null
+    lineCount:
+      path: "lines.#"
+      default: 0           # a response with no lines array
+```
+
+- **Missing or null.** `default:` applies when the path is missing or holds `null`. `optional: true` applies only when it's missing, and leaves the output out. A rule takes one of them, not both.
+- **Written as the output.** The default is the output's value as written. With `fields`, it must be a list, usually `[]`, and isn't mapped through `fields`.
+- **Checked.** `aat validate` reports a default whose shape doesn't fit the graph output's type, such as a single value for a `string[]` output.
+- **No `null` default.** A default of `null` reads as no default; use `optional: true` to leave the output out.
 
 Extraction, and any `transform`, runs only for responses with status below 400. An error response produces no outputs.
 
@@ -612,6 +645,9 @@ response:
     maybeOutput:             #   object form with optional: a missing path omits the output
       path: "path.to.field"
       optional: true
+    defaultedOutput:         #   object form with default: a missing or null path takes the default
+      path: "path.to.field"
+      default: ""
   transform: |               # optional — Lua post-processing script
     -- receives `outputs` table and `json_path()` function
     return outputs

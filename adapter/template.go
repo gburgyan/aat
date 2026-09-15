@@ -44,10 +44,29 @@ type TemplateResponse struct {
 // For scalar values, only Path is set. For array values with element
 // transformation, both Path and Fields are set. When Optional is true,
 // a missing path does not produce an error — the output is simply omitted.
+// When Default is set, a missing path, or one that holds JSON null, gives the
+// output that value as written instead.
 type ExtractRule struct {
 	Path     string            `yaml:"path"`
 	Fields   map[string]string `yaml:"fields,omitempty"`
 	Optional bool              `yaml:"optional,omitempty"`
+	Default  any               `yaml:"default,omitempty"`
+}
+
+// defaultError describes what is wrong with the rule's default, or returns "".
+// A rule leaves a missing output out or gives it a default, not both, and a
+// rule that maps elements through fields produces a list.
+func (r ExtractRule) defaultError() string {
+	if r.Default == nil {
+		return ""
+	}
+	if r.Optional {
+		return "an extract rule takes optional or default, not both"
+	}
+	if _, isList := r.Default.([]any); len(r.Fields) > 0 && !isList {
+		return "an extract rule with fields takes a list default, such as []"
+	}
+	return ""
 }
 
 // UnmarshalYAML handles both string and object forms of extract rules.
@@ -67,6 +86,9 @@ func (r *ExtractRule) UnmarshalYAML(unmarshal func(any) error) error {
 		var raw rawExtractRule
 		if err := unmarshal(&raw); err != nil {
 			return err
+		}
+		if msg := ExtractRule(raw).defaultError(); msg != "" {
+			return &yaml.TypeError{Errors: []string{fmt.Sprintf("line %d: %s", n.Line, msg)}}
 		}
 		*r = ExtractRule(raw)
 		return nil
@@ -275,11 +297,15 @@ func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error)
 	for name, rule := range a.tmpl.Response.Extract {
 		gpath := normalizeJSONPath(rule.Path)
 		result := gjson.Get(bodyStr, gpath)
+		if rule.Default != nil && (!result.Exists() || result.Type == gjson.Null) {
+			outputs[name] = rule.Default
+			continue
+		}
 		if !result.Exists() {
 			if rule.Optional {
 				continue
 			}
-			return nil, fmt.Errorf("extract path %q (%s) not found in response", name, rule.Path)
+			return nil, fmt.Errorf("extract path %q (%s) not found in response; mark the rule optional: true or give it a default", name, rule.Path)
 		}
 
 		val := gjsonValue(result)
