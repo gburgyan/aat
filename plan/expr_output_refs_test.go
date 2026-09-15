@@ -120,3 +120,19 @@ func TestRewriteStepRefs_AssertionsAndRepeat(t *testing.T) {
 	assert.Equal(t, `n == "{{search__declined.count}}"`, s.Assertions.Mechanical[0].Expr)
 	assert.Equal(t, `n >= "{{search__declined.count}}"`, s.Repeat.Until)
 }
+
+func TestRewriteStepRefs_SelectionFilters(t *testing.T) {
+	shared := &SelectionConfig{Strategy: "first", Field: "id", Filter: `objectId == "{{create.customerId}}"`}
+	s := Step{
+		ID:         "event",
+		Values:     map[string]StepValue{"eventId": {From: "events.events", Select: shared}},
+		Selections: map[string]StepSelection{"about": {From: "events.events", Filter: `objectId == "{{create.customerId}}"`}},
+	}
+
+	rewriteStepRefs(&s, map[string]string{"create": "inc0_create", "events": "inc0_events"})
+
+	assert.Equal(t, "inc0_events.events", s.Values["eventId"].From)
+	assert.Equal(t, `objectId == "{{inc0_create.customerId}}"`, s.Values["eventId"].Select.Filter)
+	assert.Equal(t, `objectId == "{{inc0_create.customerId}}"`, s.Selections["about"].Filter)
+	assert.Equal(t, `objectId == "{{create.customerId}}"`, shared.Filter, "a select block another step shares is left as it was")
+}

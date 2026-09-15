@@ -478,9 +478,10 @@ func cloneClosureWithSuffix(closure []Step, suffix string) []Step {
 
 // rewriteStepRefs mutates s in place, replacing any step-id reference whose
 // old id appears as a key in idMap. Covers: DependsOn entries, Values' From
-// and FromInput (which use "stepId.field" format), and Selections' From.
-// FromSelection (selection-name local) and FromResolved (intra-step) are not
-// step-id references and are left untouched.
+// and FromInput (which use "stepId.field" format), Selections' From, and the
+// {{step.output}} expressions in selection filters, assertions, and repeat
+// conditions. FromSelection (selection-name local) and FromResolved
+// (intra-step) are not step-id references and are left untouched.
 func rewriteStepRefs(s *Step, idMap map[string]string) {
 	for i, dep := range s.DependsOn {
 		if newID, ok := idMap[dep]; ok {
@@ -501,16 +502,31 @@ func rewriteStepRefs(s *Step, idMap map[string]string) {
 				changed = true
 			}
 		}
+		if sv.Select != nil {
+			if filter := RewriteExprRefs(sv.Select.Filter, idMap); filter != sv.Select.Filter {
+				sel := *sv.Select // another step may share the select block
+				sel.Filter = filter
+				sv.Select = &sel
+				changed = true
+			}
+		}
 		if changed {
 			s.Values[name] = sv
 		}
 	}
 	for name, sel := range s.Selections {
-		if sel.From == "" {
-			continue
+		changed := false
+		if sel.From != "" {
+			if rewritten, ok := rewriteQualifiedRef(sel.From, idMap); ok {
+				sel.From = rewritten
+				changed = true
+			}
 		}
-		if rewritten, ok := rewriteQualifiedRef(sel.From, idMap); ok {
-			sel.From = rewritten
+		if filter := RewriteExprRefs(sel.Filter, idMap); filter != sel.Filter {
+			sel.Filter = filter
+			changed = true
+		}
+		if changed {
 			s.Selections[name] = sel
 		}
 	}
