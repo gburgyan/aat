@@ -32,7 +32,7 @@ For steps in the main flow and verification steps, AAT runs extraction, and then
 Within a step, the order is:
 
 1. The request is sent and the response arrives.
-2. `extract` rules run. They need a JSON body: a non-JSON body fails the step with `response body is not valid JSON` before the script starts. A transform-only template runs on any body; its `json_path` calls return `nil` when the body is not JSON.
+2. `extract` rules run. Rules that read the body need a JSON body: a non-JSON body fails the step with `response body is not valid JSON` before the script starts. A template whose rules all read headers, or that has only a transform, runs on any body; its `json_path` calls return `nil` when the body is not JSON.
 3. The script runs and its return value replaces the step's outputs.
 4. The graph's `errorDetection` rules check the raw response body, not the transformed outputs.
 5. Assertions without `raw: true` see the transformed outputs (see [Assertions](plans.md#assertions)), and later steps read them through `from` references.
@@ -49,6 +49,7 @@ Scripts run in [gopher-lua](https://github.com/yuin/gopher-lua) v1.1.1, a Lua 5.
 |--------|------------|
 | `outputs` | A table of the extracted outputs, keyed by output name. An array output with `fields` is a list of tables keyed by field name. Empty when the template has no `extract` rules. |
 | `json_path(path)` | Looks up `path` in the full raw response body and returns the value, or `nil` when the path does not exist or holds `null`. |
+| `header(name)` | Returns the response header `name`, matched in any case, as a string, or `nil` when the response has none. A header sent more than once gives its values joined with `, `. Use `tonumber` for a count. |
 | `print(...)` | Writes its arguments, tab-separated, as one line to stderr. |
 
 `json_path` takes the same [path syntax](templates.md#path-syntax) as `extract`: a leading `$.` is dropped, `[0]` becomes `.0`, and `$` alone returns the whole body. The rest of [gjson](https://github.com/tidwall/gjson) syntax works as well:

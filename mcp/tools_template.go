@@ -170,7 +170,7 @@ func formatTemplate(tmpl *adapter.Template) string {
 		sort.Strings(keys)
 		for _, k := range keys {
 			rule := tmpl.Response.Extract[k]
-			fmt.Fprintf(&b, "| %s | %s |\n", k, rule.Path)
+			fmt.Fprintf(&b, "| %s | %s |\n", k, rule.Source())
 			if len(rule.Fields) > 0 {
 				for fn, fp := range rule.Fields {
 					fmt.Fprintf(&b, "| &nbsp;&nbsp;.%s | %s |\n", fn, fp)

@@ -16,3 +16,7 @@ response:
         category: category
         price: price
         inStock: inStock
+    rateLimitLimit:
+      header: RateLimit-Limit
+    rateLimitRemaining:
+      header: RateLimit-Remaining

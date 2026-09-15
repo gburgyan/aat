@@ -6,6 +6,11 @@ execution:
   steps:
     - node: listProducts
       description: Browse the catalog
+      assertions:
+        mechanical:
+          # Both values come from response headers, as integers; the request counts against the token.
+          - type: predicate
+            expr: rateLimitRemaining < rateLimitLimit
 
     - node: createCart
       dependsOn: [listProducts]

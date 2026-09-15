@@ -45,18 +45,29 @@ type TemplateResponse struct {
 // transformation, both Path and Fields are set. When Optional is true,
 // a missing path does not produce an error — the output is simply omitted.
 // When Default is set, a missing path, or one that holds JSON null, gives the
-// output that value as written instead.
+// output that value as written instead. A rule with Header set reads that
+// response header in place of a body path.
 type ExtractRule struct {
 	Path     string            `yaml:"path"`
+	Header   string            `yaml:"header,omitempty"`
 	Fields   map[string]string `yaml:"fields,omitempty"`
 	Optional bool              `yaml:"optional,omitempty"`
 	Default  any               `yaml:"default,omitempty"`
 }
 
-// defaultError describes what is wrong with the rule's default, or returns "".
-// A rule leaves a missing output out or gives it a default, not both, and a
-// rule that maps elements through fields produces a list.
-func (r ExtractRule) defaultError() string {
+// ruleError describes what is wrong with the rule, or returns "". A rule reads
+// a body path or a response header, not both, and a header holds no elements to
+// map through fields. A rule leaves a missing output out or gives it a default,
+// not both, and a rule that maps elements through fields produces a list.
+func (r ExtractRule) ruleError() string {
+	if r.Header != "" {
+		if r.Path != "" {
+			return "an extract rule takes path or header, not both"
+		}
+		if len(r.Fields) > 0 {
+			return "a header extract rule takes no fields"
+		}
+	}
 	if r.Default == nil {
 		return ""
 	}
@@ -87,7 +98,7 @@ func (r *ExtractRule) UnmarshalYAML(unmarshal func(any) error) error {
 		if err := unmarshal(&raw); err != nil {
 			return err
 		}
-		if msg := ExtractRule(raw).defaultError(); msg != "" {
+		if msg := ExtractRule(raw).ruleError(); msg != "" {
 			return &yaml.TypeError{Errors: []string{fmt.Sprintf("line %d: %s", n.Line, msg)}}
 		}
 		*r = ExtractRule(raw)
@@ -101,6 +112,15 @@ func (r *ExtractRule) UnmarshalYAML(unmarshal func(any) error) error {
 // queried with ("$.items[0].id" becomes "items.0.id").
 func (r ExtractRule) GJSONPath() string {
 	return normalizeJSONPath(r.Path)
+}
+
+// Source names where the rule reads its output: its body path, or "header"
+// and the header's name.
+func (r ExtractRule) Source() string {
+	if r.Header != "" {
+		return "header " + r.Header
+	}
+	return r.Path
 }
 
 // HasElementFields reports whether the named output has template-side
@@ -277,17 +297,19 @@ func (a *TemplateAdapter) BuildRequest(inputs map[string]any, config *Environmen
 }
 
 // ExtractOutputs parses the response body as JSON and extracts values using
-// the template's extract rules (GJSON paths). When an extract rule has Fields
-// and the extracted value is an array, each element is transformed into a flat
-// map using the field mappings (logical name → gjson path within the element).
+// the template's extract rules (GJSON paths), and reads the response headers
+// its header rules name. When an extract rule has Fields and the extracted
+// value is an array, each element is transformed into a flat map using the
+// field mappings (logical name → gjson path within the element).
 func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error) {
 	if len(a.tmpl.Response.Extract) == 0 && a.tmpl.Response.Transform == "" {
 		return map[string]any{}, nil
 	}
 
-	// Extract rules need a JSON body. A transform-only template runs anyway;
-	// its json_path() calls simply find nothing in a non-JSON body.
-	if len(a.tmpl.Response.Extract) > 0 && !json.Valid(resp.Body) {
+	// Rules that read the body need a JSON body. Header rules don't, and a
+	// transform-only template runs anyway; its json_path() calls simply find
+	// nothing in a non-JSON body.
+	if a.readsBody() && !json.Valid(resp.Body) {
 		return nil, fmt.Errorf("response body is not valid JSON")
 	}
 
@@ -295,6 +317,20 @@ func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error)
 	outputs := make(map[string]any, len(a.tmpl.Response.Extract))
 
 	for name, rule := range a.tmpl.Response.Extract {
+		if rule.Header != "" {
+			if values := headerValues(resp.Headers, rule.Header); len(values) > 0 {
+				outputs[name] = strings.Join(values, ", ")
+				continue
+			}
+			switch {
+			case rule.Default != nil:
+				outputs[name] = rule.Default
+			case !rule.Optional:
+				return nil, fmt.Errorf("extract header %q (%s) not found in response; mark the rule optional: true or give it a default", name, rule.Header)
+			}
+			continue
+		}
+
 		gpath := normalizeJSONPath(rule.Path)
 		result := gjson.Get(bodyStr, gpath)
 		if rule.Default != nil && (!result.Exists() || result.Type == gjson.Null) {
@@ -323,7 +359,7 @@ func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error)
 	}
 
 	if a.tmpl.Response.Transform != "" {
-		transformed, err := runTransform(a.tmpl.Response.Transform, outputs, bodyStr)
+		transformed, err := runTransformWithLog(a.tmpl.Response.Transform, outputs, bodyStr, resp.Headers, os.Stderr)
 		if err != nil {
 			return nil, fmt.Errorf("transform: %w", err)
 		}
@@ -331,6 +367,16 @@ func (a *TemplateAdapter) ExtractOutputs(resp *Response) (map[string]any, error)
 	}
 
 	return outputs, nil
+}
+
+// readsBody reports whether any extract rule reads the response body.
+func (a *TemplateAdapter) readsBody() bool {
+	for _, rule := range a.tmpl.Response.Extract {
+		if rule.Header == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // transformElements applies field mappings to each array element, producing

@@ -219,6 +219,9 @@ func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, no
 	// Extract outputs (best-effort for cleanup)
 	outputs, err := adp.ExtractOutputs(resp)
 	if err == nil {
+		if tmpl, ok := e.registry.GetTemplate(node.Adapter); ok {
+			convertHeaderOutputs(outputs, node, tmpl)
+		}
 		result.Outputs = outputs
 	}
 	// Cleanup extraction errors are silently ignored — empty outputs is fine
