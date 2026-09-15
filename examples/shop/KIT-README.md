@@ -1,6 +1,6 @@
 # Shop API integration kit
 
-This kit describes the shop API for integrators and their AI coding tools: 17 operations with their
+This kit describes the shop API for integrators and their AI coding tools: 18 operations with their
 request templates, the OpenAPI contract, the order calls run in and the data each one needs from the
 calls before it, the rules and error codes behind them, integration flows, and three reference plans that
 run against the API. `package-kit.sh` builds it from the shop's AAT test project. Through the MCP server

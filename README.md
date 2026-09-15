@@ -64,7 +64,7 @@ Nobody wired the data by hand: the graph says where each input comes from, and t
 
 | Example | What it shows | Needs |
 |---------|---------------|-------|
-| [Shop](examples/shop/README.md) | Everything: a 17-operation graph, workflows with slots and addons, layers and matrices, two regions, a separately hosted payments API, negative tests, retries, checkpoints, an integration kit, MCP | Nothing: it runs offline against `aat-sandbox` |
+| [Shop](examples/shop/README.md) | Everything: an 18-operation graph, workflows with slots and addons, layers and matrices, two regions, a separately hosted payments API, negative tests, retries, checkpoints, an integration kit, MCP | Nothing: it runs offline against `aat-sandbox` |
 | [Petstore](examples/petstore/README.md) | The smallest working project: four operations, two workflows, cleanup pairing | Network access to the public Petstore |
 
 Examples against real APIs (Duffel flight booking, GitHub, Stripe) are next on the [roadmap](ROADMAP.md).

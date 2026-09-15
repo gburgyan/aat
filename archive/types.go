@@ -72,19 +72,24 @@ type StepRecord struct {
 	// all of them.
 	Iterations []IterationRecord `json:"iterations,omitempty"`
 	// RepeatStop says why a repeated step stopped sending requests: "until" when
-	// its condition held, "max" or "timeout" when a limit ended it first, and
+	// its condition held, "exhausted" when its next cursors came back empty on
+	// a listing's last page, "loop" when a response gave cursors an earlier
+	// request already sent, "max" or "timeout" when a limit ended it first, and
 	// "error" when a request failed or the condition couldn't be evaluated.
 	RepeatStop string `json:"repeatStop,omitempty" redact:"-"`
 }
 
 // IterationRecord is one request of a repeated step.
 type IterationRecord struct {
-	Index         int                  `json:"index"`
-	StartTime     time.Time            `json:"startTime,omitempty"`
-	DurationMs    int64                `json:"durationMs"`
-	Request       *RequestRecord       `json:"request,omitempty"`
-	Response      *ResponseRecord      `json:"response,omitempty"`
-	Outputs       map[string]any       `json:"outputs,omitempty"`
+	Index      int             `json:"index"`
+	StartTime  time.Time       `json:"startTime,omitempty"`
+	DurationMs int64           `json:"durationMs"`
+	Request    *RequestRecord  `json:"request,omitempty"`
+	Response   *ResponseRecord `json:"response,omitempty"`
+	Outputs    map[string]any  `json:"outputs,omitempty"`
+	// Inputs, on a step whose repeat block pages with next, are the inputs this
+	// request sent, its cursors included.
+	Inputs        map[string]any       `json:"inputs,omitempty"`
 	UntilMet      bool                 `json:"untilMet"`
 	RetryCount    int                  `json:"retryCount,omitempty"`
 	Error         string               `json:"error,omitempty"`

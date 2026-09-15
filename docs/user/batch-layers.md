@@ -225,9 +225,9 @@ aat: batch run — 7 plans x 9 permutations = 63 total runs
 
 aat: loading environment...
 aat: loaded environment "us"
-aat: loaded graph (17 nodes)
+aat: loaded graph (18 nodes)
 aat: loaded domain knowledge
-aat: loaded 17 templates
+aat: loaded 18 templates
 aat: loaded 4 layers
 aat: loaded 1 OAS spec(s) for runtime validation
 aat: dedup — 36 duplicate permutations detected:

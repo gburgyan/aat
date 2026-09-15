@@ -348,6 +348,52 @@ nodes:
 
   # --- Orders and shipments ------------------------------------------------
 
+  listOrders:
+    description: >-
+      Page through the region's orders in ID order (GET /orders), limit at a time. Pass a page's
+      nextCursor back as after for the next page. A full page gives one even when nothing follows,
+      so a listing ends with a page whose nextCursor is "". customerEmail keeps one customer's
+      orders. A step with repeat.next reads every page.
+    adapter: listOrders
+    tags: [orders]
+    oas:
+      operationId: listOrders
+    inputs:
+      - name: limit
+        type: integer
+        description: Orders per page, from 1 to 100
+        default: 20
+      - name: after
+        type: string
+        description: The previous page's nextCursor; omit it for the first page
+        optional: true
+      - name: customerEmail
+        type: string
+        description: Only list this customer's orders; omit it for every order in the region
+        optional: true
+    outputs:
+      - name: orders
+        type: order[]
+        description: The page's orders, with orderId, status, paymentStatus, and total
+        elementFields:
+          - name: orderId
+            type: string
+          - name: status
+            type: string
+          - name: paymentStatus
+            type: string
+          - name: total
+            type: integer
+      - name: orderCount
+        type: integer
+        description: Orders on the page
+      - name: liveOrderCount
+        type: integer
+        description: Orders on the page that aren't cancelled
+      - name: nextCursor
+        type: string
+        description: The after cursor for the next page; "" on the last page
+
   getOrder:
     description: >-
       Read an order with its lines, totals, status, and paymentStatus (GET /orders/{orderId}); an

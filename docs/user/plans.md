@@ -531,7 +531,7 @@ To keep a rate-limited API from answering 429 in the first place, set [`settings
 
 #### Repeat
 
-`repeat` sends a step's request again and again until a condition over its response holds, as when polling a job that finishes in the background:
+`repeat` sends a step's request again and again: until a condition over its response holds, as when polling a job that finishes in the background, or through every page of a listing:
 
 ```yaml
   - node: getExport
@@ -546,13 +546,14 @@ To keep a rate-limited API from answering 429 in the first place, set [`settings
 
 | Field | Description |
 |-------|-------------|
-| `repeat.until` | A predicate over each response's outputs, in the syntax of a `predicate` assertion. The step stops as soon as it holds. Required |
+| `repeat.until` | A predicate over each response's outputs, in the syntax of a `predicate` assertion. The step stops as soon as it holds. Required unless `repeat.next` is set |
+| `repeat.next` | Pages through a listing: a map from an input of the step's node to an output of the same node, as in `after: nextCursor`. Each request after the first sends the previous response's output as that input. See [the listing example](#reading-every-page) below |
 | `repeat.collect` | Outputs gathered across the responses: a list output's items are appended in order, and an integer or float output's values are added |
-| `repeat.interval` | The wait between requests, such as `500ms` or `2s`. Default `1s`. A response's `Retry-After` header lengthens it, up to 60 seconds |
+| `repeat.interval` | The wait between requests, such as `500ms` or `2s`. Default `1s`, or none with `next`. A response's `Retry-After` header lengthens it, up to 60 seconds |
 | `repeat.max` | The most requests the step sends, up to 1000. Default 50 |
 | `repeat.timeout` | The most time the step spends repeating, such as `3m`. No default |
 
-- **The same request each time.** The step's inputs are resolved once, so every request sends the same values. Each request is retried under the step's `retry:` block, as any step is.
+- **The same request each time.** The step's inputs are resolved once, so every request sends the same values, except the cursors `next` sets. Each request is retried under the step's `retry:` block, as any step is.
 - **When it stops.** The step passes on the request whose outputs make `until` true. It fails when `max` requests or the `timeout` come first, with a `repeat` result among its assertions, such as `repeat.until "status == \"complete\"" is still false after 30 requests (repeat.max)`. A request that fails, with an error or a status of 400 or more, ends the repeats at once.
 - **What later steps see.** The step's request, response, and outputs are its last request's, with each `collect` output gathered across all of them. Its assertions run once, on those outputs, while `until` reads each response's own. A field `until` reads that a response leaves out fails the step, so give its extract rule a [`default:`](templates.md#extraction-errors).
 - **In the archive.** The step records every request under `iterations`, and why it stopped under `repeatStop` (see [Archives](archives.md#layout)). The progress line and `aat run show` give the number of requests.
@@ -569,6 +570,30 @@ Gathering a job's results as they arrive:
       collect: [items, itemCount]
       interval: 0s
 ```
+
+##### Reading every page
+
+With `next`, the step reads a listing a page at a time, sending each response's cursor as the next request's input. This one reads every order of a customer and checks that none is left open:
+
+```yaml
+  - node: listOrders
+    values:
+      customerEmail: {fromInput: createCart.customerEmail}
+      limit: 100
+    repeat:
+      next: {after: nextCursor}
+      collect: [orders, orderCount, liveOrderCount]
+      max: 20
+    assertions:
+      mechanical:
+        - type: predicate
+          expr: orderCount > 0 && liveOrderCount == 0
+```
+
+- **When it stops.** The step stops, and passes, when every cursor comes back missing, `null`, or `""`: the listing's last page, recorded as `exhausted`. `until` can still end it sooner. Reaching `max` or the `timeout` with a cursor left fails the step, so an audit can't pass on a listing that was cut off, and so does a response that gives cursors an earlier request already sent (`loop`).
+- **The cursor.** It is a string or integer output of the same node. Give its extract rule `default: ""`, since a last page's cursor is usually `null` or missing. A cursor that comes back empty removes the input, so a template's `{{?after}}` block leaves it out. A plan value for the cursor input starts the listing there.
+- **Inputs.** The step's inputs, and what `fromInput` reads, are the first page's. Each request under `iterations` records the inputs it sent, cursor included.
+- **No wait.** Pages are requested one after another unless `interval` is set. A `Retry-After` header still lengthens the wait, and [`settings.minRequestInterval`](environments.md#request-pacing) still paces requests.
 
 #### Negative Testing (expectFailure)
 

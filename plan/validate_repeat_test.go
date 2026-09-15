@@ -20,6 +20,13 @@ func repeatGraph() *graph.Graph {
 		"createSearch": {Name: "createSearch", Cleanup: graph.CleanupPairing{Node: "cancelSearch"},
 			Outputs: []graph.Output{{Name: "status", Type: "string"}}},
 		"cancelSearch": {Name: "cancelSearch"},
+		"listOrders": {Name: "listOrders",
+			Inputs: []graph.Input{{Name: "limit", Type: "integer", Optional: true}, {Name: "after", Type: "string", Optional: true}},
+			Outputs: []graph.Output{
+				{Name: "orders", Type: "order[]"},
+				{Name: "orderCount", Type: "integer"},
+				{Name: "nextCursor", Type: "string"},
+			}},
 	}}
 }
 
@@ -42,6 +49,12 @@ func TestValidate_Repeat(t *testing.T) {
 		{name: "timeout shorter than interval", node: "getSearch", repeat: RepeatConfig{Until: "remainingBatches == 0", Interval: "2s", Timeout: "1s"}, want: "repeat.timeout 1s is shorter than repeat.interval 2s"},
 		{name: "with expectFailure", node: "getSearch", repeat: RepeatConfig{Until: "remainingBatches == 0"}, fail: true, want: "repeat can't be combined with expectFailure"},
 		{name: "on a node with a cleanup pairing", node: "createSearch", repeat: RepeatConfig{Until: `status == "done"`}, want: "repeat is for reads, but createSearch has a cleanup pairing (cancelSearch)"},
+		{name: "next without until", node: "listOrders", repeat: RepeatConfig{Next: map[string]string{"after": "nextCursor"}, Collect: []string{"orders", "orderCount"}, Max: 100}},
+		{name: "next with a timeout and the default interval", node: "listOrders", repeat: RepeatConfig{Next: map[string]string{"after": "nextCursor"}, Timeout: "500ms"}},
+		{name: "neither until nor next", node: "listOrders", repeat: RepeatConfig{Collect: []string{"orders"}}, want: "repeat.until is required unless repeat.next is set"},
+		{name: "next sets an unknown input", node: "listOrders", repeat: RepeatConfig{Next: map[string]string{"cursor": "nextCursor"}}, want: `repeat.next sets "cursor", which is not an input of listOrders (inputs: after, limit)`},
+		{name: "next reads an unknown output", node: "listOrders", repeat: RepeatConfig{Next: map[string]string{"after": "next"}}, want: `repeat.next reads "next", which is not an output of listOrders (outputs: nextCursor, orderCount, orders)`},
+		{name: "next reads a list", node: "listOrders", repeat: RepeatConfig{Next: map[string]string{"after": "orders"}}, want: `repeat.next can't send "orders", a order[] output: a cursor is a string or integer output`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -83,6 +96,36 @@ func TestParse_RepeatBlock(t *testing.T) {
 	_, err = Parse([]byte("execution:\n  steps:\n    - node: getSearch\n      repeat: {until: x, sleep: 1s}\n"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `unknown key "sleep"`)
+}
+
+func TestParse_RepeatNextRoundTrip(t *testing.T) {
+	p, err := Parse([]byte("execution:\n  steps:\n    - node: listOrders\n      repeat:\n        next: {after: nextCursor}\n        collect: [orders]\n        max: 100\n"))
+	require.NoError(t, err)
+	want := &RepeatConfig{Next: map[string]string{"after": "nextCursor"}, Collect: []string{"orders"}, Max: 100}
+	assert.Equal(t, want, p.Execution.Steps[0].Repeat)
+
+	out, err := Marshal(p)
+	require.NoError(t, err)
+	assert.NotContains(t, string(out), "until", "a repeat that pages writes no empty until")
+	back, err := Parse(out)
+	require.NoError(t, err)
+	assert.Equal(t, want, back.Execution.Steps[0].Repeat)
+}
+
+func TestRepeatConfig_IntervalWithNext(t *testing.T) {
+	paging := &RepeatConfig{Next: map[string]string{"after": "nextCursor"}}
+	interval, err := paging.IntervalDuration()
+	require.NoError(t, err)
+	assert.Zero(t, interval, "pages are requested without a wait")
+
+	polling := &RepeatConfig{Until: "done == true"}
+	interval, err = polling.IntervalDuration()
+	require.NoError(t, err)
+	assert.Equal(t, DefaultRepeatInterval, interval)
+
+	clone := paging.Clone()
+	clone.Next["page"] = "nextPage"
+	assert.Len(t, paging.Next, 1, "a clone shares no map with its original")
 }
 
 // TestInstantiate_MutationOfRepeatedStepDoesNotRepeat checks that a mutation's

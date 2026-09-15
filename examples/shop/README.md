@@ -3,7 +3,7 @@
 <!-- --8<-- [start:body] -->
 A complete AAT project for a small e-commerce API that runs on your machine. `aat-sandbox` serves
 the API with no signup and no network, and this directory holds everything AAT needs to drive it:
-a 17-operation graph, workflows with slots and addons, 12 layers, 7 plans, two regions, negative
+an 18-operation graph, workflows with slots and addons, 12 layers, 7 plans, two regions, negative
 tests, a response visualizer, and MCP configuration for AI coding tools.
 
 ## 60-second start
@@ -255,7 +255,7 @@ aat run plan smoke --var apiHost=localhost:9765 --var payHost=localhost:9766
 ```
 aat-project.yaml               manifest: where everything below lives, default environment
 aat-kit.yaml                   the integration kit's manifest: the part integrators get
-graph.yaml                     17 operations: inputs, outputs, data flow, cleanup, workflows
+graph.yaml                     18 operations: inputs, outputs, data flow, cleanup, workflows
 openapi.yaml                   the API contract
 templates/                     one HTTP request/response template per operation
 domain.yaml                    concepts, types, and value pools for AI tools

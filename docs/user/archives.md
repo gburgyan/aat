@@ -69,7 +69,7 @@ Each step record holds:
 | `expectFailure` | For negative steps: expected statuses, actual status, pass or fail |
 | `oasValidation` | Request and response checks against the OpenAPI spec |
 | `errorClassification`, `error`, `retryCount`, `retriedOn` | Error category and detail for a failed step, and the category of each step-level retry |
-| `iterations`, `repeatStop` | On a step with a [`repeat`](plans.md#repeat) block: each request it sent, with its request, response, outputs, OpenAPI validation, and whether `untilMet`, and why the step stopped (`until`, `max`, `timeout`, or `error`). The step's own `request` and `response` are its last request's, and OpenAPI counts in `summary.json` cover every request |
+| `iterations`, `repeatStop` | On a step with a [`repeat`](plans.md#repeat) block: each request it sent, with its request, response, outputs, OpenAPI validation, and whether `untilMet`, plus the `inputs` it sent on a step that pages with `next`. `repeatStop` says why the step stopped: `until`, `exhausted` (the listing's last page), `loop` (a cursor came back), `max`, `timeout`, or `error`. The step's own `request` and `response` are its last request's, and OpenAPI counts in `summary.json` cover every request |
 | `cleanupFor` | On a cleanup step: the step whose resource it releases, or the cleanup step before it in a [cleanup chain](graphs.md#cleanup). Cleanup step IDs are unique within a run (`deleteCart`, then `deleteCart_2`) |
 | `whenError` | On a cleanup step: why its pairing's `when` condition couldn't be evaluated, such as an output the step didn't return. The cleanup ran anyway |
 

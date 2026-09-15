@@ -1,7 +1,11 @@
 package shop
 
 import (
+	"cmp"
 	"net/http"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -28,6 +32,65 @@ func (s *Server) handleGetOrder(w http.ResponseWriter, r *http.Request) {
 	if o, ok := s.lookupOrder(w, r, st); ok {
 		writeJSON(w, http.StatusOK, o)
 	}
+}
+
+// orderPageJSON is one page of listOrders: the orders, and how the page was cut.
+type orderPageJSON struct {
+	Orders []*order      `json:"orders"`
+	Meta   orderPageMeta `json:"meta"`
+}
+
+// orderPageMeta holds a page's limit and the cursor to the next page, null on
+// the last one.
+type orderPageMeta struct {
+	Limit int     `json:"limit"`
+	After *string `json:"after"`
+}
+
+// handleListOrders implements listOrders (GET /orders). Orders come in ID
+// order, limit at a time (1 to 100, default 20), starting after the order the
+// after cursor names, which need not exist any more; customerEmail keeps one
+// customer's orders. A full page's meta.after is its last order's ID, so a
+// listing whose size is a multiple of limit ends with an empty page, and a
+// shorter page's is null.
+func (s *Server) handleListOrders(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 20
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 100 {
+			writeError(w, validation("limit must be a whole number from 1 to 100, not %q", v))
+			return
+		}
+		limit = n
+	}
+	after, email := q.Get("after"), q.Get("customerEmail")
+
+	st := s.store(r)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	listed := make([]*order, 0, len(st.orders))
+	for _, o := range st.orders {
+		if (email == "" || o.CustomerEmail == email) && (after == "" || compareIDs(o.ID, after) > 0) {
+			listed = append(listed, o)
+		}
+	}
+	slices.SortFunc(listed, func(a, b *order) int { return compareIDs(a.ID, b.ID) })
+	page := orderPageJSON{Orders: listed[:min(limit, len(listed))], Meta: orderPageMeta{Limit: limit}}
+	if len(page.Orders) == limit {
+		last := page.Orders[limit-1].ID
+		page.Meta.After = &last
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+// compareIDs orders sequential IDs such as ord_0009 and ord_10000 by number: a
+// shorter ID comes first, and IDs of the same length compare as text.
+func compareIDs(a, b string) int {
+	if c := cmp.Compare(len(a), len(b)); c != 0 {
+		return c
+	}
+	return strings.Compare(a, b)
 }
 
 // handleDeleteOrder implements deleteOrder (DELETE /orders/{orderId}). It

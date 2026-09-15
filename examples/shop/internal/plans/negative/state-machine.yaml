@@ -9,6 +9,8 @@ intent:
 execution:
   steps:
     - node: createCart
+      values:
+        customerEmail: "audit-{{random 8}}@example.com"
 
     - node: addItem
       dependsOn: [createCart]
@@ -117,3 +119,16 @@ execution:
         mechanical:
           - type: predicate
             expr: 'status == "cancelled" && paymentStatus == "refunded"'
+    - node: listOrders
+      purpose: Every page of the customer's orders holds none left open
+      values:
+        customerEmail: {fromInput: createCart.customerEmail}
+        limit: 1
+      repeat:
+        next: {after: nextCursor}
+        collect: [orders, orderCount, liveOrderCount]
+        max: 10
+      assertions:
+        mechanical:
+          - type: predicate
+            expr: orderCount == 1 && liveOrderCount == 0

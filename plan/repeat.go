@@ -2,22 +2,30 @@ package plan
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 )
 
-// RepeatConfig sends a step's request again and again until a condition over
-// its response holds, as when polling an asynchronous job. Every request
-// resends the inputs the first resolved.
+// RepeatConfig sends a step's request again and again: until a condition over
+// its response holds, as when polling an asynchronous job, or through every
+// page of a listing. Every request resends the inputs the first resolved,
+// except the cursors Next sets.
 type RepeatConfig struct {
 	// Until is a predicate over each response's outputs. The step stops sending
-	// requests as soon as it holds.
-	Until string `yaml:"until" json:"until"`
+	// requests as soon as it holds. It is required unless Next is set.
+	Until string `yaml:"until,omitempty" json:"until,omitempty"`
+	// Next pages through a listing. It maps an input of the step's node to an
+	// output of the same node, as in after: nextCursor: each request after the
+	// first sends the previous response's output as that input, and the step
+	// stops once every one comes back missing, null, or empty.
+	Next map[string]string `yaml:"next,omitempty" json:"next,omitempty"`
 	// Collect names outputs gathered across the responses: the items of a list
 	// output are appended in order, and a number output's values are added.
 	Collect []string `yaml:"collect,omitempty" json:"collect,omitempty"`
 	// Interval is the wait between requests, such as 500ms or 2s; empty means
-	// 1s. A response's Retry-After header lengthens it, up to 60s.
+	// 1s, or none when Next pages through a listing. A response's Retry-After
+	// header lengthens it, up to 60s.
 	Interval string `yaml:"interval,omitempty" json:"interval,omitempty"`
 	// Max caps the requests the step sends; 0 means DefaultRepeatMax.
 	Max int `yaml:"max,omitempty" json:"max,omitempty"`
@@ -45,6 +53,9 @@ func (r *RepeatConfig) MaxRequests() int {
 // IntervalDuration returns the wait between requests.
 func (r *RepeatConfig) IntervalDuration() (time.Duration, error) {
 	if r.Interval == "" {
+		if len(r.Next) > 0 {
+			return 0, nil
+		}
 		return DefaultRepeatInterval, nil
 	}
 	return parseRepeatDuration("interval", r.Interval)
@@ -65,6 +76,7 @@ func (r *RepeatConfig) Clone() *RepeatConfig {
 		return nil
 	}
 	cp := *r
+	cp.Next = maps.Clone(r.Next)
 	cp.Collect = slices.Clone(r.Collect)
 	return &cp
 }

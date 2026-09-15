@@ -11,7 +11,7 @@ aat generate --oas openapi.yaml --output-graph graph.yaml --output-templates tem
 ```
 
 ```text
-Generated 17 nodes, 17 templates written to templates/
+Generated 18 nodes, 18 templates written to templates/
 ```
 
 | Flag | Type | Default | Description |
@@ -282,7 +282,7 @@ The [Quickstart](quickstart.md) walks through these steps on the Petstore spec, 
 
 ## What a Hand-Tuned Graph Adds
 
-The [shop example](examples/shop.md) ships the spec its sandbox serves (`examples/shop/openapi.yaml`) and a graph written for it. Generating from that spec gives the same 17 nodes, with 185 outputs where the shop's graph declares 58. Here is `addItem` from each (generated outputs trimmed):
+The [shop example](examples/shop.md) ships the spec its sandbox serves (`examples/shop/openapi.yaml`) and a graph written for it. Generating from that spec gives the same 18 nodes, with 187 outputs where the shop's graph declares 64. Here is `addItem` from each (generated outputs trimmed):
 
 ```yaml
     addItem:

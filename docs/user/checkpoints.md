@@ -23,9 +23,9 @@ On the [shop example](examples/shop.md), with `aat-sandbox serve` running:
 ```
 aat: loading environment...
 aat: loaded environment "us"
-aat: loaded graph (17 nodes)
+aat: loaded graph (18 nodes)
 aat: loaded domain knowledge
-aat: loaded 17 templates
+aat: loaded 18 templates
 aat: loaded 1 OAS spec(s) for runtime validation
 aat: reconstituting recipe "Quick Purchase"...
 aat: authenticated via oauth2

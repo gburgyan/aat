@@ -251,6 +251,50 @@ paths:
         default:
           $ref: '#/components/responses/Error'
 
+  /orders:
+    get:
+      operationId: listOrders
+      summary: List orders, a page at a time
+      description: |
+        Orders in ID order, `limit` at a time, starting after the order the
+        `after` cursor names. A full page's `meta.after` is its last order's ID,
+        so a listing whose size is a multiple of `limit` ends with an empty page;
+        a shorter page's `meta.after` is null.
+      tags: [orders]
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Orders per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: after
+          in: query
+          required: false
+          description: The previous page's `meta.after`
+          schema:
+            type: string
+        - name: customerEmail
+          in: query
+          required: false
+          description: Only this customer's orders
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of orders
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderList'
+        '400':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
   /orders/{orderId}:
     parameters:
       - $ref: '#/components/parameters/orderId'
@@ -805,6 +849,25 @@ components:
         createdAt:
           type: string
           format: date-time
+
+    OrderList:
+      type: object
+      required: [orders, meta]
+      properties:
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/Order'
+        meta:
+          type: object
+          required: [limit, after]
+          properties:
+            limit:
+              type: integer
+            after:
+              type: string
+              nullable: true
+              description: The cursor for the next page, or null on the last page
 
     Shipment:
       type: object

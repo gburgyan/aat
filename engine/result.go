@@ -127,13 +127,16 @@ type StepResult struct {
 
 // IterationResult records one request of a repeated step.
 type IterationResult struct {
-	Index         int // counting from 1
-	StartTime     time.Time
-	Duration      time.Duration // the request and its retries
-	Request       *adapter.Request
-	Response      *adapter.Response
-	StatusCode    int
-	Outputs       map[string]any
+	Index      int // counting from 1
+	StartTime  time.Time
+	Duration   time.Duration // the request and its retries
+	Request    *adapter.Request
+	Response   *adapter.Response
+	StatusCode int
+	Outputs    map[string]any
+	// Inputs, on a step whose repeat block pages with next, are the inputs this
+	// request sent, its cursors included.
+	Inputs        map[string]any
 	UntilMet      bool // the repeat condition held on this response
 	RetryCount    int
 	Error         error
@@ -144,10 +147,12 @@ type IterationResult struct {
 
 // Why a repeated step stopped sending requests.
 const (
-	RepeatStopUntil   = "until"   // its condition held
-	RepeatStopMax     = "max"     // it sent max requests first
-	RepeatStopTimeout = "timeout" // its timeout ran out first
-	RepeatStopError   = "error"   // a request failed, or the condition couldn't be evaluated
+	RepeatStopUntil     = "until"     // its condition held
+	RepeatStopExhausted = "exhausted" // next's cursors came back empty: the listing's last page
+	RepeatStopLoop      = "loop"      // a response gave cursors an earlier request already sent
+	RepeatStopMax       = "max"       // it sent max requests first
+	RepeatStopTimeout   = "timeout"   // its timeout ran out first
+	RepeatStopError     = "error"     // a request failed, or the condition couldn't be evaluated
 )
 
 // CleanupSkip records a registered cleanup that did not run because it was no
