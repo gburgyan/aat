@@ -132,8 +132,11 @@ Graph structural validation catches:
 When an OpenAPI spec is configured (at the graph level or per-node), AAT checks consistency between the graph and the spec:
 
 - Every `operationId` in the graph exists in the node's spec (an error)
-- Every graph input is a parameter or a request body property of the operation, unless the node's template sends it only in request headers, such as an idempotency key, or as the whole value of a `form:` field, where it counts as that field: `customer: "{{customerId}}"` matches the spec's `customer` (a warning)
-- Every required parameter and body property is a graph input, a `form:` field whose whole value is a graph input, or written by the node's template: a query parameter in the path, a header, a JSON body key, or a form body key, where a bracketed key such as `metadata[source]` counts as `metadata` (a warning)
+- Every graph input is a parameter or a request body property of the operation, unless the node's template sends it only in request headers, such as an idempotency key, or as the whole value of a field the spec names otherwise, where it counts as that field (a warning). The field can be:
+    - a `form:` field: `customer: "{{customerId}}"` matches the spec's `customer`
+    - a query parameter in the path: `status={{orderStatus}}` matches `status`, inside a `{{?orderStatus}}` block too
+    - a path segment: `/orders/{{orderId}}` matches the `order` of the spec's `/orders/{order}`. Paths line up from their last segment, so a base path the template writes before the spec's path still matches, and a segment with other text around its placeholder doesn't
+- Every required parameter and body property is a graph input, a field whose whole value is a graph input (as above), or written by the node's template: a query parameter in the path, a header, a JSON body key, or a form body key, where a bracketed key such as `metadata[source]` counts as `metadata` (a warning)
 - Every output exists in the 2xx response schema at its template extract path (a warning)
 
 The checks compare names, not types. Specs with circular references load.

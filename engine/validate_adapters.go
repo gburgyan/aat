@@ -113,6 +113,31 @@ func TemplateFormInputFields(g *graph.Graph, registry *adapter.Registry) oas.For
 	return fields
 }
 
+// TemplateQueryInputParams maps each templated node to the query parameters
+// its template sends inputs as, for the static OAS input checks (see
+// oas.Validator.WithQueryInputParams).
+func TemplateQueryInputParams(g *graph.Graph, registry *adapter.Registry) oas.QueryInputParams {
+	params := make(oas.QueryInputParams, len(g.Nodes))
+	for name, node := range g.Nodes {
+		if tmpl, ok := registry.GetTemplate(node.Adapter); ok {
+			params[name] = tmpl.QueryInputParams()
+		}
+	}
+	return params
+}
+
+// TemplatePaths maps each templated node to its request path in OpenAPI form,
+// for the static OAS input checks (see oas.Validator.WithPathTemplates).
+func TemplatePaths(g *graph.Graph, registry *adapter.Registry) oas.PathTemplates {
+	paths := make(oas.PathTemplates, len(g.Nodes))
+	for name, node := range g.Nodes {
+		if tmpl, ok := registry.GetTemplate(node.Adapter); ok {
+			paths[name] = tmpl.PathTemplate()
+		}
+	}
+	return paths
+}
+
 // validateAdapterOutputsForNodes is the shared implementation. When nodeFilter
 // is non-nil, only nodes in the set are checked.
 func validateAdapterOutputsForNodes(g *graph.Graph, registry *adapter.Registry, nodeFilter map[string]bool) error {

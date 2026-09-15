@@ -767,13 +767,22 @@ func placeholderKeys(sources ...string) map[string]bool {
 func pairNames(pairs string) []string {
 	var names []string
 	for _, pair := range strings.Split(pairs, "&") {
-		name, _, _ := strings.Cut(pair, "=")
-		name, _, _ = strings.Cut(name, "[")
-		if name != "" && !strings.Contains(name, "{{") {
+		key, _, _ := strings.Cut(pair, "=")
+		if name := pairName(key); name != "" {
 			names = append(names, name)
 		}
 	}
 	return names
+}
+
+// pairName returns the field name of a query or form key: the name before its
+// first bracket, or "" for a key written as a placeholder.
+func pairName(key string) string {
+	name, _, _ := strings.Cut(key, "[")
+	if strings.Contains(name, "{{") {
+		return ""
+	}
+	return name
 }
 
 // withoutBlocks removes every {{?key}}...{{/key}} and {{#key}}...{{/key}} block,

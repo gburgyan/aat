@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: Parameters a graph names its own way
+  version: 1.0.0
+paths:
+  /v1/orders:
+    get:
+      operationId: listOrders
+      parameters:
+        - name: status
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: starting_after
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of orders
+  /v1/orders/{order}/items/{item}:
+    get:
+      operationId: getOrderItem
+      parameters:
+        - name: order
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: item
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: One item of an order

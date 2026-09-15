@@ -2,6 +2,7 @@ package oas
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/pb33f/libopenapi/datamodel/high/base"
@@ -12,11 +13,13 @@ import (
 
 // Validator implements graph.SpecValidator for OpenAPI specifications.
 type Validator struct {
-	specs           map[string]*v3high.Document
-	outputPaths     OutputPaths
-	suppliedFields  SuppliedFields
-	headerInputs    HeaderInputs
-	formInputFields FormInputFields
+	specs            map[string]*v3high.Document
+	outputPaths      OutputPaths
+	suppliedFields   SuppliedFields
+	headerInputs     HeaderInputs
+	formInputFields  FormInputFields
+	queryInputParams QueryInputParams
+	pathTemplates    PathTemplates
 }
 
 // OutputPaths maps node name → output name → the GJSON path the node's template
@@ -36,6 +39,15 @@ type HeaderInputs map[string]map[string]bool
 // node's template sends that input as: the form fields whose whole value is the
 // input.
 type FormInputFields map[string]map[string][]string
+
+// QueryInputParams maps node name → input → the query parameters the node's
+// template sends that input as: the parameters whose whole value is the input.
+type QueryInputParams map[string]map[string][]string
+
+// PathTemplates maps node name → the node's template request path before its
+// query, written as an OpenAPI path: a segment that is exactly one placeholder
+// becomes {input}.
+type PathTemplates map[string]string
 
 // NewValidator creates a new OAS validator.
 func NewValidator() *Validator {
@@ -75,6 +87,22 @@ func (v *Validator) WithHeaderInputs(inputs HeaderInputs) *Validator {
 // skus[] counts as the skus field.
 func (v *Validator) WithFormInputFields(fields FormInputFields) *Validator {
 	v.formInputFields = fields
+	return v
+}
+
+// WithQueryInputParams makes the input checks match an input to the query
+// parameter the node's template sends it as, so an input named startingAfter
+// and sent as starting_after={{startingAfter}} counts as starting_after.
+func (v *Validator) WithQueryInputParams(params QueryInputParams) *Validator {
+	v.queryInputParams = params
+	return v
+}
+
+// WithPathTemplates makes the input checks match an input to the path
+// parameter its template path segment fills, so /orders/{{orderId}} against the
+// spec's /orders/{order} counts orderId as order.
+func (v *Validator) WithPathTemplates(paths PathTemplates) *Validator {
+	v.pathTemplates = paths
 	return v
 }
 
@@ -155,7 +183,7 @@ func (v *Validator) Validate(g *graph.Graph) *graph.SpecValidationResult {
 		}
 
 		// Rule 4: operationId must exist in spec
-		_, _, pathItem, op, err := FindOperation(model, node.OAS.OperationID)
+		_, opPath, pathItem, op, err := FindOperation(model, node.OAS.OperationID)
 		if err != nil {
 			result.Issues = append(result.Issues, graph.SpecValidationIssue{
 				Severity: graph.SpecError,
@@ -166,11 +194,12 @@ func (v *Validator) Validate(g *graph.Graph) *graph.SpecValidationResult {
 		}
 
 		// Rule 5: graph inputs should exist in OAS parameters or request body,
-		// unless the template sends them only in headers, or as a form field
-		// with another name
+		// unless the template sends them only in headers, or under another
+		// name: as a form field, a query parameter, or a path segment
 		oasParamNames := collectInputNames(pathItem, op)
+		sentAs := v.sentAs(nodeName, opPath)
 		for _, inp := range node.Inputs {
-			if !oasParamNames[inp.Name] && !v.headerInputs[nodeName][inp.Name] && !v.sentAsField(nodeName, inp.Name, oasParamNames) {
+			if !oasParamNames[inp.Name] && !v.headerInputs[nodeName][inp.Name] && !anyIn(sentAs[inp.Name], oasParamNames) {
 				result.Issues = append(result.Issues, graph.SpecValidationIssue{
 					Severity: graph.SpecWarning,
 					Node:     nodeName,
@@ -184,8 +213,8 @@ func (v *Validator) Validate(g *graph.Graph) *graph.SpecValidationResult {
 		graphInputNames := make(map[string]bool)
 		for _, inp := range node.Inputs {
 			graphInputNames[inp.Name] = true
-			// An input a form field sends counts as that field.
-			for _, field := range v.formInputFields[nodeName][inp.Name] {
+			// An input the template sends under another name counts as that field.
+			for _, field := range sentAs[inp.Name] {
 				graphInputNames[field] = true
 			}
 		}
@@ -241,15 +270,78 @@ func (v *Validator) outputPath(nodeName, output string) (string, bool) {
 	return output, false
 }
 
-// sentAsField reports whether the node's template sends input as a form field
-// that names holds.
-func (v *Validator) sentAsField(nodeName, input string, names map[string]bool) bool {
-	for _, field := range v.formInputFields[nodeName][input] {
-		if names[field] {
-			return true
+// sentAs maps each input of a node to the request fields its template sends it
+// as under another name: the form fields and query parameters whose whole
+// value it is, and the path parameters of opPath at the segments it fills.
+func (v *Validator) sentAs(nodeName, opPath string) map[string][]string {
+	fields := make(map[string][]string)
+	add := func(input string, names []string) {
+		for _, name := range names {
+			if !slices.Contains(fields[input], name) {
+				fields[input] = append(fields[input], name)
+			}
 		}
 	}
-	return false
+	for input, names := range v.formInputFields[nodeName] {
+		add(input, names)
+	}
+	for input, names := range v.queryInputParams[nodeName] {
+		add(input, names)
+	}
+	if path, ok := v.pathTemplates[nodeName]; ok {
+		for input, params := range pathParamInputs(path, opPath) {
+			add(input, params)
+		}
+	}
+	return fields
+}
+
+// anyIn reports whether names holds any of fields.
+func anyIn(fields []string, names map[string]bool) bool {
+	return slices.ContainsFunc(fields, func(field string) bool { return names[field] })
+}
+
+// pathParamInputs lines a template path up with an operation's path, both in
+// OpenAPI form, and maps each input a segment names to the path parameter at
+// that segment: /orders/{orderId} against /orders/{order} maps orderId to
+// order. The paths are compared from their last segment, so a base path the
+// template writes and the spec leaves to its server still lines up. A literal
+// segment that differs, or an input where the spec has a literal, lines up
+// nothing.
+func pathParamInputs(templatePath, opPath string) map[string][]string {
+	tmpl := strings.Split(strings.Trim(templatePath, "/"), "/")
+	spec := strings.Split(strings.Trim(opPath, "/"), "/")
+	if len(tmpl) < len(spec) {
+		return nil
+	}
+	tmpl = tmpl[len(tmpl)-len(spec):]
+	inputs := make(map[string][]string)
+	for i, segment := range spec {
+		param, isParam := bracedName(segment)
+		input, isInput := bracedName(tmpl[i])
+		switch {
+		case isParam && isInput:
+			inputs[input] = append(inputs[input], param)
+		case isParam:
+			// The template writes the parameter's value itself.
+		case segment != tmpl[i]:
+			return nil
+		}
+	}
+	return inputs
+}
+
+// bracedName returns the name in a path segment written as {name}.
+func bracedName(segment string) (string, bool) {
+	inner, ok := strings.CutPrefix(segment, "{")
+	if !ok {
+		return "", false
+	}
+	inner, ok = strings.CutSuffix(inner, "}")
+	if !ok || inner == "" || strings.ContainsAny(inner, "{}") {
+		return "", false
+	}
+	return inner, true
 }
 
 // collectInputNames returns all parameter names (path-item and operation level)

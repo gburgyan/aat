@@ -113,6 +113,9 @@ the graph and plan formats may still change before 1.0.
 - `aat validate` matches an input that is the whole value of a `form:` field to that field, so a graph can name its
   inputs its own way: `order_id: "{{orderId}}"` counts as the spec's `order_id`, in both the unknown-input and the
   required-field checks.
+- `aat validate` matches path and query parameters the same way: `/orders/{{orderId}}` fills the spec's
+  `/orders/{order}`, and `status={{orderStatus}}` counts as `status`, inside a conditional block too. Paths line up
+  from their last segment, and a segment with other text around its placeholder still needs the spec's name.
 - `aat validate` and `aat run` report a header or `form:` field whose whole value names no input of the node, which
   would never be sent.
 - Verification steps take `values`, as main steps do, to read a particular step: `values: {orderId: {from:
