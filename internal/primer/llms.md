@@ -478,11 +478,12 @@ Assertions live under `assertions.mechanical` on each step.
 |------|--------|-------------|
 | `status` | `expect` | HTTP status: an integer code (`201`, not `"201"`) or a class (`2xx`, `4xx`) |
 | `fieldExists` | `path` | Path exists and is not null |
+| `fieldAbsent` | `path` | Path is missing or null: how to assert that a response leaves a field out, which a predicate can't name |
 | `fieldEquals` | `path`, `value` | Value at the path equals `value`; a string matches only a string, and a number only a number |
 | `predicate` | `expr` | Boolean expression over the same data, such as `total > 0 && currency == "USD"` |
 | `schema` | — | Validate response body against the node's OAS response schema. Requires the project to have OAS specs configured on its graph nodes; otherwise the assertion is reported as `skipped`. |
 
-`fieldExists`, `fieldEquals`, and `predicate` read the step's **extracted outputs**, keyed by output name, not the raw HTTP body (they fall back to the body only on a response with status 400 or above). Add `raw: true` to check the raw response body instead. A predicate cannot see the HTTP status: `status >= 200` reads an output named `status`. Check the status with `type: status`:
+`fieldExists`, `fieldAbsent`, `fieldEquals`, and `predicate` read the step's **extracted outputs**, keyed by output name, not the raw HTTP body (they fall back to the body only on a response with status 400 or above). Add `raw: true` to check the raw response body instead. A predicate cannot see the HTTP status: `status >= 200` reads an output named `status`. Check the status with `type: status`:
 
 ```yaml
 assertions:
@@ -499,10 +500,11 @@ assertions:
   - parentheses, quoted strings, numbers, `true`, and `false`
   - dots for nested fields
   - two decimal numbers written as text, such as `"221.78"`, order as numbers with `< > <= >=`; `==` compares text
-  - no `null`, arithmetic, or indexing
+  - no `null` (check a missing or null field with a `fieldAbsent` assertion), arithmetic, or indexing
   - write `!(a == b)`, not `!a == b`
 - **An output the step didn't produce.** A predicate reads outputs by name, and a name the step has no output for fails the assertion with `unknown field "trackingNumber"`; it doesn't read as "not equal". An `optional` output is missing whenever the response lacks its path, and one extracted as null fails too, with `cannot compare type <nil>`. When an output may be absent:
   - assert presence with `{type: fieldExists, path: trackingNumber}` when the output must be there; it fails on a missing or null output
+  - assert absence with `{type: fieldAbsent, path: trackingNumber}` when it must not be there, as with an error body that leaves out `code`
   - keep the name out of predicates on steps whose response may not hold it
   - or set a flag in a transform, so every run has the output: `outputs.shipped = outputs.trackingNumber ~= nil`, with `shipped` declared on the node, then `shipped == false`
 - **Array length:** a predicate can't count, but a path can.
@@ -1068,7 +1070,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
     "passed": true,
     "results": [
       {
-        "type": "status | fieldExists | fieldEquals | predicate | schema",
+        "type": "status | fieldExists | fieldAbsent | fieldEquals | predicate | schema",
         "passed": true,
         "skipped": false,
         "message": "string",

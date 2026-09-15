@@ -162,7 +162,7 @@ Filters may only reference fields in the element fields list. Search inputs alre
 ## Assertions
 
 Add assertions only when the user says "verify that..." or "assert that...".
-Valid types: status, fieldExists, fieldEquals, predicate.
+Valid types: status, fieldExists, fieldAbsent, fieldEquals, predicate.
 Use bare field names (no jsonpath $ prefix).
 `)
 

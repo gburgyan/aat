@@ -172,7 +172,7 @@ func (e *ValidationError) Error() string {
 // AssertionTypes returns the mechanical assertion types the engine evaluates, in
 // the order documentation lists them.
 func AssertionTypes() []string {
-	return []string{"status", "fieldExists", "fieldEquals", "predicate", "schema"}
+	return []string{"status", "fieldExists", "fieldAbsent", "fieldEquals", "predicate", "schema"}
 }
 
 // IsAssertionType reports whether t names a mechanical assertion type.
