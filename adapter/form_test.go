@@ -283,3 +283,63 @@ items:
 `, tmpl.Request.Form.YAML())
 	})
 }
+
+func TestTemplate_PathTemplate(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "no placeholders", path: "/orders", want: "/orders"},
+		{name: "whole segments", path: "/orders/{{orderId}}/items/{{ itemId }}", want: "/orders/{orderId}/items/{itemId}"},
+		{name: "the query is left out", path: "/orders/{{orderId}}?expand[]={{expand}}", want: "/orders/{orderId}"},
+		{name: "text around a placeholder stays", path: "/orders/sku-{{sku}}", want: "/orders/sku-{{sku}}"},
+		{name: "blocks are removed", path: "/orders{{?orderId}}/{{orderId}}{{/orderId}}?limit=10", want: "/orders"},
+		{name: "a conditional query", path: "/orders{{?status}}?status={{status}}{{/status}}", want: "/orders"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl := Template{Request: TemplateRequest{Path: tt.path}}
+			assert.Equal(t, tt.want, tmpl.PathTemplate())
+		})
+	}
+}
+
+func TestTemplate_QueryInputParams(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want map[string][]string
+	}{
+		{name: "no query", path: "/orders/{{orderId}}", want: map[string][]string{}},
+		{
+			name: "whole values",
+			path: "/orders?status={{orderStatus}}&limit={{limit}}&sort=created",
+			want: map[string][]string{"orderStatus": {"status"}, "limit": {"limit"}},
+		},
+		{
+			name: "inside conditional blocks",
+			path: "/orders?limit=10{{?startingAfter}}&starting_after={{startingAfter}}{{/startingAfter}}",
+			want: map[string][]string{"startingAfter": {"starting_after"}},
+		},
+		{
+			name: "a block that holds the question mark",
+			path: "/orders{{?orderStatus}}?status={{orderStatus}}{{/orderStatus}}",
+			want: map[string][]string{"orderStatus": {"status"}},
+		},
+		{
+			name: "bracketed keys name the parameter",
+			path: "/orders?created[gte]={{since}}&expand[]={{expand}}",
+			want: map[string][]string{"since": {"created"}, "expand": {"expand"}},
+		},
+		{name: "text around a placeholder", path: "/orders?q=status:{{orderStatus}}", want: map[string][]string{}},
+		{name: "one input in two parameters", path: "/orders?from={{day}}&to={{day}}", want: map[string][]string{"day": {"from", "to"}}},
+		{name: "iteration items", path: "/orders?{{#ids}}&ids[]={{.}}{{/ids}}", want: map[string][]string{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpl := Template{Request: TemplateRequest{Path: tt.path}}
+			assert.Equal(t, tt.want, tmpl.QueryInputParams())
+		})
+	}
+}

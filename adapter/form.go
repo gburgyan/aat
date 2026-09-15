@@ -453,6 +453,44 @@ func (t *Template) FormInputFields() map[string][]string {
 	return inputs
 }
 
+// PathTemplate returns the request path before its query, written the way an
+// OpenAPI path is: a segment that is exactly one placeholder becomes {input},
+// and any other segment stays as written, so /orders/{{orderId}}/items gives
+// /orders/{orderId}/items. Blocks are removed first. The static OpenAPI check
+// lines it up with the operation's path to match an input to the path
+// parameter it fills.
+func (t *Template) PathTemplate() string {
+	path, _, _ := strings.Cut(withoutBlocks(t.Request.Path), "?")
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		if input, ok := wholePlaceholder(segment); ok {
+			segments[i] = "{" + input + "}"
+		}
+	}
+	return strings.Join(segments, "/")
+}
+
+// QueryInputParams maps each input that is the whole value of a query
+// parameter written into the path to the parameters it fills, conditional
+// blocks included: {{?startingAfter}}&starting_after={{startingAfter}}{{/startingAfter}}
+// fills starting_after with startingAfter. The static OpenAPI check uses it to
+// match such an input to the spec parameter it is sent as.
+func (t *Template) QueryInputParams() map[string][]string {
+	inputs := make(map[string][]string)
+	_, query, ok := strings.Cut(blockTagRe.ReplaceAllString(t.Request.Path, ""), "?")
+	if !ok {
+		return inputs
+	}
+	for _, pair := range strings.Split(query, "&") {
+		key, value, _ := strings.Cut(pair, "=")
+		name := pairName(key)
+		if input, whole := wholePlaceholder(value); whole && name != "" && !slices.Contains(inputs[input], name) {
+			inputs[input] = append(inputs[input], name)
+		}
+	}
+	return inputs
+}
+
 // WholeValueInputs returns, sorted, the inputs that are the whole value of a
 // request.form field or a header. Such a field or header is left out when its
 // input has no value, so a misspelled name would send nothing, silently; the

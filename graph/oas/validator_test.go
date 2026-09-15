@@ -352,6 +352,113 @@ func TestValidate_HeaderOnlyInputNotReported(t *testing.T) {
 	assert.False(t, reported(v.Validate(g)), "the template sends requestKey only in a header")
 }
 
+// TestValidate_ParamsNamedApart: an input the template sends as a whole path
+// segment, or as the whole value of a query parameter, counts as that
+// parameter in both the unknown-input and the required-parameter checks.
+func TestValidate_ParamsNamedApart(t *testing.T) {
+	pathWarnings := []string{
+		`input "orderId" not found`, `input "itemId" not found`,
+		`required parameter "order" missing`, `required parameter "item" missing`,
+	}
+	tests := []struct {
+		name      string
+		operation string
+		inputs    []string
+		path      string              // the template's path in OpenAPI form; "" when unknown
+		query     map[string][]string // input → the query parameters it is sent as
+		wantMsgs  []string            // empty: no issue expected
+	}{
+		{
+			name:      "path inputs without template knowledge",
+			operation: "getOrderItem",
+			inputs:    []string{"orderId", "itemId"},
+			wantMsgs:  pathWarnings,
+		},
+		{
+			name:      "whole path segments fill the parameters",
+			operation: "getOrderItem",
+			inputs:    []string{"orderId", "itemId"},
+			path:      "/v1/orders/{orderId}/items/{itemId}",
+		},
+		{
+			name:      "a base path the template writes still lines up",
+			operation: "getOrderItem",
+			inputs:    []string{"orderId", "itemId"},
+			path:      "/shop/v1/orders/{orderId}/items/{itemId}/",
+		},
+		{
+			name:      "a segment with other text is not the parameter",
+			operation: "getOrderItem",
+			inputs:    []string{"orderId", "itemId"},
+			path:      "/v1/orders/{orderId}/items/sku-{{itemId}}",
+			wantMsgs:  []string{`input "itemId" not found`, `required parameter "item" missing`},
+		},
+		{
+			name:      "a literal segment that differs lines up nothing",
+			operation: "getOrderItem",
+			inputs:    []string{"orderId", "itemId"},
+			path:      "/v1/carts/{orderId}/items/{itemId}",
+			wantMsgs:  pathWarnings,
+		},
+		{
+			name:      "a shorter path lines up nothing",
+			operation: "getOrderItem",
+			inputs:    []string{"orderId", "itemId"},
+			path:      "/{orderId}/{itemId}",
+			wantMsgs:  pathWarnings,
+		},
+		{
+			name:      "query inputs without template knowledge",
+			operation: "listOrders",
+			inputs:    []string{"orderStatus", "startingAfter"},
+			path:      "/v1/orders",
+			wantMsgs: []string{
+				`input "orderStatus" not found`, `input "startingAfter" not found`, `required parameter "status" missing`,
+			},
+		},
+		{
+			name:      "query parameters sent as whole values",
+			operation: "listOrders",
+			inputs:    []string{"orderStatus", "startingAfter"},
+			path:      "/v1/orders",
+			query:     map[string][]string{"orderStatus": {"status"}, "startingAfter": {"starting_after"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := NewValidator()
+			require.NoError(t, v.LoadSpec("orders.yaml", "testdata/param_aliases.yaml"))
+			if tt.path != "" {
+				v.WithPathTemplates(PathTemplates{tt.operation: tt.path})
+			}
+			v.WithQueryInputParams(QueryInputParams{tt.operation: tt.query})
+
+			inputs := make([]graph.Input, 0, len(tt.inputs))
+			for _, name := range tt.inputs {
+				inputs = append(inputs, graph.Input{Name: name, Type: "string"})
+			}
+			result := v.Validate(&graph.Graph{
+				Version: "1.0.0",
+				OAS:     "orders.yaml",
+				Nodes: map[string]*graph.Node{
+					tt.operation: {
+						Name:    tt.operation,
+						Adapter: tt.operation,
+						OAS:     &graph.OASRef{OperationID: tt.operation},
+						Inputs:  inputs,
+					},
+				},
+			})
+
+			require.Len(t, result.Issues, len(tt.wantMsgs), result.Format())
+			for _, want := range tt.wantMsgs {
+				assert.Contains(t, result.Format(), want)
+			}
+		})
+	}
+}
+
 func contains(s, substr string) bool {
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
