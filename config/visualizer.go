@@ -17,9 +17,15 @@ type VisualizerDef struct {
 }
 
 // VisualizerMatch defines the rules for when a visualizer applies to a step.
+// Every rule given must hold.
 type VisualizerMatch struct {
+	// BodyContains is a top-level key the response body must have.
 	BodyContains string `yaml:"bodyContains,omitempty" json:"bodyContains,omitempty"`
-	Node         string `yaml:"node,omitempty" json:"node,omitempty"`
+	// BodyPath is a gjson path, such as data.booking_reference, that must reach
+	// a value other than null in the response body.
+	BodyPath string `yaml:"bodyPath,omitempty" json:"bodyPath,omitempty"`
+	// Node is the graph node the step must run.
+	Node string `yaml:"node,omitempty" json:"node,omitempty"`
 }
 
 // VisualizerManifest is the top-level structure of visualizers.yaml.

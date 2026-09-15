@@ -7,6 +7,9 @@ the graph and plan formats may still change before 1.0.
 ## [Unreleased]
 
 ### Added
+- A visualizer can match a nested field with `match.bodyPath`, a gjson path that must reach a value other than `null`,
+  such as `data.receipt_number`. It tells apart the responses of an API that wraps every body in the same envelope,
+  where `bodyContains` sees only the shared top-level key.
 - A step can repeat its request until a condition over the response holds, as when polling a background job:
   `repeat: {until: 'status == "complete"', interval: 2s, max: 30, timeout: 2m}`.
   - Every request sends the inputs resolved for the first, and each is retried under the step's `retry:` block. A
