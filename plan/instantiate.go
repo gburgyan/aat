@@ -229,6 +229,7 @@ func VerificationSteps(p *Plan, g *graph.Graph, layeredDefaults map[string]*grap
 			Node:        vs.Node,
 			Description: vs.Purpose,
 			Assertions:  vs.Assertions,
+			Repeat:      vs.Repeat.Clone(),
 			Values:      make(map[string]StepValue, len(vs.Values)),
 		}
 		for name, sv := range vs.Values {
@@ -397,6 +398,7 @@ func expandMutations(p *Plan) {
 			child.MutationScope = ""
 			child.IsGoal = false
 			child.Assertions = nil
+			child.Repeat = nil
 			child.ID = parentID + "--" + m.Name
 			for k, v := range m.Set {
 				child.Values[k] = StepValue{Default: v}
@@ -681,6 +683,8 @@ func deepCopyStep(s Step) Step {
 			cp.Selections[k] = v
 		}
 	}
+
+	cp.Repeat = s.Repeat.Clone()
 
 	if len(s.Mutations) > 0 {
 		cp.Mutations = make([]Mutation, len(s.Mutations))

@@ -18,21 +18,29 @@ import (
 // before retrying. A server that asks for longer ends the step's retries.
 const maxRetryAfter = 60 * time.Second
 
-// executeStepWithTracking wraps executeStepWithRetry.
+// executeStepWithTracking runs a step: until its condition holds when it has a
+// repeat block (see executeStepRepeated), and otherwise once, with its retries.
 func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
-	return e.executeStepWithRetry(ctx, step, node, state)
+	if step.Repeat != nil {
+		return e.executeStepRepeated(ctx, step, node, state)
+	}
+	return e.executeStepWithRetry(ctx, step, node, state, nil)
 }
 
 // executeStepWithRetry wraps executeStepWith with retry logic based on the
 // step's RetryConfig. If no RetryConfig is set, it runs a single attempt.
 // The result of a retried step is its last attempt's, timed from the start of
 // the first attempt, so its duration includes the failed attempts and the
-// waits between them.
-func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) (result StepResult) {
+// waits between them. Every attempt sends the inputs prepared holds, resolving
+// them first when it holds none; nil starts from none.
+func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, prepared *stepInputs) (result StepResult) {
 	// Every attempt shares the inputs the first resolved, so a retry resends
-	// the same request.
-	var prepared stepInputs
-	result = e.executeStepWith(ctx, step, node, state, &prepared)
+	// the same request. A repeated step passes its own, which every one of its
+	// requests shares.
+	if prepared == nil {
+		prepared = &stepInputs{}
+	}
+	result = e.executeStepWith(ctx, step, node, state, prepared)
 	firstStart := result.StartTime
 	defer func() {
 		if result.StartTime.After(firstStart) {
@@ -128,7 +136,7 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 		}
 
 		// Retry the step
-		result = e.executeStepWith(ctx, step, node, state, &prepared)
+		result = e.executeStepWith(ctx, step, node, state, prepared)
 		result.RetryCount = attempt
 		result.RetriedOn = append([]ErrorCategory(nil), retriedOn...)
 

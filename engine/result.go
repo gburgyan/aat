@@ -116,7 +116,39 @@ type StepResult struct {
 	// WhenError, on a cleanup step, says why its pairing's when condition could
 	// not be evaluated. The cleanup ran anyway.
 	WhenError string
+	// Iterations, on a step with a repeat block, records each request the step
+	// sent, in order. The step's own request, response, and status are its last
+	// request's.
+	Iterations []IterationResult
+	// RepeatStop says why a repeated step stopped sending requests: one of the
+	// RepeatStop constants.
+	RepeatStop string
 }
+
+// IterationResult records one request of a repeated step.
+type IterationResult struct {
+	Index         int // counting from 1
+	StartTime     time.Time
+	Duration      time.Duration // the request and its retries
+	Request       *adapter.Request
+	Response      *adapter.Response
+	StatusCode    int
+	Outputs       map[string]any
+	UntilMet      bool // the repeat condition held on this response
+	RetryCount    int
+	Error         error
+	OASValidation *oas.ValidationResult
+	ActualBaseURL string
+	OriginalPath  string
+}
+
+// Why a repeated step stopped sending requests.
+const (
+	RepeatStopUntil   = "until"   // its condition held
+	RepeatStopMax     = "max"     // it sent max requests first
+	RepeatStopTimeout = "timeout" // its timeout ran out first
+	RepeatStopError   = "error"   // a request failed, or the condition couldn't be evaluated
+)
 
 // CleanupSkip records a registered cleanup that did not run because it was no
 // longer needed.

@@ -215,6 +215,9 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 	if s.RetryCount > 0 {
 		fmt.Fprintf(&b, "**Retries:** %d\n\n", s.RetryCount)
 	}
+	if len(s.Iterations) > 0 {
+		fmt.Fprintf(&b, "**Requests:** %d (stopped: %s)\n\n", len(s.Iterations), s.RepeatStop)
+	}
 
 	return b.String()
 }

@@ -558,11 +558,24 @@ func (e *Engine) oasStrictError(step plan.Step, result *StepResult) error {
 	if !e.oasStrict || step.ExpectFailure != nil {
 		return nil
 	}
-	n := oasErrorCount(result.OASValidation)
+	n := stepOASErrorCount(result)
 	if n == 0 {
 		return nil
 	}
 	return fmt.Errorf("step %s: OAS validation failed in strict mode (%d error(s))", stepRef(step), n)
+}
+
+// stepOASErrorCount returns how many request and response violations a step's
+// OpenAPI validation found, across every request of a repeated step.
+func stepOASErrorCount(result *StepResult) int {
+	if len(result.Iterations) == 0 {
+		return oasErrorCount(result.OASValidation)
+	}
+	n := 0
+	for _, it := range result.Iterations {
+		n += oasErrorCount(it.OASValidation)
+	}
+	return n
 }
 
 // oasErrorCount returns how many request and response violations a validation
@@ -800,18 +813,7 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 			result.TransformScript = tmpl.Response.Transform
 		}
 
-		// Collect outputs tagged for display
-		for _, out := range node.Outputs {
-			if out.Display != "" {
-				if v, ok := outputs[out.Name]; ok {
-					result.DisplayOutputs = append(result.DisplayOutputs, DisplayOutput{
-						Label: out.Display,
-						Name:  out.Name,
-						Value: v,
-					})
-				}
-			}
-		}
+		result.DisplayOutputs = displayOutputs(node, outputs)
 
 		// Check for errors buried in the response body
 		rules := effectiveErrorRules(node, e.graph)
@@ -830,17 +832,24 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		)
 	}
 
-	// Run mechanical assertions if configured.
-	// Assertions with Raw=true evaluate against the raw HTTP response body.
-	// Normal assertions evaluate against serialized extracted outputs when
-	// available, falling back to the raw body (e.g., on 4xx responses).
-	if step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
+	e.runStepAssertions(step, node, &result, inputs, resolvedAt)
+	return result
+}
+
+// runStepAssertions evaluates a step's mechanical assertions against result and
+// sets result.Validation. A step without assertions, or a result without a
+// response, is left as it is. Assertions with Raw=true evaluate against the raw
+// HTTP response body. Normal assertions evaluate against serialized extracted
+// outputs when available, falling back to the raw body (e.g., on 4xx
+// responses).
+func (e *Engine) runStepAssertions(step plan.Step, node *graph.Node, result *StepResult, inputs map[string]any, resolvedAt time.Time) {
+	resp := result.Response
+	if resp != nil && step.Assertions != nil && len(step.Assertions.Mechanical) > 0 {
 		merged := &validate.MechanicalResult{Passed: true}
 		// Expressions in a fieldEquals value or a quoted predicate string read
 		// the step's inputs, as step values do, and the time they were resolved,
 		// so a retry compares with the dates it resent.
-		rctx := e.buildResolveContext(node)
-		ectx := plan.ExprContext{Now: resolvedAt, Env: rctx.EnvLookup, Values: inputs, Random: rctx.Random}
+		ectx := e.assertionExprContext(node, inputs, resolvedAt)
 		predicateEval := func(expr string, fields map[string]any) (bool, error) {
 			return plan.EvalPredicateWithExprs(expr, fields, ectx)
 		}
@@ -907,8 +916,28 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		}
 		result.Validation = merged
 	}
+}
 
-	return result
+// assertionExprContext is the expression context of a step's assertions and of
+// its repeat condition: its inputs, and the time they were resolved.
+func (e *Engine) assertionExprContext(node *graph.Node, inputs map[string]any, resolvedAt time.Time) plan.ExprContext {
+	rctx := e.buildResolveContext(node)
+	return plan.ExprContext{Now: resolvedAt, Env: rctx.EnvLookup, Values: inputs, Random: rctx.Random}
+}
+
+// displayOutputs returns the outputs node tags for display, in the order the
+// node declares them.
+func displayOutputs(node *graph.Node, outputs map[string]any) []DisplayOutput {
+	var shown []DisplayOutput
+	for _, out := range node.Outputs {
+		if out.Display == "" {
+			continue
+		}
+		if v, ok := outputs[out.Name]; ok {
+			shown = append(shown, DisplayOutput{Label: out.Display, Name: out.Name, Value: v})
+		}
+	}
+	return shown
 }
 
 // namingMissingOutputs wraps the predicate evaluator of assertions that read a
