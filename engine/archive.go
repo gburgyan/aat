@@ -110,6 +110,19 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 			Passed:     s.ExpectFailure.Passed,
 		}
 	}
+	if s.Fuzz != nil {
+		c := s.Fuzz.Case
+		rec.Fuzz = &archive.FuzzRecord{ID: c.ID, Target: c.Target, Mode: c.Mode, Input: c.Input, Strategy: c.Strategy,
+			Value: c.Value, Patch: c.Patch, SpecViolations: s.Fuzz.SpecViolations, Finding: s.Fuzz.Finding, Fails: s.Fuzz.Fails}
+		if s.Fuzz.JudgedAs != c.Mode {
+			rec.Fuzz.JudgedAs = s.Fuzz.JudgedAs
+		}
+		rec.Fuzz.Setup = s.Fuzz.Setup
+		rec.Fuzz.OutputsError = s.OutputsError
+	}
+	if s.FuzzSetup != "" {
+		rec.FuzzSetup = s.FuzzSetup
+	}
 	if s.KnownIssue != nil {
 		rec.KnownIssue = &archive.KnownIssueRecord{
 			Until:    s.KnownIssue.Until,
@@ -334,6 +347,7 @@ func convertResolutions(resolutions []ValueResolution) []archive.ValueResolution
 			Constraint: r.Constraint,
 			PoolIndex:  r.PoolIndex,
 			PoolSize:   r.PoolSize,
+			PoolRef:    r.PoolRef,
 			Tried:      r.Tried,
 			Error:      r.Error,
 			Layer:      r.Layer,

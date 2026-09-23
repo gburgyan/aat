@@ -256,11 +256,11 @@ func TestNoun(t *testing.T) {
 
 func TestClosest(t *testing.T) {
 	valid := []string{"fromSelection", "optional", "plans", "values"}
-	assert.Equal(t, "fromSelection", closest("fromSelecton", valid))
-	assert.Equal(t, "optional", closest("optinal", valid))
-	assert.Equal(t, "plans", closest("plan", valid))
-	assert.Equal(t, "values", closest("VALUES", valid))
-	assert.Equal(t, "", closest("unrelated", valid))
+	assert.Equal(t, "fromSelection", Closest("fromSelecton", valid))
+	assert.Equal(t, "optional", Closest("optinal", valid))
+	assert.Equal(t, "plans", Closest("plan", valid))
+	assert.Equal(t, "values", Closest("VALUES", valid))
+	assert.Equal(t, "", Closest("unrelated", valid))
 }
 
 // TestDecode_Documents checks that a second YAML document, which yaml.v3 would

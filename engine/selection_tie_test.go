@@ -18,25 +18,25 @@ func TestApplySelection_MinMaxCountsTies(t *testing.T) {
 		map[string]any{"sku": "d", "price": 125, "category": "gear"},
 	}
 
-	highest, err := applySelection(products, &plan.SelectionConfig{Strategy: "max", SortField: "price"})
+	highest, err := applySelection(products, &plan.SelectionConfig{Strategy: "max", SortField: "price"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 0, highest.index, "the first of the tied elements")
 	assert.Equal(t, 3, highest.ties)
 	require.NotNil(t, highest.sortValue)
 	assert.Equal(t, 125.0, *highest.sortValue)
 
-	lowest, err := applySelection(products, &plan.SelectionConfig{Strategy: "min", Field: "price"})
+	lowest, err := applySelection(products, &plan.SelectionConfig{Strategy: "min", Field: "price"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, lowest.index)
 	assert.Equal(t, 1, lowest.ties, "no tie")
 
-	apparel, err := applySelection(products, &plan.SelectionConfig{Strategy: "max", SortField: "price", Filter: `category == "apparel"`})
+	apparel, err := applySelection(products, &plan.SelectionConfig{Strategy: "max", SortField: "price", Filter: `category == "apparel"`}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, apparel.filteredSize)
 	assert.Equal(t, 1, apparel.index, "the index is within the filtered elements")
 	assert.Equal(t, 1, apparel.ties)
 
-	first, err := applySelection(products, &plan.SelectionConfig{Strategy: "first"})
+	first, err := applySelection(products, &plan.SelectionConfig{Strategy: "first"}, nil)
 	require.NoError(t, err)
 	assert.Zero(t, first.ties)
 	assert.Nil(t, first.sortValue)
@@ -50,13 +50,13 @@ func TestApplySelection_MatchReportsMatchCount(t *testing.T) {
 		map[string]any{"sku": "d", "stock": 5},
 	}
 
-	got, err := applySelection(products, &plan.SelectionConfig{Strategy: "match", Filter: "stock > 0"})
+	got, err := applySelection(products, &plan.SelectionConfig{Strategy: "match", Filter: "stock > 0"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, got.index)
 	assert.Equal(t, "b", got.element.(map[string]any)["sku"])
 	assert.Equal(t, 2, got.filteredSize)
 
-	_, err = applySelection([]any{map[string]any{"sku": "a"}}, &plan.SelectionConfig{Strategy: "match", Filter: "stock > 0"})
+	_, err = applySelection([]any{map[string]any{"sku": "a"}}, &plan.SelectionConfig{Strategy: "match", Filter: "stock > 0"}, nil)
 	assert.Error(t, err, "a predicate error before any match still fails")
 }
 

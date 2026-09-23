@@ -276,6 +276,7 @@ steps:
 | `description` | Human-readable step description |
 | `isGoal` | Marks this step as the primary goal of the plan (at most one step; when `intent.goal` is set it must name this step) |
 | `knownIssue` | Keeps this step's failure out of the run's outcome until a date ([Known issues](#known-issues-a-failure-with-a-deadline)) |
+| `fuzz` | Fuzzes the step on every run: generated cases, pinned ones, and what to accept ([Fuzzing: the fuzz block](fuzzing.md#the-fuzz-block)) |
 
 When multiple steps target the same graph node, use `id` to give each a unique identifier. All references (`dependsOn`, `from`) use the step ID.
 
@@ -630,9 +631,13 @@ Naming it matters: `INVALID_ARGUMENT`, `FAILED_PRECONDITION`, and
 on another. Numbers still match a gRPC step through that mapping, so a plan
 written as `status: [404]` reads against either protocol.
 
+A status class takes any status in it. `status: [4xx]` says the API must refuse the request, whatever the
+reason, and still fails the step on a 5xx or a success. A gRPC status matches the class of the HTTP status
+it maps to, so `4xx` takes `NOT_FOUND` and `INVALID_ARGUMENT` alike. Only `4xx` and `5xx` are failure classes.
+
 When `expectFailure` is set:
 
-- The step passes if the response status matches one of the listed codes
+- The step passes if the response status matches one of the listed codes or classes
 - The step fails if the response returns a success status (2xx)
 - Retries are skipped — the first response determines the outcome
 - Cleanup still runs normally

@@ -23,6 +23,7 @@ import (
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/internal/sandbox/shop"
 	aatmcp "github.com/gburgyan/aat/mcp"
+	"github.com/gburgyan/aat/plan"
 )
 
 // TestShopExample runs the embedded examples/shop project against the
@@ -330,6 +331,117 @@ func TestShopExample(t *testing.T) {
 		out.Reset()
 		require.NoError(t, runShowCommand("latest", archiveDir, showOptions{}, &out, io.Discard))
 		assert.Regexp(t, `(?m)^oas: strict, \d+ requests? and \d+ responses? validated, 0 violations$`, out.String())
+	})
+
+	t.Run("fuzz finds a planted bug", func(t *testing.T) {
+		t.Parallel()
+		// The planted bug: adding a quantity of 0 fails with a 500 instead of
+		// the sandbox's 400.
+		p := newShopProjectWith(t, func(h http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/items") {
+					body, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(body))
+					if bytes.Contains(body, []byte(`"quantity": 0`)) || bytes.Contains(body, []byte(`"quantity":0`)) {
+						http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
+						return
+					}
+				}
+				h.ServeHTTP(w, r)
+			})
+		})
+
+		args := p.runArgs(t, "us")
+		args.PlanPath = p.plan(t, "smoke")
+		args.Fuzz = &engine.FuzzConfig{Targets: []string{"addItem"}}
+		res := runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		assert.EqualError(t, res.err, "fuzzing found 1 server-error")
+		assert.Equal(t, engine.OutcomeFailed, res.outcome)
+		require.NotNil(t, res.summary.Fuzz)
+		assert.Equal(t, 1, res.summary.Fuzz.Failing)
+		assert.Equal(t, 1, res.summary.Fuzz.Findings["server-error"])
+
+		var failing []FuzzStepSummary
+		for _, s := range res.summary.Steps {
+			if s.Fuzz != nil && s.Fuzz.Fails {
+				failing = append(failing, *s.Fuzz)
+			}
+		}
+		require.Len(t, failing, 1)
+		assert.Equal(t, "quantity.below-min", failing[0].ID, "the graph's min: 1 makes 0 a negative case")
+
+		// The happy path still passed, and the archive records the case.
+		assert.True(t, stepByNode(t, res.summary, "checkoutCart").Passed)
+		arc, err := archive.Read(res.archivePath)
+		require.NoError(t, err)
+		var recorded *archive.FuzzRecord
+		for _, s := range arc.Steps {
+			if s.Fuzz != nil && s.Fuzz.ID == "quantity.below-min" {
+				recorded = s.Fuzz
+			}
+		}
+		require.NotNil(t, recorded)
+		assert.Equal(t, "server-error", recorded.Finding)
+		assert.True(t, recorded.Fails)
+
+		// Cases share their setup while the API refuses them, and the
+		// read-only listProducts is never copied.
+		assert.Positive(t, res.summary.Fuzz.Setup["reused"], "refused cases reuse a cart")
+		assert.Positive(t, res.summary.Fuzz.Setup["fresh"])
+		for _, st := range arc.Steps {
+			if st.FuzzSetup != "" {
+				assert.NotEqual(t, "listProducts", st.Node, "a read-only step is not copied")
+			}
+		}
+
+		// Replaying the one case finds it again, and --fuzz-save writes it out.
+		saveDir := t.TempDir()
+		args.OutputDir = filepath.Join(t.TempDir(), "runs")
+		args.Fuzz = &engine.FuzzConfig{Targets: []string{"addItem"}, Cases: []string{"quantity.below-min"}}
+		args.FuzzSave = saveDir
+		res = runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		assert.EqualError(t, res.err, "fuzzing found 1 server-error")
+		assert.Equal(t, 1, res.summary.Fuzz.Cases)
+		assert.Equal(t, 1, res.summary.Fuzz.Failing)
+
+		saved, err := filepath.Glob(filepath.Join(saveDir, "*.yaml"))
+		require.NoError(t, err)
+		require.Len(t, saved, 1)
+		assert.Equal(t, "smoke--addItem--quantity.below-min.yaml", filepath.Base(saved[0]))
+		regression, err := plan.ParseFile(saved[0])
+		require.NoError(t, err)
+		var pinned *plan.FuzzSettings
+		for _, st := range regression.Execution.Steps {
+			if st.FuzzSettings != nil {
+				pinned = st.FuzzSettings
+			}
+		}
+		require.NotNil(t, pinned)
+		require.Len(t, pinned.Pinned, 1)
+		assert.Equal(t, "server-error", pinned.Pinned[0].Found)
+
+		// The saved plan fails on its own while the bug is there, with no --fuzz.
+		args.OutputDir = filepath.Join(t.TempDir(), "runs")
+		args.Fuzz, args.FuzzSave = nil, ""
+		args.PlanPath = saved[0]
+		res = runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		assert.EqualError(t, res.err, "fuzzing found 1 server-error")
+		assert.Equal(t, 1, res.summary.Fuzz.Cases)
+
+		// And passes against a sandbox without it.
+		fixed := newShopProject(t)
+		fixedArgs := fixed.runArgs(t, "us")
+		fixedArgs.PlanPath = saved[0]
+		res = runCommand(context.Background(), &fixedArgs, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		assert.Equal(t, engine.OutcomePassed, res.outcome)
+
+		// --no-fuzz runs it as the plan it came from.
+		fixedArgs.OutputDir = filepath.Join(t.TempDir(), "runs")
+		fixedArgs.NoFuzz = true
+		res = runCommand(context.Background(), &fixedArgs, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		assert.Nil(t, res.summary.Fuzz)
 	})
 
 	t.Run("published kit", func(t *testing.T) {

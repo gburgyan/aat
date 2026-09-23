@@ -255,8 +255,12 @@ type Input struct {
 // Custom UnmarshalYAML/MarshalYAML preserves backward compatibility with
 // `default: "literal"` syntax.
 type InputDefault struct {
-	Value        any                 `yaml:"value,omitempty"`
-	Pool         []any               `yaml:"pool,omitempty"`
+	Value any   `yaml:"value,omitempty"`
+	Pool  []any `yaml:"pool,omitempty"`
+	// PoolRef names a value pool of the domain file to draw from instead of
+	// listing a pool here: "airportCodes", or "airportCodes.us" for one of
+	// its groups. The engine reads the pool at run time.
+	PoolRef      string              `yaml:"poolRef,omitempty"`
 	PoolStrategy *string             `yaml:"poolStrategy,omitempty"`
 	Constraint   string              `yaml:"constraint,omitempty"`
 	From         string              `yaml:"from,omitempty"`
@@ -283,7 +287,7 @@ func (d *InputDefault) HasValue() bool {
 	if d == nil {
 		return false
 	}
-	return d.Value != nil || len(d.Pool) > 0 || d.From != "" || d.FromResolved != ""
+	return d.Value != nil || len(d.Pool) > 0 || d.PoolRef != "" || d.From != "" || d.FromResolved != ""
 }
 
 // IsLiteralOnly reports whether this InputDefault is a simple literal value
@@ -292,7 +296,7 @@ func (d *InputDefault) IsLiteralOnly() bool {
 	if d == nil {
 		return false
 	}
-	return d.Value != nil && len(d.Pool) == 0 && d.From == "" && d.FromResolved == "" && d.Select == nil && d.Constraint == ""
+	return d.Value != nil && len(d.Pool) == 0 && d.PoolRef == "" && d.From == "" && d.FromResolved == "" && d.Select == nil && d.Constraint == ""
 }
 
 // EffectiveValue returns the literal value if this is a literal-only default,

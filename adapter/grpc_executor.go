@@ -101,7 +101,7 @@ func (e *GRPCExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 	}
 	in, err := e.reg.JSONToMessage(md.Input(), body)
 	if err != nil {
-		return nil, fmt.Errorf("building the request for %s: %w", req.Path, err)
+		return nil, &NotSentError{Err: fmt.Errorf("building the request for %s: %w", req.Path, err)}
 	}
 
 	conn, err := e.pool.Get(e.target, e.secure, e.tls)

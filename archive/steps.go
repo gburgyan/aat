@@ -49,6 +49,9 @@ func FindStep(a *Archive, id string) (step *StepRecord, cleanup bool) {
 // no unmet expected failure, and no error in its response body. It does not
 // look at the HTTP status on its own.
 func StepPassed(s StepRecord) bool {
+	if s.Fuzz != nil {
+		return !s.Fuzz.Fails // a fuzz step is judged by its finding alone
+	}
 	if s.Error != "" {
 		return false
 	}

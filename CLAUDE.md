@@ -32,6 +32,10 @@ make clean         # Remove binaries and frontend artifacts (node_modules, dist)
 
 **Before committing or pushing**, run `make check` to catch issues that CI would flag. This runs `gofmt -s` formatting, tests with the race detector, and linting — the same checks the CI/CD pipeline performs.
 
+## Pull Requests
+
+One feature, one PR against `main`. Don't stack PRs: when a feature is spread over a chain of PRs, no single diff shows the whole feature, which makes review harder, and every merge needs the next PR retargeted. Keep the steps reviewable as well-scoped commits inside the one PR instead. If a feature is truly too big for one PR, split it into pieces that each stand on their own and target `main`, not each other.
+
 ## Package Structure
 
 | Package | Responsibility |
@@ -43,6 +47,7 @@ make clean         # Remove binaries and frontend artifacts (node_modules, dist)
 | `adapter/` | Adapter and Executor interfaces, HTTP and gRPC executors, Tier 1/3 loaders |
 | `domain/` | Domain knowledge: concepts, types, value pools |
 | `plan/` | Plan model, expression evaluator, validation, persistence |
+| `fuzz/` | Fuzz case generation from input types, constraints, domain types and pools, and the template's request fields; `engine` expands, patches, and judges the cases |
 | `intent/` | LLM-powered prompt → plan transformation |
 | `engine/` | Execution engine: scheduling, value resolution, retry, cleanup, verification |
 | `validate/` | Mechanical assertions (status, fields, predicates, schema) and JSONPath helpers |
@@ -70,8 +75,8 @@ Dependencies flow in one direction. No cycles. No lateral imports within a tier.
 
 **Foundation packages** (stdlib and third-party imports only; importable from any tier): `internal/httpstatus`, `internal/yamlx`, `internal/predicate`, `internal/version`, `internal/primer`, `internal/protoreg`, `internal/grpcstatus`, `internal/gjsonpath`
 **Leaf packages** (no aat imports other than foundation packages): `config`, `graph`, `domain`, `adapter`, `validate`, `internal/sandbox/shop`, `internal/sandbox/shopgrpc`
-**Mid-tier**: `graph/oas` → graph; `graph/proto` → graph; `llm` → config; `plan` → graph, config; `archive` → plan
-**Orchestrators**: `engine` → graph, graph/oas, adapter, plan, domain, validate, archive, config
+**Mid-tier**: `graph/oas` → graph; `graph/proto` → graph; `llm` → config; `plan` → graph, config; `archive` → plan; `fuzz` → graph, domain, plan, adapter
+**Orchestrators**: `engine` → graph, graph/oas, adapter, plan, domain, validate, archive, config, fuzz
 **Entry points**: `intent` → graph, domain, plan, llm; `mcp` → all packages; `server` → intent, archive, plan, config, adapter (for the protocol a step used)
 **Binaries**: `cmd/aat` → every package outside `internal/` (its tests also import `internal/sandbox/shop` and the root embed for the shop end-to-end test); `cmd/aat-sandbox` → internal/sandbox/shop, internal/sandbox/shopgrpc, root embed
 

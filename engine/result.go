@@ -74,6 +74,21 @@ type RunResult struct {
 	// retry waits, verification, and cleanup.
 	StartTime time.Time
 	Duration  time.Duration
+
+	// FuzzCapped is true when --fuzz-cases dropped fuzz cases: the seed chose
+	// which ran.
+	FuzzCapped bool
+	// FuzzWarnings are problems with how the run fuzzed, such as the shared
+	// scope on a step that changes state.
+	FuzzWarnings []string
+	// FuzzCopiesSkipped counts the fuzz setup copies that weren't sent: a case
+	// reused the live copy, or its setup had already failed.
+	FuzzCopiesSkipped int
+
+	// Seed is the seed the run drew pool picks and random selections from;
+	// Engine.WithSeed with it replays those choices. It is 0 when the run
+	// ended before any step resolved.
+	Seed uint64
 }
 
 // Elapsed returns how long the run took: its recorded wall-clock Duration, or,
@@ -116,6 +131,14 @@ type StepResult struct {
 	DisplayOutputs    []DisplayOutput            // outputs tagged with display labels
 	ExpectFailure     *ExpectFailureResult       // non-nil for negative assertion steps
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
+	// OutputsError, on a fuzz step, says why its outputs could not be read
+	// from a successful response. The case is judged on the response anyway.
+	OutputsError string
+	// Fuzz, on a step the fuzzer made, is how its response was judged.
+	Fuzz *FuzzResult
+	// FuzzSetup, on a copy of a setup step made for a fuzz case, is the ID
+	// of the case's step.
+	FuzzSetup string
 	// KnownIssue is set when the step carried a knownIssue entry, whether or
 	// not it ended up applying. Applied says it kept this step's failure out
 	// of the run's outcome; Expired says the entry had lapsed.
@@ -247,7 +270,7 @@ type ValueResolution struct {
 	InputName string // input being resolved
 	Source    string // "plan_default", "expression", "plan_from", "select_edge",
 	// "named_selection", "from_input", "from_resolved", "fallback_pool",
-	// "graph_default", "layer", "optional_skip", "override_value", "error"
+	// "graph_default", "layer", "optional_skip", "override_value", "raw_value", "error"
 	// Layer names the layer that set the value, when a layer did.
 	Layer        string
 	RawValue     any    // before expression evaluation (nil if N/A)
@@ -260,6 +283,7 @@ type ValueResolution struct {
 	ConstraintOK bool   // whether constraint passed
 	PoolIndex    int    // index in fallback pool (-1 if not from pool)
 	PoolSize     int    // fallback pool size (0 if no pool)
+	PoolRef      string // the domain pool the pool came from, when poolRef named one
 	Tried        []any  // values tried and rejected before this one
 	// Error, for source "error", says why the input couldn't be resolved. For a
 	// named selection that failed, InputName is the selection's name.

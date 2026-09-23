@@ -89,7 +89,7 @@ func TestNewServer_AllPersona_RegistersAllTools(t *testing.T) {
 	srv := NewServer(buildPersonaTestContext())
 	tools := srv.mcp.ListTools()
 	// Every tool except the 7 OpenAPI tools, which need a loaded spec.
-	assert.Equal(t, 32, len(tools), "all-tools server (no OAS) should have 32 tools, got %d: %v",
+	assert.Equal(t, 33, len(tools), "all-tools server (no OAS) should have 33 tools, got %d: %v",
 		len(tools), collectToolNames(tools))
 	// The data-flow tools the api persona has belong to "all tools" too.
 	toolNames := collectToolNames(tools)
@@ -235,6 +235,7 @@ func TestNewTestServer_ToolNames(t *testing.T) {
 	assert.Contains(t, toolNames, "generate_plan")
 	assert.Contains(t, toolNames, "validate_plan")
 	assert.Contains(t, toolNames, "execute_plan")
+	assert.Contains(t, toolNames, "generate_fuzz_cases")
 	assert.Contains(t, toolNames, "list_archives")
 	assert.Contains(t, toolNames, "list_recent_failures")
 	assert.Contains(t, toolNames, "list_workflows")
@@ -286,8 +287,8 @@ func TestNewIntegrationServer_WithOAS_ToolCount(t *testing.T) {
 func TestNewTestServer_ToolCount(t *testing.T) {
 	srv := NewTestServer(buildPersonaTestContext())
 	tools := srv.mcp.ListTools()
-	// 25 base + 1 new = 26 tools
-	assert.Equal(t, 26, len(tools), "test server should have 26 tools, got %d: %v",
+	// 25 base + execute_plan's generate_fuzz_cases = 27 tools
+	assert.Equal(t, 27, len(tools), "test server should have 27 tools, got %d: %v",
 		len(tools), collectToolNames(tools))
 }
 

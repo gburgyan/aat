@@ -27,7 +27,8 @@ type selectionResult struct {
 // applySelection selects a single element from arr according to the strategy in sel.
 // Returns the selected element, its index in the (possibly filtered) array, and the
 // size of the array after filtering (for match, the number of matching elements).
-func applySelection(arr []any, sel *plan.SelectionConfig) (*selectionResult, error) {
+// The random strategy draws from r, or from the global source when r is nil.
+func applySelection(arr []any, sel *plan.SelectionConfig, r *rand.Rand) (*selectionResult, error) {
 	if len(arr) == 0 {
 		return nil, fmt.Errorf("array is empty")
 	}
@@ -69,7 +70,12 @@ func applySelection(arr []any, sel *plan.SelectionConfig) (*selectionResult, err
 		}
 		return &selectionResult{element: working[sel.Index], index: sel.Index, filteredSize: len(working)}, nil
 	case "random":
-		idx := rand.IntN(len(working))
+		var idx int
+		if r != nil {
+			idx = r.IntN(len(working))
+		} else {
+			idx = rand.IntN(len(working))
+		}
 		return &selectionResult{element: working[idx], index: idx, filteredSize: len(working)}, nil
 	case "min":
 		return selectByFieldExtreme(working, compareField(sel), false)

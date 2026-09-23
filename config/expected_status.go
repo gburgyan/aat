@@ -6,17 +6,22 @@ import (
 	"strings"
 
 	"github.com/gburgyan/aat/internal/grpcstatus"
+	"github.com/gburgyan/aat/internal/httpstatus"
 	"gopkg.in/yaml.v3"
 )
 
 // ExpectedStatus is a status a step is expected to fail with. It lives here,
 // below plan, so an override's expectFailure reads the same forms a plan step's
-// does; plan names it by alias. It is written
-// either as an HTTP status code or as a gRPC status name:
+// does; plan names it by alias. It is written as an HTTP status code, a gRPC
+// status name, or a status class:
 //
 //	expectFailure:
 //	  status: [404]
 //	  status: [NOT_FOUND]
+//	  status: [4xx]
+//
+// A class matches any status in it. A gRPC status matches the class of the
+// HTTP status it maps to, so 4xx takes NOT_FOUND and INVALID_ARGUMENT alike.
 //
 // Both forms carry a code, so every comparison the engine makes works the same
 // for either. A name also keeps itself, because several gRPC codes map to one
@@ -28,6 +33,9 @@ type ExpectedStatus struct {
 	// Name is the gRPC status name when the status was written as one, and
 	// empty when it was written as a number.
 	Name string
+	// Class is the leading digit of a status class such as 4xx, and 0 for an
+	// exact status. A class has no Code.
+	Class int
 }
 
 // HTTPStatus returns an expected status written as an HTTP code.
@@ -35,6 +43,9 @@ func HTTPStatus(code int) ExpectedStatus { return ExpectedStatus{Code: code} }
 
 // String renders the status the way it was written.
 func (e ExpectedStatus) String() string {
+	if e.Class != 0 {
+		return fmt.Sprintf("%dxx", e.Class)
+	}
 	if e.Name != "" {
 		return e.Name
 	}
@@ -43,25 +54,32 @@ func (e ExpectedStatus) String() string {
 
 // IsFailure reports whether the status denotes a failure. Because OK is the
 // only gRPC code that maps below 400, this is one rule for both protocols.
-func (e ExpectedStatus) IsFailure() bool { return e.Code >= 400 }
+func (e ExpectedStatus) IsFailure() bool { return e.Code >= 400 || e.Class >= 4 }
 
 // Matches reports whether a response failed with this status. A gRPC response
 // is compared by name when the expectation named one, so that codes sharing an
 // HTTP status stay distinguishable.
 func (e ExpectedStatus) Matches(status int, grpcName string) bool {
+	if e.Class != 0 {
+		return status/100 == e.Class
+	}
 	if e.Name != "" && grpcName != "" {
 		return strings.EqualFold(e.Name, grpcName)
 	}
 	return e.Code == status
 }
 
-// ParseExpectedStatus reads a status written as a number or a gRPC name.
+// ParseExpectedStatus reads a status written as a number, a gRPC name, or a
+// status class such as 4xx.
 func ParseExpectedStatus(v any) (ExpectedStatus, error) {
+	if class, ok := httpstatus.Class(v); ok {
+		return ExpectedStatus{Class: class}, nil
+	}
 	switch t := v.(type) {
 	case string:
 		code, ok := grpcstatus.CodeByName(t)
 		if !ok {
-			return ExpectedStatus{}, fmt.Errorf("unknown status %q: write an HTTP status code, or one of %s",
+			return ExpectedStatus{}, fmt.Errorf("unknown status %q: write an HTTP status code, a class such as 4xx, or one of %s",
 				t, strings.Join(grpcstatus.Names(), ", "))
 		}
 		return ExpectedStatus{Code: grpcstatus.HTTPStatus(code), Name: grpcstatus.Name(code)}, nil
@@ -72,7 +90,7 @@ func ParseExpectedStatus(v any) (ExpectedStatus, error) {
 	case float64:
 		return ExpectedStatus{Code: int(t)}, nil
 	default:
-		return ExpectedStatus{}, fmt.Errorf("a status is a code such as 404 or a gRPC name such as NOT_FOUND, not %T", v)
+		return ExpectedStatus{}, fmt.Errorf("a status is a code such as 404, a class such as 4xx, or a gRPC name such as NOT_FOUND, not %T", v)
 	}
 }
 
@@ -92,6 +110,9 @@ func (e *ExpectedStatus) UnmarshalYAML(unmarshal func(any) error) error {
 
 // MarshalYAML writes the status back the way it was written.
 func (e ExpectedStatus) MarshalYAML() (any, error) {
+	if e.Class != 0 {
+		return e.String(), nil
+	}
 	if e.Name != "" {
 		return e.Name, nil
 	}
@@ -124,6 +145,9 @@ func (e *ExpectedStatus) UnmarshalJSON(data []byte) error {
 
 // MarshalJSON writes the status the way it was written.
 func (e ExpectedStatus) MarshalJSON() ([]byte, error) {
+	if e.Class != 0 {
+		return json.Marshal(e.String())
+	}
 	if e.Name != "" {
 		return json.Marshal(e.Name)
 	}
@@ -134,7 +158,7 @@ func (e ExpectedStatus) MarshalJSON() ([]byte, error) {
 type ExpectedStatuses []ExpectedStatus
 
 // Codes returns the statuses as HTTP codes, for the places that report them
-// as numbers.
+// as numbers. A class has no code and reads as 0.
 func (s ExpectedStatuses) Codes() []int {
 	codes := make([]int, len(s))
 	for i, e := range s {

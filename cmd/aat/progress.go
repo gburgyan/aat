@@ -33,6 +33,9 @@ func (o *CLIProgressObserver) OnStepStart(index, total int, step plan.Step) {
 }
 
 func (o *CLIProgressObserver) OnStepComplete(index, total int, result engine.StepResult) {
+	if quietSetupCopy(result) {
+		return
+	}
 	writeStepResult(o.out, "  ", index, total, result, o.term, o.statusWidth)
 }
 
@@ -54,7 +57,10 @@ func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
 	color := o.term.IsTTY
 	_, _ = fmt.Fprintln(o.out)
 	total := len(result.Steps)
-	planned := max(o.total, total) // steps the run meant to execute, for ABORTED and STOPPED
+	// steps the run meant to execute, for ABORTED and STOPPED: setup copies a
+	// fuzz case reused, or skipped once its setup failed, were never meant to
+	// be sent
+	planned := max(o.total-result.FuzzCopiesSkipped, total)
 	elapsed := formatDuration(result.Elapsed())
 	switch result.Outcome {
 	case engine.OutcomePassed:
@@ -69,6 +75,8 @@ func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
 		_, _ = fmt.Fprintf(o.out, "%s at %q (%d/%d steps, %s)\n", colorOutcome("STOPPED", color), result.StoppedAt, total, planned, elapsed)
 	}
 	writeOASTotal(o.out, "", result.Steps, color)
+	writeFuzzWarnings(o.out, "", result.FuzzWarnings, color)
+	writeFuzzSummary(o.out, "", result.Steps, color)
 	writeKnownIssues(o.out, "", result, o.term)
 }
 
@@ -97,8 +105,10 @@ func writeStepResult(w io.Writer, lead string, index, total int, result engine.S
 	case result.Response != nil:
 		duration := colorize(formatDuration(result.Duration), colorDim, color)
 		_, _ = fmt.Fprintf(w, "%s %s  %s%s\n", prefix, statusCol(result, statusWidth, color), duration, stepMarks(result, color))
-		for _, do := range result.DisplayOutputs {
-			_, _ = fmt.Fprintf(w, "%s%s: %v\n", indent, do.Label, do.Value)
+		if result.Fuzz == nil { // a fuzz case's outputs are not the plan's story
+			for _, do := range result.DisplayOutputs {
+				_, _ = fmt.Fprintf(w, "%s%s: %v\n", indent, do.Label, do.Value)
+			}
 		}
 		for _, msg := range failedAssertions(result.Validation) {
 			_, _ = fmt.Fprintf(w, "%s%s\n", indent, colorize(msg, colorYellow, color))
@@ -178,6 +188,9 @@ func resultStepID(result engine.StepResult) string {
 // failed assertions, and OpenAPI violations.
 func stepMarks(result engine.StepResult, color bool) string {
 	marks := ""
+	if note := fuzzNote(result, color); note != "" {
+		marks += "  " + note
+	}
 	if note := repeatNote(result); note != "" {
 		marks += "  " + colorize(note, colorDim, color)
 	}

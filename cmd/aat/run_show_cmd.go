@@ -16,6 +16,8 @@ import (
 
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/engine"
+	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 	"github.com/spf13/cobra"
 	"github.com/tidwall/gjson"
@@ -407,16 +409,22 @@ type shownStepRow struct {
 
 // shownRunList is the step list of aat run show, and its --json document.
 type shownRunList struct {
-	Run            string               `json:"run,omitempty"`
-	ArchivePath    string               `json:"archive_path"`
-	Plan           string               `json:"plan,omitempty"`
-	Outcome        string               `json:"outcome"`
-	Error          string               `json:"error,omitempty"`
-	DurationMs     int64                `json:"duration_ms"`
-	Attempt        int                  `json:"attempt,omitempty"`
-	TotalAttempts  int                  `json:"total_attempts,omitempty"`
-	OtherAttempts  []string             `json:"other_attempts,omitempty"`
-	OAS            *shownOAS            `json:"oas,omitempty"`
+	Run           string    `json:"run,omitempty"`
+	ArchivePath   string    `json:"archive_path"`
+	Plan          string    `json:"plan,omitempty"`
+	Outcome       string    `json:"outcome"`
+	Error         string    `json:"error,omitempty"`
+	DurationMs    int64     `json:"duration_ms"`
+	Attempt       int       `json:"attempt,omitempty"`
+	TotalAttempts int       `json:"total_attempts,omitempty"`
+	OtherAttempts []string  `json:"other_attempts,omitempty"`
+	OAS           *shownOAS `json:"oas,omitempty"`
+	// Seed replays the run's pool picks and random selections with
+	// aat run plan --seed.
+	Seed uint64               `json:"seed,omitempty"`
+	Fuzz *archive.FuzzSummary `json:"fuzz,omitempty"`
+	// FuzzFindings lists the fuzz cases with a finding, failing ones first.
+	FuzzFindings   []archive.FuzzRecord `json:"fuzz_findings,omitempty"`
 	Steps          []shownStepRow       `json:"steps"`
 	Cleanup        []shownStepRow       `json:"cleanup,omitempty"`
 	CleanupSkipped []CleanupSkipSummary `json:"cleanup_skipped,omitempty"`
@@ -483,6 +491,20 @@ func showRun(out io.Writer, a *archive.Archive, src shownRun, format showFormat)
 	if list.OAS != nil {
 		fmt.Fprintf(&b, "oas: %s\n", list.OAS.describe())
 	}
+	if list.Seed != 0 {
+		fmt.Fprintf(&b, "seed: %d\n", list.Seed)
+	}
+	if list.Fuzz != nil {
+		fmt.Fprintf(&b, "fuzz: %s\n", describeFuzz(list.Fuzz))
+		for _, f := range list.FuzzFindings {
+			mark := "warn"
+			if f.Fails {
+				mark = "FAIL"
+			}
+			c := plan.FuzzCase{Input: f.Input, Value: f.Value, Patch: f.Patch}
+			fmt.Fprintf(&b, "  %s %-16s %s  %s\n", mark, f.Finding, f.ID, c.Describe())
+		}
+	}
 	if list.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", list.Error)
 	}
@@ -538,6 +560,9 @@ func buildShownRunList(a *archive.Archive, src shownRun) shownRunList {
 		TotalAttempts: a.Metadata.TotalAttempts,
 		OtherAttempts: src.Attempts,
 		OAS:           newShownOAS(summary.OAS),
+		Seed:          summary.Seed,
+		Fuzz:          summary.Fuzz,
+		FuzzFindings:  fuzzFindings(a.Steps),
 		Steps:         []shownStepRow{},
 
 		KnownIssues:         a.KnownIssues,
@@ -1222,4 +1247,40 @@ func shownRowStatus(row shownStepRow) string {
 	default:
 		return "-"
 	}
+}
+
+// fuzzFindings lists the fuzz cases among steps that have a finding, the
+// failing ones first.
+func fuzzFindings(steps []archive.StepRecord) []archive.FuzzRecord {
+	var out []archive.FuzzRecord
+	for _, failing := range []bool{true, false} {
+		for _, s := range steps {
+			if s.Fuzz != nil && s.Fuzz.Finding != "" && s.Fuzz.Fails == failing {
+				out = append(out, *s.Fuzz)
+			}
+		}
+	}
+	return out
+}
+
+// describeFuzz says how a run's fuzz cases came out, as in "50 cases: 48 as
+// expected, 1 server-error, 1 accepted-invalid (1 failing)".
+func describeFuzz(s *archive.FuzzSummary) string {
+	var parts []string
+	if n := s.Findings[archive.FindingOK]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d as expected", n))
+	}
+	for _, f := range engine.AllFindings {
+		if n := s.Findings[f]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, f))
+		}
+	}
+	text := pluralize(s.Cases, "case") + ": " + strings.Join(parts, ", ")
+	if s.Failing > 0 {
+		text += fmt.Sprintf(" (%d failing)", s.Failing)
+	}
+	if setup := describeSetup(s.Setup); setup != "" {
+		text += " · setup: " + setup
+	}
+	return text
 }

@@ -128,6 +128,7 @@ These flags apply to both `run plan` and `run batch`.
 | `--no-auto-overrides` | bool | `false` | Disable auto-discovery of `.aat-overrides.yaml` |
 | `--oas-validate` | string | `auto` | OAS validation mode: `auto`, `strict`, or `off` (see [OAS Validation](#oas-validation)) |
 | `--no-mutations` | bool | `false` | Skip mutation-expanded sibling steps; run only the happy path (smoke-test mode) |
+| `--fuzz` | string | — | Fuzz these steps, by step ID or node; see [Fuzzing](fuzzing.md) for `--fuzz-mode`, `--fuzz-input`, `--fuzz-cases`, `--fuzz-case`, `--fuzz-scope`, and `--fuzz-fail` |
 | `--verbose-auth` | bool | `false` | Log auth request/response details to stderr for debugging |
 | `--json` | bool | `false` | Machine-readable JSON summary to stdout |
 | `--quiet` | bool | `false` | Suppress progress; print only the outcome and archive path |
@@ -138,6 +139,7 @@ The `run plan` command adds:
 |------|------|---------|-------------|
 | `--stop-after` | string | — | Stop after the step with this ID passes and skip cleanup (see [Checkpoints](checkpoints.md)) |
 | `--dump-state` | path | — | Write the run state to a file with mode `0600`, with credentials redacted (`-` for stdout, which then carries only the state) |
+| `--seed` | int | — | Replay a run's pool picks and random selections; the run's output, archive, and `aat run show` give its seed (see [Replaying a run's picks](value-flow.md#replaying-a-runs-picks)) |
 | `--dump-state-secrets` | bool | `false` | Keep live credentials in the `--dump-state` output, for a harness that sends requests as the run's session (see [Checkpoints: Security](checkpoints.md#security)) |
 
 The `run batch` command adds:
@@ -148,7 +150,7 @@ The `run batch` command adds:
 | `--layer-group` | string | — | Comma-separated layer names for permutations (repeatable) |
 | `--no-dedup` | bool | `false` | Disable duplicate plan detection across permutations |
 | `--shuffle` | bool | `false` | Randomize plan execution order |
-| `--seed` | int | `0` | Random seed for `--shuffle` (`0` = current time; the seed used is logged) |
+| `--seed` | int | `0` | Seed for `--shuffle` and for each run's pool picks and random selections (`0` = a new seed each time; the shuffle seed used is logged) |
 
 See [Matrix Testing: Controlling Behavior](batch-layers.md#controlling-behavior) for how dedup, shuffle, and seed interact with layer groups.
 
@@ -316,7 +318,7 @@ When you run a plan, AAT performs these steps in order:
 
 ### Step Execution Order
 
-Steps run in topological order based on `dependsOn` declarations. Steps with no dependencies run first. Steps that depend on earlier steps wait until their dependencies complete. Within a dependency level, steps run in plan declaration order.
+Steps run in `dependsOn` order: a step waits until the steps it depends on have run. Of the steps ready to run, the one the plan lists first goes next, so a plan whose steps come after what they depend on runs in the order written.
 
 ### Value Resolution at Runtime
 
@@ -351,7 +353,7 @@ The `--retries` flag sets the maximum number of plan-level retries on failure. W
 aat run plan flaky-test --retries 2
 ```
 
-Each failed attempt is saved as `attempt-01.json`, `attempt-02.json`, etc. in the run directory, and the final attempt (whether it passed or not) as `archive.json` (see [Archives: Layout](archives.md#layout)). Setup errors (invalid plan, missing config, failed authentication) are not retried, and neither is a run that stopped at a checkpoint.
+Each failed attempt is saved as `attempt-01.json`, `attempt-02.json`, etc. in the run directory, and the final attempt (whether it passed or not) as `archive.json` (see [Archives: Layout](archives.md#layout)). Setup errors (invalid plan, missing config, failed authentication) are not retried, and neither is a run that stopped at a checkpoint or one that a [fuzz](fuzzing.md) finding failed: a finding is a result about the API, and a retry could draw other cases and hide it.
 
 A two-second delay separates attempts to avoid hammering the API. Plan-level attempts do not read a response's `Retry-After`; a step's own `retry:` does (see [Plans: Retry](plans.md#retry)).
 

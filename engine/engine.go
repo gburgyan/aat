@@ -66,6 +66,24 @@ type Engine struct {
 	// StepID() matches completes successfully. Cleanup is intentionally skipped
 	// so created resources stay alive for an external harness to consume.
 	stopAfterStep string
+
+	// seed is the seed WithSeed set; seedSet says whether it was called. Run
+	// picks a seed when it was not.
+	seed    uint64
+	seedSet bool
+	// draws hands out each step's random source during Run; nil outside it.
+	draws *stepDraws
+
+	// fuzz, when set, adds fuzz cases to the plan; see WithFuzz.
+	fuzz *FuzzConfig
+	// fuzzCapped is set during Run when --fuzz-cases dropped cases, so the
+	// seed chose which ran.
+	fuzzCapped bool
+	// fuzzJudge holds each fuzz target's fail list and accepted statuses
+	// during Run, by target step ID.
+	fuzzJudge map[string]fuzzJudging
+	// fuzzRun tracks each fuzz target's setup copies during Run.
+	fuzzRun *fuzzRunState
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -143,6 +161,22 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
+	// The seed the run's pool picks, random selections, and capped fuzz cases
+	// are drawn from
+	seed := e.seed
+	if !e.seedSet {
+		seed = NewRunSeed()
+	}
+
+	// 1b. Fuzz cases become sibling steps of the steps they target
+	e.fuzzCapped = false
+	e.fuzzRun = newFuzzRunState()
+	if e.fuzz != nil || planFuzzes(instantiatedPlan) {
+		if err := e.expandFuzz(instantiatedPlan, seed); err != nil {
+			return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan, Seed: seed}
+		}
+	}
+
 	// 2. Topological sort
 	sorted, err := TopologicalSort(instantiatedPlan.Execution.Steps)
 	if err != nil {
@@ -176,10 +210,20 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
-	// 4. Set plan for constraint-aware resolution
+	// 4. Set plan for constraint-aware resolution, and the seed the run's
+	// pool picks and random selections are drawn from
 	e.plan = instantiatedPlan
+	e.draws = newStepDraws(seed)
 	defer func() {
 		e.plan = nil
+		e.draws = nil
+		if result != nil {
+			result.Seed = seed
+			result.FuzzCapped = e.fuzzCapped
+			if e.fuzzRun != nil {
+				result.FuzzWarnings = e.fuzzRun.warnings
+			}
+		}
 	}()
 
 	state := NewRunState()
@@ -187,6 +231,15 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	var stepResults []StepResult
 	outcome := OutcomePassed
 	kiLog := newKnownIssueLog()
+	// failedSetup maps a fuzz case's step to why its copy of the setup failed;
+	// the rest of that case is not sent.
+	failedSetup := map[string]string{}
+	copiesSkipped := 0
+	defer func() {
+		if result != nil {
+			result.FuzzCopiesSkipped = copiesSkipped
+		}
+	}()
 	verificationSteps := plan.VerificationSteps(instantiatedPlan, e.graph, e.layeredDefaults)
 	total := len(sorted) + len(verificationSteps)
 
@@ -216,14 +269,52 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			}
 		}
 
+		// A fuzz setup copy is reused while the target's cases have left the
+		// live copy as it was, and isn't sent once the target's setup has
+		// failed too often.
+		caseID := step.FuzzSetup
+		if step.Fuzz != nil {
+			caseID = step.StepID()
+		}
+		if step.FuzzSetup != "" && failedSetup[caseID] == "" {
+			reused, reason := e.fuzzRun.beforeSetupCopy(step, state)
+			if reason != "" {
+				failedSetup[caseID] = reason
+			}
+			if reused {
+				copiesSkipped++
+				continue
+			}
+		}
+
+		// A fuzz case whose setup failed is not sent, nor is the rest of its
+		// setup; only the case itself is reported.
+		if reason := failedSetup[caseID]; reason != "" {
+			if step.Fuzz == nil {
+				copiesSkipped++
+				continue
+			}
+			skipped := StepResult{StepID: step.StepID(), Node: step.Node, Error: fmt.Errorf("not sent: %s", reason), StartTime: time.Now()}
+			skipped.Fuzz = e.judgeFuzz(step, node, &skipped)
+			skipped.Fuzz.Setup = SetupFailed
+			stepResults = append(stepResults, skipped)
+			if e.Observer != nil {
+				e.Observer.OnStepStart(i, total, step)
+				e.Observer.OnStepComplete(i, total, skipped)
+			}
+			continue
+		}
+
 		if e.Observer != nil {
 			e.Observer.OnStepStart(i, total, step)
 		}
 
 		stepResult := e.executeStepWithTracking(ctx, step, node, state)
+		stepResult.FuzzSetup = step.FuzzSetup
 
 		// expectFailure is resolved before anything is displayed or decided,
-		// because whether the step failed at all depends on it.
+		// a fuzz setup copy's failure included, because whether the step failed
+		// at all depends on it.
 		if stepResult.Error == nil && step.ExpectFailure != nil {
 			efr := &ExpectFailureResult{
 				ExpectedStatuses: step.ExpectFailure.Status,
@@ -234,6 +325,64 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			// so that codes sharing an HTTP status stay distinguishable.
 			efr.Passed = step.ExpectFailure.Status.Matches(stepResult.StatusCode, grpcStatusName(stepResult.Response))
 			stepResult.ExpectFailure = efr
+		}
+
+		// A copy of a setup step made for a fuzz case ends that case when it
+		// fails, not the run: the case says nothing about the target then.
+		if step.FuzzSetup != "" && (stepResult.Error != nil || e.stepFailed(step, &stepResult)) {
+			if stepResult.Error != nil && ctx.Err() != nil {
+				stepResults = append(stepResults, stepResult)
+				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+			}
+			failedSetup[step.FuzzSetup] = fmt.Sprintf("its copy of setup step %s failed", step.StepID())
+			e.fuzzRun.setupCopyFailed(step)
+			// One that failed only its checks may still have created something.
+			if stepResult.Error == nil && stepResult.StatusCode < 400 && node.Cleanup.Node != "" {
+				if stepResult.Outputs != nil {
+					state.StoreOutputs(step.StepID(), stepResult.Outputs)
+				}
+				cleanupStack.Push(CleanupEntry{NodeName: node.Cleanup.Node, ForNode: node.Name, ForStep: step.StepID()})
+			}
+			stepResults = append(stepResults, stepResult)
+			if e.Observer != nil {
+				e.Observer.OnStepComplete(i, total, stepResult)
+			}
+			continue
+		}
+
+		if step.FuzzSetup != "" {
+			e.fuzzRun.setupCopySent(step)
+		}
+
+		// A fuzz step never ends the run: its finding is recorded, and fails
+		// the outcome when the configuration says it does.
+		if step.Fuzz != nil {
+			if stepResult.Error != nil && ctx.Err() != nil {
+				stepResults = append(stepResults, stepResult)
+				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+			}
+			stepResult.Fuzz = e.judgeFuzz(step, node, &stepResult)
+			stepResult.Fuzz.Setup = e.fuzzRun.caseSetup[step.StepID()]
+			e.fuzzRun.caseJudged(step, &stepResult)
+			if stepResult.Fuzz.Fails {
+				outcome = OutcomeFailed
+			}
+			// A case the API accepted may have created something to clean up,
+			// and the cleanup reads the step's outputs: without them it has
+			// nothing to name the resource by.
+			if stepResult.Response != nil && stepResult.StatusCode < 400 && stepResult.ResponseBodyError == nil && stepResult.OutputsError == "" {
+				if stepResult.Outputs != nil {
+					state.StoreOutputs(step.StepID(), stepResult.Outputs)
+				}
+				if node.Cleanup.Node != "" {
+					cleanupStack.Push(CleanupEntry{NodeName: node.Cleanup.Node, ForNode: node.Name, ForStep: step.StepID()})
+				}
+			}
+			stepResults = append(stepResults, stepResult)
+			if e.Observer != nil {
+				e.Observer.OnStepComplete(i, total, stepResult)
+			}
+			continue
 		}
 
 		// A knownIssue is resolved next, so the progress line, the archive,
@@ -374,6 +523,9 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	}
 	if verOutcome != OutcomePassed {
 		outcome = verOutcome
+	}
+	if verErr == nil {
+		verErr = fuzzFailureError(stepResults)
 	}
 
 	return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, verErr)
@@ -739,6 +891,9 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	} else {
 		// Construct ResolveContext from engine fields
 		rctx := e.buildResolveContext(node)
+		if e.draws != nil {
+			rctx.Rand = e.draws.next(sid)
+		}
 		resolvedAt = rctx.Now
 
 		// Resolve inputs
@@ -762,6 +917,9 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		// sent.
 		overlayValues, _ := e.router.ResolveValueOverride(node.Name)
 		for k, v := range overlayValues {
+			if step.Fuzz != nil && step.Fuzz.Input == k {
+				continue // the case's value is what the step is for
+			}
 			inputs[k] = v
 			resolutions = recordOverrideValue(resolutions, k, v)
 		}
@@ -792,8 +950,16 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	exec, cfg, rewrite := e.router.Resolve(node.Name)
 	actualBaseURL := exec.Target()
 
-	// Build request
+	// Build request, then apply a fuzz case's patch to it
 	req, err := adp.BuildRequest(inputs, cfg)
+	if err == nil && step.Fuzz != nil {
+		for _, p := range step.Fuzz.Patch {
+			if perr := adapter.ApplyPatch(req, p.Where, p.Path, p.Op, p.Value); perr != nil {
+				err = fmt.Errorf("fuzz case %s: %w", step.Fuzz.ID, perr)
+				break
+			}
+		}
+	}
 	if err != nil {
 		return StepResult{
 			StepID:        sid,
@@ -861,26 +1027,33 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		result.OriginalPath = originalPath
 	}
 
-	// Extract outputs (only on success)
+	// Extract outputs (only on success). A fuzz case is judged on its
+	// response, so one whose outputs can't be read, such as an error page
+	// behind a 200, carries on without them rather than failing as if nothing
+	// had come back.
 	if resp.StatusCode < 400 {
 		outputs, err := adp.ExtractOutputs(resp)
-		if err != nil {
+		switch {
+		case err != nil && step.Fuzz == nil:
 			result.Error = fmt.Errorf("extracting outputs: %w", err)
 			return result
-		}
-		tmpl, hasTemplate := e.registry.GetTemplate(node.Adapter)
-		if hasTemplate {
-			convertHeaderOutputs(outputs, node, tmpl)
-		}
-		outputs = echoInputOutputs(outputs, node, inputs)
-		result.Outputs = outputs
+		case err != nil:
+			result.OutputsError = err.Error()
+		default:
+			tmpl, hasTemplate := e.registry.GetTemplate(node.Adapter)
+			if hasTemplate {
+				convertHeaderOutputs(outputs, node, tmpl)
+			}
+			outputs = echoInputOutputs(outputs, node, inputs)
+			result.Outputs = outputs
 
-		// Record transform script if present
-		if hasTemplate && tmpl.HasTransform() {
-			result.TransformScript = tmpl.Response.Transform
-		}
+			// Record transform script if present
+			if hasTemplate && tmpl.HasTransform() {
+				result.TransformScript = tmpl.Response.Transform
+			}
 
-		result.DisplayOutputs = displayOutputs(node, outputs)
+			result.DisplayOutputs = displayOutputs(node, outputs)
+		}
 
 		// Check for errors buried in the response body
 		rules := effectiveErrorRules(node, e.graph)

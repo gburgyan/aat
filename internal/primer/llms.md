@@ -149,6 +149,8 @@ Scalar: `default: "USD"`
 
 Pool (engine picks one): `default: ["USD", "EUR", "GBP"]`
 
+Domain pool (engine picks one from `domain.yaml`'s `valuePools`): `default: {poolRef: currencies}`, or `{poolRef: airportCodes.us}` for one group. Graph defaults, layers, and step values all take it, with `constraint` and `poolStrategy` as for `pool`; `aat validate` checks each name. Prefer it to copying a domain pool's values into several defaults.
+
 Rich default (references another node's output):
 ```yaml
 default:
@@ -572,6 +574,7 @@ assertions:
   - If a server asks for more than 60 s, the step ends as `failed_fast`.
 - **Step retries vs `--retries`:** use step retries for rate limits and flaky responses. `--retries N` on `aat run` reruns the whole plan after 2 s, and it ignores those headers.
 - **Same request:** a step's inputs are resolved once, so every attempt sends the same values, pool picks and generated values included.
+- **Replaying picks:** a run that drew from a pool or made a `random` selection prints its seed (also in `aat run show` and `summary.json`); `aat run plan <name> --seed N`, or `seed` on MCP `execute_plan`, repeats those choices. `{{uuid}}` and `{{random N}}` stay unique.
 - **Request timeout:** aat's client waits 30 s for each response. A request that takes longer fails with `no response within aat's 30s request timeout`, in the `timeout` category, which retries by default. The limit isn't configurable.
 - **Known rate limits:** set `settings.minRequestInterval` (`250ms`, `1s`) in the environment file. It spaces the start of every request one command sends, `--parallel` plans included, but not OAuth token requests.
 
@@ -677,7 +680,10 @@ a 2xx. Retries are skipped — the first response wins. Cleanup still runs.
     description: "Unknown product should be rejected"
 ```
 
-All `expectFailure.status` entries must be `>= 400`. An expected-failure step
+All `expectFailure.status` entries must be `>= 400`, or the class `4xx` or `5xx`,
+which takes any status in it: `status: [4xx]` passes on any refusal and fails
+on a 5xx. Classes work in mutation `expectStatus` and overlay `expectFailure`
+too. An expected-failure step
 stores no outputs, so a later step can't read an ID from its error body. To check
 the rejected object afterwards, create it in an earlier step that succeeds and
 make the rejected call on it, or find it with a list step filtered by a value you
@@ -862,6 +868,38 @@ infrastructure, not a defect with a date.
 
 Do not reach for this to quiet a flaky step — that is a `retry` rule — or in
 place of `expectFailure`, which says the API *should* refuse the call.
+
+### 6. `--fuzz` — generated values against one step of a flow
+
+`aat run plan <plan> --fuzz <step-or-node>` runs the plan, then sends the step
+values its inputs allow (`positive`), forbid (`negative`), and say nothing
+about (`edge`), each as a sibling step on its own copy of the steps before it.
+Cases come from input types, `constraints`, the domain file's types and
+pools, and the template (each input left out or null; the template's own
+body fields removed, nulled, or retyped); nothing about fuzzing goes in the
+graph. Inputs wired from earlier steps
+are left alone unless named with `--fuzz-input`. When the node has an OpenAPI
+operation, a request the spec refuses is judged as negative.
+
+- **Setup:** each case varies one step; later steps read the original. By
+  default (`--fuzz-scope reuse`) a target's cases share a copy of its setup
+  while the API refuses them, and get a fresh one after a case is accepted,
+  fails with a 5xx, or gets no response; read-only GET setup steps aren't
+  copied. `isolated` copies per case; `shared` uses the happy path's own (warned
+  on a step that changes state).
+- **Findings:** `server-error`, `no-response`, and `schema-violation` fail the
+  run; `accepted-invalid` and `rejected-valid` are warnings (`--fuzz-fail`
+  changes the set). Fuzz steps never stop the run.
+- **Replay:** case IDs are stable (`quantity.above-max`): `--fuzz-case ID`
+  reruns one. `--fuzz-cases N` caps the cases, picked by the run's seed.
+- **Better cases:** declare `constraints` (min, max, lengths, pattern) and enum
+  types on inputs; they make the boundaries the fuzzer tests.
+- **Keeping a finding:** `--fuzz-save DIR` writes a plan per failing case,
+  with the case pinned in the step's `fuzz:` block; it fails until the API is
+  fixed. A step's `fuzz:` block (`mode`, `inputs`, `skip`, `cases`, `only`,
+  `scope`, `fail`, `accept: [409]`, `pinned: [{id, mode, input, value}]`)
+  fuzzes it on every run; `--no-fuzz` ignores blocks. MCP
+  `generate_fuzz_cases` returns a step's cases as such a block.
 
 ### Patterns You'll Use
 

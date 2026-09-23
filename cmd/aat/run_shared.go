@@ -42,21 +42,26 @@ type runArgs struct {
 	DomainPath        string
 	JSON              bool
 	Quiet             bool
-	Overrides         []string          // "nodeName=http://url" pairs
-	EnvOverlay        string            // path to overlay YAML
-	MaxRetries        int               // max plan-level retries (0 = no retries)
-	Layers            []string          // layer names to apply
-	LayersDir         string            // directory containing layer files
-	LayerGroups       [][]string        // layer groups for permutation (batch only)
-	NoAutoOverrides   bool              // disable .aat-overrides.yaml auto-discovery
-	AutoOverridesPath string            // resolved path to auto-discovered overrides file
-	OASValidateMode   string            // "auto", "strict", "off"
-	VerboseAuth       bool              // log auth request/response details to stderr
-	SkipMutations     bool              // strip mutations from plans before running (smoke-test mode)
-	StopAfterStep     string            // stop after this step ID; skip cleanup (checkpoint handoff)
-	DumpStatePath     string            // write accumulated run state to this file (mode 0600)
-	DumpStateSecrets  bool              // keep live credentials in the state dump instead of redacting them
-	Vars              map[string]string // --var KEY=VALUE for multi-environment files
+	Overrides         []string           // "nodeName=http://url" pairs
+	EnvOverlay        string             // path to overlay YAML
+	MaxRetries        int                // max plan-level retries (0 = no retries)
+	Layers            []string           // layer names to apply
+	LayersDir         string             // directory containing layer files
+	LayerGroups       [][]string         // layer groups for permutation (batch only)
+	NoAutoOverrides   bool               // disable .aat-overrides.yaml auto-discovery
+	AutoOverridesPath string             // resolved path to auto-discovered overrides file
+	OASValidateMode   string             // "auto", "strict", "off"
+	VerboseAuth       bool               // log auth request/response details to stderr
+	SkipMutations     bool               // strip mutations from plans before running (smoke-test mode)
+	StopAfterStep     string             // stop after this step ID; skip cleanup (checkpoint handoff)
+	DumpStatePath     string             // write accumulated run state to this file (mode 0600)
+	DumpStateSecrets  bool               // keep live credentials in the state dump instead of redacting them
+	Vars              map[string]string  // --var KEY=VALUE for multi-environment files
+	Seed              *uint64            // --seed: replay a run's pool picks and random selections; nil picks one
+	Fuzz              *engine.FuzzConfig // --fuzz and its options; nil runs no fuzz cases
+	NoFuzz            bool               // --no-fuzz: ignore the plans' fuzz: blocks
+	FuzzSave          string             // --fuzz-save: directory for regression plans of fuzz findings
+	FuzzSaveAll       bool               // --fuzz-save-all: save warnings too
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -78,14 +83,49 @@ type RunSummary struct {
 	EndedEarly  bool         `json:"ended_early,omitempty"`
 	Summary     SummaryStats `json:"summary"`
 	ArchivePath string       `json:"archive_path,omitempty"`
-	Attempts    int          `json:"attempts,omitempty"`   // total attempts (omitted if 1)
-	Retried     bool         `json:"retried,omitempty"`    // true if any retries occurred
-	StoppedAt   string       `json:"stopped_at,omitempty"` // checkpoint step ID when the outcome is "stopped"
+	// Fuzz counts the run's fuzz cases by finding, when it had any.
+	Fuzz *FuzzRunSummary `json:"fuzz,omitempty"`
+	// Seed is what `aat run plan --seed` takes to replay the run's pool picks
+	// and random selections; set when the run made such a choice.
+	Seed      uint64 `json:"seed,omitempty"`
+	Attempts  int    `json:"attempts,omitempty"`   // total attempts (omitted if 1)
+	Retried   bool   `json:"retried,omitempty"`    // true if any retries occurred
+	StoppedAt string `json:"stopped_at,omitempty"` // checkpoint step ID when the outcome is "stopped"
 	// State is the accumulated run state (base URLs, request headers, step
 	// inputs and outputs), populated only when --dump-state=- requests stdout
 	// output. Its credentials are redacted unless --dump-state-secrets asked
 	// for them.
 	State *engine.StateExport `json:"state,omitempty"`
+}
+
+// FuzzStepSummary is a fuzz case in the JSON summary.
+type FuzzStepSummary struct {
+	ID       string `json:"id"`
+	Target   string `json:"target"`
+	Mode     string `json:"mode"`
+	Input    string `json:"input"`
+	Strategy string `json:"strategy"`
+	Value    any    `json:"value"`
+	// Patch is what the case changed in the request, when it did not set an
+	// input's value.
+	Patch []plan.RequestPatch `json:"patch,omitempty"`
+	// JudgedAs is set when the response was judged by another mode than the
+	// case's: negative when the request broke the OpenAPI spec.
+	JudgedAs       string   `json:"judged_as,omitempty"`
+	SpecViolations []string `json:"spec_violations,omitempty"`
+	Finding        string   `json:"finding,omitempty"`
+	Fails          bool     `json:"fails,omitempty"`
+	// Setup is how the steps the case ran on came to be: fresh, reused, or
+	// failed.
+	Setup string `json:"setup,omitempty"`
+}
+
+// FuzzRunSummary counts a run's fuzz cases in the JSON summary, as
+// summary.json does, with the run's warnings about how it fuzzed.
+type FuzzRunSummary struct {
+	archive.FuzzSummary
+	// Warnings are problems with how the run fuzzed.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // StepSummary is a per-step entry in the JSON summary.
@@ -111,6 +151,9 @@ type StepSummary struct {
 	// Warnings are problems that didn't fail the step, such as a min or max
 	// selection whose candidates tied.
 	Warnings []string `json:"warnings,omitempty"`
+	// Fuzz, on a step the fuzzer made, is the case it sent and its finding.
+	// Such a step passed unless its finding failed the run.
+	Fuzz *FuzzStepSummary `json:"fuzz,omitempty"`
 }
 
 // CleanupSkipSummary is a registered cleanup that did not run because it was
@@ -150,6 +193,7 @@ type runResult struct {
 	attempts    int             // total attempts (1 = no retries)
 	layers      []string        // effective layers applied to this run
 	secrets     map[string]bool // the run's known secrets, for redacting what a batch archives about it
+	fuzzFailed  bool            // a fuzz case's finding failed the run
 }
 
 // exitCodeInfra is the exit code for infrastructure/config errors.
@@ -238,6 +282,9 @@ func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
 		KnownIssuesResolved: toKnownIssueSummaries(result.KnownIssuesResolved),
 		EndedEarly:          result.EndedEarly,
 	}
+	if result.DrewRandomly() {
+		s.Seed = result.Seed
+	}
 
 	var passed, failed int
 
@@ -256,6 +303,10 @@ func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
 	}
 	for _, skip := range result.CleanupSkipped {
 		s.CleanupSkipped = append(s.CleanupSkipped, CleanupSkipSummary(skip))
+	}
+
+	if fs := engine.SummarizeFuzz(result.Steps); fs != nil {
+		s.Fuzz = &FuzzRunSummary{FuzzSummary: *fs, Warnings: result.FuzzWarnings}
 	}
 
 	s.Summary = SummaryStats{
@@ -307,8 +358,20 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		ss.RetriedOn = append(ss.RetriedOn, c.String())
 	}
 
-	// Determine passed/failed
-	if step.Error != nil {
+	// Determine passed/failed. A fuzz step is judged by its finding alone.
+	if f := step.Fuzz; f != nil {
+		c := f.Case
+		ss.Fuzz = &FuzzStepSummary{ID: c.ID, Target: c.Target, Mode: c.Mode, Input: c.Input, Strategy: c.Strategy,
+			Value: c.Value, Patch: c.Patch, SpecViolations: f.SpecViolations, Finding: f.Finding, Fails: f.Fails}
+		if f.JudgedAs != c.Mode {
+			ss.Fuzz.JudgedAs = f.JudgedAs
+		}
+		ss.Fuzz.Setup = f.Setup
+		ss.Passed = !f.Fails
+		if f.Fails {
+			ss.Error = f.Finding
+		}
+	} else if step.Error != nil {
 		ss.Error = step.Error.Error()
 		ss.Passed = false
 	} else if step.ExpectFailure != nil {
@@ -470,7 +533,9 @@ const retryDelay = 2 * time.Second
 // isRetryable returns true if the run result should trigger a plan-level retry.
 // Setup errors (bad plan, missing template) are not retried.
 func isRetryable(res *runResult) bool {
-	if res.setupErr {
+	// A fuzz finding is a result about the API, not flakiness: a retry would
+	// draw other cases and could pass, hiding it.
+	if res.setupErr || res.fuzzFailed {
 		return false
 	}
 	switch res.outcome {
@@ -725,10 +790,20 @@ type runContext struct {
 	Pacer *engine.Pacer
 
 	// Execution options
-	SkipMutations    bool   // strip mutations from each plan before instantiation
-	StopAfterStep    string // stop after this step ID; skip cleanup (checkpoint handoff)
-	DumpStatePath    string // write accumulated run state to this file (mode 0600)
-	DumpStateSecrets bool   // keep live credentials in the state dump instead of redacting them
+	SkipMutations    bool               // strip mutations from each plan before instantiation
+	StopAfterStep    string             // stop after this step ID; skip cleanup (checkpoint handoff)
+	DumpStatePath    string             // write accumulated run state to this file (mode 0600)
+	DumpStateSecrets bool               // keep live credentials in the state dump instead of redacting them
+	Seed             *uint64            // seed for pool picks and random selections; nil picks one per run
+	Fuzz             *engine.FuzzConfig // fuzz cases to add to each plan; nil for none
+	NoFuzz           bool               // strip each plan's fuzz: blocks
+	FuzzSave         string             // directory for regression plans of fuzz findings
+	FuzzSaveAll      bool               // save warnings as well as failures
+	// PlanName names the plan in saved fuzz regression plans' file names: a
+	// batch sets its path within the plan directory, so plans of one name in
+	// different subdirectories don't overwrite each other. Empty uses the plan
+	// file's base name.
+	PlanName string
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -803,6 +878,11 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		StopAfterStep:     args.StopAfterStep,
 		DumpStatePath:     args.DumpStatePath,
 		DumpStateSecrets:  args.DumpStateSecrets,
+		Seed:              args.Seed,
+		Fuzz:              args.Fuzz,
+		NoFuzz:            args.NoFuzz,
+		FuzzSave:          args.FuzzSave,
+		FuzzSaveAll:       args.FuzzSaveAll,
 	}
 
 	// Pre-load layers referenced by --layer and/or --layer-group flags.
@@ -910,6 +990,9 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	// exercises only the happy-path steps. Useful as a smoke-test mode.
 	if rctx.SkipMutations {
 		plan.StripMutations(p)
+	}
+	if rctx.NoFuzz {
+		plan.StripFuzz(p)
 	}
 
 	// Compute layered defaults from the effective set of layers (CLI + recipe).
@@ -1053,6 +1136,12 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		WithEnvValues(rctx.Env.Values).
 		WithStopAfter(rctx.StopAfterStep).
 		WithPacer(rctx.Pacer)
+	if rctx.Seed != nil {
+		eng.WithSeed(*rctx.Seed)
+	}
+	if rctx.Fuzz != nil {
+		eng.WithFuzz(rctx.Fuzz)
+	}
 
 	if rctx.OASCache != nil {
 		eng.WithOASSpecs(rctx.OASCache, rctx.Graph.OAS, rctx.OASValidateMode == "strict")
@@ -1082,6 +1171,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		TotalAttempts: totalAttempts,
 		Layers:        effectiveLayers,
 		OASValidation: archiveOASMode(rctx.Graph, rctx.OASValidateMode),
+		Seed:          result.Seed,
 	}
 	archivePath := filepath.Join(runDir, "archive.json")
 	arc, archiveErr := engine.ToArchive(result, meta, rctx.Env.APIBaseURL, secrets)
@@ -1093,6 +1183,23 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		archivePath = ""
 	} else {
 		logf("Archive: %s\n", archivePath)
+	}
+	if result.DrewRandomly() {
+		logf("Seed: %d (replay its picks with --seed %d)\n", result.Seed, result.Seed)
+	}
+	if rctx.FuzzSave != "" {
+		saved, saveErr := saveFuzzFindings(p, result, fuzzSaveOptions{
+			Dir: rctx.FuzzSave, All: rctx.FuzzSaveAll, PlanPath: planPath, PlanName: rctx.PlanName, Layers: effectiveLayers, Seed: result.Seed,
+		})
+		for _, path := range saved {
+			logf("Saved fuzz regression plan: %s\n", path)
+		}
+		if saveErr != nil {
+			logf("aat: warning: fuzz regression plan not written: %s\n", saveErr)
+		}
+		if len(saved) > 0 && len(effectiveLayers) > 0 {
+			logf("aat: note: the saved plans don't apply layers %s; run them with --layer\n", strings.Join(effectiveLayers, ", "))
+		}
 	}
 
 	// Build machine-readable summary
@@ -1124,6 +1231,10 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		}
 	}
 
+	fuzzFailed := false
+	if fs := engine.SummarizeFuzz(result.Steps); fs != nil {
+		fuzzFailed = fs.Failing > 0
+	}
 	return &runResult{
 		outcome:     result.Outcome,
 		summary:     summary,
@@ -1131,6 +1242,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		err:         result.Error,
 		layers:      effectiveLayers,
 		secrets:     secrets,
+		fuzzFailed:  fuzzFailed,
 	}
 }
 

@@ -259,6 +259,7 @@ export interface ResolutionDetail {
   constraintOk?: boolean | null;
   poolIndex?: number;
   poolSize?: number;
+  poolRef?: string;
   tried?: unknown[];
 }
 

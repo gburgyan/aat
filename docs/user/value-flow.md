@@ -340,6 +340,8 @@ values:
     constraint: "value != origin"   # "JFK" fails, so a pool entry is used
 ```
 
+`poolRef` takes a pool from the [domain file](domain.md#value-pools) instead of listing one: `poolRef: airportCodes`, or `poolRef: airportCodes.us` for one group. It works wherever `pool` does, and a value sets one or the other.
+
 Pool iteration order depends on `poolStrategy`:
 
 | Strategy | Behavior |
@@ -349,9 +351,37 @@ Pool iteration order depends on `poolStrategy`:
 
 A pool entry whose expression cannot be evaluated is skipped. When no entry passes the constraint, the step fails with an error naming the constraint. An expression in the `default` itself that cannot be evaluated is an error, not a reason to fall back.
 
+#### Replaying a run's picks
+
+Every run draws its random pool orders, and its `random` [selections](#selection-strategies), from a seed. When a run made such a choice, its output ends with the seed, and `aat run show`, the archive, and `summary.json` record it:
+
+```
+Seed: 4986022358596074 (replay its picks with --seed 4986022358596074)
+```
+
+`aat run plan smoke --seed 4986022358596074` makes the same choices again, so a failure that only one pick triggers can be rerun. Each step draws from the seed, its step ID, and how many times it has resolved before, so steps that run in parallel, or a plan with a step added elsewhere, still pick what they picked. `aat run batch --seed N` gives each run a seed derived from `N`, the plan, and its layer permutation, and MCP `execute_plan` takes a `seed`.
+
+`{{uuid}}` and `{{random N}}` do not follow the seed: they exist to make values unique, and repeating them would collide with what the first run created.
+
 ### Constraints
 
 `constraint` is a [predicate expression](#predicate-expression-syntax) that a candidate value must satisfy. The candidate is available as `value`, and every input of the same step resolved before this one is available by name — inputs resolve in the order the graph node declares them, so `origin` must come before `destination` in the example above. The constraint is checked against the `default` and against pool entries; it is not applied to `from`, `fromSelection`, `fromInput`, or `fromResolved` values. Graph input defaults and layer entries accept the same `pool`, `poolStrategy`, and `constraint` fields (a graph default writes its literal as `value:` instead of `default:`).
+
+## Raw Values
+
+`raw: true` sends a step value's default exactly as written: `{{…}}` is not evaluated, and the value is not
+converted to the input's type, so `"12"` stays a string for an `integer` input. It is for negative tests that need a
+value the input's type would otherwise fix, and it is how [fuzz cases](fuzzing.md) are sent.
+
+```yaml
+values:
+  quantity:
+    default: "12"
+    raw: true           # sent as the string "12"
+```
+
+A raw value needs a `default`, and takes no `from`, `fromSelection`, `fromResolved`, `fromInput`, `pool`, or
+`poolRef`.
 
 ## Type Coercion
 

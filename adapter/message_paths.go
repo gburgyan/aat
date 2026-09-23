@@ -49,16 +49,59 @@ type jsonFrame struct {
 // members, and placeholders standing for whole values.
 func jsonPlaceholderPaths(text string) (map[string][]string, bool) {
 	paths := make(map[string][]string)
-	record := func(name, path string) {
-		for _, p := range paths[name] {
-			if p == path {
+	ok := scanJSONTemplate(text, func(ev jsonEvent) {
+		if ev.kind != eventPlaceholder {
+			return
+		}
+		for _, p := range paths[ev.name] {
+			if p == ev.path {
 				return
 			}
 		}
-		paths[name] = append(paths[name], path)
+		paths[ev.name] = append(paths[ev.name], ev.path)
+	})
+	if !ok {
+		return nil, false
 	}
+	return paths, true
+}
 
+// jsonEventKind says what a JSON template scan found.
+type jsonEventKind int
+
+const (
+	// eventPlaceholder is an input a value (or a key) holds.
+	eventPlaceholder jsonEventKind = iota
+	// eventLiteral is a value the template writes itself: a string without
+	// placeholders, a number, true, false, or null.
+	eventLiteral
+	// eventContainer is an object or array value.
+	eventContainer
+)
+
+// jsonEvent is one thing a JSON template scan found, at a GJSON path.
+type jsonEvent struct {
+	kind jsonEventKind
+	path string
+	// name is the input, for a placeholder.
+	name string
+	// valueKind is "string", "number", "boolean", "null", "object", or
+	// "array", for a literal or a container.
+	valueKind string
+	// whole is true for a placeholder that is the entire value: {{n}} or
+	// "{{s}}", not part of a longer string or a key.
+	whole bool
+	// inBlock is true inside a conditional or iteration block, where the
+	// value may not be sent, or is sent once per element.
+	inBlock bool
+}
+
+// scanJSONTemplate walks a JSON template, calling visit for each placeholder,
+// literal value, and container it finds. It returns false when the text
+// can't be read as one JSON object with placeholders in it.
+func scanJSONTemplate(text string, visit func(jsonEvent)) bool {
 	var stack []*jsonFrame
+	blocks := 0
 	// valuePath is the path of the value the scan is at: each frame's key or
 	// index, from the outside in.
 	valuePath := func() string {
@@ -87,10 +130,14 @@ func jsonPlaceholderPaths(text string) (map[string][]string, bool) {
 		}
 		return parent + "." + seg
 	}
+	emit := func(ev jsonEvent) {
+		ev.inBlock = blocks > 0
+		visit(ev)
+	}
 
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "{") {
-		return nil, false
+		return false
 	}
 	for i := 0; i < len(text); i++ {
 		c := text[i]
@@ -98,35 +145,40 @@ func jsonPlaceholderPaths(text string) (map[string][]string, bool) {
 		case c == '{' && strings.HasPrefix(text[i:], "{{"):
 			end := strings.Index(text[i+2:], "}}")
 			if end < 0 {
-				return nil, false
+				return false
 			}
 			tag := strings.TrimSpace(text[i+2 : i+2+end])
 			i += end + 3
 			if len(stack) == 0 {
-				return nil, false
+				return false
 			}
 			switch {
-			case strings.HasPrefix(tag, "?"), strings.HasPrefix(tag, "/"):
-				// A block's content stays where it is.
+			case strings.HasPrefix(tag, "?"):
+				blocks++ // a block's content stays where it is
+			case strings.HasPrefix(tag, "/"):
+				if blocks > 0 {
+					blocks--
+				}
 			case strings.HasPrefix(tag, "#"):
 				// The list fills the array or object the block is in.
-				record(strings.TrimSpace(tag[1:]), containerPath())
+				emit(jsonEvent{kind: eventPlaceholder, name: strings.TrimSpace(tag[1:]), path: containerPath()})
+				blocks++
 			case isElementRef(tag):
 				// The element an iteration block is on, not an input.
 			case !top().array && top().keyNext:
 				// A placeholder written where a key goes: any key of the object.
-				record(tag, join(containerPath(), "*"))
+				emit(jsonEvent{kind: eventPlaceholder, name: tag, path: join(containerPath(), "*")})
 				top().keyNext = false
 			default:
-				record(tag, valuePath())
+				emit(jsonEvent{kind: eventPlaceholder, name: tag, path: valuePath(), whole: true})
 			}
 		case c == '"':
 			end, names, ok := scanJSONString(text, i)
 			if !ok {
-				return nil, false
+				return false
 			}
 			if len(stack) == 0 {
-				return nil, false
+				return false
 			}
 			f := top()
 			if !f.array && f.keyNext {
@@ -135,7 +187,7 @@ func jsonPlaceholderPaths(text string) (map[string][]string, bool) {
 				if !isLiteral {
 					for _, name := range names {
 						if !isElementRef(name) {
-							record(name, join(containerPath(), "*"))
+							emit(jsonEvent{kind: eventPlaceholder, name: name, path: join(containerPath(), "*")})
 						}
 					}
 					f.key = "*"
@@ -143,37 +195,61 @@ func jsonPlaceholderPaths(text string) (map[string][]string, bool) {
 					f.key = gjsonpath.KeySegment(key).Raw
 				}
 			} else {
+				raw := text[i : end+1]
+				if len(names) == 0 {
+					emit(jsonEvent{kind: eventLiteral, path: valuePath(), valueKind: "string"})
+				}
 				for _, name := range names {
 					if !isElementRef(name) {
-						record(name, valuePath())
+						emit(jsonEvent{kind: eventPlaceholder, name: name, path: valuePath(), whole: raw == `"{{`+name+`}}"`})
 					}
 				}
 			}
 			i = end
 		case c == '{':
+			if len(stack) > 0 {
+				emit(jsonEvent{kind: eventContainer, path: valuePath(), valueKind: "object"})
+			}
 			stack = append(stack, &jsonFrame{keyNext: true})
 		case c == '[':
+			if len(stack) > 0 {
+				emit(jsonEvent{kind: eventContainer, path: valuePath(), valueKind: "array"})
+			}
 			stack = append(stack, &jsonFrame{array: true})
 		case c == '}' || c == ']':
 			if len(stack) == 0 || top().array != (c == ']') {
-				return nil, false
+				return false
 			}
 			stack = stack[:len(stack)-1]
 		case c == ',':
 			if len(stack) == 0 {
-				return nil, false
+				return false
 			}
 			if f := top(); f.array {
 				f.index++
 			} else {
 				f.keyNext, f.key = true, ""
 			}
+		case c == '-' || (c >= '0' && c <= '9') || c == 't' || c == 'f' || c == 'n':
+			// A bare literal: a number, true, false, or null.
+			j := i
+			for j < len(text) && !strings.ContainsRune(",}] \t\r\n", rune(text[j])) && !strings.HasPrefix(text[j:], "{{") {
+				j++
+			}
+			if len(stack) > 0 {
+				kind := "number"
+				switch text[i:j] {
+				case "true", "false":
+					kind = "boolean"
+				case "null":
+					kind = "null"
+				}
+				emit(jsonEvent{kind: eventLiteral, path: valuePath(), valueKind: kind})
+			}
+			i = j - 1
 		}
 	}
-	if len(stack) != 0 {
-		return nil, false
-	}
-	return paths, true
+	return len(stack) == 0
 }
 
 // scanJSONString reads the JSON string starting at text[start], a quote. It

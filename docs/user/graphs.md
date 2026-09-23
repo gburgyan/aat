@@ -104,6 +104,7 @@ Rich default fields:
 |-------|-------------|
 | `value` | Literal value |
 | `pool` | Array of candidate values, used when there is no `value` or the `value` fails `constraint` |
+| `poolRef` | A value pool of the [domain file](domain.md#value-pools) to use as the pool: `airportCodes`, or `airportCodes.us` for one of its groups. Set `pool` or `poolRef`, not both |
 | `poolStrategy` | How to pick from the pool: `random` (default) or `sequential` |
 | `constraint` | Predicate the value must satisfy, over `value` and the inputs already resolved for the step (see [Fallback Pools](value-flow.md#fallback-pools)) |
 | `from` | Reference to an upstream step output (`step.output`) |
