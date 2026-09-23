@@ -68,21 +68,18 @@ func (t *Template) RequestFields() ([]RequestField, bool) {
 		bodyOK = false // a form body has no JSON to patch
 	}
 
-	if _, query, ok := strings.Cut(t.Request.Path, "?"); ok {
-		inBlock := strings.Contains(query, "{{?") || strings.Contains(query, "{{#")
-		for _, pair := range strings.Split(query, "&") {
-			name, value, _ := strings.Cut(pair, "=")
-			if name == "" || strings.Contains(name, "{{") {
-				continue
-			}
-			f := RequestField{Where: FieldQuery, Path: name, InBlock: inBlock}
-			if names := placeholderNames(value); len(names) == 1 && strings.TrimSpace(value) == "{{"+names[0]+"}}" {
-				f.Input = names[0]
-			} else {
-				f.Kind = "string"
-			}
-			fields = append(fields, f)
+	for _, param := range queryParams(t.Request.Path) {
+		name, value, _ := strings.Cut(param.text, "=")
+		if name == "" || strings.Contains(name, "{{") {
+			continue
 		}
+		f := RequestField{Where: FieldQuery, Path: name, InBlock: param.inBlock}
+		if names := placeholderNames(value); len(names) == 1 && strings.TrimSpace(value) == "{{"+names[0]+"}}" {
+			f.Input = names[0]
+		} else {
+			f.Kind = "string"
+		}
+		fields = append(fields, f)
 	}
 
 	headers := t.Request.Headers
@@ -101,6 +98,68 @@ func (t *Template) RequestFields() ([]RequestField, bool) {
 		}
 	}
 	return fields, bodyOK
+}
+
+// queryParam is one name=value pair of a templated query string, with its
+// block tags taken out.
+type queryParam struct {
+	text string
+	// inBlock is true when the pair starts inside a conditional or iteration
+	// block.
+	inBlock bool
+}
+
+// queryParams splits the query of a templated path into its pairs. The query
+// starts at the first "?" outside a {{…}} tag, which may itself sit inside a
+// block, as in /products{{?category}}?category={{category}}{{/category}}.
+// Pairs split at "&" outside tags, and each is in a block when one is open
+// where the pair starts.
+func queryParams(path string) []queryParam {
+	var params []queryParam
+	depth := 0
+	inQuery := false
+	var cur *queryParam
+	for i := 0; i < len(path); {
+		if strings.HasPrefix(path[i:], "{{") {
+			end := strings.Index(path[i+2:], "}}")
+			if end < 0 {
+				break
+			}
+			tag := strings.TrimSpace(path[i+2 : i+2+end])
+			full := path[i : i+4+end]
+			i += 4 + end
+			switch {
+			case strings.HasPrefix(tag, "?"), strings.HasPrefix(tag, "#"):
+				depth++
+			case strings.HasPrefix(tag, "/"):
+				depth--
+			default:
+				if inQuery {
+					if cur == nil {
+						params = append(params, queryParam{inBlock: depth > 0})
+						cur = &params[len(params)-1]
+					}
+					cur.text += full
+				}
+			}
+			continue
+		}
+		c := path[i]
+		i++
+		switch {
+		case !inQuery:
+			inQuery = c == '?'
+		case c == '&':
+			cur = nil
+		default:
+			if cur == nil {
+				params = append(params, queryParam{inBlock: depth > 0})
+				cur = &params[len(params)-1]
+			}
+			cur.text += string(c)
+		}
+	}
+	return params
 }
 
 // Request patch operations.

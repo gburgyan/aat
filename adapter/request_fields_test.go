@@ -127,3 +127,23 @@ func TestApplyPatch(t *testing.T) {
 	req := &Request{Body: []byte("name=x")}
 	assert.ErrorContains(t, ApplyPatch(req, FieldBody, "name", PatchRemove, nil), "not JSON")
 }
+
+// TestTemplate_RequestFields_QueryBlocks checks the query of paths with
+// blocks: a "?" inside a block starts the query, and only the pairs a block
+// holds are in one.
+func TestTemplate_RequestFields_QueryBlocks(t *testing.T) {
+	query := func(path string) []RequestField {
+		tmpl := &Template{Request: TemplateRequest{Method: "GET", Path: path}}
+		fields, _ := tmpl.RequestFields()
+		return fields
+	}
+	assert.Equal(t, []RequestField{{Where: FieldQuery, Path: "category", Input: "category", InBlock: true}},
+		query("/products{{?category}}?category={{category}}{{/category}}"))
+	assert.Equal(t, []RequestField{
+		{Where: FieldQuery, Path: "offer_request_id", Input: "offerRequestId"},
+		{Where: FieldQuery, Path: "sort", Input: "sort"},
+		{Where: FieldQuery, Path: "limit", Input: "limit"},
+		{Where: FieldQuery, Path: "after", Input: "after", InBlock: true},
+	}, query("/air/offers?offer_request_id={{offerRequestId}}&sort={{sort}}&limit={{limit}}{{?after}}&after={{after}}{{/after}}"))
+	assert.Equal(t, []RequestField{{Where: FieldQuery, Path: "v", Kind: "string"}}, query("/x/{{id}}?v=2"))
+}
