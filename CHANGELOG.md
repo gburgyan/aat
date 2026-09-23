@@ -43,7 +43,9 @@ the graph and plan formats may still change before 1.0.
   copied at all. After three setups in a row fail, the target's remaining cases aren't tried. Copies' progress lines
   are hidden unless they fail. The fuzz summary says how cases were set up (`setup: 2 fresh, 7 reused`), and `shared`
   scope on a step that changes state is warned about. `isolated` keeps a fresh copy per case. On the shop,
-  fuzzing `addItem` and `checkout` sends 143 requests where it sent 228.
+  fuzzing `addItem` and `checkout` sends 143 requests where it sent 228; on Duffel's test API, ten booking cases took
+  73 seconds with three searches instead of ten. Fuzz steps and their copies are named like
+  `addItem__fuzz_quantity_below_min`, so a copied expression such as `{{search.firstSliceOrigin}}` still parses.
 - **A step's `fuzz:` block fuzzes it on every run, and `--fuzz-save` keeps findings as regression plans.** The block
   holds what `--fuzz` flags would say (`mode`, `inputs`, `cases`, `only`, `scope`, `fail`) plus `skip` (inputs never
   to fuzz), `accept` (statuses no case is faulted for, such as a busy API's 409), and `pinned` cases sent exactly as

@@ -3,6 +3,7 @@ package plan
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -183,9 +184,20 @@ func StripFuzz(p *Plan) {
 }
 
 // FuzzStepID returns the ID of the sibling step that runs a case against the
-// step targetID. It keeps to characters a step ID may hold.
+// step targetID, as in addItem__fuzz_quantity_below_min. It keeps to letters,
+// digits, and underscores, so expressions can name it and its setup copies.
 func FuzzStepID(targetID, caseID string) string {
-	return targetID + "--fuzz-" + strings.NewReplacer(".", "-", " ", "-").Replace(caseID)
+	return identifier(targetID) + "__fuzz_" + identifier(caseID)
+}
+
+var nonIdentifier = regexp.MustCompile(`[^A-Za-z0-9_]+`)
+
+// identifier makes s a valid step ID for {{step.output}} expressions, which
+// allow letters, digits, and underscores only. A copy of a setup step is named
+// after its case's step, and a copied assertion or value that reads the
+// original by name is rewritten to read the copy, so the name must parse.
+func identifier(s string) string {
+	return nonIdentifier.ReplaceAllString(s, "_")
 }
 
 // Fuzz scopes: what a case's request runs on.

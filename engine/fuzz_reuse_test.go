@@ -229,3 +229,20 @@ func TestReadOnlyStep(t *testing.T) {
 	eng.graph.Nodes["listAirports"].Cleanup.Node = "x"
 	assert.False(t, eng.readOnlyStep(plan.Step{Node: "listAirports"}), "a node with a cleanup pairing makes something")
 }
+
+// TestFuzzReuse_CopiedExpressionsParse checks that a setup copy whose value
+// reads an earlier step by name, as Duffel's getOffer assertion reads
+// {{search.firstSliceOrigin}}, still parses once the name is the copy's.
+func TestFuzzReuse_CopiedExpressionsParse(t *testing.T) {
+	eng, _ := buildTravelEngine(t)
+	p := travelPlan(name("name.empty", plan.FuzzNegative, ""))
+	p.Execution.Steps[2].Values["name"] = plan.StepValue{Default: "{{res.id}}"}
+	result := eng.Run(context.Background(), p)
+	require.NoError(t, result.Error)
+	assert.Equal(t, []string{SetupFresh}, setups(result), "the copy of t1 resolved its expression")
+	for _, st := range result.Steps {
+		if st.FuzzSetup != "" && st.Node == "addTraveler" {
+			assert.Equal(t, "r2", st.Inputs["name"], "it read its own reservation's copy")
+		}
+	}
+}

@@ -26,17 +26,17 @@ cd examples/shop/
   [ 1/23] listProducts         200  0ms
   [ 2/23] createCart           201  0ms
   [ 4/23] addItem              201  0ms
-  [ 5/23] addItem--fuzz-quant~ 201  0ms  fuzz quantity.at-min (positive)
+  [ 5/23] addItem__fuzz_quan~ 201  0ms  fuzz quantity.at-min (positive)
   [ 6/23] checkout             201  0ms
   [ 8/23] paymentCharge        201  0ms
-  [ 9/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.below-min (negative)
-  [11/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.fraction (negative)
-  [13/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.overflow (negative)
-  [15/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.wrong-type (negative)
-  [17/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.missing (negative)
-  [19/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.null (negative)
-  [21/23] addItem--fuzz-quant~ 409  0ms  fuzz quantity.large (edge)
-  [23/23] addItem--fuzz-body-~ 201  0ms  fuzz body.extra-property (edge)
+  [ 9/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.below-min (negative)
+  [11/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.fraction (negative)
+  [13/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.overflow (negative)
+  [15/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.wrong-type (negative)
+  [17/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.missing (negative)
+  [19/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.null (negative)
+  [21/23] addItem__fuzz_quan~ 409  0ms  fuzz quantity.large (edge)
+  [23/23] addItem__fuzz_body~ 201  0ms  fuzz body.extra-property (edge)
 ...
 PASSED (16/16 steps, 3ms)
 Fuzz: 9 cases: 9 as expected · setup: 2 fresh, 7 reused

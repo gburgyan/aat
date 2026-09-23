@@ -37,7 +37,7 @@ func TestExpandFuzzCases_Shared(t *testing.T) {
 	}
 	require.NoError(t, ExpandFuzzCases(p, "add", cases, FuzzExpandOptions{Scope: FuzzScopeShared}))
 
-	assert.Equal(t, []string{"cart", "add", "add--fuzz-quantity-above-max", "add--fuzz-quantity-zero", "checkout"}, stepIDs(p))
+	assert.Equal(t, []string{"cart", "add", "add__fuzz_quantity_above_max", "add__fuzz_quantity_zero", "checkout"}, stepIDs(p))
 	child := p.Execution.Steps[2]
 	assert.Equal(t, StepValue{Default: 100, Raw: true}, child.Values["quantity"])
 	assert.Equal(t, "cart.cartId", child.Values["cartId"].From, "other values stay")
@@ -53,10 +53,10 @@ func TestExpandFuzzCases_Isolated(t *testing.T) {
 	p := fuzzPlan()
 	require.NoError(t, ExpandFuzzCases(p, "add", []FuzzCase{{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0}}, FuzzExpandOptions{Scope: FuzzScopeIsolated}))
 
-	assert.Equal(t, []string{"cart", "add", "cart__add--fuzz-quantity-zero", "add--fuzz-quantity-zero", "checkout"}, stepIDs(p))
+	assert.Equal(t, []string{"cart", "add", "cart__add__fuzz_quantity_zero", "add__fuzz_quantity_zero", "checkout"}, stepIDs(p))
 	child := p.Execution.Steps[3]
-	assert.Equal(t, []string{"cart__add--fuzz-quantity-zero"}, child.DependsOn)
-	assert.Equal(t, "cart__add--fuzz-quantity-zero.cartId", child.Values["cartId"].From, "the case reads its own cart")
+	assert.Equal(t, []string{"cart__add__fuzz_quantity_zero"}, child.DependsOn)
+	assert.Equal(t, "cart__add__fuzz_quantity_zero.cartId", child.Values["cartId"].From, "the case reads its own cart")
 }
 
 func TestExpandFuzzCases_UnknownTarget(t *testing.T) {
@@ -73,7 +73,7 @@ func TestExpandFuzzCases_TwoTargetsSameCase(t *testing.T) {
 		assert.False(t, seen[id], "duplicate step %s", id)
 		seen[id] = true
 	}
-	assert.Contains(t, stepIDs(p), "cart__checkout--fuzz-body-extra-property")
+	assert.Contains(t, stepIDs(p), "cart__checkout__fuzz_body_extra_property")
 }
 
 // TestExpandFuzzCases_SetupIncludesStepsThatBuildOnIt checks that a case's
@@ -91,12 +91,12 @@ func TestExpandFuzzCases_SetupIncludesStepsThatBuildOnIt(t *testing.T) {
 
 	assert.Equal(t, []string{
 		"products", "cart", "item", "unrelated", "order",
-		"products__order--fuzz-tier-empty", "cart__order--fuzz-tier-empty", "item__order--fuzz-tier-empty",
-		"order--fuzz-tier-empty",
+		"products__order__fuzz_tier_empty", "cart__order__fuzz_tier_empty", "item__order__fuzz_tier_empty",
+		"order__fuzz_tier_empty",
 	}, stepIDs(p), "the item's prerequisites come too, in plan order; the unrelated step does not")
 	item := p.Execution.Steps[7]
-	assert.Equal(t, []string{"cart__order--fuzz-tier-empty", "products__order--fuzz-tier-empty"}, item.DependsOn)
-	assert.Equal(t, "order--fuzz-tier-empty", item.FuzzSetup)
+	assert.Equal(t, []string{"cart__order__fuzz_tier_empty", "products__order__fuzz_tier_empty"}, item.DependsOn)
+	assert.Equal(t, "order__fuzz_tier_empty", item.FuzzSetup)
 	assert.Empty(t, p.Execution.Steps[8].FuzzSetup, "the case's own step is not setup")
 }
 
@@ -173,21 +173,29 @@ func TestExpandFuzzCases_ReuseOrderAndReadOnly(t *testing.T) {
 
 	assert.Equal(t, []string{
 		"products", "cart", "view", "add",
-		"cart__add--fuzz-quantity-zero", "view__add--fuzz-quantity-zero", "add--fuzz-quantity-zero",
-		"cart__add--fuzz-quantity-large", "view__add--fuzz-quantity-large", "add--fuzz-quantity-large",
+		"cart__add__fuzz_quantity_zero", "view__add__fuzz_quantity_zero", "add__fuzz_quantity_zero",
+		"cart__add__fuzz_quantity_large", "view__add__fuzz_quantity_large", "add__fuzz_quantity_large",
 	}, stepIDs(p), "listProducts is read-only and depends on nothing copied, so it is used as it is; getCart reads the copied cart, so it is copied")
 
 	byID := map[string]Step{}
 	for _, s := range p.Execution.Steps {
 		byID[s.StepID()] = s
 	}
-	assert.Equal(t, "cart", byID["cart__add--fuzz-quantity-zero"].FuzzSetupOf)
-	assert.Equal(t, "add--fuzz-quantity-zero", byID["view__add--fuzz-quantity-zero"].FuzzSetup)
-	assert.Contains(t, byID["add--fuzz-quantity-zero"].DependsOn, "products", "the uncopied step keeps its ID")
+	assert.Equal(t, "cart", byID["cart__add__fuzz_quantity_zero"].FuzzSetupOf)
+	assert.Equal(t, "add__fuzz_quantity_zero", byID["view__add__fuzz_quantity_zero"].FuzzSetup)
+	assert.Contains(t, byID["add__fuzz_quantity_zero"].DependsOn, "products", "the uncopied step keeps its ID")
 
 	// The second case waits for the first: its first copy, and its own step.
-	assert.Contains(t, byID["cart__add--fuzz-quantity-large"].DependsOn, "add--fuzz-quantity-zero")
-	assert.NotContains(t, byID["view__add--fuzz-quantity-large"].DependsOn, "add--fuzz-quantity-zero", "it waits through the cart copy")
-	assert.Contains(t, byID["add--fuzz-quantity-large"].DependsOn, "add--fuzz-quantity-zero")
-	assert.NotContains(t, byID["cart__add--fuzz-quantity-zero"].DependsOn, "add", "the first case doesn't wait for the target")
+	assert.Contains(t, byID["cart__add__fuzz_quantity_large"].DependsOn, "add__fuzz_quantity_zero")
+	assert.NotContains(t, byID["view__add__fuzz_quantity_large"].DependsOn, "add__fuzz_quantity_zero", "it waits through the cart copy")
+	assert.Contains(t, byID["add__fuzz_quantity_large"].DependsOn, "add__fuzz_quantity_zero")
+	assert.NotContains(t, byID["cart__add__fuzz_quantity_zero"].DependsOn, "add", "the first case doesn't wait for the target")
+}
+
+func TestFuzzStepID_IsAnExpressionIdentifier(t *testing.T) {
+	assert.Equal(t, "book__fuzz_email_whitespace", FuzzStepID("book", "email.whitespace"))
+	assert.Equal(t, "pay_declined__fuzz_body_shipping_country_remove", FuzzStepID("pay--declined", "body.shipping.country.remove"))
+	// A copy is named after its case's step; an expression can read it.
+	_, err := EvalExpr("{{search__book__fuzz_email_whitespace.origin}}", ExprContext{Outputs: func(step, output string) (any, error) { return "DEN", nil }})
+	assert.NoError(t, err)
 }
