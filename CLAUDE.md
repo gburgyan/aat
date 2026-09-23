@@ -32,6 +32,10 @@ make clean         # Remove binaries and frontend artifacts (node_modules, dist)
 
 **Before committing or pushing**, run `make check` to catch issues that CI would flag. This runs `gofmt -s` formatting, tests with the race detector, and linting — the same checks the CI/CD pipeline performs.
 
+## Pull Requests
+
+One feature, one PR against `main`. Don't stack PRs: when a feature is spread over a chain of PRs, no single diff shows the whole feature, which makes review harder, and every merge needs the next PR retargeted. Keep the steps reviewable as well-scoped commits inside the one PR instead. If a feature is truly too big for one PR, split it into pieces that each stand on their own and target `main`, not each other.
+
 ## Package Structure
 
 | Package | Responsibility |
