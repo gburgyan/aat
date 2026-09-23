@@ -123,6 +123,10 @@ type Step struct {
 	FuzzSetup string `yaml:"-" json:"fuzzSetup,omitempty"`
 	// FuzzSetupOf is the ID of the step a fuzz setup copy copies.
 	FuzzSetupOf string `yaml:"-" json:"fuzzSetupOf,omitempty"`
+	// VariantOf is set on a step instantiation made from another, a mutation
+	// sibling or a clone for an isolated mutation: the ID of the step it was
+	// made from. It is never read from a plan file.
+	VariantOf string `yaml:"-" json:"variantOf,omitempty"`
 }
 
 // Mutation is a negative-test variant of a step. At instantiation it produces

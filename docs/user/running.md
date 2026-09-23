@@ -318,7 +318,7 @@ When you run a plan, AAT performs these steps in order:
 
 ### Step Execution Order
 
-Steps run in topological order based on `dependsOn` declarations. Steps with no dependencies run first. Steps that depend on earlier steps wait until their dependencies complete. Within a dependency level, steps run in plan declaration order.
+Steps run in `dependsOn` order: a step waits until the steps it depends on have run. Of the steps ready to run, the one the plan lists first goes next, so a plan whose steps come after what they depend on runs in the order written.
 
 ### Value Resolution at Runtime
 

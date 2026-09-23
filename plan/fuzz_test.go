@@ -199,3 +199,35 @@ func TestFuzzStepID_IsAnExpressionIdentifier(t *testing.T) {
 	_, err := EvalExpr("{{search__book__fuzz_email_whitespace.origin}}", ExprContext{Outputs: func(step, output string) (any, error) { return "DEN", nil }})
 	assert.NoError(t, err)
 }
+
+// TestExpandFuzzCases_SetupSkipsStepsOnReadOnlyPrereqs checks that a step
+// that depends only on a read-only prerequisite of the target is not copied:
+// it changes nothing the target works on.
+func TestExpandFuzzCases_SetupSkipsStepsOnReadOnlyPrereqs(t *testing.T) {
+	p := &Plan{Execution: Execution{Steps: []Step{
+		{ID: "products", Node: "listProducts"},
+		{ID: "cart", Node: "createCart"},
+		{ID: "wishlist", Node: "createWishlist", DependsOn: []string{"products"}},
+		{ID: "add", Node: "addItem", DependsOn: []string{"cart", "products"}},
+	}}}
+	readOnly := func(s Step) bool { return s.Node == "listProducts" }
+	require.NoError(t, ExpandFuzzCases(p, "add", []FuzzCase{{ID: "q.a", Mode: FuzzEdge, Input: "quantity", Value: 1}},
+		FuzzExpandOptions{Scope: FuzzScopeIsolated, ReadOnly: readOnly}))
+	assert.Equal(t, []string{"products", "cart", "wishlist", "add", "cart__add__fuzz_q_a", "add__fuzz_q_a"}, stepIDs(p))
+}
+
+func TestExpandMutations_IsolatedClonesAreNotFuzzTargets(t *testing.T) {
+	p := &Plan{Execution: Execution{Steps: []Step{
+		{ID: "cart", Node: "createCart", FuzzSettings: &FuzzSettings{Cases: 2}},
+		{ID: "add", Node: "addItem", DependsOn: []string{"cart"}, MutationScope: "isolated", Values: map[string]StepValue{},
+			Mutations: []Mutation{{Name: "bad", Set: map[string]any{"quantity": -1}, ExpectStatus: ExpectedStatuses{{Code: 400}}}}},
+	}}}
+	expandMutations(p)
+	var withBlock []string
+	for _, s := range p.Execution.Steps {
+		if s.FuzzSettings != nil {
+			withBlock = append(withBlock, s.StepID())
+		}
+	}
+	assert.Equal(t, []string{"cart"}, withBlock)
+}

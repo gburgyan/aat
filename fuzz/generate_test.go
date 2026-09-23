@@ -200,3 +200,23 @@ func TestGenerate_OptionalInputMissingIsPositive(t *testing.T) {
 	assert.NotContains(t, byID, "limit.null", "a query parameter can't be null")
 	assert.NotContains(t, byID, "cursor.missing", "an optional input with no value is left out already")
 }
+
+// TestGenerate_CapAfterSkipAndOnly checks that the cap draws from the cases
+// left after Skip and Only, so it never spends picks on skipped inputs or
+// drops a case Only names.
+func TestGenerate_CapAfterSkipAndOnly(t *testing.T) {
+	now := time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)
+	for seed := uint64(1); seed <= 20; seed++ {
+		cases, capped, err := GenerateCapped(addItemTarget(), Options{Skip: []string{"note"}, Max: 10, Seed: seed, Now: now})
+		require.NoError(t, err)
+		assert.True(t, capped)
+		assert.Len(t, cases, 10)
+		for _, c := range cases {
+			assert.NotEqual(t, "note", c.Input, c.ID)
+		}
+
+		cases, _, err = GenerateCapped(addItemTarget(), Options{Only: []string{"quantity.below-min", "quantity.above-max"}, Max: 5, Seed: seed, Now: now})
+		require.NoError(t, err)
+		assert.Len(t, cases, 2, "both named cases, whatever the seed")
+	}
+}

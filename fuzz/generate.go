@@ -13,6 +13,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -44,8 +45,12 @@ type Options struct {
 	// value is not wired from another step or input; an input named here is
 	// fuzzed even when it is wired.
 	Inputs []string
-	// Max caps the number of cases; 0 means all of them. When it caps, Seed
-	// picks which run.
+	// Skip names inputs never to fuzz.
+	Skip []string
+	// Only limits the cases to those with these IDs.
+	Only []string
+	// Max caps the number of cases, after Skip and Only; 0 means all of them.
+	// When it caps, Seed picks which run.
 	Max  int
 	Seed uint64
 	// Now dates the date cases; zero means time.Now.
@@ -118,6 +123,9 @@ func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 		keep(templateCases(fields, !grpc))
 	}
 	sort.SliceStable(cases, func(i, j int) bool { return modeRank(cases[i].Mode) < modeRank(cases[j].Mode) })
+	cases = slices.DeleteFunc(cases, func(c plan.FuzzCase) bool {
+		return c.Input != "" && slices.Contains(opts.Skip, c.Input) || len(opts.Only) > 0 && !slices.Contains(opts.Only, c.ID)
+	})
 
 	if opts.Max > 0 && len(cases) > opts.Max {
 		r := rand.New(rand.NewPCG(opts.Seed, 0x66757a7a)) // "fuzz"

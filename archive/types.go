@@ -167,6 +167,9 @@ type FuzzRecord struct {
 	Finding string `json:"finding,omitempty" redact:"-"`
 	// Fails is true when the finding failed the run.
 	Fails bool `json:"fails,omitempty"`
+	// OutputsError says why the outputs of a successful response could not
+	// be read; the case was judged on the response anyway.
+	OutputsError string `json:"outputsError,omitempty"`
 	// Setup is how the steps the case ran on came to be: fresh, reused, or
 	// failed; empty on the happy path's own.
 	Setup string `json:"setup,omitempty" redact:"-"`

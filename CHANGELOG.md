@@ -59,6 +59,12 @@ the graph and plan formats may still change before 1.0.
   of the HTTP status it maps to. See
   [Negative Testing](https://gburgyan.github.io/aat/plans/#negative-testing-expectfailure).
 
+### Changed
+- **Steps run in the order the plan lists them, wherever `dependsOn` allows.** Of the steps ready to run, the one
+  written first now goes next; before, a step that became ready went to the back of the queue, so a plan could run
+  its steps in an order it never wrote. See
+  [Step Execution Order](https://gburgyan.github.io/aat/running/#step-execution-order).
+
 ## [0.3.2] - 2026-09-22
 
 A bug-fix release: a gRPC call that outlives its deadline is now always an error, never a response the step asserts

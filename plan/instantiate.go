@@ -403,6 +403,7 @@ func expandMutations(p *Plan) {
 			child.Assertions = nil
 			child.Repeat = nil
 			child.ID = parentID + "--" + m.Name
+			child.VariantOf = parentID
 			for k, v := range m.Set {
 				child.Values[k] = StepValue{Default: v}
 			}
@@ -473,6 +474,8 @@ func cloneClosureWithSuffix(closure []Step, suffix string) []Step {
 		c := deepCopyStep(s)
 		c.ID = s.StepID() + suffix
 		c.IsGoal = false
+		c.FuzzSettings = nil // a clone is setup for its sibling, not a target
+		c.VariantOf = s.StepID()
 		rewriteStepRefs(&c, idMap)
 		clones[i] = c
 	}

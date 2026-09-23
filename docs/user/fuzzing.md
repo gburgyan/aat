@@ -59,12 +59,15 @@ A case that the API accepts changes something: an item goes into a cart, a trave
 made. If every case ran on the happy path's cart, the cart would fill up. The rest of the plan would see a different
 cart, and an API with a limit, such as a few travelers per reservation, would start refusing cases for the wrong
 reason. So by default a case runs on a copy of the steps its target depends on. The copy also includes the earlier
-steps that build on those, such as the `addItem` a checkout needs even though it reads nothing from it.
+steps that build on those, such as the `addItem` a checkout needs even though it reads nothing from it. A step that
+depends only on read-only steps, such as a wishlist made from `listProducts`, changes nothing the target works on and
+isn't copied. A target's cases all run before the steps that come after it in the plan.
 
 Making a copy for every case is expensive against a slow, rate-limited API, so the default scope, `reuse`, shares one:
 
-- **Sharing.** A target's cases share a copy of its setup as long as the API refuses them. A refusal (a 4xx) changes
-  nothing, so the next case can use the same cart.
+- **Sharing.** A target's cases share a copy of its setup as long as the API refuses them. A refusal (a 4xx, or a
+  success whose body the graph's `errorDetection` reads as an error) changes nothing, so the next case can use the
+  same cart. A target that only reads, such as `getOrder`, never changes its setup, so its cases all share one.
 - **When a copy is used up.** When a case is accepted (2xx), fails with a 5xx that may have half-written something, or
   gets no response, the copy may have changed. The next case gets a fresh one.
 - **Read-only steps.** A setup step that only reads (a GET, HEAD, or OPTIONS with no cleanup pairing), such as

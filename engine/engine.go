@@ -312,6 +312,21 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		stepResult := e.executeStepWithTracking(ctx, step, node, state)
 		stepResult.FuzzSetup = step.FuzzSetup
 
+		// expectFailure is resolved before anything is displayed or decided,
+		// a fuzz setup copy's failure included, because whether the step failed
+		// at all depends on it.
+		if stepResult.Error == nil && step.ExpectFailure != nil {
+			efr := &ExpectFailureResult{
+				ExpectedStatuses: step.ExpectFailure.Status,
+				ActualStatus:     stepResult.StatusCode,
+				Description:      step.ExpectFailure.Description,
+			}
+			// A gRPC step is matched by status name when the plan wrote one,
+			// so that codes sharing an HTTP status stay distinguishable.
+			efr.Passed = step.ExpectFailure.Status.Matches(stepResult.StatusCode, grpcStatusName(stepResult.Response))
+			stepResult.ExpectFailure = efr
+		}
+
 		// A copy of a setup step made for a fuzz case ends that case when it
 		// fails, not the run: the case says nothing about the target then.
 		if step.FuzzSetup != "" && (stepResult.Error != nil || e.stepFailed(step, &stepResult)) {
@@ -353,8 +368,9 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				outcome = OutcomeFailed
 			}
 			// A case the API accepted may have created something to clean up,
-			// and the cleanup reads the step's outputs.
-			if stepResult.Error == nil && stepResult.StatusCode < 400 {
+			// and the cleanup reads the step's outputs: without them it has
+			// nothing to name the resource by.
+			if stepResult.Response != nil && stepResult.StatusCode < 400 && stepResult.ResponseBodyError == nil && stepResult.OutputsError == "" {
 				if stepResult.Outputs != nil {
 					state.StoreOutputs(step.StepID(), stepResult.Outputs)
 				}
@@ -367,20 +383,6 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				e.Observer.OnStepComplete(i, total, stepResult)
 			}
 			continue
-		}
-
-		// expectFailure is resolved before anything is displayed or decided,
-		// because whether the step failed at all depends on it.
-		if stepResult.Error == nil && step.ExpectFailure != nil {
-			efr := &ExpectFailureResult{
-				ExpectedStatuses: step.ExpectFailure.Status,
-				ActualStatus:     stepResult.StatusCode,
-				Description:      step.ExpectFailure.Description,
-			}
-			// A gRPC step is matched by status name when the plan wrote one,
-			// so that codes sharing an HTTP status stay distinguishable.
-			efr.Passed = step.ExpectFailure.Status.Matches(stepResult.StatusCode, grpcStatusName(stepResult.Response))
-			stepResult.ExpectFailure = efr
 		}
 
 		// A knownIssue is resolved next, so the progress line, the archive,
@@ -1025,26 +1027,33 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		result.OriginalPath = originalPath
 	}
 
-	// Extract outputs (only on success)
+	// Extract outputs (only on success). A fuzz case is judged on its
+	// response, so one whose outputs can't be read, such as an error page
+	// behind a 200, carries on without them rather than failing as if nothing
+	// had come back.
 	if resp.StatusCode < 400 {
 		outputs, err := adp.ExtractOutputs(resp)
-		if err != nil {
+		switch {
+		case err != nil && step.Fuzz == nil:
 			result.Error = fmt.Errorf("extracting outputs: %w", err)
 			return result
-		}
-		tmpl, hasTemplate := e.registry.GetTemplate(node.Adapter)
-		if hasTemplate {
-			convertHeaderOutputs(outputs, node, tmpl)
-		}
-		outputs = echoInputOutputs(outputs, node, inputs)
-		result.Outputs = outputs
+		case err != nil:
+			result.OutputsError = err.Error()
+		default:
+			tmpl, hasTemplate := e.registry.GetTemplate(node.Adapter)
+			if hasTemplate {
+				convertHeaderOutputs(outputs, node, tmpl)
+			}
+			outputs = echoInputOutputs(outputs, node, inputs)
+			result.Outputs = outputs
 
-		// Record transform script if present
-		if hasTemplate && tmpl.HasTransform() {
-			result.TransformScript = tmpl.Response.Transform
-		}
+			// Record transform script if present
+			if hasTemplate && tmpl.HasTransform() {
+				result.TransformScript = tmpl.Response.Transform
+			}
 
-		result.DisplayOutputs = displayOutputs(node, outputs)
+			result.DisplayOutputs = displayOutputs(node, outputs)
+		}
 
 		// Check for errors buried in the response body
 		rules := effectiveErrorRules(node, e.graph)

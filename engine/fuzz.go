@@ -126,7 +126,9 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		fromCLI := false
 		if cli != nil {
 			for _, t := range cli.Targets {
-				if s.StepID() == t || s.Node == t {
+				// A node name takes the plan's own steps of that node, not the
+				// mutation siblings and isolated clones instantiation made.
+				if s.StepID() == t || s.Node == t && s.VariantOf == "" {
 					fromCLI = true
 					matched[t] = true
 				}
@@ -155,7 +157,7 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		if block == nil {
 			block = &plan.FuzzSettings{}
 		}
-		opts := fuzz.Options{Modes: block.Mode, Inputs: block.Inputs, Max: block.Cases, Seed: seed, Now: time.Now()}
+		opts := fuzz.Options{Modes: block.Mode, Inputs: block.Inputs, Skip: block.Skip, Max: block.Cases, Seed: seed, Now: time.Now()}
 		only, scope, fail := block.Only, block.Scope, block.Fail
 		if tg.fromCLI {
 			if len(cli.Modes) > 0 {
@@ -183,24 +185,31 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 
 		var cases []plan.FuzzCase
 		if tg.fromCLI || block.Generates() {
+			opts.Only = only
 			tmpl, _ := e.registry.GetTemplate(node.Adapter)
 			generated, capped, err := fuzz.GenerateCapped(fuzz.Target{Step: step, Node: node, KB: e.KB, Template: tmpl}, opts)
 			if err != nil {
 				return fmt.Errorf("fuzz target %s: %w", step.StepID(), err)
 			}
 			e.fuzzCapped = e.fuzzCapped || capped
-			cases = slices.DeleteFunc(generated, func(c plan.FuzzCase) bool { return c.Input != "" && slices.Contains(block.Skip, c.Input) })
+			cases = generated
 		}
 		// A pinned case replaces a generated one with its ID.
 		for _, pc := range block.Pinned {
-			cases = slices.DeleteFunc(cases, func(c plan.FuzzCase) bool { return c.ID == pc.ID })
-			cases = append(cases, pc.Case())
+			c, err := e.pinnedCase(step, node, pc)
+			if err != nil {
+				return err
+			}
+			cases = slices.DeleteFunc(cases, func(g plan.FuzzCase) bool { return g.ID == pc.ID })
+			if len(only) == 0 || slices.Contains(only, pc.ID) {
+				cases = append(cases, c)
+			}
 		}
-		if len(only) > 0 {
-			cases = slices.DeleteFunc(cases, func(c plan.FuzzCase) bool { return !slices.Contains(only, c.ID) })
-		}
-		for _, c := range cases {
-			found[c.ID] = true
+		// --fuzz-case names cases of the steps --fuzz names.
+		if tg.fromCLI {
+			for _, c := range cases {
+				found[c.ID] = true
+			}
 		}
 		if scope == "" {
 			scope = plan.FuzzScopeReuse
@@ -213,13 +222,13 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		if err := plan.ExpandFuzzCases(p, step.StepID(), cases, plan.FuzzExpandOptions{Scope: scope, ReadOnly: e.readOnlyStep}); err != nil {
 			return err
 		}
-		e.fuzzRun.groups[step.StepID()] = &fuzzGroup{scope: scope, live: map[string]string{}}
+		e.fuzzRun.groups[step.StepID()] = &fuzzGroup{scope: scope, readOnly: e.readOnlyStep(step), live: map[string]string{}}
 		for _, c := range cases {
 			e.fuzzRun.caseTarget[plan.FuzzStepID(step.StepID(), c.ID)] = step.StepID()
 		}
 		e.fuzzJudge[step.StepID()] = fuzzJudging{fail: fail, accept: block.Accept}
 	}
-	if cli != nil && len(targets) > 0 {
+	if cli != nil && len(matched) > 0 {
 		for _, id := range cli.Cases {
 			if !found[id] {
 				return fmt.Errorf("--fuzz-case %s: no target step has a case with that ID", id)
@@ -237,6 +246,42 @@ func planFuzzes(p *plan.Plan) bool {
 		}
 	}
 	return false
+}
+
+// pinnedCase returns a pinned case as the fuzzer sends it. A pinned null for
+// an input is sent as the generator sends one: the body fields the input
+// fills are set to null, since an input resolved to nothing is left out of
+// the request instead.
+func (e *Engine) pinnedCase(step plan.Step, node *graph.Node, pc plan.PinnedFuzzCase) (plan.FuzzCase, error) {
+	c := pc.Case()
+	if c.Value != nil || len(c.Patch) > 0 {
+		return c, nil
+	}
+	if tmpl, ok := e.registry.GetTemplate(node.Adapter); ok {
+		fields, _ := tmpl.RequestFields()
+		for _, f := range fields {
+			if f.Input == c.Input && f.Where == adapter.FieldBody {
+				c.Patch = append(c.Patch, plan.RequestPatch{Where: f.Where, Path: f.Path, Op: adapter.PatchSet})
+			}
+		}
+	}
+	if len(c.Patch) == 0 {
+		return c, fmt.Errorf("fuzz target %s: pinned case %s sets %s to null, but the template sends it in no body field; give a patch instead",
+			step.StepID(), c.ID, c.Input)
+	}
+	return c, nil
+}
+
+// refused reports whether the API refused a request it answered: a 4xx, or
+// a success whose body the graph's error detection reads as an error.
+func refused(r *StepResult) bool {
+	return r.Response != nil && (r.StatusCode >= 400 && r.StatusCode < 500 || r.StatusCode < 400 && r.ResponseBodyError != nil)
+}
+
+// notSent reports whether a request got no response because it was never
+// sent: aat could not build it, or its setup failed.
+func notSent(r *StepResult) bool {
+	return r.Response == nil && (r.Request == nil || errors.As(r.Error, new(*adapter.NotSentError)))
 }
 
 // judgeFuzz decides a fuzz step's finding from its result.
@@ -264,16 +309,18 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 	// response validator's complaint about it is this finding, not a
 	// schema violation.
 	undocumented := false
-	if e.oasCache != nil && r.Error == nil && r.Response != nil && grpcStatusName(r.Response) == "" {
+	if e.oasCache != nil && r.Response != nil && grpcStatusName(r.Response) == "" {
 		documented, known := oas.StatusDocumented(node, e.graphOAS, e.oasCache, r.StatusCode)
 		undocumented = known && !documented
 	}
 
 	finding := ""
+	// Anything with a response is judged on it: an error after one, such as
+	// outputs that couldn't be read, says nothing about whether it came.
 	switch {
-	case r.Error != nil && (r.Request == nil || errors.As(r.Error, new(*adapter.NotSentError))):
+	case notSent(r):
 		finding = FindingNotSent
-	case r.Error != nil:
+	case r.Response == nil:
 		finding = FindingNoResponse
 	case r.StatusCode >= 500:
 		finding = FindingServerError
@@ -281,9 +328,9 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 		finding = FindingUndocumentedStatus
 	case r.OASValidation != nil && r.OASValidation.Response != nil && !r.OASValidation.Response.Valid && !r.OASValidation.Response.Skipped:
 		finding = FindingSchemaViolation
-	case mode == plan.FuzzNegative && r.StatusCode < 400:
+	case mode == plan.FuzzNegative && !refused(r):
 		finding = FindingAcceptedInvalid
-	case mode == plan.FuzzPositive && r.StatusCode >= 400:
+	case mode == plan.FuzzPositive && refused(r):
 		finding = FindingRejectedValid
 	}
 	judging, ok := e.fuzzJudge[c.Target]
@@ -292,7 +339,7 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 	}
 	fail := judging.fail
 	// A status the block accepts is never a judgement call against the API.
-	if judging.accept.Matches(r.StatusCode, grpcStatusName(r.Response)) && r.Error == nil {
+	if r.Response != nil && judging.accept.Matches(r.StatusCode, grpcStatusName(r.Response)) {
 		switch finding {
 		case FindingAcceptedInvalid, FindingRejectedValid, FindingUndocumentedStatus:
 			finding = ""
@@ -394,6 +441,9 @@ const maxSetupFailures = 3
 // fuzzGroup is a fuzz target's setup during Run.
 type fuzzGroup struct {
 	scope string
+	// readOnly is true when the target only reads, so no case can change
+	// its setup.
+	readOnly bool
 	// live maps a setup step's original ID to the copy the next case may
 	// reuse, while clean.
 	live map[string]string
@@ -498,7 +548,8 @@ func (f *fuzzRunState) setupCopyFailed(step plan.Step) {
 
 // caseJudged records how a case's response leaves its setup: clean when the
 // API refused the request or it was never sent, since a refusal changes
-// nothing, and changed otherwise, so the next case sets up afresh.
+// nothing, or when the target only reads, and changed otherwise, so the next
+// case sets up afresh.
 func (f *fuzzRunState) caseJudged(step plan.Step, r *StepResult) {
 	caseID := step.StepID()
 	g := f.groups[f.caseTarget[caseID]]
@@ -507,7 +558,5 @@ func (f *fuzzRunState) caseJudged(step plan.Step, r *StepResult) {
 	}
 	g.failures = 0
 	g.building = ""
-	refused := r.Error == nil && r.StatusCode >= 400 && r.StatusCode < 500
-	notSent := r.Error != nil && (r.Request == nil || errors.As(r.Error, new(*adapter.NotSentError)))
-	g.clean = refused || notSent
+	g.clean = g.readOnly || refused(r) || notSent(r)
 }

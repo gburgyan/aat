@@ -60,9 +60,11 @@ type RequestPatch struct {
 // the step at idx: the steps it depends on, and every earlier step that
 // builds on those, with their own prerequisites, in plan order. A step that
 // adds an item to a cart the target checks out is part of the setup even when
-// the target reads nothing from it. Fuzz steps and the copies made for other
-// cases are never part of it.
-func fuzzSetupClosure(steps []Step, idx int, byID map[string]Step) []Step {
+// the target reads nothing from it. A step builds on the setup only through a
+// step that changes something: one that depends only on read-only steps, as
+// readOnly reports them, is left out. Fuzz steps and the copies made for
+// other cases are never part of it.
+func fuzzSetupClosure(steps []Step, idx int, byID map[string]Step, readOnly func(Step) bool) []Step {
 	in := map[string]bool{}
 	for _, s := range transitivePrereqClosure(steps[idx], byID) {
 		in[s.StepID()] = true
@@ -75,7 +77,7 @@ func fuzzSetupClosure(steps []Step, idx int, byID map[string]Step) []Step {
 			}
 			builds := false
 			for _, dep := range s.DependsOn {
-				if in[dep] {
+				if in[dep] && (readOnly == nil || !readOnly(byID[dep])) {
 					builds = true
 					break
 				}
@@ -256,7 +258,7 @@ func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, opts FuzzExpand
 	var toCopy []Step
 	if opts.Scope != FuzzScopeShared {
 		copied := map[string]bool{}
-		for _, s := range fuzzSetupClosure(p.Execution.Steps, idx, byID) {
+		for _, s := range fuzzSetupClosure(p.Execution.Steps, idx, byID, opts.ReadOnly) {
 			dependsOnCopy := false
 			for _, dep := range s.DependsOn {
 				if copied[dep] {

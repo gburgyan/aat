@@ -118,6 +118,7 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 			rec.Fuzz.JudgedAs = s.Fuzz.JudgedAs
 		}
 		rec.Fuzz.Setup = s.Fuzz.Setup
+		rec.Fuzz.OutputsError = s.OutputsError
 	}
 	if s.FuzzSetup != "" {
 		rec.FuzzSetup = s.FuzzSetup

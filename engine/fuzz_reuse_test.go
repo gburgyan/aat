@@ -22,14 +22,17 @@ import (
 // and POST /reservations/{id}/travelers adds a traveler to it, at most two per
 // reservation (409 beyond that). A name that is empty or longer than 20 is
 // refused with a 400, and "crash" fails with a 500. GET /airports lists
-// airports. With failAfterFirst, every reservation request after the first
-// fails with a 503.
+// airports, and GET /reservations/{id} reads a reservation. With
+// failAfterFirst, every reservation request after the first fails with a 503;
+// with roomyCopies, every reservation after the first takes three travelers.
 type travelAPI struct {
 	mu             sync.Mutex
 	reservations   map[string]int
 	creates        int
 	airports       int
+	reads          int
 	failAfterFirst bool
+	roomyCopies    bool
 }
 
 func (a *travelAPI) handler(w http.ResponseWriter, r *http.Request) {
@@ -40,6 +43,9 @@ func (a *travelAPI) handler(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodGet && r.URL.Path == "/airports":
 		a.airports++
 		_, _ = w.Write([]byte(`{"airports":["DEN","SFO"]}`))
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/reservations/"):
+		a.reads++
+		_, _ = fmt.Fprintf(w, `{"travelers":%d}`, a.reservations[strings.TrimPrefix(r.URL.Path, "/reservations/")])
 	case r.Method == http.MethodPost && r.URL.Path == "/reservations":
 		a.creates++
 		if a.failAfterFirst && a.creates > 1 {
@@ -57,12 +63,16 @@ func (a *travelAPI) handler(w http.ResponseWriter, r *http.Request) {
 			Name string `json:"name"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
+		limit := 2
+		if a.roomyCopies && id != "r1" {
+			limit = 3
+		}
 		switch {
 		case body.Name == "crash":
 			w.WriteHeader(http.StatusInternalServerError)
 		case body.Name == "" || len(body.Name) > 20:
 			w.WriteHeader(http.StatusBadRequest)
-		case a.reservations[id] >= 2:
+		case a.reservations[id] >= limit:
 			w.WriteHeader(http.StatusConflict)
 		default:
 			a.reservations[id]++
@@ -83,6 +93,9 @@ func buildTravelEngine(t *testing.T) (*Engine, *travelAPI) {
 	g := &graph.Graph{Version: "1.0.0", Nodes: map[string]*graph.Node{
 		"listAirports":      {Name: "listAirports", Adapter: "t.listAirports", Outputs: []graph.Output{{Name: "airports", Type: "string[]"}}},
 		"createReservation": {Name: "createReservation", Adapter: "t.createReservation", Outputs: []graph.Output{{Name: "id", Type: "string"}}},
+		"getReservation": {Name: "getReservation", Adapter: "t.getReservation", Inputs: []graph.Input{
+			{Name: "reservationId", Type: "string", Default: &graph.InputDefault{From: "createReservation.id"}},
+		}},
 		"addTraveler": {Name: "addTraveler", Adapter: "t.addTraveler", Inputs: []graph.Input{
 			{Name: "reservationId", Type: "string", Default: &graph.InputDefault{From: "createReservation.id"}},
 			{Name: "name", Type: "string", Default: &graph.InputDefault{Value: "Ada"}},
@@ -92,6 +105,7 @@ func buildTravelEngine(t *testing.T) (*Engine, *travelAPI) {
 	for name, tmpl := range map[string]adapter.Template{
 		"t.listAirports": {Request: adapter.TemplateRequest{Method: "GET", Path: "/airports"},
 			Response: adapter.TemplateResponse{Extract: map[string]adapter.ExtractRule{"airports": {Path: "airports"}}}},
+		"t.getReservation": {Request: adapter.TemplateRequest{Method: "GET", Path: "/reservations/{{reservationId}}"}},
 		"t.createReservation": {Request: adapter.TemplateRequest{Method: "POST", Path: "/reservations"},
 			Response: adapter.TemplateResponse{Extract: map[string]adapter.ExtractRule{"id": {Path: "id"}}}},
 		"t.addTraveler": {Request: adapter.TemplateRequest{Method: "POST", Path: "/reservations/{{reservationId}}/travelers",
@@ -245,4 +259,42 @@ func TestFuzzReuse_CopiedExpressionsParse(t *testing.T) {
 			assert.Equal(t, "r2", st.Inputs["name"], "it read its own reservation's copy")
 		}
 	}
+}
+
+func header(id string) plan.PinnedFuzzCase {
+	return plan.PinnedFuzzCase{ID: id, Mode: plan.FuzzEdge, Patch: []plan.RequestPatch{{Where: "header", Path: "X-Case", Op: "set", Value: id}}}
+}
+
+// TestFuzzReuse_ReadOnlyTargetKeepsItsSetup checks that cases the API accepts
+// on a target that only reads leave the setup as it was.
+func TestFuzzReuse_ReadOnlyTargetKeepsItsSetup(t *testing.T) {
+	eng, api := buildTravelEngine(t)
+	p := travelPlan()
+	p.Execution.Steps = append(p.Execution.Steps, plan.Step{ID: "read", Node: "getReservation",
+		Values:       map[string]plan.StepValue{"reservationId": {From: "res.id"}},
+		FuzzSettings: &plan.FuzzSettings{Pinned: []plan.PinnedFuzzCase{header("h.a"), header("h.b"), header("h.c")}}})
+	result := eng.Run(context.Background(), p)
+	require.NoError(t, result.Error)
+	assert.Equal(t, []string{SetupFresh, SetupReused, SetupReused}, setups(result))
+	assert.Equal(t, 2, api.creates)
+}
+
+// TestFuzzReuse_ExpectFailureCopyEndsOnlyItsCase checks that a setup copy of
+// an expectFailure step that gets a success ends its case, not the run.
+func TestFuzzReuse_ExpectFailureCopyEndsOnlyItsCase(t *testing.T) {
+	eng, api := buildTravelEngine(t)
+	api.roomyCopies = true // the happy path's third traveler is refused; a copy's is not
+	p := travelPlan()
+	p.Execution.Steps = append(p.Execution.Steps,
+		plan.Step{ID: "t3", Node: "addTraveler", Values: map[string]plan.StepValue{"reservationId": {From: "res.id"}, "name": {Default: "Cy"}},
+			ExpectFailure: &plan.ExpectFailure{Status: plan.ExpectedStatuses{{Code: 409}}}},
+		plan.Step{ID: "read", Node: "getReservation", Values: map[string]plan.StepValue{"reservationId": {From: "res.id"}},
+			FuzzSettings: &plan.FuzzSettings{Pinned: []plan.PinnedFuzzCase{header("h.a")}}},
+	)
+	result := eng.Run(context.Background(), p)
+	require.NoError(t, result.Error)
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, fuzzSteps(result), 1)
+	assert.Equal(t, FindingNotSent, fuzzSteps(result)[0].Fuzz.Finding)
+	assert.Equal(t, []string{SetupFailed}, setups(result))
 }

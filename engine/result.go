@@ -131,6 +131,9 @@ type StepResult struct {
 	DisplayOutputs    []DisplayOutput            // outputs tagged with display labels
 	ExpectFailure     *ExpectFailureResult       // non-nil for negative assertion steps
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
+	// OutputsError, on a fuzz step, says why its outputs could not be read
+	// from a successful response. The case is judged on the response anyway.
+	OutputsError string
 	// Fuzz, on a step the fuzzer made, is how its response was judged.
 	Fuzz *FuzzResult
 	// FuzzSetup, on a copy of a setup step made for a fuzz case, is the ID
