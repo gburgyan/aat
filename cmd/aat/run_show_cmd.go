@@ -1279,5 +1279,8 @@ func describeFuzz(s *archive.FuzzSummary) string {
 	if s.Failing > 0 {
 		text += fmt.Sprintf(" (%d failing)", s.Failing)
 	}
+	if setup := describeSetup(s.Setup); setup != "" {
+		text += " · setup: " + setup
+	}
 	return text
 }

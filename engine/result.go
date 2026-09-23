@@ -78,6 +78,12 @@ type RunResult struct {
 	// FuzzCapped is true when --fuzz-cases dropped fuzz cases: the seed chose
 	// which ran.
 	FuzzCapped bool
+	// FuzzWarnings are problems with how the run fuzzed, such as the shared
+	// scope on a step that changes state.
+	FuzzWarnings []string
+	// FuzzCopiesSkipped counts the fuzz setup copies that weren't sent: a case
+	// reused the live copy, or its setup had already failed.
+	FuzzCopiesSkipped int
 
 	// Seed is the seed the run drew pool picks and random selections from;
 	// Engine.WithSeed with it replays those choices. It is 0 when the run
@@ -127,6 +133,9 @@ type StepResult struct {
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
 	// Fuzz, on a step the fuzzer made, is how its response was judged.
 	Fuzz *FuzzResult
+	// FuzzSetup, on a copy of a setup step made for a fuzz case, is the ID
+	// of the case's step.
+	FuzzSetup string
 	// KnownIssue is set when the step carried a knownIssue entry, whether or
 	// not it ended up applying. Applied says it kept this step's failure out
 	// of the run's outcome; Expired says the entry had lapsed.

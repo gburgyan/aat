@@ -71,7 +71,10 @@ type StepRecord struct {
 	ResponseBodyError *ResponseBodyErrorRecord `json:"responseBodyError,omitempty"`
 	// Fuzz, on a step the fuzzer made, is the case it sent and how its
 	// response was judged.
-	Fuzz          *FuzzRecord          `json:"fuzz,omitempty"`
+	Fuzz *FuzzRecord `json:"fuzz,omitempty"`
+	// FuzzSetup, on a copy of a setup step made for a fuzz case, is the ID of
+	// the case's step.
+	FuzzSetup     string               `json:"fuzzSetup,omitempty" redact:"-"`
 	OASValidation *OASValidationRecord `json:"oasValidation,omitempty"`
 	Error         string               `json:"error,omitempty"`
 	RetryCount    int                  `json:"retryCount,omitempty"`
@@ -164,6 +167,9 @@ type FuzzRecord struct {
 	Finding string `json:"finding,omitempty" redact:"-"`
 	// Fails is true when the finding failed the run.
 	Fails bool `json:"fails,omitempty"`
+	// Setup is how the steps the case ran on came to be: fresh, reused, or
+	// failed; empty on the happy path's own.
+	Setup string `json:"setup,omitempty" redact:"-"`
 }
 
 // ExpectFailureRecord captures the outcome of a negative assertion. Expected
@@ -381,6 +387,9 @@ type FuzzSummary struct {
 	Findings map[string]int `json:"findings"`
 	// Failing counts the cases whose finding failed the run.
 	Failing int `json:"failing"`
+	// Setup counts the cases by how their setup came to be: fresh, reused,
+	// or failed.
+	Setup map[string]int `json:"setup,omitempty"`
 }
 
 // OASSummary is a run's OpenAPI validation in summary.json: the mode, and

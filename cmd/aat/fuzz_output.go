@@ -31,6 +31,33 @@ func fuzzNote(result engine.StepResult, color bool) string {
 	}
 }
 
+// quietSetupCopy reports whether a progress line would be a fuzz case's
+// copy of a setup step that passed: those lines are noise, and the fuzz
+// summary counts them. A copy that failed is shown, since its case wasn't
+// sent.
+func quietSetupCopy(r engine.StepResult) bool {
+	return r.FuzzSetup != "" && r.Error == nil && r.StatusCode < 400 && (r.Validation == nil || r.Validation.Passed)
+}
+
+// describeSetup says how a run's fuzz cases were set up, as in "4 fresh, 50
+// reused, 1 failed", or "" when every case ran on the happy path's own.
+func describeSetup(counts map[string]int) string {
+	var parts []string
+	for _, k := range []string{engine.SetupFresh, engine.SetupReused, engine.SetupFailed} {
+		if n := counts[k]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, k))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+// writeFuzzWarnings prints the problems with how a run fuzzed.
+func writeFuzzWarnings(w io.Writer, lead string, warnings []string, color bool) {
+	for _, msg := range warnings {
+		_, _ = fmt.Fprintf(w, "%s%s\n", lead, colorize("warning: "+msg, colorYellow, color))
+	}
+}
+
 // writeFuzzSummary prints a run's fuzz cases after its outcome: the count by
 // finding, then each case with a finding, failing ones first, with the value
 // it sent and the status it got back.
@@ -48,7 +75,11 @@ func writeFuzzSummary(w io.Writer, lead string, steps []engine.StepResult, color
 			parts = append(parts, fmt.Sprintf("%d %s", n, finding))
 		}
 	}
-	_, _ = fmt.Fprintf(w, "%sFuzz: %s: %s\n", lead, pluralize(fs.Cases, "case"), strings.Join(parts, ", "))
+	line := fmt.Sprintf("%sFuzz: %s: %s", lead, pluralize(fs.Cases, "case"), strings.Join(parts, ", "))
+	if setup := describeSetup(fs.Setup); setup != "" {
+		line += " · setup: " + setup
+	}
+	_, _ = fmt.Fprintln(w, line)
 
 	for _, failing := range []bool{true, false} {
 		for _, s := range steps {

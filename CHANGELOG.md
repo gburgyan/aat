@@ -36,6 +36,14 @@ the graph and plan formats may still change before 1.0.
   `undocumented-status`, marks a status the node's operation doesn't list. A case's copy of the setup now includes the
   earlier steps that build on it, such as the `addItem` a checkout needs, and a copied step that fails reports its
   case as `not-sent` without stopping the run. The shop example's `quantity` input now declares `min: 1`.
+- **Fuzz cases share their setup while the API refuses them.** The new default scope, `reuse`, runs a target's cases
+  on one copy of the steps it depends on until a case is accepted, fails with a 5xx, or gets no response. Then the
+  next case gets a fresh copy. Refused cases, most of a run, cost one setup, and accepted ones never pile onto one
+  resource (a cart, a reservation with a traveler limit). Read-only setup steps (a GET with no cleanup pairing) aren't
+  copied at all. After three setups in a row fail, the target's remaining cases aren't tried. Copies' progress lines
+  are hidden unless they fail. The fuzz summary says how cases were set up (`setup: 2 fresh, 7 reused`), and `shared`
+  scope on a step that changes state is warned about. `isolated` keeps a fresh copy per case. On the shop,
+  fuzzing `addItem` and `checkout` sends 143 requests where it sent 228.
 - **A step's `fuzz:` block fuzzes it on every run, and `--fuzz-save` keeps findings as regression plans.** The block
   holds what `--fuzz` flags would say (`mode`, `inputs`, `cases`, `only`, `scope`, `fail`) plus `skip` (inputs never
   to fuzz), `accept` (statuses no case is faulted for, such as a busy API's 409), and `pinned` cases sent exactly as

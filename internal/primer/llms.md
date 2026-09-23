@@ -881,6 +881,12 @@ graph. Inputs wired from earlier steps
 are left alone unless named with `--fuzz-input`. When the node has an OpenAPI
 operation, a request the spec refuses is judged as negative.
 
+- **Setup:** each case varies one step; later steps read the original. By
+  default (`--fuzz-scope reuse`) a target's cases share a copy of its setup
+  while the API refuses them, and get a fresh one after a case is accepted,
+  fails with a 5xx, or gets no response; read-only GET setup steps aren't
+  copied. `isolated` copies per case; `shared` uses the happy path's own (warned
+  on a step that changes state).
 - **Findings:** `server-error`, `no-response`, and `schema-violation` fail the
   run; `accepted-invalid` and `rejected-valid` are warnings (`--fuzz-fail`
   changes the set). Fuzz steps never stop the run.

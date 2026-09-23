@@ -57,10 +57,12 @@ type FuzzConfig struct {
 	Modes         []string // see fuzz.Options
 	Inputs        []string // see fuzz.Options
 	Max           int      // cases per target step; 0 means all
-	// Scope is "isolated", where each case gets its own copy of the steps the
-	// target depends on, or "shared", where every case runs on the target's
-	// own: faster, but a case that changes state can change what later steps
-	// see. Empty leaves it to the step's fuzz: block, or isolated.
+	// Scope is one of the plan.FuzzScope constants: "reuse", where a target's
+	// cases share a copy of the steps it depends on until a case may have
+	// changed it; "isolated", where each case gets its own copy; or "shared",
+	// where every case runs on the target's own, which is cheapest but lets a
+	// case change what later steps see. Empty leaves it to the step's fuzz:
+	// block, or reuse.
 	Scope string
 	// Cases limits the run to the cases with these IDs.
 	Cases []string
@@ -91,6 +93,9 @@ type FuzzResult struct {
 	Finding string
 	// Fails is true when the finding fails the run.
 	Fails bool
+	// Setup says how the steps the case ran on came to be: SetupFresh,
+	// SetupReused, SetupFailed, or empty when it ran on the happy path's own.
+	Setup string
 }
 
 // fuzzJudging is how a target's cases are judged: the findings that fail the
@@ -106,6 +111,7 @@ type fuzzJudging struct {
 func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 	cli := e.fuzz
 	e.fuzzJudge = map[string]fuzzJudging{}
+	e.fuzzRun = newFuzzRunState()
 
 	type target struct {
 		step    plan.Step
@@ -196,8 +202,20 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		for _, c := range cases {
 			found[c.ID] = true
 		}
-		if err := plan.ExpandFuzzCases(p, step.StepID(), cases, scope != "shared"); err != nil {
+		if scope == "" {
+			scope = plan.FuzzScopeReuse
+		}
+		if scope == plan.FuzzScopeShared && len(cases) > 0 && !e.readOnlyStep(step) {
+			e.fuzzRun.warnings = append(e.fuzzRun.warnings, fmt.Sprintf(
+				"fuzz scope shared on %s: each case the API accepts changes the state the rest of the plan sees; reuse or isolated keeps it apart",
+				step.StepID()))
+		}
+		if err := plan.ExpandFuzzCases(p, step.StepID(), cases, plan.FuzzExpandOptions{Scope: scope, ReadOnly: e.readOnlyStep}); err != nil {
 			return err
+		}
+		e.fuzzRun.groups[step.StepID()] = &fuzzGroup{scope: scope, live: map[string]string{}}
+		for _, c := range cases {
+			e.fuzzRun.caseTarget[plan.FuzzStepID(step.StepID(), c.ID)] = step.StepID()
 		}
 		e.fuzzJudge[step.StepID()] = fuzzJudging{fail: fail, accept: block.Accept}
 	}
@@ -329,6 +347,9 @@ type FuzzSummary struct {
 	Findings map[string]int
 	// Failing counts the cases whose finding failed the run.
 	Failing int
+	// Setup counts the cases by how their setup came to be: keyed by the
+	// Setup constants. A case on the happy path's own setup isn't counted.
+	Setup map[string]int
 }
 
 // SummarizeFuzz counts the fuzz cases among steps, or returns nil when there
@@ -340,13 +361,153 @@ func SummarizeFuzz(steps []StepResult) *FuzzSummary {
 			continue
 		}
 		if s == nil {
-			s = &FuzzSummary{Findings: map[string]int{}}
+			s = &FuzzSummary{Findings: map[string]int{}, Setup: map[string]int{}}
 		}
 		s.Cases++
 		s.Findings[r.Fuzz.Finding]++
+		if r.Fuzz.Setup != "" {
+			s.Setup[r.Fuzz.Setup]++
+		}
 		if r.Fuzz.Fails {
 			s.Failing++
 		}
 	}
 	return s
+}
+
+// Setup of a fuzz case: how the steps it runs on came to be.
+const (
+	// SetupFresh is a case whose copy of the setup was sent for it.
+	SetupFresh = "fresh"
+	// SetupReused is a case that ran on the copy an earlier case left clean.
+	SetupReused = "reused"
+	// SetupFailed is a case whose copy of the setup failed, or that wasn't
+	// tried because the target's setup kept failing.
+	SetupFailed = "failed"
+)
+
+// maxSetupFailures is how many setups in a row may fail before a target's
+// remaining cases are not sent: an API that is refusing the setup, often
+// for a rate limit, is not asked again and again.
+const maxSetupFailures = 3
+
+// fuzzGroup is a fuzz target's setup during Run.
+type fuzzGroup struct {
+	scope string
+	// live maps a setup step's original ID to the copy the next case may
+	// reuse, while clean.
+	live map[string]string
+	// clean is true when no case since the live copy was made may have
+	// changed what it set up.
+	clean bool
+	// building is the case whose copy is being sent.
+	building string
+	// failures counts the setups in a row that failed.
+	failures int
+	// stopped, once set, says why the target's remaining cases are not sent.
+	stopped string
+}
+
+// fuzzRunState is what the engine tracks about fuzz cases during Run.
+type fuzzRunState struct {
+	groups     map[string]*fuzzGroup // by target step ID
+	caseTarget map[string]string     // case step ID → target step ID
+	caseSetup  map[string]string     // case step ID → a Setup constant
+	warnings   []string
+}
+
+func newFuzzRunState() *fuzzRunState {
+	return &fuzzRunState{groups: map[string]*fuzzGroup{}, caseTarget: map[string]string{}, caseSetup: map[string]string{}}
+}
+
+// readOnlyStep reports whether a step only reads: an HTTP GET, HEAD, or
+// OPTIONS on a node with no cleanup pairing. A gRPC call is never assumed to
+// be one.
+func (e *Engine) readOnlyStep(s plan.Step) bool {
+	node := e.graph.Nodes[s.Node]
+	if node == nil || node.Cleanup.Node != "" {
+		return false
+	}
+	tmpl, ok := e.registry.GetTemplate(node.Adapter)
+	if !ok || tmpl.Protocol == adapter.ProtocolGRPC {
+		return false
+	}
+	switch strings.ToUpper(tmpl.Request.Method) {
+	case "GET", "HEAD", "OPTIONS":
+		return true
+	}
+	return false
+}
+
+// beforeSetupCopy decides what to do with a fuzz setup copy about to run. It
+// returns reused when the copy's live counterpart stands in for it, having
+// pointed this copy's ID at that counterpart's outputs and inputs, and a
+// reason when the case is not to be sent at all.
+func (f *fuzzRunState) beforeSetupCopy(step plan.Step, state *RunState) (reused bool, reason string) {
+	caseID := step.FuzzSetup
+	g := f.groups[f.caseTarget[caseID]]
+	if g == nil {
+		return false, ""
+	}
+	if g.stopped != "" {
+		f.caseSetup[caseID] = SetupFailed
+		return false, g.stopped
+	}
+	if g.scope == plan.FuzzScopeReuse && g.clean && g.building != caseID {
+		if live := g.live[step.FuzzSetupOf]; live != "" {
+			if outputs, ok := state.GetAllOutputs(live); ok {
+				state.StoreOutputs(step.StepID(), outputs)
+			}
+			if inputs, ok := state.AllInputs(live); ok {
+				state.StoreInputs(step.StepID(), inputs)
+			}
+			f.caseSetup[caseID] = SetupReused
+			return true, ""
+		}
+	}
+	if g.building != caseID {
+		// A fresh copy: whatever was live is no longer.
+		g.live, g.clean, g.building = map[string]string{}, false, caseID
+		f.caseSetup[caseID] = SetupFresh
+	}
+	return false, ""
+}
+
+// setupCopySent records a copy that was sent and passed.
+func (f *fuzzRunState) setupCopySent(step plan.Step) {
+	if g := f.groups[f.caseTarget[step.FuzzSetup]]; g != nil {
+		g.live[step.FuzzSetupOf] = step.StepID()
+	}
+}
+
+// setupCopyFailed records a copy that failed, and stops the target's cases
+// once its setup has failed too often in a row.
+func (f *fuzzRunState) setupCopyFailed(step plan.Step) {
+	caseID := step.FuzzSetup
+	f.caseSetup[caseID] = SetupFailed
+	g := f.groups[f.caseTarget[caseID]]
+	if g == nil {
+		return
+	}
+	g.clean, g.building = false, ""
+	g.failures++
+	if g.failures >= maxSetupFailures && g.stopped == "" {
+		g.stopped = fmt.Sprintf("the setup for %s failed %d times in a row", f.caseTarget[caseID], g.failures)
+	}
+}
+
+// caseJudged records how a case's response leaves its setup: clean when the
+// API refused the request or it was never sent, since a refusal changes
+// nothing, and changed otherwise, so the next case sets up afresh.
+func (f *fuzzRunState) caseJudged(step plan.Step, r *StepResult) {
+	caseID := step.StepID()
+	g := f.groups[f.caseTarget[caseID]]
+	if g == nil || f.caseSetup[caseID] == SetupFailed {
+		return
+	}
+	g.failures = 0
+	g.building = ""
+	refused := r.Error == nil && r.StatusCode >= 400 && r.StatusCode < 500
+	notSent := r.Error != nil && (r.Request == nil || errors.As(r.Error, new(*adapter.NotSentError)))
+	g.clean = refused || notSent
 }

@@ -33,6 +33,9 @@ func (o *CLIProgressObserver) OnStepStart(index, total int, step plan.Step) {
 }
 
 func (o *CLIProgressObserver) OnStepComplete(index, total int, result engine.StepResult) {
+	if quietSetupCopy(result) {
+		return
+	}
 	writeStepResult(o.out, "  ", index, total, result, o.term, o.statusWidth)
 }
 
@@ -54,7 +57,10 @@ func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
 	color := o.term.IsTTY
 	_, _ = fmt.Fprintln(o.out)
 	total := len(result.Steps)
-	planned := max(o.total, total) // steps the run meant to execute, for ABORTED and STOPPED
+	// steps the run meant to execute, for ABORTED and STOPPED: setup copies a
+	// fuzz case reused, or skipped once its setup failed, were never meant to
+	// be sent
+	planned := max(o.total-result.FuzzCopiesSkipped, total)
 	elapsed := formatDuration(result.Elapsed())
 	switch result.Outcome {
 	case engine.OutcomePassed:
@@ -69,6 +75,7 @@ func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
 		_, _ = fmt.Fprintf(o.out, "%s at %q (%d/%d steps, %s)\n", colorOutcome("STOPPED", color), result.StoppedAt, total, planned, elapsed)
 	}
 	writeOASTotal(o.out, "", result.Steps, color)
+	writeFuzzWarnings(o.out, "", result.FuzzWarnings, color)
 	writeFuzzSummary(o.out, "", result.Steps, color)
 	writeKnownIssues(o.out, "", result, o.term)
 }

@@ -384,6 +384,16 @@ func TestShopExample(t *testing.T) {
 		assert.Equal(t, "server-error", recorded.Finding)
 		assert.True(t, recorded.Fails)
 
+		// Cases share their setup while the API refuses them, and the
+		// read-only listProducts is never copied.
+		assert.Positive(t, res.summary.Fuzz.Setup["reused"], "refused cases reuse a cart")
+		assert.Positive(t, res.summary.Fuzz.Setup["fresh"])
+		for _, st := range arc.Steps {
+			if st.FuzzSetup != "" {
+				assert.NotEqual(t, "listProducts", st.Node, "a read-only step is not copied")
+			}
+		}
+
 		// Replaying the one case finds it again, and --fuzz-save writes it out.
 		saveDir := t.TempDir()
 		args.OutputDir = filepath.Join(t.TempDir(), "runs")

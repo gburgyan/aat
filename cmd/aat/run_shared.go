@@ -115,6 +115,9 @@ type FuzzStepSummary struct {
 	SpecViolations []string `json:"spec_violations,omitempty"`
 	Finding        string   `json:"finding,omitempty"`
 	Fails          bool     `json:"fails,omitempty"`
+	// Setup is how the steps the case ran on came to be: fresh, reused, or
+	// failed.
+	Setup string `json:"setup,omitempty"`
 }
 
 // FuzzRunSummary counts a run's fuzz cases in the JSON summary.
@@ -124,6 +127,11 @@ type FuzzRunSummary struct {
 	// response was what they called for.
 	Findings map[string]int `json:"findings"`
 	Failing  int            `json:"failing"`
+	// Setup counts the cases by how their setup came to be: fresh, reused,
+	// or failed.
+	Setup map[string]int `json:"setup,omitempty"`
+	// Warnings are problems with how the run fuzzed.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // StepSummary is a per-step entry in the JSON summary.
@@ -303,7 +311,10 @@ func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
 	}
 
 	if fs := engine.SummarizeFuzz(result.Steps); fs != nil {
-		s.Fuzz = &FuzzRunSummary{Cases: fs.Cases, Findings: map[string]int{}, Failing: fs.Failing}
+		s.Fuzz = &FuzzRunSummary{Cases: fs.Cases, Findings: map[string]int{}, Failing: fs.Failing, Warnings: result.FuzzWarnings}
+		if len(fs.Setup) > 0 {
+			s.Fuzz.Setup = fs.Setup
+		}
 		for finding, n := range fs.Findings {
 			if finding == "" {
 				finding = "ok"
@@ -369,6 +380,7 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		if f.JudgedAs != c.Mode {
 			ss.Fuzz.JudgedAs = f.JudgedAs
 		}
+		ss.Fuzz.Setup = f.Setup
 		ss.Passed = !f.Fails
 		if f.Fails {
 			ss.Error = f.Finding

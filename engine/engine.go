@@ -82,6 +82,8 @@ type Engine struct {
 	// fuzzJudge holds each fuzz target's fail list and accepted statuses
 	// during Run, by target step ID.
 	fuzzJudge map[string]fuzzJudging
+	// fuzzRun tracks each fuzz target's setup copies during Run.
+	fuzzRun *fuzzRunState
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -168,6 +170,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 
 	// 1b. Fuzz cases become sibling steps of the steps they target
 	e.fuzzCapped = false
+	e.fuzzRun = newFuzzRunState()
 	if e.fuzz != nil || planFuzzes(instantiatedPlan) {
 		if err := e.expandFuzz(instantiatedPlan, seed); err != nil {
 			return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan, Seed: seed}
@@ -217,6 +220,9 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		if result != nil {
 			result.Seed = seed
 			result.FuzzCapped = e.fuzzCapped
+			if e.fuzzRun != nil {
+				result.FuzzWarnings = e.fuzzRun.warnings
+			}
 		}
 	}()
 
@@ -228,6 +234,12 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	// failedSetup maps a fuzz case's step to why its copy of the setup failed;
 	// the rest of that case is not sent.
 	failedSetup := map[string]string{}
+	copiesSkipped := 0
+	defer func() {
+		if result != nil {
+			result.FuzzCopiesSkipped = copiesSkipped
+		}
+	}()
 	verificationSteps := plan.VerificationSteps(instantiatedPlan, e.graph, e.layeredDefaults)
 	total := len(sorted) + len(verificationSteps)
 
@@ -257,29 +269,48 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			}
 		}
 
-		if e.Observer != nil {
-			e.Observer.OnStepStart(i, total, step)
-		}
-
-		// A fuzz case whose setup failed is not sent, nor is the rest of its
-		// setup.
+		// A fuzz setup copy is reused while the target's cases have left the
+		// live copy as it was, and isn't sent once the target's setup has
+		// failed too often.
 		caseID := step.FuzzSetup
 		if step.Fuzz != nil {
 			caseID = step.StepID()
 		}
-		if reason := failedSetup[caseID]; reason != "" {
-			skipped := StepResult{StepID: step.StepID(), Node: step.Node, Error: fmt.Errorf("not sent: %s", reason), StartTime: time.Now()}
-			if step.Fuzz != nil {
-				skipped.Fuzz = e.judgeFuzz(step, node, &skipped)
+		if step.FuzzSetup != "" && failedSetup[caseID] == "" {
+			reused, reason := e.fuzzRun.beforeSetupCopy(step, state)
+			if reason != "" {
+				failedSetup[caseID] = reason
 			}
+			if reused {
+				copiesSkipped++
+				continue
+			}
+		}
+
+		// A fuzz case whose setup failed is not sent, nor is the rest of its
+		// setup; only the case itself is reported.
+		if reason := failedSetup[caseID]; reason != "" {
+			if step.Fuzz == nil {
+				copiesSkipped++
+				continue
+			}
+			skipped := StepResult{StepID: step.StepID(), Node: step.Node, Error: fmt.Errorf("not sent: %s", reason), StartTime: time.Now()}
+			skipped.Fuzz = e.judgeFuzz(step, node, &skipped)
+			skipped.Fuzz.Setup = SetupFailed
 			stepResults = append(stepResults, skipped)
 			if e.Observer != nil {
+				e.Observer.OnStepStart(i, total, step)
 				e.Observer.OnStepComplete(i, total, skipped)
 			}
 			continue
 		}
 
+		if e.Observer != nil {
+			e.Observer.OnStepStart(i, total, step)
+		}
+
 		stepResult := e.executeStepWithTracking(ctx, step, node, state)
+		stepResult.FuzzSetup = step.FuzzSetup
 
 		// A copy of a setup step made for a fuzz case ends that case when it
 		// fails, not the run: the case says nothing about the target then.
@@ -289,6 +320,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 			}
 			failedSetup[step.FuzzSetup] = fmt.Sprintf("its copy of setup step %s failed", step.StepID())
+			e.fuzzRun.setupCopyFailed(step)
 			// One that failed only its checks may still have created something.
 			if stepResult.Error == nil && stepResult.StatusCode < 400 && node.Cleanup.Node != "" {
 				if stepResult.Outputs != nil {
@@ -303,6 +335,10 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			continue
 		}
 
+		if step.FuzzSetup != "" {
+			e.fuzzRun.setupCopySent(step)
+		}
+
 		// A fuzz step never ends the run: its finding is recorded, and fails
 		// the outcome when the configuration says it does.
 		if step.Fuzz != nil {
@@ -311,6 +347,8 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 			}
 			stepResult.Fuzz = e.judgeFuzz(step, node, &stepResult)
+			stepResult.Fuzz.Setup = e.fuzzRun.caseSetup[step.StepID()]
+			e.fuzzRun.caseJudged(step, &stepResult)
 			if stepResult.Fuzz.Fails {
 				outcome = OutcomeFailed
 			}

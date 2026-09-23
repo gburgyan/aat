@@ -121,6 +121,8 @@ type Step struct {
 	// FuzzSetup is set on a copy of a setup step made for one fuzz case: the
 	// ID of the case's step. A copy that fails ends that case, not the run.
 	FuzzSetup string `yaml:"-" json:"fuzzSetup,omitempty"`
+	// FuzzSetupOf is the ID of the step a fuzz setup copy copies.
+	FuzzSetupOf string `yaml:"-" json:"fuzzSetupOf,omitempty"`
 }
 
 // Mutation is a negative-test variant of a step. At instantiation it produces

@@ -23,34 +23,66 @@ cd examples/shop/
 ```
 
 ```
-  [21/32] addItem              201  0ms
-  [22/32] addItem--fuzz-quant~ 201  0ms  fuzz quantity.at-min (positive)
-  [23/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.below-min (negative)
-  [24/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.fraction (negative)
-  [25/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.overflow (negative)
-  [26/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.wrong-type (negative)
-  [27/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.missing (negative)
-  [28/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.null (negative)
-  [29/32] addItem--fuzz-quant~ 409  0ms  fuzz quantity.large (edge)
-  [30/32] addItem--fuzz-body-~ 201  0ms  fuzz body.extra-property (edge)
-  [31/32] checkout             201  0ms
+  [ 1/23] listProducts         200  0ms
+  [ 2/23] createCart           201  0ms
+  [ 4/23] addItem              201  0ms
+  [ 5/23] addItem--fuzz-quant~ 201  0ms  fuzz quantity.at-min (positive)
+  [ 6/23] checkout             201  0ms
+  [ 8/23] paymentCharge        201  0ms
+  [ 9/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.below-min (negative)
+  [11/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.fraction (negative)
+  [13/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.overflow (negative)
+  [15/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.wrong-type (negative)
+  [17/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.missing (negative)
+  [19/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.null (negative)
+  [21/23] addItem--fuzz-quant~ 409  0ms  fuzz quantity.large (edge)
+  [23/23] addItem--fuzz-body-~ 201  0ms  fuzz body.extra-property (edge)
 ...
-PASSED (32/32 steps, 6ms)
-Fuzz: 9 cases: 9 as expected
+PASSED (16/16 steps, 3ms)
+Fuzz: 9 cases: 9 as expected · setup: 2 fresh, 7 reused
 ```
 
-The happy path runs as usual. Each case runs after its target, on its own copy of the steps the target depends on,
-so a case can't change what the rest of the plan sees. The copy also includes the earlier steps that build on those,
-such as the `addItem` a checkout needs even though it reads nothing from it. If a copied step fails, its case is
-reported as `not-sent` and the run carries on. Those copies, such as `listProducts__addItem--fuzz-quantity-null`
-and `createCart__addItem--fuzz-quantity-null` for the case `quantity.null`, run before the target and are left out
-above.
+The happy path runs as usual, and each case runs as a step of its own. A case is a dead end: no later step reads
+anything from it. Everything after the target reads the original step, which ran with the plan's own values. So a
+case that stops `createCart` from making a cart can't take the cart away from `addItem`. Each case varies one step,
+and everything else is the happy path.
 
 Only `quantity` was fuzzed as an input: `cartId` and `sku` are wired from earlier steps, and fuzzing those would only
 test that the step can't find its cart. The shop's graph gives `quantity` a `min: 1` constraint, which is where
 `at-min` and `below-min` come from.
 
 `--fuzz` takes step IDs or node names, comma-separated. A node name fuzzes every step of that node.
+
+## What a case runs on
+
+A case that the API accepts changes something: an item goes into a cart, a traveler onto a reservation, a booking is
+made. If every case ran on the happy path's cart, the cart would fill up. The rest of the plan would see a different
+cart, and an API with a limit, such as a few travelers per reservation, would start refusing cases for the wrong
+reason. So by default a case runs on a copy of the steps its target depends on. The copy also includes the earlier
+steps that build on those, such as the `addItem` a checkout needs even though it reads nothing from it.
+
+Making a copy for every case is expensive against a slow, rate-limited API, so the default scope, `reuse`, shares one:
+
+- **Sharing.** A target's cases share a copy of its setup as long as the API refuses them. A refusal (a 4xx) changes
+  nothing, so the next case can use the same cart.
+- **When a copy is used up.** When a case is accepted (2xx), fails with a 5xx that may have half-written something, or
+  gets no response, the copy may have changed. The next case gets a fresh one.
+- **Read-only steps.** A setup step that only reads (a GET, HEAD, or OPTIONS with no cleanup pairing), such as
+  `listProducts`, isn't copied at all, as long as it depends on nothing that is copied.
+- **Failed setup.** If a copy fails, its case is reported as `not-sent` and the run carries on. After three setups for
+  a target fail in a row, often because of a rate limit, that target's remaining cases aren't tried.
+
+In the quick start, `at-min` was accepted, so the refused cases after it got a fresh cart and then shared it: `setup:
+2 fresh, 7 reused`. The copies' own lines are hidden unless one fails. They are in the archive with `fuzzSetup` set.
+Other scopes:
+
+| Scope | What a case runs on |
+|-------|---------------------|
+| `reuse` (default) | A copy of the setup the target's cases share while the API refuses them |
+| `isolated` | A fresh copy for every case: for an API that changes state even when it refuses a request |
+| `shared` | The happy path's own setup: no copies, but every case the API accepts changes what the rest of the plan sees. A run warns when a target that isn't read-only uses it |
+
+Set it with `--fuzz-scope` or `scope:` in the step's [`fuzz:` block](#the-fuzz-block).
 
 ## Cases
 
@@ -139,7 +171,7 @@ Each case's response gets one finding, or none when it was what the case called 
 | `accepted-invalid` | A success for a negative case | no |
 | `rejected-valid` | A 4xx for a positive case | no |
 | `undocumented-status` | A status the node's OpenAPI operation doesn't list, with no `default` response | no |
-| `not-sent` | The case couldn't be sent: its copy of a setup step failed, or AAT couldn't build the request, such as a value a gRPC message can't hold | no |
+| `not-sent` | The case couldn't be sent: its setup failed (counted as `failed` in the setup line), or AAT couldn't build the request, such as a value a gRPC message can't hold | no |
 
 `--fuzz-fail` lists the findings that fail the run: `--fuzz-fail server-error,accepted-invalid` makes an API that
 takes forbidden values a failure. The others are warnings. A fuzz step never stops the run, and it doesn't retry.
@@ -165,7 +197,7 @@ case: its ID, mode, input, value, the mode it was judged by, the spec violations
 | `--fuzz-input` | inputs not wired | Fuzz only these inputs. A wired input, such as an ID from an earlier step, is fuzzed only when named here |
 | `--fuzz-cases` | `0` (all) | At most this many cases per step, picked by the run's [seed](value-flow.md#replaying-a-runs-picks) |
 | `--fuzz-case` | — | Run only these case IDs |
-| `--fuzz-scope` | `isolated` | `isolated` gives each case its own copy of the steps the target depends on. `shared` runs every case on the target's own; it is faster, but a case the API accepts can change what later steps see |
+| `--fuzz-scope` | `reuse` | What a case runs on: `reuse`, `isolated`, or `shared` (see [What a case runs on](#what-a-case-runs-on)) |
 | `--fuzz-fail` | `server-error,no-response,schema-violation` | Findings that fail the run |
 | `--fuzz-save` | — | Write a regression plan for each failing case to this directory ([Keeping a finding](#keeping-a-finding)) |
 | `--fuzz-save-all` | `false` | With `--fuzz-save`, save the warnings too |

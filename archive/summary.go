@@ -77,6 +77,12 @@ func BuildFuzzSummary(steps []StepRecord) *FuzzSummary {
 		if finding == "" {
 			finding = "ok"
 		}
+		if step.Fuzz.Setup != "" {
+			if s.Setup == nil {
+				s.Setup = map[string]int{}
+			}
+			s.Setup[step.Fuzz.Setup]++
+		}
 		s.Findings[finding]++
 		if step.Fuzz.Fails {
 			s.Failing++

@@ -188,13 +188,46 @@ func FuzzStepID(targetID, caseID string) string {
 	return targetID + "--fuzz-" + strings.NewReplacer(".", "-", " ", "-").Replace(caseID)
 }
 
+// Fuzz scopes: what a case's request runs on.
+const (
+	// FuzzScopeReuse runs a target's cases on a copy of its setup that they
+	// share until one may have changed it; the engine then makes a fresh one.
+	FuzzScopeReuse = "reuse"
+	// FuzzScopeIsolated gives every case a fresh copy of the setup.
+	FuzzScopeIsolated = "isolated"
+	// FuzzScopeShared runs every case on the happy path's own setup.
+	FuzzScopeShared = "shared"
+)
+
+// FuzzScopes lists the scopes.
+var FuzzScopes = []string{FuzzScopeReuse, FuzzScopeIsolated, FuzzScopeShared}
+
+// FuzzExpandOptions shape ExpandFuzzCases.
+type FuzzExpandOptions struct {
+	// Scope is one of the FuzzScope constants; empty means reuse.
+	Scope string
+	// ReadOnly reports whether a setup step only reads: such a step is used as
+	// it is rather than copied, as long as nothing it depends on is copied.
+	// Nil copies every setup step.
+	ReadOnly func(Step) bool
+}
+
 // ExpandFuzzCases adds a sibling step for each case after the step targetID
 // in an instantiated plan. A sibling is the target with the case's value set
-// raw on its input; it has no assertions, retries, repeat, expectFailure, or
-// known issue, since the engine judges it by the fuzz checks alone. With
-// isolated, each sibling gets its own copy of the steps the target depends on,
-// so a case cannot change the state the happy path or another case runs on.
-func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, isolated bool) error {
+// raw on its input, or its patch; it has no assertions, retries, repeat,
+// expectFailure, or known issue, since the engine judges it by the fuzz checks
+// alone.
+//
+// Outside the shared scope, each case also gets its own copy of the steps the
+// target depends on, and of the earlier steps that build on them, so a case
+// can't change what the rest of the plan sees. A copy carries FuzzSetup (the
+// case's step) and FuzzSetupOf (the step it copies); under reuse the engine
+// sends a case's copies only when the previous case may have changed the
+// setup, and otherwise points them at the live copy. A read-only setup step
+// that depends on nothing copied is not copied at all. The cases of a target
+// run in order: each case's first copies, and its own step, depend on the
+// previous case's step.
+func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, opts FuzzExpandOptions) error {
 	idx := -1
 	byID := make(map[string]Step, len(p.Execution.Steps))
 	for i, s := range p.Execution.Steps {
@@ -208,12 +241,27 @@ func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, isolated bool) 
 	}
 	target := p.Execution.Steps[idx]
 
-	var closure []Step
-	if isolated {
-		closure = fuzzSetupClosure(p.Execution.Steps, idx, byID)
+	var toCopy []Step
+	if opts.Scope != FuzzScopeShared {
+		copied := map[string]bool{}
+		for _, s := range fuzzSetupClosure(p.Execution.Steps, idx, byID) {
+			dependsOnCopy := false
+			for _, dep := range s.DependsOn {
+				if copied[dep] {
+					dependsOnCopy = true
+					break
+				}
+			}
+			if !dependsOnCopy && opts.ReadOnly != nil && opts.ReadOnly(s) {
+				continue // used as it is
+			}
+			copied[s.StepID()] = true
+			toCopy = append(toCopy, s)
+		}
 	}
 
 	var added []Step
+	prev := ""
 	for _, c := range cases {
 		c.Target = targetID
 		childID := FuzzStepID(targetID, c.ID)
@@ -222,24 +270,25 @@ func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, isolated bool) 
 		}
 
 		var idMap map[string]string
-		if isolated && len(closure) > 0 {
-			// ExpandFuzzCases marks each copy with the case it sets up, so the
-			// engine can tell a failed setup from a failed plan.
+		if len(toCopy) > 0 {
 			// The suffix names the target too: two targets can have a case with
 			// the same ID, and their copies of a shared step must not collide.
-			suffix := "__" + childID
-			clones := cloneClosureWithSuffix(closure, suffix)
+			clones := cloneClosureWithSuffix(toCopy, "__"+childID)
+			idMap = make(map[string]string, len(clones))
+			for i, orig := range toCopy {
+				idMap[orig.StepID()] = clones[i].StepID()
+			}
 			for i := range clones {
 				clones[i].FuzzSetup = childID
+				clones[i].FuzzSetupOf = toCopy[i].StepID()
 				clones[i].FuzzSettings = nil // a copy is setup, not a target
-			}
-			idMap = make(map[string]string, len(clones))
-			for i, orig := range closure {
+				if prev != "" && !dependsOnAny(clones[i], idMap) {
+					clones[i].DependsOn = append(clones[i].DependsOn, prev)
+				}
 				if _, taken := byID[clones[i].StepID()]; taken {
 					return fmt.Errorf("fuzz case %q: step %q already exists", c.ID, clones[i].StepID())
 				}
 				byID[clones[i].StepID()] = clones[i]
-				idMap[orig.StepID()] = clones[i].StepID()
 			}
 			added = append(added, clones...)
 		}
@@ -266,8 +315,12 @@ func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, isolated bool) 
 		if len(idMap) > 0 {
 			rewriteStepRefs(&child, idMap)
 		}
+		if prev != "" {
+			child.DependsOn = append(child.DependsOn, prev)
+		}
 		added = append(added, child)
 		byID[childID] = child
+		prev = childID
 	}
 
 	steps := make([]Step, 0, len(p.Execution.Steps)+len(added))
@@ -276,6 +329,19 @@ func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, isolated bool) 
 	steps = append(steps, p.Execution.Steps[idx+1:]...)
 	p.Execution.Steps = steps
 	return nil
+}
+
+// dependsOnAny reports whether a copy depends on another copy of its case,
+// whose IDs are the values of idMap.
+func dependsOnAny(s Step, idMap map[string]string) bool {
+	for _, dep := range s.DependsOn {
+		for _, copyID := range idMap {
+			if dep == copyID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Describe says what the case sends, as in `quantity=-1`, `remove quantity`,
@@ -347,8 +413,8 @@ func validateFuzzSettings(prefix string, s *FuzzSettings, node *graph.Node) []st
 	if s.Cases < 0 {
 		add("cases must not be negative")
 	}
-	if s.Scope != "" && s.Scope != "isolated" && s.Scope != "shared" {
-		add("unknown scope %q (use isolated or shared)", s.Scope)
+	if s.Scope != "" && !slices.Contains(FuzzScopes, s.Scope) {
+		add("unknown scope %q (use %s)", s.Scope, strings.Join(FuzzScopes, ", "))
 	}
 	for _, f := range s.Fail {
 		if !slices.Contains(FuzzFindings, f) {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/fuzz"
+	"github.com/gburgyan/aat/plan"
 )
 
 // runCmd is the parent Cobra command for plan execution. Its persistent flags
@@ -56,7 +57,7 @@ func addExecutionFlags(cmd *cobra.Command) {
 	flags.StringSlice("fuzz-input", nil, "fuzz only these inputs; a wired input is fuzzed only when named here")
 	flags.Int("fuzz-cases", 0, "at most this many cases per fuzzed step, picked by the run's seed (0 = all)")
 	flags.StringSlice("fuzz-case", nil, "run only the fuzz cases with these IDs, such as quantity.above-max")
-	flags.String("fuzz-scope", "isolated", "isolated: each case gets its own copy of the steps the target depends on; shared: cases reuse the target's, which is faster but lets a case change what later steps see")
+	flags.String("fuzz-scope", "reuse", "reuse: a target's cases share a copy of the steps it depends on until a case may have changed it (the API accepted it); isolated: each case gets its own copy; shared: cases run on the target's own, which is cheapest but lets a case change what later steps see")
 	flags.Bool("no-fuzz", false, "ignore the plan's fuzz: blocks; run each step as written")
 	flags.String("fuzz-save", "", "write a plan to this directory for each fuzz case whose finding failed the run, with the case pinned in the target step's fuzz: block, so it fails until the bug is fixed")
 	flags.Bool("fuzz-save-all", false, "with --fuzz-save, also save the cases whose finding was only a warning")
@@ -94,8 +95,8 @@ func fuzzConfigFromFlags(cmd *cobra.Command) (*engine.FuzzConfig, error) {
 	cfg.Cases, _ = flags.GetStringSlice("fuzz-case")
 	if flags.Changed("fuzz-scope") {
 		scope, _ := flags.GetString("fuzz-scope")
-		if scope != "isolated" && scope != "shared" {
-			return nil, fmt.Errorf("--fuzz-scope %s: use isolated or shared", scope)
+		if !slices.Contains(plan.FuzzScopes, scope) {
+			return nil, fmt.Errorf("--fuzz-scope %s: use %s", scope, strings.Join(plan.FuzzScopes, ", "))
 		}
 		cfg.Scope = scope
 	}

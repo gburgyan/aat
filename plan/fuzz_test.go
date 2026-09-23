@@ -35,7 +35,7 @@ func TestExpandFuzzCases_Shared(t *testing.T) {
 		{ID: "quantity.above-max", Mode: FuzzNegative, Input: "quantity", Value: 100},
 		{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0},
 	}
-	require.NoError(t, ExpandFuzzCases(p, "add", cases, false))
+	require.NoError(t, ExpandFuzzCases(p, "add", cases, FuzzExpandOptions{Scope: FuzzScopeShared}))
 
 	assert.Equal(t, []string{"cart", "add", "add--fuzz-quantity-above-max", "add--fuzz-quantity-zero", "checkout"}, stepIDs(p))
 	child := p.Execution.Steps[2]
@@ -51,7 +51,7 @@ func TestExpandFuzzCases_Shared(t *testing.T) {
 
 func TestExpandFuzzCases_Isolated(t *testing.T) {
 	p := fuzzPlan()
-	require.NoError(t, ExpandFuzzCases(p, "add", []FuzzCase{{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0}}, true))
+	require.NoError(t, ExpandFuzzCases(p, "add", []FuzzCase{{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0}}, FuzzExpandOptions{Scope: FuzzScopeIsolated}))
 
 	assert.Equal(t, []string{"cart", "add", "cart__add--fuzz-quantity-zero", "add--fuzz-quantity-zero", "checkout"}, stepIDs(p))
 	child := p.Execution.Steps[3]
@@ -60,14 +60,14 @@ func TestExpandFuzzCases_Isolated(t *testing.T) {
 }
 
 func TestExpandFuzzCases_UnknownTarget(t *testing.T) {
-	assert.ErrorContains(t, ExpandFuzzCases(fuzzPlan(), "pay", nil, false), `fuzz target "pay"`)
+	assert.ErrorContains(t, ExpandFuzzCases(fuzzPlan(), "pay", nil, FuzzExpandOptions{Scope: FuzzScopeShared}), `fuzz target "pay"`)
 }
 
 func TestExpandFuzzCases_TwoTargetsSameCase(t *testing.T) {
 	p := fuzzPlan()
 	c := []FuzzCase{{ID: "body.extra-property", Mode: FuzzEdge, Patch: []RequestPatch{{Where: "body", Path: "x", Op: "set", Value: "x"}}}}
-	require.NoError(t, ExpandFuzzCases(p, "add", c, true))
-	require.NoError(t, ExpandFuzzCases(p, "checkout", c, true))
+	require.NoError(t, ExpandFuzzCases(p, "add", c, FuzzExpandOptions{Scope: FuzzScopeIsolated}))
+	require.NoError(t, ExpandFuzzCases(p, "checkout", c, FuzzExpandOptions{Scope: FuzzScopeIsolated}))
 	seen := map[string]bool{}
 	for _, id := range stepIDs(p) {
 		assert.False(t, seen[id], "duplicate step %s", id)
@@ -87,7 +87,7 @@ func TestExpandFuzzCases_SetupIncludesStepsThatBuildOnIt(t *testing.T) {
 		{ID: "unrelated", Node: "listOrders"},
 		{ID: "order", Node: "checkout", DependsOn: []string{"cart"}},
 	}}}
-	require.NoError(t, ExpandFuzzCases(p, "order", []FuzzCase{{ID: "tier.empty", Input: "tier", Value: ""}}, true))
+	require.NoError(t, ExpandFuzzCases(p, "order", []FuzzCase{{ID: "tier.empty", Input: "tier", Value: ""}}, FuzzExpandOptions{Scope: FuzzScopeIsolated}))
 
 	assert.Equal(t, []string{
 		"products", "cart", "item", "unrelated", "order",
@@ -155,4 +155,39 @@ execution:
 	} {
 		assert.Contains(t, joined, want)
 	}
+}
+
+func TestExpandFuzzCases_ReuseOrderAndReadOnly(t *testing.T) {
+	p := &Plan{Execution: Execution{Steps: []Step{
+		{ID: "products", Node: "listProducts"},
+		{ID: "cart", Node: "createCart"},
+		{ID: "view", Node: "getCart", DependsOn: []string{"cart"}},
+		{ID: "add", Node: "addItem", DependsOn: []string{"cart", "products", "view"}},
+	}}}
+	readOnly := func(s Step) bool { return s.Node == "listProducts" || s.Node == "getCart" }
+	cases := []FuzzCase{
+		{ID: "quantity.zero", Mode: FuzzNegative, Input: "quantity", Value: 0},
+		{ID: "quantity.large", Mode: FuzzEdge, Input: "quantity", Value: 99},
+	}
+	require.NoError(t, ExpandFuzzCases(p, "add", cases, FuzzExpandOptions{Scope: FuzzScopeReuse, ReadOnly: readOnly}))
+
+	assert.Equal(t, []string{
+		"products", "cart", "view", "add",
+		"cart__add--fuzz-quantity-zero", "view__add--fuzz-quantity-zero", "add--fuzz-quantity-zero",
+		"cart__add--fuzz-quantity-large", "view__add--fuzz-quantity-large", "add--fuzz-quantity-large",
+	}, stepIDs(p), "listProducts is read-only and depends on nothing copied, so it is used as it is; getCart reads the copied cart, so it is copied")
+
+	byID := map[string]Step{}
+	for _, s := range p.Execution.Steps {
+		byID[s.StepID()] = s
+	}
+	assert.Equal(t, "cart", byID["cart__add--fuzz-quantity-zero"].FuzzSetupOf)
+	assert.Equal(t, "add--fuzz-quantity-zero", byID["view__add--fuzz-quantity-zero"].FuzzSetup)
+	assert.Contains(t, byID["add--fuzz-quantity-zero"].DependsOn, "products", "the uncopied step keeps its ID")
+
+	// The second case waits for the first: its first copy, and its own step.
+	assert.Contains(t, byID["cart__add--fuzz-quantity-large"].DependsOn, "add--fuzz-quantity-zero")
+	assert.NotContains(t, byID["view__add--fuzz-quantity-large"].DependsOn, "add--fuzz-quantity-zero", "it waits through the cart copy")
+	assert.Contains(t, byID["add--fuzz-quantity-large"].DependsOn, "add--fuzz-quantity-zero")
+	assert.NotContains(t, byID["cart__add--fuzz-quantity-zero"].DependsOn, "add", "the first case doesn't wait for the target")
 }
