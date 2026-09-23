@@ -9,6 +9,7 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
+	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -211,4 +212,24 @@ func TestFormatExecutionSummary_ErrorRun(t *testing.T) {
 	text := formatExecutionSummary(result, "run-test-004")
 	assert.Contains(t, text, "error")
 	assert.Contains(t, text, "ERROR")
+}
+
+func TestFormatExecutionSummary_Fuzz(t *testing.T) {
+	result := &engine.RunResult{
+		Outcome: engine.OutcomeFailed,
+		Steps: []engine.StepResult{
+			{StepID: "add", Node: "addItem", StatusCode: 201, Response: &adapter.Response{StatusCode: 201}},
+			{StepID: "add__fuzz_quantity_zero", Node: "addItem", StatusCode: 500, Response: &adapter.Response{StatusCode: 500},
+				Fuzz: &engine.FuzzResult{Case: plan.FuzzCase{ID: "quantity.zero", Target: "add", Mode: plan.FuzzPositive, Input: "quantity", Value: 0},
+					Finding: engine.FindingServerError, Fails: true}},
+			{StepID: "add__fuzz_quantity_above_max", Node: "addItem", StatusCode: 400, Response: &adapter.Response{StatusCode: 400},
+				Fuzz: &engine.FuzzResult{Case: plan.FuzzCase{ID: "quantity.above-max", Target: "add", Mode: plan.FuzzNegative, Input: "quantity", Value: 100}}},
+		},
+	}
+	out := formatExecutionSummary(result, "run-1")
+	assert.Contains(t, out, "| 500 server-error (fails the run) |")
+	assert.Contains(t, out, "### Fuzzing")
+	assert.Contains(t, out, "2 cases, 1 as expected, 1 server-error; 1 fail the run.")
+	assert.Contains(t, out, "- `quantity.zero` on add (positive, quantity=0): server-error -> 500")
+	assert.NotContains(t, out, "`quantity.above-max` on")
 }

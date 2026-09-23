@@ -126,7 +126,8 @@ response is a finding:
 | The body itself | `body.extra-property`, a property the template never sends |
 | A literal query parameter | `query.<name>.remove` |
 
-A gRPC message gets no `body.extra-property`: a protobuf message has no room for a field its type doesn't declare.
+A gRPC message gets no `body.extra-property`, `wrong-type`, `fraction`, or `overflow` cases: a protobuf message has no
+room for a field its type doesn't declare, and its codec refuses a value of the wrong type before anything is sent.
 
 Fields inside `{{?…}}` and `{{#…}}` blocks, and array elements, are left alone. A form body or one that isn't JSON
 gets none of these cases.

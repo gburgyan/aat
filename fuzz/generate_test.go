@@ -220,3 +220,20 @@ func TestGenerate_CapAfterSkipAndOnly(t *testing.T) {
 		assert.Len(t, cases, 2, "both named cases, whatever the seed")
 	}
 }
+
+// TestGenerate_GRPCLeavesOutUnencodableValues checks that a gRPC target gets
+// no case its message can't carry: every one would be not-sent.
+func TestGenerate_GRPCLeavesOutUnencodableValues(t *testing.T) {
+	target := addItemTarget()
+	target.Template = &adapter.Template{Protocol: adapter.ProtocolGRPC, Request: adapter.TemplateRequest{
+		Message: `{"cartId": "{{cartId}}", "quantity": {{quantity}}, "channel": "web"}`,
+	}}
+	cases, err := Generate(target, Options{Now: time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)})
+	require.NoError(t, err)
+	byID := caseByID(cases)
+	for _, id := range []string{"quantity.wrong-type", "quantity.fraction", "quantity.overflow", "gift.wrong-type", "body.channel.wrong-type"} {
+		assert.NotContains(t, byID, id)
+	}
+	assert.Contains(t, byID, "quantity.above-max")
+	assert.Contains(t, byID, "body.channel.remove")
+}

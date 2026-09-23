@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/gburgyan/aat/engine"
@@ -64,35 +63,13 @@ func saveFuzzFindings(p *plan.Plan, result *engine.RunResult, opts fuzzSaveOptio
 	return paths, nil
 }
 
-// pinnedPlan returns a copy of p with case f pinned on its target step.
+// pinnedPlan returns a copy of p with case f pinned on its target step, and
+// a description that says where it came from.
 func pinnedPlan(p *plan.Plan, f *engine.FuzzResult, opts fuzzSaveOptions) (*plan.Plan, error) {
-	data, err := plan.Marshal(p)
+	cp, err := plan.PinFuzzCase(p, f.Case, f.Finding, engine.DefaultFuzzFail)
 	if err != nil {
 		return nil, err
 	}
-	cp, err := plan.Parse(data)
-	if err != nil {
-		return nil, fmt.Errorf("copying the plan: %w", err)
-	}
-	plan.StripFuzz(cp)
-
-	target := -1
-	for i, s := range cp.Execution.Steps {
-		if s.StepID() == f.Case.Target {
-			target = i
-		}
-	}
-	if target < 0 {
-		return nil, fmt.Errorf("target step %s is not in the plan as written", f.Case.Target)
-	}
-
-	pinned := f.Case.Pin()
-	pinned.Found = f.Finding
-	fail := slices.Clone(engine.DefaultFuzzFail)
-	if !slices.Contains(fail, f.Finding) {
-		fail = append(fail, f.Finding)
-	}
-	cp.Execution.Steps[target].FuzzSettings = &plan.FuzzSettings{Pinned: []plan.PinnedFuzzCase{pinned}, Fail: fail}
 
 	desc := fmt.Sprintf("Fuzz regression: case %s on step %s found %s.", f.Case.ID, f.Case.Target, f.Finding)
 	desc += " It fails until the API handles the case."

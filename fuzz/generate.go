@@ -99,10 +99,14 @@ func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 		fields, _ = t.Template.RequestFields()
 	}
 
+	// A protobuf message has no room for a field its type doesn't declare,
+	// and its codec refuses a value of the wrong type before anything is
+	// sent, so those cases could only ever be not-sent.
+	grpc := t.Template != nil && t.Template.Protocol == adapter.ProtocolGRPC
 	var cases []plan.FuzzCase
 	keep := func(cs []plan.FuzzCase) {
 		for _, c := range cs {
-			if modes[c.Mode] {
+			if modes[c.Mode] && (!grpc || !slices.Contains(unencodable, c.Strategy)) {
 				cases = append(cases, c)
 			}
 		}
@@ -118,8 +122,6 @@ func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 		keep(absenceCases(in, t.Step.Values[in.Name], fields))
 	}
 	if len(named) == 0 {
-		// A protobuf message has no room for a field its type doesn't declare.
-		grpc := t.Template != nil && t.Template.Protocol == adapter.ProtocolGRPC
 		keep(templateCases(fields, !grpc))
 	}
 	sort.SliceStable(cases, func(i, j int) bool { return modeRank(cases[i].Mode) < modeRank(cases[j].Mode) })
@@ -139,6 +141,11 @@ func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 	}
 	return cases, false, nil
 }
+
+// unencodable lists the strategies whose values a protobuf message can't
+// carry: a value of another type, a fraction for an integer, and a number
+// past the largest integer.
+var unencodable = []string{"wrong-type", "fraction", "overflow"}
 
 // absenceCases lists the cases that leave an input out of the request, or
 // send it as null, by patching the fields the template puts it in. An input

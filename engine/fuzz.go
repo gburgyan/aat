@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
+	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/fuzz"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
@@ -386,38 +387,18 @@ func fuzzFailureError(steps []StepResult) error {
 	return fmt.Errorf("fuzzing found %s", strings.Join(parts, ", "))
 }
 
-// FuzzSummary counts a run's fuzz cases by finding.
-type FuzzSummary struct {
-	Cases int
-	// Findings counts the cases by finding; a case whose response was what
-	// it called for is counted under "".
-	Findings map[string]int
-	// Failing counts the cases whose finding failed the run.
-	Failing int
-	// Setup counts the cases by how their setup came to be: keyed by the
-	// Setup constants. A case on the happy path's own setup isn't counted.
-	Setup map[string]int
-}
-
-// SummarizeFuzz counts the fuzz cases among steps, or returns nil when there
-// are none.
-func SummarizeFuzz(steps []StepResult) *FuzzSummary {
-	var s *FuzzSummary
+// SummarizeFuzz counts the fuzz cases among steps, as the archive's summary
+// counts them, or returns nil when there are none.
+func SummarizeFuzz(steps []StepResult) *archive.FuzzSummary {
+	var s *archive.FuzzSummary
 	for _, r := range steps {
 		if r.Fuzz == nil {
 			continue
 		}
 		if s == nil {
-			s = &FuzzSummary{Findings: map[string]int{}, Setup: map[string]int{}}
+			s = &archive.FuzzSummary{}
 		}
-		s.Cases++
-		s.Findings[r.Fuzz.Finding]++
-		if r.Fuzz.Setup != "" {
-			s.Setup[r.Fuzz.Setup]++
-		}
-		if r.Fuzz.Fails {
-			s.Failing++
-		}
+		s.Add(r.Fuzz.Finding, r.Fuzz.Setup, r.Fuzz.Fails)
 	}
 	return s
 }

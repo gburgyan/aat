@@ -1267,7 +1267,7 @@ func fuzzFindings(steps []archive.StepRecord) []archive.FuzzRecord {
 // expected, 1 server-error, 1 accepted-invalid (1 failing)".
 func describeFuzz(s *archive.FuzzSummary) string {
 	var parts []string
-	if n := s.Findings["ok"]; n > 0 {
+	if n := s.Findings[archive.FindingOK]; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d as expected", n))
 	}
 	for _, f := range engine.AllFindings {

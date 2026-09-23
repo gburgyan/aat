@@ -185,6 +185,42 @@ func StripFuzz(p *Plan) {
 	}
 }
 
+// PinFuzzCase returns a copy of p that sends case c, which found finding,
+// on every run: the case is pinned in its target step's fuzz: block, every
+// other fuzz: block is removed, and the block's fail list is fail plus the
+// finding, so the plan fails until the API handles the case. The target must
+// be a step of p as written.
+func PinFuzzCase(p *Plan, c FuzzCase, finding string, fail []string) (*Plan, error) {
+	data, err := Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	cp, err := Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("copying the plan: %w", err)
+	}
+	StripFuzz(cp)
+
+	target := -1
+	for i, s := range cp.Execution.Steps {
+		if s.StepID() == c.Target {
+			target = i
+		}
+	}
+	if target < 0 {
+		return nil, fmt.Errorf("target step %s is not in the plan as written", c.Target)
+	}
+
+	pinned := c.Pin()
+	pinned.Found = finding
+	fail = slices.Clone(fail)
+	if !slices.Contains(fail, finding) {
+		fail = append(fail, finding)
+	}
+	cp.Execution.Steps[target].FuzzSettings = &FuzzSettings{Pinned: []PinnedFuzzCase{pinned}, Fail: fail}
+	return cp, nil
+}
+
 // FuzzStepID returns the ID of the sibling step that runs a case against the
 // step targetID, as in addItem__fuzz_quantity_below_min. It keeps to letters,
 // digits, and underscores, so expressions can name it and its setup copies.

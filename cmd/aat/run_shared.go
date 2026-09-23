@@ -120,16 +120,10 @@ type FuzzStepSummary struct {
 	Setup string `json:"setup,omitempty"`
 }
 
-// FuzzRunSummary counts a run's fuzz cases in the JSON summary.
+// FuzzRunSummary counts a run's fuzz cases in the JSON summary, as
+// summary.json does, with the run's warnings about how it fuzzed.
 type FuzzRunSummary struct {
-	Cases int `json:"cases"`
-	// Findings counts the cases by finding; "ok" counts the cases whose
-	// response was what they called for.
-	Findings map[string]int `json:"findings"`
-	Failing  int            `json:"failing"`
-	// Setup counts the cases by how their setup came to be: fresh, reused,
-	// or failed.
-	Setup map[string]int `json:"setup,omitempty"`
+	archive.FuzzSummary
 	// Warnings are problems with how the run fuzzed.
 	Warnings []string `json:"warnings,omitempty"`
 }
@@ -312,16 +306,7 @@ func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
 	}
 
 	if fs := engine.SummarizeFuzz(result.Steps); fs != nil {
-		s.Fuzz = &FuzzRunSummary{Cases: fs.Cases, Findings: map[string]int{}, Failing: fs.Failing, Warnings: result.FuzzWarnings}
-		if len(fs.Setup) > 0 {
-			s.Fuzz.Setup = fs.Setup
-		}
-		for finding, n := range fs.Findings {
-			if finding == "" {
-				finding = "ok"
-			}
-			s.Fuzz.Findings[finding] = n
-		}
+		s.Fuzz = &FuzzRunSummary{FuzzSummary: *fs, Warnings: result.FuzzWarnings}
 	}
 
 	s.Summary = SummaryStats{

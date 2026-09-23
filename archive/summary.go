@@ -70,25 +70,38 @@ func BuildFuzzSummary(steps []StepRecord) *FuzzSummary {
 			continue
 		}
 		if s == nil {
-			s = &FuzzSummary{Findings: map[string]int{}}
+			s = &FuzzSummary{}
 		}
-		s.Cases++
-		finding := step.Fuzz.Finding
-		if finding == "" {
-			finding = "ok"
-		}
-		if step.Fuzz.Setup != "" {
-			if s.Setup == nil {
-				s.Setup = map[string]int{}
-			}
-			s.Setup[step.Fuzz.Setup]++
-		}
-		s.Findings[finding]++
-		if step.Fuzz.Fails {
-			s.Failing++
-		}
+		s.Add(step.Fuzz.Finding, step.Fuzz.Setup, step.Fuzz.Fails)
 	}
 	return s
+}
+
+// FindingOK is the key FuzzSummary.Findings counts the cases under whose
+// response was what they called for.
+const FindingOK = "ok"
+
+// Add counts one fuzz case: its finding, empty when the response was what
+// the case called for; its setup, empty on the happy path's own; and
+// whether its finding failed the run.
+func (s *FuzzSummary) Add(finding, setup string, fails bool) {
+	if s.Findings == nil {
+		s.Findings = map[string]int{}
+	}
+	if finding == "" {
+		finding = FindingOK
+	}
+	s.Cases++
+	s.Findings[finding]++
+	if setup != "" {
+		if s.Setup == nil {
+			s.Setup = map[string]int{}
+		}
+		s.Setup[setup]++
+	}
+	if fails {
+		s.Failing++
+	}
 }
 
 // buildOASSummary counts the OpenAPI validation of steps, which found

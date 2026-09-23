@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/engine"
 )
 
@@ -36,7 +37,13 @@ func fuzzNote(result engine.StepResult, color bool) string {
 // summary counts them. A copy that failed is shown, since its case wasn't
 // sent.
 func quietSetupCopy(r engine.StepResult) bool {
-	return r.FuzzSetup != "" && r.Error == nil && r.StatusCode < 400 && (r.Validation == nil || r.Validation.Passed)
+	if r.FuzzSetup == "" || r.Error != nil || r.ResponseBodyError != nil || r.Validation != nil && !r.Validation.Passed {
+		return false
+	}
+	if r.ExpectFailure != nil {
+		return r.ExpectFailure.Passed
+	}
+	return r.StatusCode < 400
 }
 
 // describeSetup says how a run's fuzz cases were set up, as in "4 fresh, 50
@@ -67,7 +74,7 @@ func writeFuzzSummary(w io.Writer, lead string, steps []engine.StepResult, color
 		return
 	}
 	var parts []string
-	if n := fs.Findings[""]; n > 0 {
+	if n := fs.Findings[archive.FindingOK]; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d as expected", n))
 	}
 	for _, finding := range engine.AllFindings {

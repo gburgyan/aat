@@ -231,3 +231,21 @@ func TestExpandMutations_IsolatedClonesAreNotFuzzTargets(t *testing.T) {
 	}
 	assert.Equal(t, []string{"cart"}, withBlock)
 }
+
+func TestPinFuzzCase(t *testing.T) {
+	p := fuzzPlan()
+	p.Execution.Steps[2].FuzzSettings = &FuzzSettings{Cases: 3}
+	c := FuzzCase{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0, Target: "add"}
+	pinned, err := PinFuzzCase(p, c, FindingRejectedValid, []string{FindingServerError})
+	require.NoError(t, err)
+	assert.Nil(t, pinned.Execution.Steps[2].FuzzSettings, "other blocks are removed")
+	block := pinned.Execution.Steps[1].FuzzSettings
+	require.NotNil(t, block)
+	assert.Equal(t, []string{FindingServerError, FindingRejectedValid}, block.Fail)
+	assert.Equal(t, []PinnedFuzzCase{{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0, Found: FindingRejectedValid}}, block.Pinned)
+	assert.Equal(t, 3, p.Execution.Steps[2].FuzzSettings.Cases, "the plan itself is untouched")
+
+	c.Target = "add--neg"
+	_, err = PinFuzzCase(p, c, FindingRejectedValid, nil)
+	assert.ErrorContains(t, err, "not in the plan as written")
+}
