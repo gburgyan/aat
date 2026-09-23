@@ -301,6 +301,7 @@ type ResolutionDetail struct {
 	ConstraintOK *bool  `json:"constraintOk,omitempty"`
 	PoolIndex    int    `json:"poolIndex,omitempty"`
 	PoolSize     int    `json:"poolSize,omitempty"`
+	PoolRef      string `json:"poolRef,omitempty"`
 	Tried        []any  `json:"tried,omitempty"`
 }
 

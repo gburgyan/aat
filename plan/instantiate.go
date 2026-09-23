@@ -285,6 +285,8 @@ func StepValueFromDefault(d *graph.InputDefault) StepValue {
 		copy(sv.Pool, d.Pool)
 	}
 
+	sv.PoolRef = d.PoolRef
+
 	if d.PoolStrategy != nil {
 		s := *d.PoolStrategy
 		sv.PoolStrategy = &s

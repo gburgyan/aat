@@ -69,7 +69,7 @@ func (a *Assertions) UnmarshalYAML(unmarshal func(any) error) error {
 // mapping reads as the step value's own keys.
 func (sv StepValue) MarshalYAML() (interface{}, error) {
 	if !sv.Locked && sv.From == "" && sv.Select == nil && sv.Constraint == "" &&
-		len(sv.Pool) == 0 && sv.PoolStrategy == nil &&
+		len(sv.Pool) == 0 && sv.PoolRef == "" && sv.PoolStrategy == nil &&
 		sv.FromSelection == "" && sv.FromResolved == "" && sv.FromInput == "" && sv.Default != nil &&
 		reflect.ValueOf(sv.Default).Kind() != reflect.Map {
 		return sv.Default, nil

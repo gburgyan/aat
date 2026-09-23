@@ -340,6 +340,8 @@ values:
     constraint: "value != origin"   # "JFK" fails, so a pool entry is used
 ```
 
+`poolRef` takes a pool from the [domain file](domain.md#value-pools) instead of listing one: `poolRef: airportCodes`, or `poolRef: airportCodes.us` for one group. It works wherever `pool` does, and a value sets one or the other.
+
 Pool iteration order depends on `poolStrategy`:
 
 | Strategy | Behavior |

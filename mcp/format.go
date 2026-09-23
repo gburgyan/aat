@@ -198,6 +198,9 @@ func formatGraphDefault(d *graph.InputDefault) string {
 		}
 		return "[" + strings.Join(items, ", ") + "]"
 	}
+	if d.PoolRef != "" {
+		return "poolRef: " + d.PoolRef
+	}
 	if d.From != "" {
 		return "from: " + d.From
 	}

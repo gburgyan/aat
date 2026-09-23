@@ -216,7 +216,7 @@ func unknownKeyMessage(key, typeName string, target reflect.Type) string {
 	if len(valid) == 0 {
 		return msg
 	}
-	if suggestion := closest(key, valid); suggestion != "" {
+	if suggestion := Closest(key, valid); suggestion != "" {
 		return fmt.Sprintf("%s (did you mean %q?)", msg, suggestion)
 	}
 	return fmt.Sprintf("%s (valid keys: %s)", msg, strings.Join(valid, ", "))
@@ -326,10 +326,10 @@ func collectKeys(t reflect.Type, keys *[]string) {
 	}
 }
 
-// closest returns the valid key that key most likely misspells: the same key
+// Closest returns the valid key that key most likely misspells: the same key
 // in another case, or one within an edit distance of 2. It returns "" when
 // nothing is close.
-func closest(key string, valid []string) string {
+func Closest(key string, valid []string) string {
 	best, bestDist := "", 3
 	for _, candidate := range valid {
 		if strings.EqualFold(candidate, key) {

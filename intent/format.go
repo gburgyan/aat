@@ -387,6 +387,9 @@ func formatInputDefault(d *graph.InputDefault) string {
 		}
 		return fmt.Sprintf(" [pool: %s]", strings.Join(items, ", "))
 	}
+	if d.PoolRef != "" {
+		return fmt.Sprintf(" [poolRef: %s]", d.PoolRef)
+	}
 	if d.From != "" {
 		return fmt.Sprintf(" [from: %s]", d.From)
 	}

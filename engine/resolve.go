@@ -498,6 +498,14 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 
 	// 3. Plan StepValue default / pool
 	if sv, ok := step.Values[input.Name]; ok {
+		var kb *domain.KnowledgeBase
+		if rctx != nil {
+			kb = rctx.KB
+		}
+		sv, err := withDomainPool(sv, kb)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("resolving %q: %w", input.Name, err)
+		}
 		if sv.Default != nil {
 			// Full resolution: evaluate expressions, check constraints, try pool
 			if rctx != nil && ectx != nil {
@@ -527,6 +535,7 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 				FinalValue: sv.Pool[0],
 				PoolIndex:  0,
 				PoolSize:   len(sv.Pool),
+				PoolRef:    sv.PoolRef,
 			}
 			return sv.Pool[0], nil, res, nil
 		}
@@ -885,6 +894,7 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 					ConstraintOK: true,
 					PoolIndex:    indices[pi],
 					PoolSize:     len(sv.Pool),
+					PoolRef:      sv.PoolRef,
 					Tried:        tried,
 				}
 				if isExpression(candidate) {

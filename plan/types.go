@@ -161,8 +161,11 @@ type StepSelection struct {
 // When a bare scalar appears in YAML (e.g., origin: "DEN"), only Default is set.
 // When a mapping appears, the full struct is unmarshalled.
 type StepValue struct {
-	Default       any              `yaml:"default,omitempty" json:"default,omitempty"`
-	Pool          []any            `yaml:"pool,omitempty" json:"pool,omitempty"`
+	Default any   `yaml:"default,omitempty" json:"default,omitempty"`
+	Pool    []any `yaml:"pool,omitempty" json:"pool,omitempty"`
+	// PoolRef names a domain value pool ("airportCodes", or
+	// "airportCodes.us" for a group) to use as the pool.
+	PoolRef       string           `yaml:"poolRef,omitempty" json:"poolRef,omitempty"`
 	PoolStrategy  *string          `yaml:"poolStrategy,omitempty" json:"poolStrategy,omitempty"`
 	Constraint    string           `yaml:"constraint,omitempty" json:"constraint,omitempty"`
 	From          string           `yaml:"from,omitempty" json:"from,omitempty"`
@@ -192,6 +195,7 @@ func (sv StepValue) IsEmpty() bool {
 		sv.Select == nil &&
 		sv.Constraint == "" &&
 		len(sv.Pool) == 0 &&
+		sv.PoolRef == "" &&
 		sv.PoolStrategy == nil
 }
 

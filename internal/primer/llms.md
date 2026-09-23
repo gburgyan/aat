@@ -149,6 +149,8 @@ Scalar: `default: "USD"`
 
 Pool (engine picks one): `default: ["USD", "EUR", "GBP"]`
 
+Domain pool (engine picks one from `domain.yaml`'s `valuePools`): `default: {poolRef: currencies}`, or `{poolRef: airportCodes.us}` for one group. Graph defaults, layers, and step values all take it, with `constraint` and `poolStrategy` as for `pool`; `aat validate` checks each name. Prefer it to copying a domain pool's values into several defaults.
+
 Rich default (references another node's output):
 ```yaml
 default:
@@ -678,7 +680,10 @@ a 2xx. Retries are skipped — the first response wins. Cleanup still runs.
     description: "Unknown product should be rejected"
 ```
 
-All `expectFailure.status` entries must be `>= 400`. An expected-failure step
+All `expectFailure.status` entries must be `>= 400`, or the class `4xx` or `5xx`,
+which takes any status in it: `status: [4xx]` passes on any refusal and fails
+on a 5xx. Classes work in mutation `expectStatus` and overlay `expectFailure`
+too. An expected-failure step
 stores no outputs, so a later step can't read an ID from its error body. To check
 the rejected object afterwards, create it in an earlier step that succeeds and
 make the rejected call on it, or find it with a list step filtered by a value you

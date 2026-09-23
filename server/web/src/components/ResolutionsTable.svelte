@@ -90,7 +90,7 @@
             <span class="dt-mono">{r.constraint}</span>
           {/if}
           {#if r.poolSize}
-            pool {(r.poolIndex ?? 0) + 1}/{r.poolSize}
+            pool {(r.poolIndex ?? 0) + 1}/{r.poolSize}{#if r.poolRef}&nbsp;<span class="dt-mono">{r.poolRef}</span>{/if}
           {/if}
         </td>
       </tr>

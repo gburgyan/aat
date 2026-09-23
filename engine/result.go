@@ -265,6 +265,7 @@ type ValueResolution struct {
 	ConstraintOK bool   // whether constraint passed
 	PoolIndex    int    // index in fallback pool (-1 if not from pool)
 	PoolSize     int    // fallback pool size (0 if no pool)
+	PoolRef      string // the domain pool the pool came from, when poolRef named one
 	Tried        []any  // values tried and rejected before this one
 	// Error, for source "error", says why the input couldn't be resolved. For a
 	// named selection that failed, InputName is the selection's name.

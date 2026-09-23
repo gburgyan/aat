@@ -13,6 +13,16 @@ the graph and plan formats may still change before 1.0.
   each run's picks as well as the shuffle. A step's picks depend on its ID, not on the order steps run in, so parallel
   steps replay too. `{{uuid}}` and `{{random N}}` stay unique. See
   [Replaying a run's picks](https://gburgyan.github.io/aat/value-flow/#replaying-a-runs-picks).
+- **Defaults can draw from the domain file's value pools.** `poolRef: airportCodes`, or `poolRef: airportCodes.us`
+  for one group, works wherever `pool` does: graph defaults, layers, and step values, with `constraint` and
+  `poolStrategy`. One list then serves every input that takes that kind of value, where each default used to copy
+  it. `aat validate` checks every name, the archive and web UI record which pool a value came from, and MCP
+  `list_value_pools` shows each pool's groups and the inputs that use it. See
+  [Value Pools](https://gburgyan.github.io/aat/domain/#value-pools).
+- **`expectFailure` takes status classes.** `status: [4xx]` passes on any refusal and still fails on a 5xx or a
+  success; it works in mutation `expectStatus` and overlay `expectFailure` too, and a gRPC status matches the class
+  of the HTTP status it maps to. See
+  [Negative Testing](https://gburgyan.github.io/aat/plans/#negative-testing-expectfailure).
 
 ## [0.3.2] - 2026-09-22
 

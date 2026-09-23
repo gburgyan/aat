@@ -1267,6 +1267,7 @@ func toResolutionDetails(recs []archive.ValueResolutionRecord) []ResolutionDetai
 			ConstraintOK: r.ConstraintOK,
 			PoolIndex:    r.PoolIndex,
 			PoolSize:     r.PoolSize,
+			PoolRef:      r.PoolRef,
 			Tried:        r.Tried,
 		}
 	}

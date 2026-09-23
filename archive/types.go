@@ -313,7 +313,9 @@ type ValueResolutionRecord struct {
 	ConstraintOK *bool  `json:"constraintOk,omitempty"`
 	PoolIndex    int    `json:"poolIndex,omitempty"`
 	PoolSize     int    `json:"poolSize,omitempty"`
-	Tried        []any  `json:"tried,omitempty"`
+	// PoolRef names the domain pool the pool came from, when poolRef named one.
+	PoolRef string `json:"poolRef,omitempty" redact:"-"`
+	Tried   []any  `json:"tried,omitempty"`
 	// Error, for source "error", says why the input couldn't be resolved. For a
 	// named selection that failed, InputName is the selection's name.
 	Error string `json:"error,omitempty"`

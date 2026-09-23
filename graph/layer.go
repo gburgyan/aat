@@ -240,8 +240,8 @@ func MergeInputDefault(base, overlay *InputDefault) *InputDefault {
 
 	result := *base
 
-	if overlay.Value != nil || overlay.Pool != nil || overlay.From != "" || overlay.FromResolved != "" {
-		result.Value, result.Pool, result.From, result.FromResolved = nil, nil, "", ""
+	if overlay.Value != nil || overlay.Pool != nil || overlay.PoolRef != "" || overlay.From != "" || overlay.FromResolved != "" {
+		result.Value, result.Pool, result.PoolRef, result.From, result.FromResolved = nil, nil, "", "", ""
 		if overlay.From == "" {
 			result.Select = nil // a select applies only to a from source
 		}
@@ -250,6 +250,10 @@ func MergeInputDefault(base, overlay *InputDefault) *InputDefault {
 	if overlay.Pool != nil {
 		result.Pool = make([]any, len(overlay.Pool))
 		copy(result.Pool, overlay.Pool)
+	}
+
+	if overlay.PoolRef != "" {
+		result.PoolRef = overlay.PoolRef
 	}
 
 	if overlay.Value != nil {

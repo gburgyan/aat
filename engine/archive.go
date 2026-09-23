@@ -334,6 +334,7 @@ func convertResolutions(resolutions []ValueResolution) []archive.ValueResolution
 			Constraint: r.Constraint,
 			PoolIndex:  r.PoolIndex,
 			PoolSize:   r.PoolSize,
+			PoolRef:    r.PoolRef,
 			Tried:      r.Tried,
 			Error:      r.Error,
 			Layer:      r.Layer,
