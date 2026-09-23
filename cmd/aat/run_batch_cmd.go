@@ -748,8 +748,11 @@ func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, 
 func specRunContext(rctx *runContext, spec batchRunSpec, batchSeed int64) *runContext {
 	cp := *rctx
 	cp.Layers = spec.layers
+	cp.PlanName = strings.TrimSuffix(spec.entry.Name, filepath.Ext(spec.entry.Name))
 	if batchSeed != 0 {
-		seed := runSeed(batchSeed, spec.entry.FullPath, spec.permutation)
+		// The plan's path within its directory, not its absolute path, so the
+		// seed replays in any checkout.
+		seed := runSeed(batchSeed, spec.entry.Name, spec.permutation)
 		cp.Seed = &seed
 	}
 	return &cp

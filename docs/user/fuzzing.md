@@ -266,7 +266,9 @@ aat run plan smoke --fuzz addItem --fuzz-save plans/fuzz/
 The saved plan is the one that ran, with a recipe written out in full. Its target step has a `fuzz:` block pinning the
 one case, and `fail` includes the finding. On every run it sends that value, fails while the API still mishandles it,
 and passes once the API is fixed. Kept in a plan directory, it becomes part of `aat run batch`. A plain plan can't
-apply layers, so a plan found with layers says which ones in its description, along with the run's seed.
+apply layers, so a plan found with layers says which ones in its description, along with the run's seed. In a batch,
+a file is named after the plan's path within its directory, as in `us-smoke--addItem--quantity.below-min.yaml`, so
+plans of one name in different subdirectories keep their own.
 
 ## What it doesn't do yet
 

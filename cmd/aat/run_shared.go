@@ -199,6 +199,7 @@ type runResult struct {
 	attempts    int             // total attempts (1 = no retries)
 	layers      []string        // effective layers applied to this run
 	secrets     map[string]bool // the run's known secrets, for redacting what a batch archives about it
+	fuzzFailed  bool            // a fuzz case's finding failed the run
 }
 
 // exitCodeInfra is the exit code for infrastructure/config errors.
@@ -547,7 +548,9 @@ const retryDelay = 2 * time.Second
 // isRetryable returns true if the run result should trigger a plan-level retry.
 // Setup errors (bad plan, missing template) are not retried.
 func isRetryable(res *runResult) bool {
-	if res.setupErr {
+	// A fuzz finding is a result about the API, not flakiness: a retry would
+	// draw other cases and could pass, hiding it.
+	if res.setupErr || res.fuzzFailed {
 		return false
 	}
 	switch res.outcome {
@@ -811,6 +814,11 @@ type runContext struct {
 	NoFuzz           bool               // strip each plan's fuzz: blocks
 	FuzzSave         string             // directory for regression plans of fuzz findings
 	FuzzSaveAll      bool               // save warnings as well as failures
+	// PlanName names the plan in saved fuzz regression plans' file names: a
+	// batch sets its path within the plan directory, so plans of one name in
+	// different subdirectories don't overwrite each other. Empty uses the plan
+	// file's base name.
+	PlanName string
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -1196,7 +1204,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	}
 	if rctx.FuzzSave != "" {
 		saved, saveErr := saveFuzzFindings(p, result, fuzzSaveOptions{
-			Dir: rctx.FuzzSave, All: rctx.FuzzSaveAll, PlanPath: planPath, Layers: effectiveLayers, Seed: result.Seed,
+			Dir: rctx.FuzzSave, All: rctx.FuzzSaveAll, PlanPath: planPath, PlanName: rctx.PlanName, Layers: effectiveLayers, Seed: result.Seed,
 		})
 		for _, path := range saved {
 			logf("Saved fuzz regression plan: %s\n", path)
@@ -1238,6 +1246,10 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		}
 	}
 
+	fuzzFailed := false
+	if fs := engine.SummarizeFuzz(result.Steps); fs != nil {
+		fuzzFailed = fs.Failing > 0
+	}
 	return &runResult{
 		outcome:     result.Outcome,
 		summary:     summary,
@@ -1245,6 +1257,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		err:         result.Error,
 		layers:      effectiveLayers,
 		secrets:     secrets,
+		fuzzFailed:  fuzzFailed,
 	}
 }
 

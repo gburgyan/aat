@@ -18,8 +18,11 @@ type fuzzSaveOptions struct {
 	// All also saves the cases whose finding was only a warning.
 	All bool
 	// PlanPath is the plan or recipe the run started from; its name starts
-	// each file's.
+	// each file's, unless PlanName is set.
 	PlanPath string
+	// PlanName, when set, starts each file's name instead: a batch's path of
+	// the plan within its directory, as in "us/smoke".
+	PlanName string
 	// Layers and Seed describe the run, for the saved plan's description: a
 	// plain plan can't apply layers itself.
 	Layers []string
@@ -43,7 +46,11 @@ func saveFuzzFindings(p *plan.Plan, result *engine.RunResult, opts fuzzSaveOptio
 		if err != nil {
 			return paths, fmt.Errorf("fuzz case %s: %w", f.Case.ID, err)
 		}
-		name := fileSafe(strings.TrimSuffix(filepath.Base(opts.PlanPath), filepath.Ext(opts.PlanPath)))
+		planName := opts.PlanName
+		if planName == "" {
+			planName = strings.TrimSuffix(filepath.Base(opts.PlanPath), filepath.Ext(opts.PlanPath))
+		}
+		name := fileSafe(planName)
 		if len(opts.Layers) > 0 {
 			name += "--" + fileSafe(strings.Join(opts.Layers, "+"))
 		}

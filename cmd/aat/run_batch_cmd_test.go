@@ -14,7 +14,9 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -976,10 +978,38 @@ func TestRunSeed(t *testing.T) {
 }
 
 func TestSpecRunContext_Seed(t *testing.T) {
-	spec := batchRunSpec{entry: config.PlanEntry{FullPath: "plans/smoke.yaml"}, layers: []string{"eu"}}
+	spec := batchRunSpec{entry: config.PlanEntry{Name: "us/smoke.yaml", FullPath: "/home/ci/x/plans/us/smoke.yaml"}, layers: []string{"eu"}}
 	assert.Nil(t, specRunContext(&runContext{}, spec, 0).Seed, "no batch seed leaves each run to pick one")
 	got := specRunContext(&runContext{}, spec, 7)
 	require.NotNil(t, got.Seed)
-	assert.Equal(t, runSeed(7, "plans/smoke.yaml", ""), *got.Seed)
+	assert.Equal(t, runSeed(7, "us/smoke.yaml", ""), *got.Seed)
 	assert.Equal(t, []string{"eu"}, got.Layers)
+	assert.Equal(t, "us/smoke", got.PlanName)
+
+	elsewhere := spec
+	elsewhere.entry.FullPath = "/Users/me/x/plans/us/smoke.yaml"
+	assert.Equal(t, *got.Seed, *specRunContext(&runContext{}, elsewhere, 7).Seed, "the same seed in any checkout")
+}
+
+func TestIsRetryable_FuzzFindingIsNotRetried(t *testing.T) {
+	assert.True(t, isRetryable(&runResult{outcome: engine.OutcomeFailed}))
+	assert.False(t, isRetryable(&runResult{outcome: engine.OutcomeFailed, fuzzFailed: true}))
+}
+
+func TestSaveFuzzFindings_PlanNameKeepsSubdirectoriesApart(t *testing.T) {
+	dir := t.TempDir()
+	p := &plan.Plan{Metadata: plan.Metadata{GraphVersion: "1.0.0"}, Execution: plan.Execution{Steps: []plan.Step{{ID: "add", Node: "addItem"}}}}
+	result := &engine.RunResult{Steps: []engine.StepResult{{Fuzz: &engine.FuzzResult{
+		Case:    plan.FuzzCase{ID: "quantity.zero", Mode: plan.FuzzNegative, Input: "quantity", Value: 0, Target: "add"},
+		Finding: engine.FindingServerError, Fails: true,
+	}}}}
+	var all []string
+	for _, name := range []string{"us/smoke", "eu/smoke"} {
+		paths, err := saveFuzzFindings(p, result, fuzzSaveOptions{Dir: dir, PlanPath: "/x/plans/" + name + ".yaml", PlanName: name})
+		require.NoError(t, err)
+		all = append(all, paths...)
+	}
+	require.Len(t, all, 2)
+	assert.NotEqual(t, all[0], all[1])
+	assert.Equal(t, "us-smoke--add--quantity.zero.yaml", filepath.Base(all[0]))
 }
