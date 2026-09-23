@@ -128,6 +128,7 @@ These flags apply to both `run plan` and `run batch`.
 | `--no-auto-overrides` | bool | `false` | Disable auto-discovery of `.aat-overrides.yaml` |
 | `--oas-validate` | string | `auto` | OAS validation mode: `auto`, `strict`, or `off` (see [OAS Validation](#oas-validation)) |
 | `--no-mutations` | bool | `false` | Skip mutation-expanded sibling steps; run only the happy path (smoke-test mode) |
+| `--fuzz` | string | — | Fuzz these steps, by step ID or node; see [Fuzzing](fuzzing.md) for `--fuzz-mode`, `--fuzz-input`, `--fuzz-cases`, `--fuzz-case`, `--fuzz-scope`, and `--fuzz-fail` |
 | `--verbose-auth` | bool | `false` | Log auth request/response details to stderr for debugging |
 | `--json` | bool | `false` | Machine-readable JSON summary to stdout |
 | `--quiet` | bool | `false` | Suppress progress; print only the outcome and archive path |

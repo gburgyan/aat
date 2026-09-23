@@ -869,6 +869,27 @@ infrastructure, not a defect with a date.
 Do not reach for this to quiet a flaky step — that is a `retry` rule — or in
 place of `expectFailure`, which says the API *should* refuse the call.
 
+### 6. `--fuzz` — generated values against one step of a flow
+
+`aat run plan <plan> --fuzz <step-or-node>` runs the plan, then sends the step
+values its inputs allow (`positive`), forbid (`negative`), and say nothing
+about (`edge`), each as a sibling step on its own copy of the steps before it.
+Cases come from input types, `constraints`, and the domain file's types and
+pools; nothing about fuzzing goes in the graph. Inputs wired from earlier steps
+are left alone unless named with `--fuzz-input`. When the node has an OpenAPI
+operation, a request the spec refuses is judged as negative.
+
+- **Findings:** `server-error`, `no-response`, and `schema-violation` fail the
+  run; `accepted-invalid` and `rejected-valid` are warnings (`--fuzz-fail`
+  changes the set). Fuzz steps never stop the run.
+- **Replay:** case IDs are stable (`quantity.above-max`): `--fuzz-case ID`
+  reruns one. `--fuzz-cases N` caps the cases, picked by the run's seed.
+- **Better cases:** declare `constraints` (min, max, lengths, pattern) and enum
+  types on inputs; they make the boundaries the fuzzer tests.
+- **Keeping a finding:** write a step or a `mutations:` entry that sends the
+  value. When it must arrive exactly as generated, use a step value with
+  `raw: true`, which sends its default without expressions or type coercion.
+
 ### Patterns You'll Use
 
 **Depth test an endpoint that needs setup state:** write a plan whose terminal

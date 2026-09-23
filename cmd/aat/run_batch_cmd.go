@@ -82,6 +82,13 @@ A batch that finds no plans exits 2.`,
 		if err != nil {
 			return batchSetupFailure(jsonFlag, err)
 		}
+		fuzzCfg, err := fuzzConfigFromFlags(cmd)
+		if err != nil {
+			return batchSetupFailure(jsonFlag, err)
+		}
+		if fuzzCfg != nil {
+			fuzzCfg.AllowNoTarget = true // a plan without the target runs as written
+		}
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -107,6 +114,7 @@ A batch that finds no plans exits 2.`,
 				VerboseAuth:     verboseAuth,
 				SkipMutations:   noMutations,
 				Vars:            vars,
+				Fuzz:            fuzzCfg,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,

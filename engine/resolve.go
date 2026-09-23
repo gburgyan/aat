@@ -139,7 +139,9 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 			return inputs, decisions, resolutions, fmt.Errorf("resolving input %q for node %q: %w", input.Name, step.Node, err)
 		}
 		if val != nil {
-			val = coerceValue(val, input.Type)
+			if !step.Values[input.Name].Raw {
+				val = coerceValue(val, input.Type)
+			}
 			inputs[input.Name] = val
 			// Update expression context so later inputs can reference this one
 			if ectx != nil {
@@ -505,6 +507,16 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 		sv, err := withDomainPool(sv, kb)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("resolving %q: %w", input.Name, err)
+		}
+		if sv.Raw && sv.Default != nil {
+			// Sent as written: no expression, constraint, or pool
+			return sv.Default, nil, &ValueResolution{
+				InputName:  input.Name,
+				Source:     "raw_value",
+				RawValue:   sv.Default,
+				FinalValue: sv.Default,
+				PoolIndex:  -1,
+			}, nil
 		}
 		if sv.Default != nil {
 			// Full resolution: evaluate expressions, check constraints, try pool

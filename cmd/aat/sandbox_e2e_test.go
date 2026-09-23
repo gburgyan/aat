@@ -332,6 +332,67 @@ func TestShopExample(t *testing.T) {
 		assert.Regexp(t, `(?m)^oas: strict, \d+ requests? and \d+ responses? validated, 0 violations$`, out.String())
 	})
 
+	t.Run("fuzz finds a planted bug", func(t *testing.T) {
+		t.Parallel()
+		// The planted bug: adding a negative quantity fails with a 500 instead
+		// of the sandbox's 400.
+		p := newShopProjectWith(t, func(h http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/items") {
+					body, _ := io.ReadAll(r.Body)
+					r.Body = io.NopCloser(bytes.NewReader(body))
+					if bytes.Contains(body, []byte(`"quantity": -1`)) || bytes.Contains(body, []byte(`"quantity":-1`)) {
+						http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
+						return
+					}
+				}
+				h.ServeHTTP(w, r)
+			})
+		})
+
+		args := p.runArgs(t, "us")
+		args.PlanPath = p.plan(t, "smoke")
+		args.Fuzz = &engine.FuzzConfig{Targets: []string{"addItem"}}
+		res := runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		assert.EqualError(t, res.err, "fuzzing found 1 server-error")
+		assert.Equal(t, engine.OutcomeFailed, res.outcome)
+		require.NotNil(t, res.summary.Fuzz)
+		assert.Equal(t, 1, res.summary.Fuzz.Failing)
+		assert.Equal(t, 1, res.summary.Fuzz.Findings["server-error"])
+
+		var failing []FuzzStepSummary
+		for _, s := range res.summary.Steps {
+			if s.Fuzz != nil && s.Fuzz.Fails {
+				failing = append(failing, *s.Fuzz)
+			}
+		}
+		require.Len(t, failing, 1)
+		assert.Equal(t, "quantity.negative", failing[0].ID)
+		assert.Equal(t, "negative", failing[0].JudgedAs, "the spec's minimum makes -1 invalid")
+
+		// The happy path still passed, and the archive records the case.
+		assert.True(t, stepByNode(t, res.summary, "checkoutCart").Passed)
+		arc, err := archive.Read(res.archivePath)
+		require.NoError(t, err)
+		var recorded *archive.FuzzRecord
+		for _, s := range arc.Steps {
+			if s.Fuzz != nil && s.Fuzz.ID == "quantity.negative" {
+				recorded = s.Fuzz
+			}
+		}
+		require.NotNil(t, recorded)
+		assert.Equal(t, "server-error", recorded.Finding)
+		assert.True(t, recorded.Fails)
+
+		// Replaying the one case finds it again.
+		args.OutputDir = filepath.Join(t.TempDir(), "runs")
+		args.Fuzz = &engine.FuzzConfig{Targets: []string{"addItem"}, Cases: []string{"quantity.negative"}}
+		res = runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		assert.EqualError(t, res.err, "fuzzing found 1 server-error")
+		assert.Equal(t, 1, res.summary.Fuzz.Cases)
+		assert.Equal(t, 1, res.summary.Fuzz.Failing)
+	})
+
 	t.Run("published kit", func(t *testing.T) {
 		t.Parallel()
 		shell, err := exec.LookPath("sh")

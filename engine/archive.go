@@ -110,6 +110,14 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 			Passed:     s.ExpectFailure.Passed,
 		}
 	}
+	if s.Fuzz != nil {
+		c := s.Fuzz.Case
+		rec.Fuzz = &archive.FuzzRecord{ID: c.ID, Target: c.Target, Mode: c.Mode, Input: c.Input, Strategy: c.Strategy,
+			Value: c.Value, SpecViolations: s.Fuzz.SpecViolations, Finding: s.Fuzz.Finding, Fails: s.Fuzz.Fails}
+		if s.Fuzz.JudgedAs != c.Mode {
+			rec.Fuzz.JudgedAs = s.Fuzz.JudgedAs
+		}
+	}
 	if s.KnownIssue != nil {
 		rec.KnownIssue = &archive.KnownIssueRecord{
 			Until:    s.KnownIssue.Until,

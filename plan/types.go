@@ -111,6 +111,9 @@ type Step struct {
 	// later mutations to fail for the wrong reason (consumed tokens, depleted
 	// inventory, already-committed resources, etc.).
 	MutationScope string `yaml:"mutationScope,omitempty" json:"mutationScope,omitempty"`
+	// Fuzz is set on a step the fuzzer made: the case it sends. It is never
+	// read from a plan file.
+	Fuzz *FuzzCase `yaml:"-" json:"fuzz,omitempty"`
 }
 
 // Mutation is a negative-test variant of a step. At instantiation it produces
@@ -174,6 +177,10 @@ type StepValue struct {
 	FromResolved  string           `yaml:"fromResolved,omitempty" json:"fromResolved,omitempty"`
 	FromInput     string           `yaml:"fromInput,omitempty" json:"fromInput,omitempty"`
 	Locked        bool             `yaml:"locked,omitempty" json:"locked,omitempty"`
+	// Raw sends Default exactly as written: no {{…}} expressions are
+	// evaluated and no coercion to the input's type is made, so "12" stays a
+	// string and "{{x}}" stays text. It needs a default.
+	Raw bool `yaml:"raw,omitempty" json:"raw,omitempty"`
 	// Origin says where a value that instantiation merged in came from: "graph"
 	// for a graph default and "layer" for a layer's. It is empty for a value the
 	// plan sets.

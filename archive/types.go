@@ -69,10 +69,13 @@ type StepRecord struct {
 	// applied. The step still reads as failed; see Archive.KnownIssues.
 	KnownIssue        *KnownIssueRecord        `json:"knownIssue,omitempty"`
 	ResponseBodyError *ResponseBodyErrorRecord `json:"responseBodyError,omitempty"`
-	OASValidation     *OASValidationRecord     `json:"oasValidation,omitempty"`
-	Error             string                   `json:"error,omitempty"`
-	RetryCount        int                      `json:"retryCount,omitempty"`
-	RetriedOn         []string                 `json:"retriedOn,omitempty" redact:"-"` // error category of each retried attempt, in order
+	// Fuzz, on a step the fuzzer made, is the case it sent and how its
+	// response was judged.
+	Fuzz          *FuzzRecord          `json:"fuzz,omitempty"`
+	OASValidation *OASValidationRecord `json:"oasValidation,omitempty"`
+	Error         string               `json:"error,omitempty"`
+	RetryCount    int                  `json:"retryCount,omitempty"`
+	RetriedOn     []string             `json:"retriedOn,omitempty" redact:"-"` // error category of each retried attempt, in order
 	// CleanupFor, on a cleanup step, is the ID of the step whose resource it
 	// releases, or of the cleanup step before it in a chain.
 	CleanupFor string `json:"cleanupFor,omitempty" redact:"-"`
@@ -139,6 +142,25 @@ type DisplayOutputRecord struct {
 	Label string `json:"label" redact:"-"`
 	Name  string `json:"name" redact:"-"`
 	Value any    `json:"value,omitempty"`
+}
+
+// FuzzRecord is a fuzz case and its finding.
+type FuzzRecord struct {
+	ID       string `json:"id" redact:"-"`
+	Target   string `json:"target" redact:"-"`
+	Mode     string `json:"mode" redact:"-"`
+	Input    string `json:"input" redact:"-"`
+	Strategy string `json:"strategy" redact:"-"`
+	Value    any    `json:"value"`
+	// JudgedAs is the mode the response was judged by, when it differs from
+	// Mode: negative when the request broke the OpenAPI spec.
+	JudgedAs string `json:"judgedAs,omitempty" redact:"-"`
+	// SpecViolations are the ways the request broke the OpenAPI spec.
+	SpecViolations []string `json:"specViolations,omitempty"`
+	// Finding is empty when the response was what the case called for.
+	Finding string `json:"finding,omitempty" redact:"-"`
+	// Fails is true when the finding failed the run.
+	Fails bool `json:"fails,omitempty"`
 }
 
 // ExpectFailureRecord captures the outcome of a negative assertion. Expected
@@ -344,6 +366,18 @@ type RunSummary struct {
 	// Seed replays the run's pool picks and random selections with
 	// aat run plan --seed.
 	Seed uint64 `json:"seed,omitempty"`
+	// Fuzz counts the run's fuzz cases by finding, when it had any.
+	Fuzz *FuzzSummary `json:"fuzz,omitempty"`
+}
+
+// FuzzSummary counts a run's fuzz cases in summary.json.
+type FuzzSummary struct {
+	Cases int `json:"cases"`
+	// Findings counts the cases by finding; "ok" counts those whose response
+	// was what they called for.
+	Findings map[string]int `json:"findings"`
+	// Failing counts the cases whose finding failed the run.
+	Failing int `json:"failing"`
 }
 
 // OASSummary is a run's OpenAPI validation in summary.json: the mode, and

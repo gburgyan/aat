@@ -61,6 +61,7 @@ func (o *BatchStreamObserver) OnCleanupSkipped(skip engine.CleanupSkip) {
 func (o *BatchStreamObserver) OnRunComplete(result *engine.RunResult) {
 	color := o.term.IsTTY
 	writeOASTotal(o.out, "    ", result.Steps, color)
+	writeFuzzSummary(o.out, "    ", result.Steps, color)
 	name := colorize(o.planName, colorCyan, color)
 	elapsed := formatDuration(result.Elapsed())
 	switch result.Outcome {

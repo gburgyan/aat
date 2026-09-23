@@ -108,6 +108,7 @@ nav:
   - Running:
       - Running tests: running.md
       - Matrix testing: batch-layers.md
+      - Fuzzing: fuzzing.md
       - Local development: local-dev.md
       - CI/CD: ci-cd.md
       - Checkpoints: checkpoints.md

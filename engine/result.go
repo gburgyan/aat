@@ -75,6 +75,10 @@ type RunResult struct {
 	StartTime time.Time
 	Duration  time.Duration
 
+	// FuzzCapped is true when --fuzz-cases dropped fuzz cases: the seed chose
+	// which ran.
+	FuzzCapped bool
+
 	// Seed is the seed the run drew pool picks and random selections from;
 	// Engine.WithSeed with it replays those choices. It is 0 when the run
 	// ended before any step resolved.
@@ -121,6 +125,8 @@ type StepResult struct {
 	DisplayOutputs    []DisplayOutput            // outputs tagged with display labels
 	ExpectFailure     *ExpectFailureResult       // non-nil for negative assertion steps
 	ResponseBodyError *ResponseBodyError         // non-nil when error detected in 2xx response body
+	// Fuzz, on a step the fuzzer made, is how its response was judged.
+	Fuzz *FuzzResult
 	// KnownIssue is set when the step carried a knownIssue entry, whether or
 	// not it ended up applying. Applied says it kept this step's failure out
 	// of the run's outcome; Expired says the entry had lapsed.
@@ -252,7 +258,7 @@ type ValueResolution struct {
 	InputName string // input being resolved
 	Source    string // "plan_default", "expression", "plan_from", "select_edge",
 	// "named_selection", "from_input", "from_resolved", "fallback_pool",
-	// "graph_default", "layer", "optional_skip", "override_value", "error"
+	// "graph_default", "layer", "optional_skip", "override_value", "raw_value", "error"
 	// Layer names the layer that set the value, when a layer did.
 	Layer        string
 	RawValue     any    // before expression evaluation (nil if N/A)

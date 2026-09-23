@@ -367,6 +367,22 @@ Seed: 4986022358596074 (replay its picks with --seed 4986022358596074)
 
 `constraint` is a [predicate expression](#predicate-expression-syntax) that a candidate value must satisfy. The candidate is available as `value`, and every input of the same step resolved before this one is available by name — inputs resolve in the order the graph node declares them, so `origin` must come before `destination` in the example above. The constraint is checked against the `default` and against pool entries; it is not applied to `from`, `fromSelection`, `fromInput`, or `fromResolved` values. Graph input defaults and layer entries accept the same `pool`, `poolStrategy`, and `constraint` fields (a graph default writes its literal as `value:` instead of `default:`).
 
+## Raw Values
+
+`raw: true` sends a step value's default exactly as written: `{{…}}` is not evaluated, and the value is not
+converted to the input's type, so `"12"` stays a string for an `integer` input. It is for negative tests that need a
+value the input's type would otherwise fix, and it is how [fuzz cases](fuzzing.md) are sent.
+
+```yaml
+values:
+  quantity:
+    default: "12"
+    raw: true           # sent as the string "12"
+```
+
+A raw value needs a `default`, and takes no `from`, `fromSelection`, `fromResolved`, `fromInput`, `pool`, or
+`poolRef`.
+
 ## Type Coercion
 
 The engine coerces resolved values based on the graph input's declared type:

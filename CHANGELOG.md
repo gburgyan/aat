@@ -19,6 +19,17 @@ the graph and plan formats may still change before 1.0.
   it. `aat validate` checks every name, the archive and web UI record which pool a value came from, and MCP
   `list_value_pools` shows each pool's groups and the inputs that use it. See
   [Value Pools](https://gburgyan.github.io/aat/domain/#value-pools).
+- **`--fuzz` tries a step with generated values, inside a real flow.** `aat run plan smoke --fuzz addItem` runs the
+  plan, then sends `addItem` values its inputs allow, values they forbid, and values they say nothing about, each as a
+  sibling step on its own copy of the steps before it. The cases come from each input's type and constraints and the
+  domain file's types and pools, so nothing about fuzzing goes in the graph; when the node has an OpenAPI operation,
+  a request the spec refuses is judged as negative. A 5xx, no response, or a response that breaks the spec fails the
+  run (`--fuzz-fail` changes that); a forbidden value accepted or an allowed one refused is a warning. Fuzz steps never
+  stop the run. Case IDs such as `quantity.above-max` are stable, so `--fuzz-case` replays one, and the archive,
+  `summary.json`, `--json`, and `aat run show` record each case and its finding. `run batch` takes the same flags. See
+  [Fuzzing](https://gburgyan.github.io/aat/fuzzing/).
+- **`raw: true` sends a step value exactly as written**, with no expression evaluation or type coercion. See
+  [Raw Values](https://gburgyan.github.io/aat/value-flow/#raw-values).
 - **`expectFailure` takes status classes.** `status: [4xx]` passes on any refusal and still fails on a 5xx or a
   success; it works in mutation `expectStatus` and overlay `expectFailure` too, and a gRPC status matches the class
   of the HTTP status it maps to. See

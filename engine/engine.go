@@ -73,6 +73,12 @@ type Engine struct {
 	seedSet bool
 	// draws hands out each step's random source during Run; nil outside it.
 	draws *stepDraws
+
+	// fuzz, when set, adds fuzz cases to the plan; see WithFuzz.
+	fuzz *FuzzConfig
+	// fuzzCapped is set during Run when --fuzz-cases dropped cases, so the
+	// seed chose which ran.
+	fuzzCapped bool
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -150,6 +156,21 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
+	// The seed the run's pool picks, random selections, and capped fuzz cases
+	// are drawn from
+	seed := e.seed
+	if !e.seedSet {
+		seed = NewRunSeed()
+	}
+
+	// 1b. Fuzz cases become sibling steps of the steps they target
+	e.fuzzCapped = false
+	if e.fuzz != nil {
+		if err := e.expandFuzz(instantiatedPlan, seed); err != nil {
+			return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan, Seed: seed}
+		}
+	}
+
 	// 2. Topological sort
 	sorted, err := TopologicalSort(instantiatedPlan.Execution.Steps)
 	if err != nil {
@@ -185,10 +206,6 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 
 	// 4. Set plan for constraint-aware resolution, and the seed the run's
 	// pool picks and random selections are drawn from
-	seed := e.seed
-	if !e.seedSet {
-		seed = NewRunSeed()
-	}
 	e.plan = instantiatedPlan
 	e.draws = newStepDraws(seed)
 	defer func() {
@@ -196,6 +213,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		e.draws = nil
 		if result != nil {
 			result.Seed = seed
+			result.FuzzCapped = e.fuzzCapped
 		}
 	}()
 
@@ -238,6 +256,34 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		}
 
 		stepResult := e.executeStepWithTracking(ctx, step, node, state)
+
+		// A fuzz step never ends the run: its finding is recorded, and fails
+		// the outcome when the configuration says it does.
+		if step.Fuzz != nil {
+			if stepResult.Error != nil && ctx.Err() != nil {
+				stepResults = append(stepResults, stepResult)
+				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+			}
+			stepResult.Fuzz = e.judgeFuzz(step, &stepResult)
+			if stepResult.Fuzz.Fails {
+				outcome = OutcomeFailed
+			}
+			// A case the API accepted may have created something to clean up,
+			// and the cleanup reads the step's outputs.
+			if stepResult.Error == nil && stepResult.StatusCode < 400 {
+				if stepResult.Outputs != nil {
+					state.StoreOutputs(step.StepID(), stepResult.Outputs)
+				}
+				if node.Cleanup.Node != "" {
+					cleanupStack.Push(CleanupEntry{NodeName: node.Cleanup.Node, ForNode: node.Name, ForStep: step.StepID()})
+				}
+			}
+			stepResults = append(stepResults, stepResult)
+			if e.Observer != nil {
+				e.Observer.OnStepComplete(i, total, stepResult)
+			}
+			continue
+		}
 
 		// expectFailure is resolved before anything is displayed or decided,
 		// because whether the step failed at all depends on it.
@@ -391,6 +437,9 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	}
 	if verOutcome != OutcomePassed {
 		outcome = verOutcome
+	}
+	if verErr == nil {
+		verErr = fuzzFailureError(stepResults)
 	}
 
 	return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, verErr)
@@ -782,6 +831,9 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		// sent.
 		overlayValues, _ := e.router.ResolveValueOverride(node.Name)
 		for k, v := range overlayValues {
+			if step.Fuzz != nil && step.Fuzz.Input == k {
+				continue // the case's value is what the step is for
+			}
 			inputs[k] = v
 			resolutions = recordOverrideValue(resolutions, k, v)
 		}

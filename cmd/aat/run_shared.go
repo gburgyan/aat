@@ -42,22 +42,23 @@ type runArgs struct {
 	DomainPath        string
 	JSON              bool
 	Quiet             bool
-	Overrides         []string          // "nodeName=http://url" pairs
-	EnvOverlay        string            // path to overlay YAML
-	MaxRetries        int               // max plan-level retries (0 = no retries)
-	Layers            []string          // layer names to apply
-	LayersDir         string            // directory containing layer files
-	LayerGroups       [][]string        // layer groups for permutation (batch only)
-	NoAutoOverrides   bool              // disable .aat-overrides.yaml auto-discovery
-	AutoOverridesPath string            // resolved path to auto-discovered overrides file
-	OASValidateMode   string            // "auto", "strict", "off"
-	VerboseAuth       bool              // log auth request/response details to stderr
-	SkipMutations     bool              // strip mutations from plans before running (smoke-test mode)
-	StopAfterStep     string            // stop after this step ID; skip cleanup (checkpoint handoff)
-	DumpStatePath     string            // write accumulated run state to this file (mode 0600)
-	DumpStateSecrets  bool              // keep live credentials in the state dump instead of redacting them
-	Vars              map[string]string // --var KEY=VALUE for multi-environment files
-	Seed              *uint64           // --seed: replay a run's pool picks and random selections; nil picks one
+	Overrides         []string           // "nodeName=http://url" pairs
+	EnvOverlay        string             // path to overlay YAML
+	MaxRetries        int                // max plan-level retries (0 = no retries)
+	Layers            []string           // layer names to apply
+	LayersDir         string             // directory containing layer files
+	LayerGroups       [][]string         // layer groups for permutation (batch only)
+	NoAutoOverrides   bool               // disable .aat-overrides.yaml auto-discovery
+	AutoOverridesPath string             // resolved path to auto-discovered overrides file
+	OASValidateMode   string             // "auto", "strict", "off"
+	VerboseAuth       bool               // log auth request/response details to stderr
+	SkipMutations     bool               // strip mutations from plans before running (smoke-test mode)
+	StopAfterStep     string             // stop after this step ID; skip cleanup (checkpoint handoff)
+	DumpStatePath     string             // write accumulated run state to this file (mode 0600)
+	DumpStateSecrets  bool               // keep live credentials in the state dump instead of redacting them
+	Vars              map[string]string  // --var KEY=VALUE for multi-environment files
+	Seed              *uint64            // --seed: replay a run's pool picks and random selections; nil picks one
+	Fuzz              *engine.FuzzConfig // --fuzz and its options; nil runs no fuzz cases
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -79,6 +80,8 @@ type RunSummary struct {
 	EndedEarly  bool         `json:"ended_early,omitempty"`
 	Summary     SummaryStats `json:"summary"`
 	ArchivePath string       `json:"archive_path,omitempty"`
+	// Fuzz counts the run's fuzz cases by finding, when it had any.
+	Fuzz *FuzzRunSummary `json:"fuzz,omitempty"`
 	// Seed is what `aat run plan --seed` takes to replay the run's pool picks
 	// and random selections; set when the run made such a choice.
 	Seed      uint64 `json:"seed,omitempty"`
@@ -90,6 +93,31 @@ type RunSummary struct {
 	// output. Its credentials are redacted unless --dump-state-secrets asked
 	// for them.
 	State *engine.StateExport `json:"state,omitempty"`
+}
+
+// FuzzStepSummary is a fuzz case in the JSON summary.
+type FuzzStepSummary struct {
+	ID       string `json:"id"`
+	Target   string `json:"target"`
+	Mode     string `json:"mode"`
+	Input    string `json:"input"`
+	Strategy string `json:"strategy"`
+	Value    any    `json:"value"`
+	// JudgedAs is set when the response was judged by another mode than the
+	// case's: negative when the request broke the OpenAPI spec.
+	JudgedAs       string   `json:"judged_as,omitempty"`
+	SpecViolations []string `json:"spec_violations,omitempty"`
+	Finding        string   `json:"finding,omitempty"`
+	Fails          bool     `json:"fails,omitempty"`
+}
+
+// FuzzRunSummary counts a run's fuzz cases in the JSON summary.
+type FuzzRunSummary struct {
+	Cases int `json:"cases"`
+	// Findings counts the cases by finding; "ok" counts the cases whose
+	// response was what they called for.
+	Findings map[string]int `json:"findings"`
+	Failing  int            `json:"failing"`
 }
 
 // StepSummary is a per-step entry in the JSON summary.
@@ -115,6 +143,9 @@ type StepSummary struct {
 	// Warnings are problems that didn't fail the step, such as a min or max
 	// selection whose candidates tied.
 	Warnings []string `json:"warnings,omitempty"`
+	// Fuzz, on a step the fuzzer made, is the case it sent and its finding.
+	// Such a step passed unless its finding failed the run.
+	Fuzz *FuzzStepSummary `json:"fuzz,omitempty"`
 }
 
 // CleanupSkipSummary is a registered cleanup that did not run because it was
@@ -265,6 +296,16 @@ func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
 		s.CleanupSkipped = append(s.CleanupSkipped, CleanupSkipSummary(skip))
 	}
 
+	if fs := engine.SummarizeFuzz(result.Steps); fs != nil {
+		s.Fuzz = &FuzzRunSummary{Cases: fs.Cases, Findings: map[string]int{}, Failing: fs.Failing}
+		for finding, n := range fs.Findings {
+			if finding == "" {
+				finding = "ok"
+			}
+			s.Fuzz.Findings[finding] = n
+		}
+	}
+
 	s.Summary = SummaryStats{
 		TotalSteps:  len(result.Steps),
 		PassedSteps: passed,
@@ -314,8 +355,19 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		ss.RetriedOn = append(ss.RetriedOn, c.String())
 	}
 
-	// Determine passed/failed
-	if step.Error != nil {
+	// Determine passed/failed. A fuzz step is judged by its finding alone.
+	if f := step.Fuzz; f != nil {
+		c := f.Case
+		ss.Fuzz = &FuzzStepSummary{ID: c.ID, Target: c.Target, Mode: c.Mode, Input: c.Input, Strategy: c.Strategy,
+			Value: c.Value, SpecViolations: f.SpecViolations, Finding: f.Finding, Fails: f.Fails}
+		if f.JudgedAs != c.Mode {
+			ss.Fuzz.JudgedAs = f.JudgedAs
+		}
+		ss.Passed = !f.Fails
+		if f.Fails {
+			ss.Error = f.Finding
+		}
+	} else if step.Error != nil {
 		ss.Error = step.Error.Error()
 		ss.Passed = false
 	} else if step.ExpectFailure != nil {
@@ -732,11 +784,12 @@ type runContext struct {
 	Pacer *engine.Pacer
 
 	// Execution options
-	SkipMutations    bool    // strip mutations from each plan before instantiation
-	StopAfterStep    string  // stop after this step ID; skip cleanup (checkpoint handoff)
-	DumpStatePath    string  // write accumulated run state to this file (mode 0600)
-	DumpStateSecrets bool    // keep live credentials in the state dump instead of redacting them
-	Seed             *uint64 // seed for pool picks and random selections; nil picks one per run
+	SkipMutations    bool               // strip mutations from each plan before instantiation
+	StopAfterStep    string             // stop after this step ID; skip cleanup (checkpoint handoff)
+	DumpStatePath    string             // write accumulated run state to this file (mode 0600)
+	DumpStateSecrets bool               // keep live credentials in the state dump instead of redacting them
+	Seed             *uint64            // seed for pool picks and random selections; nil picks one per run
+	Fuzz             *engine.FuzzConfig // fuzz cases to add to each plan; nil for none
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -812,6 +865,7 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		DumpStatePath:     args.DumpStatePath,
 		DumpStateSecrets:  args.DumpStateSecrets,
 		Seed:              args.Seed,
+		Fuzz:              args.Fuzz,
 	}
 
 	// Pre-load layers referenced by --layer and/or --layer-group flags.
@@ -1064,6 +1118,9 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		WithPacer(rctx.Pacer)
 	if rctx.Seed != nil {
 		eng.WithSeed(*rctx.Seed)
+	}
+	if rctx.Fuzz != nil {
+		eng.WithFuzz(rctx.Fuzz)
 	}
 
 	if rctx.OASCache != nil {

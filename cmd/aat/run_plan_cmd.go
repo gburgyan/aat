@@ -54,6 +54,10 @@ var runPlanCmd = &cobra.Command{
 			return runSetupFailure(jsonFlag, err)
 		}
 		stopAfter, _ := cmd.Flags().GetString("stop-after")
+		fuzzCfg, err := fuzzConfigFromFlags(cmd)
+		if err != nil {
+			return runSetupFailure(jsonFlag, err)
+		}
 		var seed *uint64
 		if cmd.Flags().Changed("seed") {
 			v, _ := cmd.Flags().GetUint64("seed")
@@ -92,6 +96,7 @@ var runPlanCmd = &cobra.Command{
 			DumpStateSecrets: dumpStateSecrets,
 			Vars:             vars,
 			Seed:             seed,
+			Fuzz:             fuzzCfg,
 		}
 
 		code := executeRun(ra)

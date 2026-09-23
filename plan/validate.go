@@ -515,6 +515,11 @@ func Validate(p *Plan, g *graph.Graph) error {
 				}
 			}
 
+			// raw sends a default as written, so it needs one and no other source
+			if sv.Raw && (sv.Default == nil || sv.From != "" || sv.FromSelection != "" || sv.FromResolved != "" || sv.FromInput != "" || len(sv.Pool) > 0 || sv.PoolRef != "") {
+				errs = append(errs, fmt.Sprintf("step %d (%s): value %q has raw: true, which sends its default as written, so it needs a default and no from, fromSelection, fromResolved, fromInput, pool, or poolRef", i, sid, name))
+			}
+
 			// Validate FromResolved: intra-step value reference
 			if sv.FromResolved != "" {
 				// Mutual exclusion: fromResolved cannot coexist with from, fromSelection, default, or pool

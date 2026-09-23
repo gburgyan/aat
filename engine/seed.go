@@ -55,11 +55,15 @@ func (d *stepDraws) next(stepID string) *rand.Rand {
 }
 
 // DrewRandomly reports whether the run made a choice its seed decides: a pick
-// from a pool of more than one value, or a random selection. Only then is the
+// from a pool of more than one value, a random selection, or which fuzz cases
+// ran under a cap. Only then is the
 // seed worth reporting.
 func (r *RunResult) DrewRandomly() bool {
 	if r == nil {
 		return false
+	}
+	if r.FuzzCapped {
+		return true
 	}
 	for _, s := range r.Steps {
 		for _, v := range s.Resolutions {

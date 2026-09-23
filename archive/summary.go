@@ -57,7 +57,32 @@ func BuildRunSummary(a *Archive) *RunSummary {
 		Issues:        issues,
 		OAS:           buildOASSummary(a.Metadata.OASValidation, allSteps, issues["oas"]),
 		Seed:          a.Metadata.Seed,
+		Fuzz:          BuildFuzzSummary(a.Steps),
 	}
+}
+
+// BuildFuzzSummary counts the fuzz cases among steps, or returns nil when
+// there are none.
+func BuildFuzzSummary(steps []StepRecord) *FuzzSummary {
+	var s *FuzzSummary
+	for _, step := range steps {
+		if step.Fuzz == nil {
+			continue
+		}
+		if s == nil {
+			s = &FuzzSummary{Findings: map[string]int{}}
+		}
+		s.Cases++
+		finding := step.Fuzz.Finding
+		if finding == "" {
+			finding = "ok"
+		}
+		s.Findings[finding]++
+		if step.Fuzz.Fails {
+			s.Failing++
+		}
+	}
+	return s
 }
 
 // buildOASSummary counts the OpenAPI validation of steps, which found
