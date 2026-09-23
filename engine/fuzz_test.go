@@ -440,3 +440,53 @@ func TestFuzz_NotSentErrorIsNotSent(t *testing.T) {
 	r = &StepResult{Request: &adapter.Request{}, Error: errors.New("connection refused")}
 	assert.Equal(t, FindingNoResponse, eng.judgeFuzz(step, nil, r).Finding)
 }
+
+func TestFuzz_PlanBlock(t *testing.T) {
+	server := buggyQuantityServer(t)
+
+	t.Run("pinned cases alone run without --fuzz", func(t *testing.T) {
+		p := quantityPlan()
+		p.Execution.Steps[0].FuzzSettings = &plan.FuzzSettings{Pinned: []plan.PinnedFuzzCase{
+			{ID: "quantity.below-min", Mode: plan.FuzzNegative, Input: "quantity", Value: 0},
+		}}
+		result := buildQuantityEngine(t, server.URL).Run(context.Background(), p)
+		require.Len(t, result.Steps, 2, "the happy path and the pinned case, nothing generated")
+		assert.Equal(t, FindingServerError, result.Steps[1].Fuzz.Finding)
+		assert.Equal(t, OutcomeFailed, result.Outcome)
+	})
+
+	t.Run("fail and accept", func(t *testing.T) {
+		p := quantityPlan()
+		p.Execution.Steps[0].FuzzSettings = &plan.FuzzSettings{
+			Only: []string{"quantity.above-max", "quantity.wrong-type"},
+			Fail: []string{FindingAcceptedInvalid},
+		}
+		result := buildQuantityEngine(t, server.URL).Run(context.Background(), p)
+		assert.EqualError(t, result.Error, "fuzzing found 1 accepted-invalid", "the block's fail list")
+
+		p.Execution.Steps[0].FuzzSettings.Accept = plan.ExpectedStatuses{{Class: 2}}
+		result = buildQuantityEngine(t, server.URL).Run(context.Background(), p)
+		assert.Equal(t, OutcomePassed, result.Outcome, "a 2xx the block accepts is no finding: %v", result.Error)
+	})
+
+	t.Run("skip and the CLI over the block", func(t *testing.T) {
+		p := quantityPlan()
+		p.Execution.Steps[0].FuzzSettings = &plan.FuzzSettings{Skip: []string{"quantity"}}
+		result := buildQuantityEngine(t, server.URL).Run(context.Background(), p)
+		for _, s := range result.Steps {
+			if s.Fuzz != nil {
+				assert.Empty(t, s.Fuzz.Case.Input, "no case for a skipped input: %s", s.Fuzz.Case.ID)
+			}
+		}
+
+		p = quantityPlan()
+		p.Execution.Steps[0].FuzzSettings = &plan.FuzzSettings{Mode: []string{plan.FuzzPositive}}
+		result = buildQuantityEngine(t, server.URL).WithFuzz(&FuzzConfig{Targets: []string{"add"}, Modes: []string{plan.FuzzNegative}}).
+			Run(context.Background(), p)
+		for _, s := range result.Steps {
+			if s.Fuzz != nil {
+				assert.Equal(t, plan.FuzzNegative, s.Fuzz.Case.Mode, "--fuzz-mode wins over the block's mode")
+			}
+		}
+	})
+}

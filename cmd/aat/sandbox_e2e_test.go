@@ -23,6 +23,7 @@ import (
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/internal/sandbox/shop"
 	aatmcp "github.com/gburgyan/aat/mcp"
+	"github.com/gburgyan/aat/plan"
 )
 
 // TestShopExample runs the embedded examples/shop project against the
@@ -383,13 +384,54 @@ func TestShopExample(t *testing.T) {
 		assert.Equal(t, "server-error", recorded.Finding)
 		assert.True(t, recorded.Fails)
 
-		// Replaying the one case finds it again.
+		// Replaying the one case finds it again, and --fuzz-save writes it out.
+		saveDir := t.TempDir()
 		args.OutputDir = filepath.Join(t.TempDir(), "runs")
 		args.Fuzz = &engine.FuzzConfig{Targets: []string{"addItem"}, Cases: []string{"quantity.below-min"}}
+		args.FuzzSave = saveDir
 		res = runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
 		assert.EqualError(t, res.err, "fuzzing found 1 server-error")
 		assert.Equal(t, 1, res.summary.Fuzz.Cases)
 		assert.Equal(t, 1, res.summary.Fuzz.Failing)
+
+		saved, err := filepath.Glob(filepath.Join(saveDir, "*.yaml"))
+		require.NoError(t, err)
+		require.Len(t, saved, 1)
+		assert.Equal(t, "smoke--addItem--quantity.below-min.yaml", filepath.Base(saved[0]))
+		regression, err := plan.ParseFile(saved[0])
+		require.NoError(t, err)
+		var pinned *plan.FuzzSettings
+		for _, st := range regression.Execution.Steps {
+			if st.FuzzSettings != nil {
+				pinned = st.FuzzSettings
+			}
+		}
+		require.NotNil(t, pinned)
+		require.Len(t, pinned.Pinned, 1)
+		assert.Equal(t, "server-error", pinned.Pinned[0].Found)
+
+		// The saved plan fails on its own while the bug is there, with no --fuzz.
+		args.OutputDir = filepath.Join(t.TempDir(), "runs")
+		args.Fuzz, args.FuzzSave = nil, ""
+		args.PlanPath = saved[0]
+		res = runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
+		assert.EqualError(t, res.err, "fuzzing found 1 server-error")
+		assert.Equal(t, 1, res.summary.Fuzz.Cases)
+
+		// And passes against a sandbox without it.
+		fixed := newShopProject(t)
+		fixedArgs := fixed.runArgs(t, "us")
+		fixedArgs.PlanPath = saved[0]
+		res = runCommand(context.Background(), &fixedArgs, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		assert.Equal(t, engine.OutcomePassed, res.outcome)
+
+		// --no-fuzz runs it as the plan it came from.
+		fixedArgs.OutputDir = filepath.Join(t.TempDir(), "runs")
+		fixedArgs.NoFuzz = true
+		res = runCommand(context.Background(), &fixedArgs, io.Discard, TerminalInfo{})
+		require.NoError(t, res.err)
+		assert.Nil(t, res.summary.Fuzz)
 	})
 
 	t.Run("published kit", func(t *testing.T) {

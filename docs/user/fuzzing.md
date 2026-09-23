@@ -167,6 +167,9 @@ case: its ID, mode, input, value, the mode it was judged by, the spec violations
 | `--fuzz-case` | — | Run only these case IDs |
 | `--fuzz-scope` | `isolated` | `isolated` gives each case its own copy of the steps the target depends on. `shared` runs every case on the target's own; it is faster, but a case the API accepts can change what later steps see |
 | `--fuzz-fail` | `server-error,no-response,schema-violation` | Findings that fail the run |
+| `--fuzz-save` | — | Write a regression plan for each failing case to this directory ([Keeping a finding](#keeping-a-finding)) |
+| `--fuzz-save-all` | `false` | With `--fuzz-save`, save the warnings too |
+| `--no-fuzz` | `false` | Ignore the plans' `fuzz:` blocks |
 
 The flags work on `aat run batch` too, where `--fuzz addItem` fuzzes every plan that has an `addItem` step and runs
 the others as written.
@@ -174,8 +177,62 @@ the others as written.
 With `--fuzz-cases`, the seed picks which cases run, and the run prints the seed, so `--seed N` runs the same ones
 again.
 
+## The fuzz block
+
+A step can carry its fuzzing with it. A step with a `fuzz:` block is fuzzed on every run, with or without `--fuzz`:
+
+```yaml
+- id: addItem
+  node: addItem
+  fuzz:
+    mode: [negative, edge]       # --fuzz-mode
+    inputs: [quantity]           # --fuzz-input
+    skip: [note]                 # inputs never to fuzz
+    cases: 20                    # --fuzz-cases
+    only: [quantity.below-min]   # --fuzz-case
+    scope: isolated              # --fuzz-scope
+    fail: [server-error, accepted-invalid]   # --fuzz-fail
+    accept: [409]                # statuses no case is faulted for
+    pinned:                      # cases sent exactly as written
+      - id: quantity.below-min
+        mode: negative
+        input: quantity
+        value: 0
+        found: server-error
+      - id: body.channel.remove
+        mode: edge
+        patch: [{where: body, path: channel, op: remove}]
+```
+
+Every key is optional.
+
+- **`accept`** is where a judgement goes that only fuzzing needs and the graph doesn't hold. An API that answers
+  `409` to any request it can't serve right now isn't faulted for it: a status in `accept` is never
+  `accepted-invalid`, `rejected-valid`, or `undocumented-status`. A 5xx can't be accepted.
+- **`pinned`** cases are sent as written, without the generator. A case sets either `input` and `value`, or `patch`.
+  With only `pinned`, nothing else is generated.
+- **`found`** records what a case found when it was saved. It isn't checked.
+
+`--fuzz` flags win over the block for the steps they name. `--no-fuzz` ignores every block and runs the plan as
+written. `aat validate` checks the block against the step's node: modes, findings, inputs, and each pinned case.
+
+The MCP server's [`generate_fuzz_cases`](mcp-server.md) tool lists the cases `--fuzz` would send to a step, as a
+`fuzz:` block of pinned cases, without sending anything. An assistant can show them and keep the ones worth keeping.
+
+## Keeping a finding
+
+`--fuzz-save DIR` writes a plan for each case whose finding failed the run (`--fuzz-save-all` adds the warnings):
+
+```bash
+aat run plan smoke --fuzz addItem --fuzz-save plans/fuzz/
+# Saved fuzz regression plan: plans/fuzz/smoke--addItem--quantity.below-min.yaml
+```
+
+The saved plan is the one that ran, with a recipe written out in full. Its target step has a `fuzz:` block pinning the
+one case, and `fail` includes the finding. On every run it sends that value, fails while the API still mishandles it,
+and passes once the API is fixed. Kept in a plan directory, it becomes part of `aat run batch`. A plain plan can't
+apply layers, so a plan found with layers says which ones in its description, along with the run's seed.
+
 ## What it doesn't do yet
 
 - Properties the spec describes but the template never sends are not fuzzed, beyond `body.extra-property`.
-- A case that finds something is not yet written out as a plan to keep as a regression test; replay it with
-  `--fuzz-case`, or copy the value into a [mutation](plans.md#negative-testing-expectfailure).

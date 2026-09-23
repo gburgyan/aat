@@ -398,6 +398,7 @@ func expandMutations(p *Plan) {
 			child := deepCopyStep(step)
 			child.Mutations = nil
 			child.MutationScope = ""
+			child.FuzzSettings = nil
 			child.IsGoal = false
 			child.Assertions = nil
 			child.Repeat = nil

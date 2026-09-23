@@ -276,6 +276,7 @@ steps:
 | `description` | Human-readable step description |
 | `isGoal` | Marks this step as the primary goal of the plan (at most one step; when `intent.goal` is set it must name this step) |
 | `knownIssue` | Keeps this step's failure out of the run's outcome until a date ([Known issues](#known-issues-a-failure-with-a-deadline)) |
+| `fuzz` | Fuzzes the step on every run: generated cases, pinned ones, and what to accept ([Fuzzing: the fuzz block](fuzzing.md#the-fuzz-block)) |
 
 When multiple steps target the same graph node, use `id` to give each a unique identifier. All references (`dependsOn`, `from`) use the step ID.
 

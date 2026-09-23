@@ -3,8 +3,11 @@ package plan
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/gburgyan/aat/graph"
 )
 
 // Fuzz case modes: what a case's value is, and so what the API should do with
@@ -95,6 +98,90 @@ func fuzzSetupClosure(steps []Step, idx int, byID map[string]Step) []Step {
 	return out
 }
 
+// Fuzz finding names, as the engine reports them and a fuzz block's fail
+// list names them.
+const (
+	FindingServerError        = "server-error"
+	FindingNoResponse         = "no-response"
+	FindingSchemaViolation    = "schema-violation"
+	FindingAcceptedInvalid    = "accepted-invalid"
+	FindingRejectedValid      = "rejected-valid"
+	FindingUndocumentedStatus = "undocumented-status"
+	FindingNotSent            = "not-sent"
+)
+
+// FuzzFindings lists the findings, most serious first.
+var FuzzFindings = []string{FindingServerError, FindingNoResponse, FindingSchemaViolation, FindingAcceptedInvalid,
+	FindingRejectedValid, FindingUndocumentedStatus, FindingNotSent}
+
+// FuzzModes lists the case modes.
+var FuzzModes = []string{FuzzPositive, FuzzNegative, FuzzEdge}
+
+// FuzzSettings is a step's fuzz: block: what --fuzz would do for the step,
+// saved in the plan, and the judgements about the API that only fuzzing
+// needs.
+type FuzzSettings struct {
+	// Mode, Inputs, Cases, Only, Scope, and Fail are the step's --fuzz-mode,
+	// --fuzz-input, --fuzz-cases, --fuzz-case, --fuzz-scope, and --fuzz-fail.
+	Mode   []string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	Inputs []string `yaml:"inputs,omitempty" json:"inputs,omitempty"`
+	Cases  int      `yaml:"cases,omitempty" json:"cases,omitempty"`
+	Only   []string `yaml:"only,omitempty" json:"only,omitempty"`
+	Scope  string   `yaml:"scope,omitempty" json:"scope,omitempty"`
+	Fail   []string `yaml:"fail,omitempty" json:"fail,omitempty"`
+	// Skip names inputs never to fuzz.
+	Skip []string `yaml:"skip,omitempty" json:"skip,omitempty"`
+	// Accept lists statuses no case is faulted for: a response with one of
+	// them is never accepted-invalid, rejected-valid, or undocumented-status.
+	// For an API that answers 409 to anything it can't do right now, say.
+	Accept ExpectedStatuses `yaml:"accept,omitempty" json:"accept,omitempty"`
+	// Pinned cases are sent as written, without the generator. --fuzz-save
+	// writes them.
+	Pinned []PinnedFuzzCase `yaml:"pinned,omitempty" json:"pinned,omitempty"`
+}
+
+// Generates reports whether the block asks for generated cases: it has no
+// pinned cases, or it sets what to generate.
+func (s *FuzzSettings) Generates() bool {
+	return len(s.Pinned) == 0 || len(s.Mode) > 0 || len(s.Inputs) > 0 || s.Cases > 0 || len(s.Only) > 0
+}
+
+// PinnedFuzzCase is a fuzz case written in a plan: the value for one input,
+// or a patch to the request.
+type PinnedFuzzCase struct {
+	ID    string         `yaml:"id" json:"id"`
+	Mode  string         `yaml:"mode" json:"mode"`
+	Input string         `yaml:"input,omitempty" json:"input,omitempty"`
+	Value any            `yaml:"value,omitempty" json:"value,omitempty"`
+	Patch []RequestPatch `yaml:"patch,omitempty" json:"patch,omitempty"`
+	// Found is what the case found when it was saved; it is not checked.
+	Found string `yaml:"found,omitempty" json:"found,omitempty"`
+}
+
+// Case returns the pinned case as the fuzzer sends it.
+func (p PinnedFuzzCase) Case() FuzzCase {
+	strategy := p.ID
+	if i := strings.LastIndex(p.ID, "."); i >= 0 {
+		strategy = p.ID[i+1:]
+	}
+	return FuzzCase{ID: p.ID, Mode: p.Mode, Input: p.Input, Strategy: strategy, Value: p.Value, Patch: p.Patch}
+}
+
+// Pin returns a case as a plan writes it.
+func (c FuzzCase) Pin() PinnedFuzzCase {
+	return PinnedFuzzCase{ID: c.ID, Mode: c.Mode, Input: c.Input, Value: c.Value, Patch: c.Patch}
+}
+
+// StripFuzz removes every step's fuzz: block, for --no-fuzz.
+func StripFuzz(p *Plan) {
+	if p == nil {
+		return
+	}
+	for i := range p.Execution.Steps {
+		p.Execution.Steps[i].FuzzSettings = nil
+	}
+}
+
 // FuzzStepID returns the ID of the sibling step that runs a case against the
 // step targetID. It keeps to characters a step ID may hold.
 func FuzzStepID(targetID, caseID string) string {
@@ -144,6 +231,7 @@ func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, isolated bool) 
 			clones := cloneClosureWithSuffix(closure, suffix)
 			for i := range clones {
 				clones[i].FuzzSetup = childID
+				clones[i].FuzzSettings = nil // a copy is setup, not a target
 			}
 			idMap = make(map[string]string, len(clones))
 			for i, orig := range closure {
@@ -166,6 +254,7 @@ func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, isolated bool) 
 		child.KnownIssue = nil
 		child.Mutations = nil
 		child.MutationScope = ""
+		child.FuzzSettings = nil
 		if child.Values == nil {
 			child.Values = map[string]StepValue{}
 		}
@@ -228,4 +317,81 @@ func compactValue(v any) string {
 		s = s[:37] + "..."
 	}
 	return s
+}
+
+// validateFuzzSettings checks a step's fuzz: block against its node.
+func validateFuzzSettings(prefix string, s *FuzzSettings, node *graph.Node) []string {
+	if s == nil {
+		return nil
+	}
+	var errs []string
+	add := func(format string, args ...any) {
+		errs = append(errs, prefix+": fuzz: "+fmt.Sprintf(format, args...))
+	}
+	inputs := map[string]bool{}
+	for _, in := range node.Inputs {
+		inputs[in.Name] = true
+	}
+	for _, m := range s.Mode {
+		if !slices.Contains(FuzzModes, m) {
+			add("unknown mode %q (use %s)", m, strings.Join(FuzzModes, ", "))
+		}
+	}
+	for _, list := range [][]string{s.Inputs, s.Skip} {
+		for _, in := range list {
+			if !inputs[in] {
+				add("node %s has no input %q", node.Name, in)
+			}
+		}
+	}
+	if s.Cases < 0 {
+		add("cases must not be negative")
+	}
+	if s.Scope != "" && s.Scope != "isolated" && s.Scope != "shared" {
+		add("unknown scope %q (use isolated or shared)", s.Scope)
+	}
+	for _, f := range s.Fail {
+		if !slices.Contains(FuzzFindings, f) {
+			add("unknown finding %q in fail (use %s)", f, strings.Join(FuzzFindings, ", "))
+		}
+	}
+	for _, st := range s.Accept {
+		if st.Code >= 500 || st.Class >= 5 {
+			add("accept %s: a server error is never an acceptable answer", st)
+		}
+	}
+	ids := map[string]bool{}
+	for j, p := range s.Pinned {
+		where := fmt.Sprintf("pinned case %d", j)
+		if p.ID == "" {
+			add("%s has no id", where)
+		} else if ids[p.ID] {
+			add("%s: id %q is used twice", where, p.ID)
+		}
+		ids[p.ID] = true
+		if !slices.Contains(FuzzModes, p.Mode) {
+			add("%s (%s): mode %q is not one of %s", where, p.ID, p.Mode, strings.Join(FuzzModes, ", "))
+		}
+		switch {
+		case len(p.Patch) > 0 && p.Value != nil:
+			add("%s (%s): set a value or a patch, not both", where, p.ID)
+		case len(p.Patch) == 0 && p.Input == "":
+			add("%s (%s): name the input it sets, or give a patch", where, p.ID)
+		}
+		if p.Input != "" && !inputs[p.Input] {
+			add("%s (%s): node %s has no input %q", where, p.ID, node.Name, p.Input)
+		}
+		for _, rp := range p.Patch {
+			if rp.Where != "body" && rp.Where != "query" && rp.Where != "header" {
+				add("%s (%s): patch where %q is not body, query, or header", where, p.ID, rp.Where)
+			}
+			if rp.Op != "remove" && rp.Op != "set" {
+				add("%s (%s): patch op %q is not remove or set", where, p.ID, rp.Op)
+			}
+			if rp.Path == "" {
+				add("%s (%s): patch has no path", where, p.ID)
+			}
+		}
+	}
+	return errs
 }

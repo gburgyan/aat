@@ -812,6 +812,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 
 		errs = append(errs, validateKnownIssue(fmt.Sprintf("step %d (%s)", i, sid), step.KnownIssue)...)
+		if node, ok := g.Nodes[step.Node]; ok {
+			errs = append(errs, validateFuzzSettings(fmt.Sprintf("step %d (%s)", i, sid), step.FuzzSettings, node)...)
+		}
 	}
 
 	errs = append(errs, validateKnownIssue("knownIssue", p.KnownIssue)...)

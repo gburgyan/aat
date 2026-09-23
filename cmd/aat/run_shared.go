@@ -59,6 +59,9 @@ type runArgs struct {
 	Vars              map[string]string  // --var KEY=VALUE for multi-environment files
 	Seed              *uint64            // --seed: replay a run's pool picks and random selections; nil picks one
 	Fuzz              *engine.FuzzConfig // --fuzz and its options; nil runs no fuzz cases
+	NoFuzz            bool               // --no-fuzz: ignore the plans' fuzz: blocks
+	FuzzSave          string             // --fuzz-save: directory for regression plans of fuzz findings
+	FuzzSaveAll       bool               // --fuzz-save-all: save warnings too
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -793,6 +796,9 @@ type runContext struct {
 	DumpStateSecrets bool               // keep live credentials in the state dump instead of redacting them
 	Seed             *uint64            // seed for pool picks and random selections; nil picks one per run
 	Fuzz             *engine.FuzzConfig // fuzz cases to add to each plan; nil for none
+	NoFuzz           bool               // strip each plan's fuzz: blocks
+	FuzzSave         string             // directory for regression plans of fuzz findings
+	FuzzSaveAll      bool               // save warnings as well as failures
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -869,6 +875,9 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		DumpStateSecrets:  args.DumpStateSecrets,
 		Seed:              args.Seed,
 		Fuzz:              args.Fuzz,
+		NoFuzz:            args.NoFuzz,
+		FuzzSave:          args.FuzzSave,
+		FuzzSaveAll:       args.FuzzSaveAll,
 	}
 
 	// Pre-load layers referenced by --layer and/or --layer-group flags.
@@ -976,6 +985,9 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	// exercises only the happy-path steps. Useful as a smoke-test mode.
 	if rctx.SkipMutations {
 		plan.StripMutations(p)
+	}
+	if rctx.NoFuzz {
+		plan.StripFuzz(p)
 	}
 
 	// Compute layered defaults from the effective set of layers (CLI + recipe).
@@ -1169,6 +1181,20 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	}
 	if result.DrewRandomly() {
 		logf("Seed: %d (replay its picks with --seed %d)\n", result.Seed, result.Seed)
+	}
+	if rctx.FuzzSave != "" {
+		saved, saveErr := saveFuzzFindings(p, result, fuzzSaveOptions{
+			Dir: rctx.FuzzSave, All: rctx.FuzzSaveAll, PlanPath: planPath, Layers: effectiveLayers, Seed: result.Seed,
+		})
+		for _, path := range saved {
+			logf("Saved fuzz regression plan: %s\n", path)
+		}
+		if saveErr != nil {
+			logf("aat: warning: fuzz regression plan not written: %s\n", saveErr)
+		}
+		if len(saved) > 0 && len(effectiveLayers) > 0 {
+			logf("aat: note: the saved plans don't apply layers %s; run them with --layer\n", strings.Join(effectiveLayers, ", "))
+		}
 	}
 
 	// Build machine-readable summary

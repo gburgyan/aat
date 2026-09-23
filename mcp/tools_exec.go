@@ -11,6 +11,7 @@ import (
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
+	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/internal/version"
 	"github.com/gburgyan/aat/plan"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -31,6 +32,7 @@ func (s *Server) registerExecTools() {
 		),
 		s.handleExecutePlan,
 	)
+	s.registerFuzzTools()
 }
 
 // handleExecutePlan loads a plan, authenticates, runs the engine, and writes an archive.
@@ -54,44 +56,9 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		return mcp.NewToolResultError("archive directory not configured — set the `archives` field in aat-project.yaml to store results"), nil
 	}
 
-	// Search PlanDirs first, then fall back to WorkflowsDir
-	var planPath string
-	if len(s.ctx.PlanDirs) > 0 {
-		if found, err := config.FindPlan(s.ctx.PlanDirs, name); err == nil {
-			planPath = found
-		}
-	}
-	if planPath == "" && s.ctx.WorkflowsDir != "" {
-		planPath = resolveWorkflowPath(s.ctx.WorkflowsDir, name)
-	}
-	if planPath == "" {
-		return mcp.NewToolResultError(fmt.Sprintf("plan %q not found", name)), nil
-	}
-	parsed, err := plan.ParseAnyFile(planPath)
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("loading plan: %v", err)), nil
-	}
-
-	var p *plan.Plan
-	var layers []string
-	switch v := parsed.(type) {
-	case *plan.Plan:
-		p = v
-	case *plan.Recipe:
-		reconstituted, reconErr := s.ctx.reconstitute(v)
-		if reconErr != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("reconstituting recipe: %v", reconErr)), nil
-		}
-		p = reconstituted
-		layers = v.Selection.Layers
-	}
-
-	layeredDefaults, err := s.ctx.layeredDefaults(layers)
+	p, layeredDefaults, err := s.loadNamedPlan(name)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
-	}
-	if _, err := plan.InstantiateAndValidateWithLayers(p, s.ctx.Graph, layeredDefaults); err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("plan validation failed:\n%v", err)), nil
 	}
 
 	// Determine effective auth: plan auth overrides env auth
@@ -267,4 +234,50 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 	b.WriteString("\nUse `inspect_archive` to see full request/response details.")
 
 	return b.String()
+}
+
+// loadNamedPlan finds a saved plan by name (in the plan directories, then the
+// workflows directory), reconstitutes it when it is a recipe, and validates
+// it. It returns the plan, before instantiation, and the defaults its layers
+// stack on the graph's.
+func (s *Server) loadNamedPlan(name string) (*plan.Plan, map[string]*graph.InputDefault, error) {
+	var planPath string
+	if len(s.ctx.PlanDirs) > 0 {
+		if found, err := config.FindPlan(s.ctx.PlanDirs, name); err == nil {
+			planPath = found
+		}
+	}
+	if planPath == "" && s.ctx.WorkflowsDir != "" {
+		planPath = resolveWorkflowPath(s.ctx.WorkflowsDir, name)
+	}
+	if planPath == "" {
+		return nil, nil, fmt.Errorf("plan %q not found", name)
+	}
+	parsed, err := plan.ParseAnyFile(planPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading plan: %w", err)
+	}
+
+	var p *plan.Plan
+	var layers []string
+	switch v := parsed.(type) {
+	case *plan.Plan:
+		p = v
+	case *plan.Recipe:
+		reconstituted, reconErr := s.ctx.reconstitute(v)
+		if reconErr != nil {
+			return nil, nil, fmt.Errorf("reconstituting recipe: %w", reconErr)
+		}
+		p = reconstituted
+		layers = v.Selection.Layers
+	}
+
+	layeredDefaults, err := s.ctx.layeredDefaults(layers)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := plan.InstantiateAndValidateWithLayers(p, s.ctx.Graph, layeredDefaults); err != nil {
+		return nil, nil, fmt.Errorf("plan validation failed:\n%v", err)
+	}
+	return p, layeredDefaults, nil
 }

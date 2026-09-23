@@ -15,29 +15,31 @@ import (
 )
 
 // Fuzz findings: what a fuzz step's response says about the API. An empty
-// finding means the response was what the case called for.
+// finding means the response was what the case called for. See the plan
+// package for the list.
 const (
 	// FindingServerError is a 5xx: the API failed on the value.
-	FindingServerError = "server-error"
+	FindingServerError = plan.FindingServerError
 	// FindingNoResponse is a request that was sent and got no response, such
 	// as a timeout or a dropped connection.
-	FindingNoResponse = "no-response"
+	FindingNoResponse = plan.FindingNoResponse
 	// FindingSchemaViolation is a response that breaks the OpenAPI spec.
-	FindingSchemaViolation = "schema-violation"
+	FindingSchemaViolation = plan.FindingSchemaViolation
 	// FindingAcceptedInvalid is a success for a value the input forbids.
-	FindingAcceptedInvalid = "accepted-invalid"
+	FindingAcceptedInvalid = plan.FindingAcceptedInvalid
 	// FindingRejectedValid is a 4xx for a value the input allows.
-	FindingRejectedValid = "rejected-valid"
+	FindingRejectedValid = plan.FindingRejectedValid
 	// FindingUndocumentedStatus is a status the node's OpenAPI operation does
 	// not list among its responses.
-	FindingUndocumentedStatus = "undocumented-status"
-	// FindingNotSent is a case aat could not build a request for, such as a
-	// value a gRPC message cannot hold. It says nothing about the API.
-	FindingNotSent = "not-sent"
+	FindingUndocumentedStatus = plan.FindingUndocumentedStatus
+	// FindingNotSent is a case that could not be sent: its copy of a setup
+	// step failed, or aat could not build the request. It says nothing about
+	// the API.
+	FindingNotSent = plan.FindingNotSent
 )
 
 // AllFindings lists the findings, most serious first.
-var AllFindings = []string{FindingServerError, FindingNoResponse, FindingSchemaViolation, FindingAcceptedInvalid, FindingRejectedValid, FindingUndocumentedStatus, FindingNotSent}
+var AllFindings = plan.FuzzFindings
 
 // DefaultFuzzFail lists the findings that fail a run unless FuzzConfig.Fail
 // says otherwise. The others are reported as warnings: whether an API should
@@ -55,10 +57,11 @@ type FuzzConfig struct {
 	Modes         []string // see fuzz.Options
 	Inputs        []string // see fuzz.Options
 	Max           int      // cases per target step; 0 means all
-	// Shared runs every case on the target's own prerequisites instead of a
-	// copy of them for each case. It is faster, but a case that changes state
-	// can change what later steps see.
-	Shared bool
+	// Scope is "isolated", where each case gets its own copy of the steps the
+	// target depends on, or "shared", where every case runs on the target's
+	// own: faster, but a case that changes state can change what later steps
+	// see. Empty leaves it to the step's fuzz: block, or isolated.
+	Scope string
 	// Cases limits the run to the cases with these IDs.
 	Cases []string
 	// Fail lists the findings that fail the run; nil means DefaultFuzzFail.
@@ -90,22 +93,45 @@ type FuzzResult struct {
 	Fails bool
 }
 
-// expandFuzz adds the fuzz cases to an instantiated plan.
+// fuzzJudging is how a target's cases are judged: the findings that fail the
+// run, and the statuses no case is faulted for.
+type fuzzJudging struct {
+	fail   []string
+	accept plan.ExpectedStatuses
+}
+
+// expandFuzz adds the fuzz cases to an instantiated plan: for each step the
+// CLI's FuzzConfig names or that has a fuzz: block, the generated cases and
+// the pinned ones, with the CLI's settings over the block's.
 func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
-	cfg := e.fuzz
-	var targets []plan.Step
+	cli := e.fuzz
+	e.fuzzJudge = map[string]fuzzJudging{}
+
+	type target struct {
+		step    plan.Step
+		fromCLI bool
+	}
+	var targets []target
 	matched := map[string]bool{}
 	for _, s := range p.Execution.Steps {
-		for _, t := range cfg.Targets {
-			if s.StepID() == t || s.Node == t {
-				targets = append(targets, s)
-				matched[t] = true
-				break
+		if s.Fuzz != nil || s.FuzzSetup != "" {
+			continue
+		}
+		fromCLI := false
+		if cli != nil {
+			for _, t := range cli.Targets {
+				if s.StepID() == t || s.Node == t {
+					fromCLI = true
+					matched[t] = true
+				}
 			}
 		}
+		if fromCLI || s.FuzzSettings != nil {
+			targets = append(targets, target{step: s, fromCLI: fromCLI})
+		}
 	}
-	if !cfg.AllowNoTarget {
-		for _, t := range cfg.Targets {
+	if cli != nil && !cli.AllowNoTarget {
+		for _, t := range cli.Targets {
 			if !matched[t] {
 				return fmt.Errorf("--fuzz %s: the plan has no step with that ID and no step of that node", t)
 			}
@@ -113,39 +139,86 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 	}
 
 	found := map[string]bool{}
-	for _, target := range targets {
-		node := e.graph.Nodes[target.Node]
+	for _, tg := range targets {
+		step := tg.step
+		node := e.graph.Nodes[step.Node]
 		if node == nil {
-			return fmt.Errorf("fuzz target %s: node %q not found in graph", target.StepID(), target.Node)
+			return fmt.Errorf("fuzz target %s: node %q not found in graph", step.StepID(), step.Node)
 		}
-		tmpl, _ := e.registry.GetTemplate(node.Adapter)
-		cases, capped, err := fuzz.GenerateCapped(fuzz.Target{Step: target, Node: node, KB: e.KB, Template: tmpl}, fuzz.Options{
-			Modes:  cfg.Modes,
-			Inputs: cfg.Inputs,
-			Max:    cfg.Max,
-			Seed:   seed,
-			Now:    time.Now(),
-		})
-		if err != nil {
-			return fmt.Errorf("fuzz target %s: %w", target.StepID(), err)
+		block := step.FuzzSettings
+		if block == nil {
+			block = &plan.FuzzSettings{}
 		}
-		e.fuzzCapped = e.fuzzCapped || capped
-		if len(cfg.Cases) > 0 {
-			cases = slices.DeleteFunc(cases, func(c plan.FuzzCase) bool { return !slices.Contains(cfg.Cases, c.ID) })
+		opts := fuzz.Options{Modes: block.Mode, Inputs: block.Inputs, Max: block.Cases, Seed: seed, Now: time.Now()}
+		only, scope, fail := block.Only, block.Scope, block.Fail
+		if tg.fromCLI {
+			if len(cli.Modes) > 0 {
+				opts.Modes = cli.Modes
+			}
+			if len(cli.Inputs) > 0 {
+				opts.Inputs = cli.Inputs
+			}
+			if cli.Max > 0 {
+				opts.Max = cli.Max
+			}
+			if len(cli.Cases) > 0 {
+				only = cli.Cases
+			}
+			if cli.Scope != "" {
+				scope = cli.Scope
+			}
+			if cli.Fail != nil {
+				fail = cli.Fail
+			}
+		}
+		if fail == nil {
+			fail = DefaultFuzzFail
+		}
+
+		var cases []plan.FuzzCase
+		if tg.fromCLI || block.Generates() {
+			tmpl, _ := e.registry.GetTemplate(node.Adapter)
+			generated, capped, err := fuzz.GenerateCapped(fuzz.Target{Step: step, Node: node, KB: e.KB, Template: tmpl}, opts)
+			if err != nil {
+				return fmt.Errorf("fuzz target %s: %w", step.StepID(), err)
+			}
+			e.fuzzCapped = e.fuzzCapped || capped
+			cases = slices.DeleteFunc(generated, func(c plan.FuzzCase) bool { return c.Input != "" && slices.Contains(block.Skip, c.Input) })
+		}
+		// A pinned case replaces a generated one with its ID.
+		for _, pc := range block.Pinned {
+			cases = slices.DeleteFunc(cases, func(c plan.FuzzCase) bool { return c.ID == pc.ID })
+			cases = append(cases, pc.Case())
+		}
+		if len(only) > 0 {
+			cases = slices.DeleteFunc(cases, func(c plan.FuzzCase) bool { return !slices.Contains(only, c.ID) })
 		}
 		for _, c := range cases {
 			found[c.ID] = true
 		}
-		if err := plan.ExpandFuzzCases(p, target.StepID(), cases, !cfg.Shared); err != nil {
+		if err := plan.ExpandFuzzCases(p, step.StepID(), cases, scope != "shared"); err != nil {
 			return err
 		}
+		e.fuzzJudge[step.StepID()] = fuzzJudging{fail: fail, accept: block.Accept}
 	}
-	for _, id := range cfg.Cases {
-		if !found[id] && len(targets) > 0 {
-			return fmt.Errorf("--fuzz-case %s: no target step has a case with that ID", id)
+	if cli != nil && len(targets) > 0 {
+		for _, id := range cli.Cases {
+			if !found[id] {
+				return fmt.Errorf("--fuzz-case %s: no target step has a case with that ID", id)
+			}
 		}
 	}
 	return nil
+}
+
+// planFuzzes reports whether any step of the plan has a fuzz: block.
+func planFuzzes(p *plan.Plan) bool {
+	for _, s := range p.Execution.Steps {
+		if s.FuzzSettings != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // judgeFuzz decides a fuzz step's finding from its result.
@@ -195,9 +268,17 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 	case mode == plan.FuzzPositive && r.StatusCode >= 400:
 		finding = FindingRejectedValid
 	}
-	fail := e.fuzz.Fail
-	if fail == nil {
-		fail = DefaultFuzzFail
+	judging, ok := e.fuzzJudge[c.Target]
+	if !ok {
+		judging.fail = DefaultFuzzFail
+	}
+	fail := judging.fail
+	// A status the block accepts is never a judgement call against the API.
+	if judging.accept.Matches(r.StatusCode, grpcStatusName(r.Response)) && r.Error == nil {
+		switch finding {
+		case FindingAcceptedInvalid, FindingRejectedValid, FindingUndocumentedStatus:
+			finding = ""
+		}
 	}
 	return &FuzzResult{Case: *c, JudgedAs: mode, SpecViolations: violations, Finding: finding, Fails: finding != "" && slices.Contains(fail, finding)}
 }

@@ -55,6 +55,9 @@ var runPlanCmd = &cobra.Command{
 		}
 		stopAfter, _ := cmd.Flags().GetString("stop-after")
 		fuzzCfg, err := fuzzConfigFromFlags(cmd)
+		noFuzz, _ := cmd.Flags().GetBool("no-fuzz")
+		fuzzSave, _ := cmd.Flags().GetString("fuzz-save")
+		fuzzSaveAll, _ := cmd.Flags().GetBool("fuzz-save-all")
 		if err != nil {
 			return runSetupFailure(jsonFlag, err)
 		}
@@ -97,6 +100,9 @@ var runPlanCmd = &cobra.Command{
 			Vars:             vars,
 			Seed:             seed,
 			Fuzz:             fuzzCfg,
+			NoFuzz:           noFuzz,
+			FuzzSave:         fuzzSave,
+			FuzzSaveAll:      fuzzSaveAll,
 		}
 
 		code := executeRun(ra)

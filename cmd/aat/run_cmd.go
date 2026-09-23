@@ -57,6 +57,9 @@ func addExecutionFlags(cmd *cobra.Command) {
 	flags.Int("fuzz-cases", 0, "at most this many cases per fuzzed step, picked by the run's seed (0 = all)")
 	flags.StringSlice("fuzz-case", nil, "run only the fuzz cases with these IDs, such as quantity.above-max")
 	flags.String("fuzz-scope", "isolated", "isolated: each case gets its own copy of the steps the target depends on; shared: cases reuse the target's, which is faster but lets a case change what later steps see")
+	flags.Bool("no-fuzz", false, "ignore the plan's fuzz: blocks; run each step as written")
+	flags.String("fuzz-save", "", "write a plan to this directory for each fuzz case whose finding failed the run, with the case pinned in the target step's fuzz: block, so it fails until the bug is fixed")
+	flags.Bool("fuzz-save-all", false, "with --fuzz-save, also save the cases whose finding was only a warning")
 	flags.StringSlice("fuzz-fail", nil, "findings that fail the run (default server-error,no-response,schema-violation; also accepted-invalid, rejected-valid, undocumented-status, not-sent)")
 }
 
@@ -65,6 +68,9 @@ func addExecutionFlags(cmd *cobra.Command) {
 func fuzzConfigFromFlags(cmd *cobra.Command) (*engine.FuzzConfig, error) {
 	flags := cmd.Flags()
 	targets, _ := flags.GetStringSlice("fuzz")
+	if noFuzz, _ := flags.GetBool("no-fuzz"); noFuzz && len(targets) > 0 {
+		return nil, fmt.Errorf("--no-fuzz and --fuzz can't be used together")
+	}
 	if len(targets) == 0 {
 		for _, name := range []string{"fuzz-mode", "fuzz-input", "fuzz-cases", "fuzz-case", "fuzz-scope", "fuzz-fail"} {
 			if flags.Changed(name) {
@@ -86,12 +92,12 @@ func fuzzConfigFromFlags(cmd *cobra.Command) (*engine.FuzzConfig, error) {
 		return nil, fmt.Errorf("--fuzz-cases must not be negative")
 	}
 	cfg.Cases, _ = flags.GetStringSlice("fuzz-case")
-	switch scope, _ := flags.GetString("fuzz-scope"); scope {
-	case "isolated":
-	case "shared":
-		cfg.Shared = true
-	default:
-		return nil, fmt.Errorf("--fuzz-scope %s: use isolated or shared", scope)
+	if flags.Changed("fuzz-scope") {
+		scope, _ := flags.GetString("fuzz-scope")
+		if scope != "isolated" && scope != "shared" {
+			return nil, fmt.Errorf("--fuzz-scope %s: use isolated or shared", scope)
+		}
+		cfg.Scope = scope
 	}
 	if flags.Changed("fuzz-fail") {
 		fail, _ := flags.GetStringSlice("fuzz-fail")

@@ -83,6 +83,9 @@ A batch that finds no plans exits 2.`,
 			return batchSetupFailure(jsonFlag, err)
 		}
 		fuzzCfg, err := fuzzConfigFromFlags(cmd)
+		noFuzz, _ := cmd.Flags().GetBool("no-fuzz")
+		fuzzSave, _ := cmd.Flags().GetString("fuzz-save")
+		fuzzSaveAll, _ := cmd.Flags().GetBool("fuzz-save-all")
 		if err != nil {
 			return batchSetupFailure(jsonFlag, err)
 		}
@@ -115,6 +118,9 @@ A batch that finds no plans exits 2.`,
 				SkipMutations:   noMutations,
 				Vars:            vars,
 				Fuzz:            fuzzCfg,
+				NoFuzz:          noFuzz,
+				FuzzSave:        fuzzSave,
+				FuzzSaveAll:     fuzzSaveAll,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,

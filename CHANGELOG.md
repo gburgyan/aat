@@ -36,6 +36,12 @@ the graph and plan formats may still change before 1.0.
   `undocumented-status`, marks a status the node's operation doesn't list. A case's copy of the setup now includes the
   earlier steps that build on it, such as the `addItem` a checkout needs, and a copied step that fails reports its
   case as `not-sent` without stopping the run. The shop example's `quantity` input now declares `min: 1`.
+- **A step's `fuzz:` block fuzzes it on every run, and `--fuzz-save` keeps findings as regression plans.** The block
+  holds what `--fuzz` flags would say (`mode`, `inputs`, `cases`, `only`, `scope`, `fail`) plus `skip` (inputs never
+  to fuzz), `accept` (statuses no case is faulted for, such as a busy API's 409), and `pinned` cases sent exactly as
+  written. `--fuzz-save DIR` writes a plan per failing case with that case pinned, so it fails until the API is
+  fixed; `--no-fuzz` ignores the blocks. The MCP tool `generate_fuzz_cases` lists a step's cases as a block to keep.
+  See [Fuzzing: the fuzz block](https://gburgyan.github.io/aat/fuzzing/#the-fuzz-block).
 - **`raw: true` sends a step value exactly as written**, with no expression evaluation or type coercion. See
   [Raw Values](https://gburgyan.github.io/aat/value-flow/#raw-values).
 - **`expectFailure` takes status classes.** `status: [4xx]` passes on any refusal and still fails on a 5xx or a

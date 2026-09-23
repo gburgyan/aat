@@ -79,6 +79,9 @@ type Engine struct {
 	// fuzzCapped is set during Run when --fuzz-cases dropped cases, so the
 	// seed chose which ran.
 	fuzzCapped bool
+	// fuzzJudge holds each fuzz target's fail list and accepted statuses
+	// during Run, by target step ID.
+	fuzzJudge map[string]fuzzJudging
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -165,7 +168,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 
 	// 1b. Fuzz cases become sibling steps of the steps they target
 	e.fuzzCapped = false
-	if e.fuzz != nil {
+	if e.fuzz != nil || planFuzzes(instantiatedPlan) {
 		if err := e.expandFuzz(instantiatedPlan, seed); err != nil {
 			return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan, Seed: seed}
 		}

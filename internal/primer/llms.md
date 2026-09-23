@@ -888,9 +888,12 @@ operation, a request the spec refuses is judged as negative.
   reruns one. `--fuzz-cases N` caps the cases, picked by the run's seed.
 - **Better cases:** declare `constraints` (min, max, lengths, pattern) and enum
   types on inputs; they make the boundaries the fuzzer tests.
-- **Keeping a finding:** write a step or a `mutations:` entry that sends the
-  value. When it must arrive exactly as generated, use a step value with
-  `raw: true`, which sends its default without expressions or type coercion.
+- **Keeping a finding:** `--fuzz-save DIR` writes a plan per failing case,
+  with the case pinned in the step's `fuzz:` block; it fails until the API is
+  fixed. A step's `fuzz:` block (`mode`, `inputs`, `skip`, `cases`, `only`,
+  `scope`, `fail`, `accept: [409]`, `pinned: [{id, mode, input, value}]`)
+  fuzzes it on every run; `--no-fuzz` ignores blocks. MCP
+  `generate_fuzz_cases` returns a step's cases as such a block.
 
 ### Patterns You'll Use
 

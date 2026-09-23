@@ -31,7 +31,7 @@ func TestFuzzConfigFromFlags(t *testing.T) {
 		Modes:   []string{"negative"},
 		Inputs:  []string{"quantity"},
 		Max:     10,
-		Shared:  true,
+		Scope:   "shared",
 		Cases:   []string{"quantity.zero"},
 		Fail:    []string{"server-error", "accepted-invalid"},
 	}, cfg)

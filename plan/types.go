@@ -114,6 +114,10 @@ type Step struct {
 	// Fuzz is set on a step the fuzzer made: the case it sends. It is never
 	// read from a plan file.
 	Fuzz *FuzzCase `yaml:"-" json:"fuzz,omitempty"`
+	// FuzzSettings is the step's fuzz: block. A step that has one is fuzzed
+	// on every run, as --fuzz would fuzz it, with these settings; pinned
+	// cases are sent as written.
+	FuzzSettings *FuzzSettings `yaml:"fuzz,omitempty" json:"fuzzSettings,omitempty"`
 	// FuzzSetup is set on a copy of a setup step made for one fuzz case: the
 	// ID of the case's step. A copy that fails ends that case, not the run.
 	FuzzSetup string `yaml:"-" json:"fuzzSetup,omitempty"`

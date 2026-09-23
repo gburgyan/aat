@@ -254,7 +254,7 @@ The API persona registers 24 tools focused on understanding and integrating with
 
 ## Tools — Test Persona
 
-The test persona registers 26 tools focused on test plan lifecycle, execution, and debugging. It is the only persona that can execute plans (a server started without `--persona` can too); `execute_plan` runs a saved plan against the environment loaded at startup (select it with `--env`).
+The test persona registers 27 tools focused on test plan lifecycle, execution, and debugging. It is the only persona that can execute plans (a server started without `--persona` can too); `execute_plan` runs a saved plan against the environment loaded at startup (select it with `--env`).
 
 ### Graph Exploration (4 tools)
 
@@ -306,11 +306,12 @@ The test persona registers 26 tools focused on test plan lifecycle, execution, a
 | `load_plan` | Load a saved plan and return its YAML and narrative |
 | `save_plan` | Validate and save a plan YAML string to the plans directory, with the same warnings as `validate_plan` |
 
-### Execution (1 tool)
+### Execution (2 tools)
 
 | Tool | Description |
 |------|-------------|
 | `execute_plan` | Execute a saved test plan by name: authenticate, run the engine, write the archive, and return a summary |
+| `generate_fuzz_cases` | List the [fuzz cases](fuzzing.md) `--fuzz` would send to one step of a saved plan, as a `fuzz:` block of pinned cases to keep; nothing is sent |
 
 ### Archives (5 tools)
 
