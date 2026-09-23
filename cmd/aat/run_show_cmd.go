@@ -407,16 +407,19 @@ type shownStepRow struct {
 
 // shownRunList is the step list of aat run show, and its --json document.
 type shownRunList struct {
-	Run            string               `json:"run,omitempty"`
-	ArchivePath    string               `json:"archive_path"`
-	Plan           string               `json:"plan,omitempty"`
-	Outcome        string               `json:"outcome"`
-	Error          string               `json:"error,omitempty"`
-	DurationMs     int64                `json:"duration_ms"`
-	Attempt        int                  `json:"attempt,omitempty"`
-	TotalAttempts  int                  `json:"total_attempts,omitempty"`
-	OtherAttempts  []string             `json:"other_attempts,omitempty"`
-	OAS            *shownOAS            `json:"oas,omitempty"`
+	Run           string    `json:"run,omitempty"`
+	ArchivePath   string    `json:"archive_path"`
+	Plan          string    `json:"plan,omitempty"`
+	Outcome       string    `json:"outcome"`
+	Error         string    `json:"error,omitempty"`
+	DurationMs    int64     `json:"duration_ms"`
+	Attempt       int       `json:"attempt,omitempty"`
+	TotalAttempts int       `json:"total_attempts,omitempty"`
+	OtherAttempts []string  `json:"other_attempts,omitempty"`
+	OAS           *shownOAS `json:"oas,omitempty"`
+	// Seed replays the run's pool picks and random selections with
+	// aat run plan --seed.
+	Seed           uint64               `json:"seed,omitempty"`
 	Steps          []shownStepRow       `json:"steps"`
 	Cleanup        []shownStepRow       `json:"cleanup,omitempty"`
 	CleanupSkipped []CleanupSkipSummary `json:"cleanup_skipped,omitempty"`
@@ -483,6 +486,9 @@ func showRun(out io.Writer, a *archive.Archive, src shownRun, format showFormat)
 	if list.OAS != nil {
 		fmt.Fprintf(&b, "oas: %s\n", list.OAS.describe())
 	}
+	if list.Seed != 0 {
+		fmt.Fprintf(&b, "seed: %d\n", list.Seed)
+	}
 	if list.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", list.Error)
 	}
@@ -538,6 +544,7 @@ func buildShownRunList(a *archive.Archive, src shownRun) shownRunList {
 		TotalAttempts: a.Metadata.TotalAttempts,
 		OtherAttempts: src.Attempts,
 		OAS:           newShownOAS(summary.OAS),
+		Seed:          summary.Seed,
 		Steps:         []shownStepRow{},
 
 		KnownIssues:         a.KnownIssues,

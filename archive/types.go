@@ -42,6 +42,10 @@ type ArchiveMetadata struct {
 	// references none, for a run the MCP server executed, and in archives
 	// written before the mode was recorded.
 	OASValidation string `json:"oasValidation,omitempty" redact:"-"`
+	// Seed is the seed the run drew its pool picks and random selections
+	// from; `aat run plan --seed` with it replays them. It is 0 for a run that
+	// ended before any step, and in archives written before seeds were kept.
+	Seed uint64 `json:"seed,omitempty" redact:"-"`
 }
 
 // StepRecord captures the execution trace for a single step.
@@ -335,6 +339,9 @@ type RunSummary struct {
 	// OAS is the run's OpenAPI validation, recorded whenever the archive
 	// records a validation mode, a clean run included.
 	OAS *OASSummary `json:"oas,omitempty"`
+	// Seed replays the run's pool picks and random selections with
+	// aat run plan --seed.
+	Seed uint64 `json:"seed,omitempty"`
 }
 
 // OASSummary is a run's OpenAPI validation in summary.json: the mode, and

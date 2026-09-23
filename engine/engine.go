@@ -66,6 +66,13 @@ type Engine struct {
 	// StepID() matches completes successfully. Cleanup is intentionally skipped
 	// so created resources stay alive for an external harness to consume.
 	stopAfterStep string
+
+	// seed is the seed WithSeed set; seedSet says whether it was called. Run
+	// picks a seed when it was not.
+	seed    uint64
+	seedSet bool
+	// draws hands out each step's random source during Run; nil outside it.
+	draws *stepDraws
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -176,10 +183,20 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
-	// 4. Set plan for constraint-aware resolution
+	// 4. Set plan for constraint-aware resolution, and the seed the run's
+	// pool picks and random selections are drawn from
+	seed := e.seed
+	if !e.seedSet {
+		seed = NewRunSeed()
+	}
 	e.plan = instantiatedPlan
+	e.draws = newStepDraws(seed)
 	defer func() {
 		e.plan = nil
+		e.draws = nil
+		if result != nil {
+			result.Seed = seed
+		}
 	}()
 
 	state := NewRunState()
@@ -739,6 +756,9 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	} else {
 		// Construct ResolveContext from engine fields
 		rctx := e.buildResolveContext(node)
+		if e.draws != nil {
+			rctx.Rand = e.draws.next(sid)
+		}
 		resolvedAt = rctx.Now
 
 		// Resolve inputs

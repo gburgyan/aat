@@ -54,6 +54,11 @@ var runPlanCmd = &cobra.Command{
 			return runSetupFailure(jsonFlag, err)
 		}
 		stopAfter, _ := cmd.Flags().GetString("stop-after")
+		var seed *uint64
+		if cmd.Flags().Changed("seed") {
+			v, _ := cmd.Flags().GetUint64("seed")
+			seed = &v
+		}
 
 		envName, err := selectEnvName(cmd, resolved, envOverlay, noAutoOverrides)
 		if err != nil {
@@ -86,6 +91,7 @@ var runPlanCmd = &cobra.Command{
 			DumpStatePath:    dumpState,
 			DumpStateSecrets: dumpStateSecrets,
 			Vars:             vars,
+			Seed:             seed,
 		}
 
 		code := executeRun(ra)
@@ -102,6 +108,7 @@ func init() {
 	runPlanCmd.Flags().Bool("quiet", false, "suppress progress messages, show only final summary")
 	runPlanCmd.Flags().String("stop-after", "", "stop execution after the named step (by step ID); cleanup is skipped so resources stay alive for handoff")
 	runPlanCmd.Flags().String("dump-state", "", "write accumulated run state (base URLs, request headers, step inputs and outputs, with credentials redacted) to FILE (mode 0600); use \"-\" for stdout, which then carries only the state (progress goes to stderr; with --json it is nested under \"state\")")
+	runPlanCmd.Flags().Uint64("seed", 0, "seed for pool picks and random selections; a run's archive and summary give its seed, so --seed replays those choices ({{uuid}} and {{random N}} stay unique)")
 	runPlanCmd.Flags().Bool("dump-state-secrets", false, "keep live credentials in the --dump-state output, for a harness that sends requests as the run's session")
 }
 
@@ -186,6 +193,9 @@ func executeRun(ra *runArgs) int {
 		}
 		if res.archivePath != "" {
 			_, _ = fmt.Fprintf(console, "Archive: %s\n", res.archivePath)
+		}
+		if res.summary.Seed != 0 {
+			_, _ = fmt.Fprintf(console, "Seed: %d\n", res.summary.Seed)
 		}
 		return exitCode(res)
 	}

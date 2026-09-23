@@ -25,6 +25,9 @@ func (s *Server) registerExecTools() {
 				mcp.Description("Plan filename (e.g. 'booking-test' or 'booking-test.yaml')"),
 				mcp.Required(),
 			),
+			mcp.WithNumber("seed",
+				mcp.Description("Seed for pool picks and random selections. A run's summary gives its seed; passing it again replays those choices. Omit for a new seed."),
+			),
 		),
 		s.handleExecutePlan,
 	)
@@ -153,6 +156,9 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		WithEnvValues(s.ctx.Environment.Values).
 		WithLayers(layeredDefaults).
 		WithPacer(s.ctx.Pacer)
+	if seed := req.GetInt("seed", -1); seed >= 0 {
+		eng.WithSeed(uint64(seed))
+	}
 
 	result := eng.Run(ctx, p)
 
@@ -166,6 +172,7 @@ func (s *Server) handleExecutePlan(ctx context.Context, req mcp.CallToolRequest)
 		Environment:  s.ctx.Environment.Name,
 		GraphVersion: s.ctx.Graph.Version,
 		ToolVersion:  version.Effective(),
+		Seed:         result.Seed,
 	}
 	secrets := config.RunSecrets(s.ctx.Environment, p.Auth)
 	arc, err := engine.ToArchive(result, meta, s.ctx.Environment.APIBaseURL, secrets)
@@ -189,6 +196,9 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 	// Outcome header
 	fmt.Fprintf(&b, "## Execution: %s\n\n", result.Outcome.String())
 	fmt.Fprintf(&b, "- **Run ID:** %s\n", runID)
+	if result.DrewRandomly() {
+		fmt.Fprintf(&b, "- **Seed:** %d (pass it as `seed` to replay the run's picks)\n", result.Seed)
+	}
 	if result.Error != nil {
 		fmt.Fprintf(&b, "- **Error:** %s\n", result.Error)
 	}

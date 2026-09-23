@@ -57,6 +57,7 @@ type runArgs struct {
 	DumpStatePath     string            // write accumulated run state to this file (mode 0600)
 	DumpStateSecrets  bool              // keep live credentials in the state dump instead of redacting them
 	Vars              map[string]string // --var KEY=VALUE for multi-environment files
+	Seed              *uint64           // --seed: replay a run's pool picks and random selections; nil picks one
 }
 
 // RunSummary is the machine-readable JSON output for CI/CD pipelines.
@@ -78,9 +79,12 @@ type RunSummary struct {
 	EndedEarly  bool         `json:"ended_early,omitempty"`
 	Summary     SummaryStats `json:"summary"`
 	ArchivePath string       `json:"archive_path,omitempty"`
-	Attempts    int          `json:"attempts,omitempty"`   // total attempts (omitted if 1)
-	Retried     bool         `json:"retried,omitempty"`    // true if any retries occurred
-	StoppedAt   string       `json:"stopped_at,omitempty"` // checkpoint step ID when the outcome is "stopped"
+	// Seed is what `aat run plan --seed` takes to replay the run's pool picks
+	// and random selections; set when the run made such a choice.
+	Seed      uint64 `json:"seed,omitempty"`
+	Attempts  int    `json:"attempts,omitempty"`   // total attempts (omitted if 1)
+	Retried   bool   `json:"retried,omitempty"`    // true if any retries occurred
+	StoppedAt string `json:"stopped_at,omitempty"` // checkpoint step ID when the outcome is "stopped"
 	// State is the accumulated run state (base URLs, request headers, step
 	// inputs and outputs), populated only when --dump-state=- requests stdout
 	// output. Its credentials are redacted unless --dump-state-secrets asked
@@ -237,6 +241,9 @@ func buildRunSummary(result *engine.RunResult, archivePath string) *RunSummary {
 		KnownIssues:         toKnownIssueSummaries(result.KnownIssues),
 		KnownIssuesResolved: toKnownIssueSummaries(result.KnownIssuesResolved),
 		EndedEarly:          result.EndedEarly,
+	}
+	if result.DrewRandomly() {
+		s.Seed = result.Seed
 	}
 
 	var passed, failed int
@@ -725,10 +732,11 @@ type runContext struct {
 	Pacer *engine.Pacer
 
 	// Execution options
-	SkipMutations    bool   // strip mutations from each plan before instantiation
-	StopAfterStep    string // stop after this step ID; skip cleanup (checkpoint handoff)
-	DumpStatePath    string // write accumulated run state to this file (mode 0600)
-	DumpStateSecrets bool   // keep live credentials in the state dump instead of redacting them
+	SkipMutations    bool    // strip mutations from each plan before instantiation
+	StopAfterStep    string  // stop after this step ID; skip cleanup (checkpoint handoff)
+	DumpStatePath    string  // write accumulated run state to this file (mode 0600)
+	DumpStateSecrets bool    // keep live credentials in the state dump instead of redacting them
+	Seed             *uint64 // seed for pool picks and random selections; nil picks one per run
 }
 
 // loadRunContext loads all shared infrastructure from the given args.
@@ -803,6 +811,7 @@ func loadRunContext(ctx context.Context, args *runArgs, logf func(string, ...any
 		StopAfterStep:     args.StopAfterStep,
 		DumpStatePath:     args.DumpStatePath,
 		DumpStateSecrets:  args.DumpStateSecrets,
+		Seed:              args.Seed,
 	}
 
 	// Pre-load layers referenced by --layer and/or --layer-group flags.
@@ -1053,6 +1062,9 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		WithEnvValues(rctx.Env.Values).
 		WithStopAfter(rctx.StopAfterStep).
 		WithPacer(rctx.Pacer)
+	if rctx.Seed != nil {
+		eng.WithSeed(*rctx.Seed)
+	}
 
 	if rctx.OASCache != nil {
 		eng.WithOASSpecs(rctx.OASCache, rctx.Graph.OAS, rctx.OASValidateMode == "strict")
@@ -1082,6 +1094,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		TotalAttempts: totalAttempts,
 		Layers:        effectiveLayers,
 		OASValidation: archiveOASMode(rctx.Graph, rctx.OASValidateMode),
+		Seed:          result.Seed,
 	}
 	archivePath := filepath.Join(runDir, "archive.json")
 	arc, archiveErr := engine.ToArchive(result, meta, rctx.Env.APIBaseURL, secrets)
@@ -1093,6 +1106,9 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 		archivePath = ""
 	} else {
 		logf("Archive: %s\n", archivePath)
+	}
+	if result.DrewRandomly() {
+		logf("Seed: %d (replay its picks with --seed %d)\n", result.Seed, result.Seed)
 	}
 
 	// Build machine-readable summary

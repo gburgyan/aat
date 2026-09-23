@@ -572,6 +572,7 @@ assertions:
   - If a server asks for more than 60 s, the step ends as `failed_fast`.
 - **Step retries vs `--retries`:** use step retries for rate limits and flaky responses. `--retries N` on `aat run` reruns the whole plan after 2 s, and it ignores those headers.
 - **Same request:** a step's inputs are resolved once, so every attempt sends the same values, pool picks and generated values included.
+- **Replaying picks:** a run that drew from a pool or made a `random` selection prints its seed (also in `aat run show` and `summary.json`); `aat run plan <name> --seed N`, or `seed` on MCP `execute_plan`, repeats those choices. `{{uuid}}` and `{{random N}}` stay unique.
 - **Request timeout:** aat's client waits 30 s for each response. A request that takes longer fails with `no response within aat's 30s request timeout`, in the `timeout` category, which retries by default. The limit isn't configurable.
 - **Known rate limits:** set `settings.minRequestInterval` (`250ms`, `1s`) in the environment file. It spaces the start of every request one command sends, `--parallel` plans included, but not OAuth token requests.
 

@@ -56,6 +56,7 @@ func BuildRunSummary(a *Archive) *RunSummary {
 		Layers:        a.Metadata.Layers,
 		Issues:        issues,
 		OAS:           buildOASSummary(a.Metadata.OASValidation, allSteps, issues["oas"]),
+		Seed:          a.Metadata.Seed,
 	}
 }
 

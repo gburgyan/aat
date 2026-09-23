@@ -965,3 +965,21 @@ func writeFile(t *testing.T, path, content string) {
 	require.NoError(t, os.MkdirAll(dir, 0755))
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
 }
+
+func TestRunSeed(t *testing.T) {
+	base := runSeed(7, "plans/smoke.yaml", "")
+	assert.Equal(t, base, runSeed(7, "plans/smoke.yaml", ""), "stable for the same run")
+	assert.NotEqual(t, base, runSeed(8, "plans/smoke.yaml", ""), "the batch seed changes it")
+	assert.NotEqual(t, base, runSeed(7, "plans/other.yaml", ""), "each plan gets its own")
+	assert.NotEqual(t, base, runSeed(7, "plans/smoke.yaml", "eu"), "each permutation gets its own")
+	assert.Less(t, base, uint64(1)<<53)
+}
+
+func TestSpecRunContext_Seed(t *testing.T) {
+	spec := batchRunSpec{entry: config.PlanEntry{FullPath: "plans/smoke.yaml"}, layers: []string{"eu"}}
+	assert.Nil(t, specRunContext(&runContext{}, spec, 0).Seed, "no batch seed leaves each run to pick one")
+	got := specRunContext(&runContext{}, spec, 7)
+	require.NotNil(t, got.Seed)
+	assert.Equal(t, runSeed(7, "plans/smoke.yaml", ""), *got.Seed)
+	assert.Equal(t, []string{"eu"}, got.Layers)
+}

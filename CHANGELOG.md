@@ -6,6 +6,14 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Runs can be replayed with the same pool picks.** Every run draws its pool orders and `random` selections from a
+  seed, and a run that made such a choice prints it; `aat run show`, the archive, and `summary.json` record it.
+  `aat run plan --seed N` and MCP `execute_plan`'s `seed` repeat those choices, and `aat run batch --seed N` now fixes
+  each run's picks as well as the shuffle. A step's picks depend on its ID, not on the order steps run in, so parallel
+  steps replay too. `{{uuid}}` and `{{random N}}` stay unique. See
+  [Replaying a run's picks](https://gburgyan.github.io/aat/value-flow/#replaying-a-runs-picks).
+
 ## [0.3.2] - 2026-09-22
 
 A bug-fix release: a gRPC call that outlives its deadline is now always an error, never a response the step asserts

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -29,10 +29,32 @@ type ResolveContext struct {
 	Plan      *plan.Plan        // for constraint classification (may be nil)
 	Registry  *adapter.Registry // may be nil; enables template-side elementField resolution
 	Random    io.Reader         // source for {{uuid}} and {{random N}}; nil means crypto/rand
+	// Rand orders pool picks and makes random selections; nil means the
+	// unseeded global source. The engine seeds it per step, so a run can be
+	// replayed.
+	Rand *rand.Rand
 	// LayeredDefaults are the input defaults after layers, keyed as
 	// graph.ApplyLayers keys them; nil without layers. A required input marked
 	// {} falls back to them.
 	LayeredDefaults map[string]*graph.InputDefault
+}
+
+// rng returns the context's random source, or nil for the global one. It is
+// safe on a nil context.
+func (rctx *ResolveContext) rng() *rand.Rand {
+	if rctx == nil {
+		return nil
+	}
+	return rctx.Rand
+}
+
+// shuffle shuffles with r, or with the global source when r is nil.
+func shuffle(r *rand.Rand, n int, swap func(i, j int)) {
+	if r == nil {
+		rand.Shuffle(n, swap)
+		return
+	}
+	r.Shuffle(n, swap)
 }
 
 // ResolveInputs resolves all input values for a step using the basic resolution
@@ -230,7 +252,7 @@ func resolveNamedSelection(ctx context.Context, selName string, sel plan.StepSel
 	if cached, ok := dedupCache[key]; ok {
 		result = cached
 	} else {
-		result, err = applySelection(arr, resolvedSel)
+		result, err = applySelection(arr, resolvedSel, rctx.rng())
 		if err != nil {
 			return nil, nil, fmt.Errorf("selection %q from %s.%s: %w", selName, fromNode, fromField, err)
 		}
@@ -577,7 +599,7 @@ func resolveSelectValue(ctx context.Context, fromNode, fromField, inputName stri
 	if hasCached {
 		result = cached
 	} else {
-		result, err = applySelection(arr, resolvedSel)
+		result, err = applySelection(arr, resolvedSel, rctx.rng())
 		if err != nil {
 			return nil, nil, fmt.Errorf("select from %s.%s: %w", fromNode, fromField, err)
 		}
@@ -830,7 +852,7 @@ func resolveWithFallback(ctx context.Context, sv plan.StepValue, input graph.Inp
 		}
 
 		if sv.PoolStrategy == nil || *sv.PoolStrategy != "sequential" {
-			rand.Shuffle(len(pool), func(i, j int) {
+			shuffle(rctx.rng(), len(pool), func(i, j int) {
 				pool[i], pool[j] = pool[j], pool[i]
 				indices[i], indices[j] = indices[j], indices[i]
 			})

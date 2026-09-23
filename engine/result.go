@@ -74,6 +74,11 @@ type RunResult struct {
 	// retry waits, verification, and cleanup.
 	StartTime time.Time
 	Duration  time.Duration
+
+	// Seed is the seed the run drew pool picks and random selections from;
+	// Engine.WithSeed with it replays those choices. It is 0 when the run
+	// ended before any step resolved.
+	Seed uint64
 }
 
 // Elapsed returns how long the run took: its recorded wall-clock Duration, or,
