@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
@@ -137,4 +138,65 @@ func TestGenerate_IDsAreUnique(t *testing.T) {
 		assert.False(t, seen[c.ID], "duplicate case %s", c.ID)
 		seen[c.ID] = true
 	}
+}
+
+func TestGenerate_AbsenceAndTemplateCases(t *testing.T) {
+	target := addItemTarget()
+	target.Template = &adapter.Template{Protocol: "http", Request: adapter.TemplateRequest{
+		Method: "POST", Path: "/carts/{{cartId}}/items",
+		Body: `{"cartId": "{{cartId}}", "sku": "{{sku}}", "quantity": {{quantity}}, "channel": "web",
+		  "meta": {"source": "aat"}{{?note}}, "note": "{{note}}"{{/note}}}`,
+	}}
+	cases, err := Generate(target, Options{})
+	require.NoError(t, err)
+	byID := caseByID(cases)
+
+	missing := byID["quantity.missing"]
+	assert.Equal(t, plan.FuzzNegative, missing.Mode, "a required input left out")
+	assert.Equal(t, []plan.RequestPatch{{Where: "body", Path: "quantity", Op: "remove"}}, missing.Patch)
+	assert.Equal(t, plan.FuzzNegative, byID["quantity.null"].Mode)
+	assert.Equal(t, []plan.RequestPatch{{Where: "body", Path: "quantity", Op: "set"}}, byID["quantity.null"].Patch)
+	assert.NotContains(t, byID, "cartId.missing", "a wired input is left alone")
+	assert.NotContains(t, byID, "note.missing", "an input sent only in a conditional block is left out by the template itself")
+
+	for id, strategy := range map[string]string{
+		"body.channel.remove":     "remove",
+		"body.channel.null":       "null",
+		"body.channel.wrong-type": "wrong-type",
+		"body.meta.empty":         "empty",
+		"body.meta.remove":        "remove",
+		"body.meta.source.remove": "remove",
+		"body.extra-property":     "extra-property",
+	} {
+		c, ok := byID[id]
+		if assert.True(t, ok, "missing case %s", id) {
+			assert.Equal(t, plan.FuzzEdge, c.Mode, id)
+			assert.Equal(t, strategy, c.Strategy, id)
+			assert.Empty(t, c.Input, id)
+		}
+	}
+	assert.Equal(t, 12345, byID["body.channel.wrong-type"].Patch[0].Value)
+
+	// Naming inputs limits the cases to them: no template fields.
+	only, err := Generate(target, Options{Inputs: []string{"quantity"}})
+	require.NoError(t, err)
+	for _, c := range only {
+		assert.Equal(t, "quantity", c.Input, c.ID)
+	}
+}
+
+func TestGenerate_OptionalInputMissingIsPositive(t *testing.T) {
+	node := &graph.Node{Name: "search", Inputs: []graph.Input{
+		{Name: "limit", Type: "integer", Optional: true, Default: &graph.InputDefault{Value: 10}},
+		{Name: "cursor", Type: "string", Optional: true},
+	}}
+	target := Target{Node: node, Step: plan.Step{ID: "s", Node: "search", Values: map[string]plan.StepValue{"limit": {Default: 10}}},
+		Template: &adapter.Template{Request: adapter.TemplateRequest{Method: "GET", Path: "/search?limit={{limit}}&cursor={{cursor}}"}}}
+	cases, err := Generate(target, Options{})
+	require.NoError(t, err)
+	byID := caseByID(cases)
+	assert.Equal(t, plan.FuzzPositive, byID["limit.missing"].Mode)
+	assert.Equal(t, []plan.RequestPatch{{Where: "query", Path: "limit", Op: "remove"}}, byID["limit.missing"].Patch)
+	assert.NotContains(t, byID, "limit.null", "a query parameter can't be null")
+	assert.NotContains(t, byID, "cursor.missing", "an optional input with no value is left out already")
 }

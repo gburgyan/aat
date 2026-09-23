@@ -57,7 +57,7 @@ func addExecutionFlags(cmd *cobra.Command) {
 	flags.Int("fuzz-cases", 0, "at most this many cases per fuzzed step, picked by the run's seed (0 = all)")
 	flags.StringSlice("fuzz-case", nil, "run only the fuzz cases with these IDs, such as quantity.above-max")
 	flags.String("fuzz-scope", "isolated", "isolated: each case gets its own copy of the steps the target depends on; shared: cases reuse the target's, which is faster but lets a case change what later steps see")
-	flags.StringSlice("fuzz-fail", nil, "findings that fail the run (default server-error,no-response,schema-violation; also accepted-invalid, rejected-valid, not-sent)")
+	flags.StringSlice("fuzz-fail", nil, "findings that fail the run (default server-error,no-response,schema-violation; also accepted-invalid, rejected-valid, undocumented-status, not-sent)")
 }
 
 // fuzzConfigFromFlags reads the --fuzz flags, or returns nil when --fuzz is

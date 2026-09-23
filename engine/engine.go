@@ -222,6 +222,9 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	var stepResults []StepResult
 	outcome := OutcomePassed
 	kiLog := newKnownIssueLog()
+	// failedSetup maps a fuzz case's step to why its copy of the setup failed;
+	// the rest of that case is not sent.
+	failedSetup := map[string]string{}
 	verificationSteps := plan.VerificationSteps(instantiatedPlan, e.graph, e.layeredDefaults)
 	total := len(sorted) + len(verificationSteps)
 
@@ -255,7 +258,47 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			e.Observer.OnStepStart(i, total, step)
 		}
 
+		// A fuzz case whose setup failed is not sent, nor is the rest of its
+		// setup.
+		caseID := step.FuzzSetup
+		if step.Fuzz != nil {
+			caseID = step.StepID()
+		}
+		if reason := failedSetup[caseID]; reason != "" {
+			skipped := StepResult{StepID: step.StepID(), Node: step.Node, Error: fmt.Errorf("not sent: %s", reason), StartTime: time.Now()}
+			if step.Fuzz != nil {
+				skipped.Fuzz = e.judgeFuzz(step, node, &skipped)
+			}
+			stepResults = append(stepResults, skipped)
+			if e.Observer != nil {
+				e.Observer.OnStepComplete(i, total, skipped)
+			}
+			continue
+		}
+
 		stepResult := e.executeStepWithTracking(ctx, step, node, state)
+
+		// A copy of a setup step made for a fuzz case ends that case when it
+		// fails, not the run: the case says nothing about the target then.
+		if step.FuzzSetup != "" && (stepResult.Error != nil || e.stepFailed(step, &stepResult)) {
+			if stepResult.Error != nil && ctx.Err() != nil {
+				stepResults = append(stepResults, stepResult)
+				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+			}
+			failedSetup[step.FuzzSetup] = fmt.Sprintf("its copy of setup step %s failed", step.StepID())
+			// One that failed only its checks may still have created something.
+			if stepResult.Error == nil && stepResult.StatusCode < 400 && node.Cleanup.Node != "" {
+				if stepResult.Outputs != nil {
+					state.StoreOutputs(step.StepID(), stepResult.Outputs)
+				}
+				cleanupStack.Push(CleanupEntry{NodeName: node.Cleanup.Node, ForNode: node.Name, ForStep: step.StepID()})
+			}
+			stepResults = append(stepResults, stepResult)
+			if e.Observer != nil {
+				e.Observer.OnStepComplete(i, total, stepResult)
+			}
+			continue
+		}
 
 		// A fuzz step never ends the run: its finding is recorded, and fails
 		// the outcome when the configuration says it does.
@@ -264,7 +307,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				stepResults = append(stepResults, stepResult)
 				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 			}
-			stepResult.Fuzz = e.judgeFuzz(step, &stepResult)
+			stepResult.Fuzz = e.judgeFuzz(step, node, &stepResult)
 			if stepResult.Fuzz.Fails {
 				outcome = OutcomeFailed
 			}
@@ -864,8 +907,16 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	exec, cfg, rewrite := e.router.Resolve(node.Name)
 	actualBaseURL := exec.Target()
 
-	// Build request
+	// Build request, then apply a fuzz case's patch to it
 	req, err := adp.BuildRequest(inputs, cfg)
+	if err == nil && step.Fuzz != nil {
+		for _, p := range step.Fuzz.Patch {
+			if perr := adapter.ApplyPatch(req, p.Where, p.Path, p.Op, p.Value); perr != nil {
+				err = fmt.Errorf("fuzz case %s: %w", step.Fuzz.ID, perr)
+				break
+			}
+		}
+	}
 	if err != nil {
 		return StepResult{
 			StepID:        sid,

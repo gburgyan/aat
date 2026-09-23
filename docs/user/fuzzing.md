@@ -10,8 +10,8 @@ operation whose inputs have to come from earlier calls: an `addItem` needs a car
 there first.
 
 Nothing about fuzzing goes in the graph. The cases come from what the project already declares: each input's `type`
-and `constraints`, the domain file's types and [value pools](domain.md#value-pools), and, when the graph has an
-OpenAPI spec, the spec.
+and `constraints`, the domain file's types and [value pools](domain.md#value-pools), the node's template, and, when
+the graph has an OpenAPI spec, the spec.
 
 ## Quick start
 
@@ -23,25 +23,32 @@ cd examples/shop/
 ```
 
 ```
-  [15/23] addItem              201  0ms
-  [16/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.fraction (negative)
-  [17/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.overflow (negative)
-  [18/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.wrong-type (negative)
-  [19/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.zero (edge→negative)
-  [20/23] addItem--fuzz-quant~ 400  0ms  fuzz quantity.negative (edge→negative)
-  [21/23] addItem--fuzz-quant~ 409  0ms  fuzz quantity.large (edge)
-  [22/23] checkout             201  0ms
+  [21/32] addItem              201  0ms
+  [22/32] addItem--fuzz-quant~ 201  0ms  fuzz quantity.at-min (positive)
+  [23/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.below-min (negative)
+  [24/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.fraction (negative)
+  [25/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.overflow (negative)
+  [26/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.wrong-type (negative)
+  [27/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.missing (negative)
+  [28/32] addItem--fuzz-quant~ 400  0ms  fuzz quantity.null (negative)
+  [29/32] addItem--fuzz-quant~ 409  0ms  fuzz quantity.large (edge)
+  [30/32] addItem--fuzz-body-~ 201  0ms  fuzz body.extra-property (edge)
+  [31/32] checkout             201  0ms
 ...
-PASSED (23/23 steps, 5ms)
-Fuzz: 6 cases: 6 as expected
+PASSED (32/32 steps, 6ms)
+Fuzz: 9 cases: 9 as expected
 ```
 
 The happy path runs as usual. Each case runs after its target, on its own copy of the steps the target depends on,
-so a case can't change what the rest of the plan sees. Those copies, such as `listProducts__fuzz-quantity-zero` and
-`createCart__fuzz-quantity-zero` for the case `quantity.zero`, run before the target and are left out above.
+so a case can't change what the rest of the plan sees. The copy also includes the earlier steps that build on those,
+such as the `addItem` a checkout needs even though it reads nothing from it. If a copied step fails, its case is
+reported as `not-sent` and the run carries on. Those copies, such as `listProducts__addItem--fuzz-quantity-null`
+and `createCart__addItem--fuzz-quantity-null` for the case `quantity.null`, run before the target and are left out
+above.
 
-Only `quantity` was fuzzed: `cartId` and `sku` are wired from earlier steps, and fuzzing those would only test that
-the step can't find its cart.
+Only `quantity` was fuzzed as an input: `cartId` and `sku` are wired from earlier steps, and fuzzing those would only
+test that the step can't find its cart. The shop's graph gives `quantity` a `min: 1` constraint, which is where
+`at-min` and `below-min` come from.
 
 `--fuzz` takes step IDs or node names, comma-separated. A node name fuzzes every step of that node.
 
@@ -66,7 +73,31 @@ What each type gets:
 | `boolean` | `true`, `false` | `wrong-type` | |
 | `date`, `datetime` | today, next year | an invalid date, text | `far-past` |
 | `T[]` | | | `empty-list` |
+| Any input the template sends in the body, the query, or a header | `missing` for an optional input with a value | `missing` and `null` (body only) for a required input | `null` for an optional one |
 
+An input the template sends only inside a `{{?input}}` block gets no `missing` case: leaving it out is the template's
+own choice. An input that is only in the path gets none either, since leaving it out changes the route.
+
+### The template's own fields
+
+A template also writes values of its own: `"channel": "web"`, a nested object, a literal query parameter. Nothing
+says whether the API needs them, so each is fuzzed as an edge case, where only a 5xx, no response, or a broken
+response is a finding:
+
+| Field | Cases |
+|-------|-------|
+| A string, number, or boolean in the body | `body.<path>.remove`, `.null`, `.wrong-type` (a string becomes `12345`, a number `"x"`, a boolean `"yes"`) |
+| An object or array in the body | `body.<path>.remove`, `.empty` |
+| The body itself | `body.extra-property`, a property the template never sends |
+| A literal query parameter | `query.<name>.remove` |
+
+A gRPC message gets no `body.extra-property`: a protobuf message has no room for a field its type doesn't declare.
+
+Fields inside `{{?…}}` and `{{#…}}` blocks, and array elements, are left alone. A form body or one that isn't JSON
+gets none of these cases.
+
+These cases, and `missing` and `null`, change the request after the template builds it, so everything else in it is
+what the plan would send.
 Values are sent exactly as generated, like a step value with [`raw: true`](value-flow.md#raw-values): `{{…}}` in a
 value is not evaluated, and `"12"` stays a string. A `wrong-type` value for a number or a boolean is a JSON string,
 quotes included, so it arrives as a string even in an unquoted template slot such as `{"quantity": {{quantity}}}`.
@@ -75,10 +106,26 @@ quotes included, so it arrives as a string even in an unquoted template slot suc
 
 When the step's node has an [OpenAPI operation](running.md#oas-validation), its request is checked against the spec.
 A case whose request breaks the spec is judged as negative, whatever its own mode: the spec is the API's own word on
-what it accepts. In the run above, `quantity.zero` is an edge case, since the graph declares no minimum, but the shop's
-spec says `minimum: 1`, so the 400 it got was right. The progress line shows this as `edge→negative`, and the
-archive keeps the spec violations on the case. Spec violations on a fuzz step's request are the point of the case,
-so they don't count as OAS warnings.
+what it accepts. If the graph gave `quantity` no `min`, 0 would be an edge case, but the shop's spec says
+`minimum: 1`, so the case is judged as negative and a 400 is the right answer. Removing a body field the spec
+requires works the same way. The progress line shows the change as `edge→negative`, and the archive keeps the spec
+violations on the case. Spec violations on a fuzz step's request are the point of the case, so they don't count as
+OAS warnings.
+
+### Without an OpenAPI spec
+
+Everything above works without a spec except the parts that read it: judging by the spec, `schema-violation`, and
+`undocumented-status`. What decides a case's mode is then what the project declares:
+
+- **Bounds and formats come from the graph.** `constraints` on an input (`min`, `max`, `minLength`, `maxLength`,
+  `pattern`), `enum[...]` types, and a domain type's `validation` make the positive and negative cases. They describe
+  the API, not the fuzzing, so they belong in the graph, where `aat validate`, the generated docs, and MCP use them
+  too. [`aat generate --oas`](generate.md) writes an operation's bounds into the graph for you.
+- **The structure comes from the template.** Body, query, and header cases need no spec.
+- **Everything else is an edge case**, which only fails on a 5xx or no response.
+
+An input with no constraints still gets its type's negative cases (`wrong-type`, `fraction`, `missing` when it is
+required) and all of its edge cases.
 
 ## Findings
 
@@ -91,7 +138,8 @@ Each case's response gets one finding, or none when it was what the case called 
 | `schema-violation` | The response breaks the OpenAPI spec | yes |
 | `accepted-invalid` | A success for a negative case | no |
 | `rejected-valid` | A 4xx for a positive case | no |
-| `not-sent` | AAT could not build the request, such as a value a gRPC message can't hold | no |
+| `undocumented-status` | A status the node's OpenAPI operation doesn't list, with no `default` response | no |
+| `not-sent` | The case couldn't be sent: its copy of a setup step failed, or AAT couldn't build the request, such as a value a gRPC message can't hold | no |
 
 `--fuzz-fail` lists the findings that fail the run: `--fuzz-fail server-error,accepted-invalid` makes an API that
 takes forbidden values a failure. The others are warnings. A fuzz step never stops the run, and it doesn't retry.
@@ -128,8 +176,6 @@ again.
 
 ## What it doesn't do yet
 
-- Fuzzing reaches a step's inputs, not fields a template fills in itself: a nested body field that isn't an input
-  isn't fuzzed.
-- A missing required input isn't a case: the template can't be rendered without it.
+- Properties the spec describes but the template never sends are not fuzzed, beyond `body.extra-property`.
 - A case that finds something is not yet written out as a plan to keep as a regression test; replay it with
   `--fuzz-case`, or copy the value into a [mutation](plans.md#negative-testing-expectfailure).

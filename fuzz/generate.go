@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
@@ -29,6 +30,10 @@ type Target struct {
 	Step plan.Step
 	Node *graph.Node
 	KB   *domain.KnowledgeBase // may be nil
+	// Template is the node's request template; nil for a custom adapter.
+	// It says where each input is sent, and which fields the template writes
+	// itself, for the cases that leave a field out or change its type.
+	Template *adapter.Template
 }
 
 // Options shape the cases Generate returns.
@@ -84,7 +89,19 @@ func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 		now = time.Now()
 	}
 
+	var fields []adapter.RequestField
+	if t.Template != nil {
+		fields, _ = t.Template.RequestFields()
+	}
+
 	var cases []plan.FuzzCase
+	keep := func(cs []plan.FuzzCase) {
+		for _, c := range cs {
+			if modes[c.Mode] {
+				cases = append(cases, c)
+			}
+		}
+	}
 	for _, in := range t.Node.Inputs {
 		if len(named) > 0 && !named[in.Name] {
 			continue
@@ -92,11 +109,13 @@ func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 		if len(named) == 0 && wired(t.Step.Values[in.Name]) {
 			continue
 		}
-		for _, c := range inputCases(in, t.Step.Values[in.Name], t.KB, now) {
-			if modes[c.Mode] {
-				cases = append(cases, c)
-			}
-		}
+		keep(inputCases(in, t.Step.Values[in.Name], t.KB, now))
+		keep(absenceCases(in, t.Step.Values[in.Name], fields))
+	}
+	if len(named) == 0 {
+		// A protobuf message has no room for a field its type doesn't declare.
+		grpc := t.Template != nil && t.Template.Protocol == adapter.ProtocolGRPC
+		keep(templateCases(fields, !grpc))
 	}
 	sort.SliceStable(cases, func(i, j int) bool { return modeRank(cases[i].Mode) < modeRank(cases[j].Mode) })
 
@@ -111,6 +130,102 @@ func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 		return capped, true, nil
 	}
 	return cases, false, nil
+}
+
+// absenceCases lists the cases that leave an input out of the request, or
+// send it as null, by patching the fields the template puts it in. An input
+// only in the path, or only inside a conditional block, gets none.
+func absenceCases(in graph.Input, sv plan.StepValue, fields []adapter.RequestField) []plan.FuzzCase {
+	var remove, null []plan.RequestPatch
+	for _, f := range fields {
+		if f.Input != in.Name {
+			continue
+		}
+		if f.InBlock {
+			return nil // sent only when present, so leaving it out is the template's own case
+		}
+		remove = append(remove, plan.RequestPatch{Where: f.Where, Path: f.Path, Op: adapter.PatchRemove})
+		if f.Where == adapter.FieldBody {
+			null = append(null, plan.RequestPatch{Where: f.Where, Path: f.Path, Op: adapter.PatchSet})
+		}
+	}
+	if len(remove) == 0 {
+		return nil
+	}
+	// An optional input with no value is left out already.
+	if in.Optional && sv.IsEmpty() && (in.Default == nil || !in.Default.HasValue()) {
+		return nil
+	}
+	b := &builder{input: in.Name}
+	if in.Optional {
+		b.addPatch(plan.FuzzPositive, "missing", remove)
+		b.addPatch(plan.FuzzEdge, "null", null)
+	} else {
+		b.addPatch(plan.FuzzNegative, "missing", remove)
+		b.addPatch(plan.FuzzNegative, "null", null)
+	}
+	return b.cases
+}
+
+// templateCases lists the cases for the fields a template writes itself,
+// rather than filling from an input: leaving each out, sending it as null or
+// as another type, emptying an object or array, and adding a property the
+// template never sends. Nothing declares whether such a field is required, so
+// they are edge cases; an OpenAPI spec, when there is one, judges them.
+// Fields inside blocks and elements of arrays are left alone.
+func templateCases(fields []adapter.RequestField, extraProperty bool) []plan.FuzzCase {
+	b := &builder{input: "body"}
+	hasBody := false
+	for _, f := range fields {
+		if f.Where == adapter.FieldBody {
+			hasBody = true
+		}
+		if f.Input != "" || f.InBlock || f.Where != adapter.FieldBody && f.Where != adapter.FieldQuery {
+			continue
+		}
+		if inArray(f.Path) {
+			continue
+		}
+		prefix := f.Where + "." + f.Path + "."
+		remove := []plan.RequestPatch{{Where: f.Where, Path: f.Path, Op: adapter.PatchRemove}}
+		b.addPatchID(prefix+"remove", plan.FuzzEdge, "remove", remove)
+		if f.Where == adapter.FieldQuery {
+			continue
+		}
+		set := func(v any) []plan.RequestPatch {
+			return []plan.RequestPatch{{Where: f.Where, Path: f.Path, Op: adapter.PatchSet, Value: v}}
+		}
+		switch f.Kind {
+		case "object":
+			b.addPatchID(prefix+"empty", plan.FuzzEdge, "empty", set(map[string]any{}))
+		case "array":
+			b.addPatchID(prefix+"empty", plan.FuzzEdge, "empty", set([]any{}))
+		case "string":
+			b.addPatchID(prefix+"null", plan.FuzzEdge, "null", set(nil))
+			b.addPatchID(prefix+"wrong-type", plan.FuzzEdge, "wrong-type", set(12345))
+		case "number":
+			b.addPatchID(prefix+"null", plan.FuzzEdge, "null", set(nil))
+			b.addPatchID(prefix+"wrong-type", plan.FuzzEdge, "wrong-type", set("x"))
+		case "boolean":
+			b.addPatchID(prefix+"null", plan.FuzzEdge, "null", set(nil))
+			b.addPatchID(prefix+"wrong-type", plan.FuzzEdge, "wrong-type", set("yes"))
+		}
+	}
+	if hasBody && extraProperty {
+		b.addPatchID("body.extra-property", plan.FuzzEdge, "extra-property",
+			[]plan.RequestPatch{{Where: adapter.FieldBody, Path: "aatFuzzExtra", Op: adapter.PatchSet, Value: "x"}})
+	}
+	return b.cases
+}
+
+// inArray reports whether a GJSON path goes through an array element.
+func inArray(path string) bool {
+	for _, seg := range strings.Split(path, ".") {
+		if seg != "" && strings.Trim(seg, "0123456789") == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // wired reports whether a step value comes from another step or input, which
@@ -321,6 +436,26 @@ func (b *builder) add(mode, strategy string, value any) {
 		}
 	}
 	b.cases = append(b.cases, plan.FuzzCase{ID: id, Mode: mode, Input: b.input, Strategy: strategy, Value: value})
+}
+
+func (b *builder) addPatch(mode, strategy string, patch []plan.RequestPatch) {
+	if len(patch) == 0 {
+		return
+	}
+	b.addPatchID(b.input+"."+strategy, mode, strategy, patch)
+}
+
+func (b *builder) addPatchID(id, mode, strategy string, patch []plan.RequestPatch) {
+	for _, c := range b.cases {
+		if c.ID == id {
+			return
+		}
+	}
+	input := b.input
+	if input == "body" {
+		input = ""
+	}
+	b.cases = append(b.cases, plan.FuzzCase{ID: id, Mode: mode, Input: input, Strategy: strategy, Patch: patch})
 }
 
 func fill(n int) string {

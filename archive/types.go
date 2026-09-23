@@ -152,6 +152,9 @@ type FuzzRecord struct {
 	Input    string `json:"input" redact:"-"`
 	Strategy string `json:"strategy" redact:"-"`
 	Value    any    `json:"value"`
+	// Patch is what the case changed in the request, for a case that left a
+	// field out or changed it rather than setting an input.
+	Patch []plan.RequestPatch `json:"patch,omitempty"`
 	// JudgedAs is the mode the response was judged by, when it differs from
 	// Mode: negative when the request broke the OpenAPI spec.
 	JudgedAs string `json:"judgedAs,omitempty" redact:"-"`

@@ -1,12 +1,16 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/fuzz"
+	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/graph/oas"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -24,13 +28,16 @@ const (
 	FindingAcceptedInvalid = "accepted-invalid"
 	// FindingRejectedValid is a 4xx for a value the input allows.
 	FindingRejectedValid = "rejected-valid"
+	// FindingUndocumentedStatus is a status the node's OpenAPI operation does
+	// not list among its responses.
+	FindingUndocumentedStatus = "undocumented-status"
 	// FindingNotSent is a case aat could not build a request for, such as a
 	// value a gRPC message cannot hold. It says nothing about the API.
 	FindingNotSent = "not-sent"
 )
 
 // AllFindings lists the findings, most serious first.
-var AllFindings = []string{FindingServerError, FindingNoResponse, FindingSchemaViolation, FindingAcceptedInvalid, FindingRejectedValid, FindingNotSent}
+var AllFindings = []string{FindingServerError, FindingNoResponse, FindingSchemaViolation, FindingAcceptedInvalid, FindingRejectedValid, FindingUndocumentedStatus, FindingNotSent}
 
 // DefaultFuzzFail lists the findings that fail a run unless FuzzConfig.Fail
 // says otherwise. The others are reported as warnings: whether an API should
@@ -111,7 +118,8 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		if node == nil {
 			return fmt.Errorf("fuzz target %s: node %q not found in graph", target.StepID(), target.Node)
 		}
-		cases, capped, err := fuzz.GenerateCapped(fuzz.Target{Step: target, Node: node, KB: e.KB}, fuzz.Options{
+		tmpl, _ := e.registry.GetTemplate(node.Adapter)
+		cases, capped, err := fuzz.GenerateCapped(fuzz.Target{Step: target, Node: node, KB: e.KB, Template: tmpl}, fuzz.Options{
 			Modes:  cfg.Modes,
 			Inputs: cfg.Inputs,
 			Max:    cfg.Max,
@@ -141,7 +149,7 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 }
 
 // judgeFuzz decides a fuzz step's finding from its result.
-func (e *Engine) judgeFuzz(step plan.Step, r *StepResult) *FuzzResult {
+func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *FuzzResult {
 	c := step.Fuzz
 	mode := c.Mode
 	var violations []string
@@ -161,14 +169,25 @@ func (e *Engine) judgeFuzz(step plan.Step, r *StepResult) *FuzzResult {
 		r.OASValidation = &cp
 	}
 
+	// A status the operation doesn't list has no schema to break, so the
+	// response validator's complaint about it is this finding, not a
+	// schema violation.
+	undocumented := false
+	if e.oasCache != nil && r.Error == nil && r.Response != nil && grpcStatusName(r.Response) == "" {
+		documented, known := oas.StatusDocumented(node, e.graphOAS, e.oasCache, r.StatusCode)
+		undocumented = known && !documented
+	}
+
 	finding := ""
 	switch {
-	case r.Error != nil && r.Request == nil:
+	case r.Error != nil && (r.Request == nil || errors.As(r.Error, new(*adapter.NotSentError))):
 		finding = FindingNotSent
 	case r.Error != nil:
 		finding = FindingNoResponse
 	case r.StatusCode >= 500:
 		finding = FindingServerError
+	case undocumented:
+		finding = FindingUndocumentedStatus
 	case r.OASValidation != nil && r.OASValidation.Response != nil && !r.OASValidation.Response.Valid && !r.OASValidation.Response.Skipped:
 		finding = FindingSchemaViolation
 	case mode == plan.FuzzNegative && r.StatusCode < 400:

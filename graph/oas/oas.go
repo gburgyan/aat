@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/pb33f/libopenapi"
@@ -340,4 +342,36 @@ func ResolveNodeSpec(node *graph.Node, graphOAS string) string {
 		return node.OAS.Spec
 	}
 	return graphOAS
+}
+
+// StatusDocumented reports whether the node's operation lists status among
+// its responses: the code itself, its class ("4XX"), or a default response.
+// The second result is false when that can't be told: the node has no
+// operation, the spec isn't loaded, or the operation lists no responses.
+func StatusDocumented(node *graph.Node, graphOAS string, cache *SpecCache, status int) (documented, known bool) {
+	if node == nil || node.OAS == nil || node.OAS.OperationID == "" || cache == nil {
+		return false, false
+	}
+	entry := cache.Get(ResolveNodeSpec(node, graphOAS))
+	if entry == nil || entry.Model == nil {
+		return false, false
+	}
+	_, _, _, op, err := FindOperation(entry.Model, node.OAS.OperationID)
+	if err != nil || op == nil || op.Responses == nil {
+		return false, false
+	}
+	if op.Responses.Default != nil {
+		return true, true
+	}
+	if op.Responses.Codes == nil || op.Responses.Codes.Len() == 0 {
+		return false, false
+	}
+	code := strconv.Itoa(status)
+	class := code[:1] + "XX"
+	for key := range op.Responses.Codes.KeysFromOldest() {
+		if key == code || strings.EqualFold(key, class) {
+			return true, true
+		}
+	}
+	return false, true
 }

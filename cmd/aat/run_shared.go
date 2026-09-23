@@ -103,6 +103,9 @@ type FuzzStepSummary struct {
 	Input    string `json:"input"`
 	Strategy string `json:"strategy"`
 	Value    any    `json:"value"`
+	// Patch is what the case changed in the request, when it did not set an
+	// input's value.
+	Patch []plan.RequestPatch `json:"patch,omitempty"`
 	// JudgedAs is set when the response was judged by another mode than the
 	// case's: negative when the request broke the OpenAPI spec.
 	JudgedAs       string   `json:"judged_as,omitempty"`
@@ -359,7 +362,7 @@ func toStepSummary(step engine.StepResult) StepSummary {
 	if f := step.Fuzz; f != nil {
 		c := f.Case
 		ss.Fuzz = &FuzzStepSummary{ID: c.ID, Target: c.Target, Mode: c.Mode, Input: c.Input, Strategy: c.Strategy,
-			Value: c.Value, SpecViolations: f.SpecViolations, Finding: f.Finding, Fails: f.Fails}
+			Value: c.Value, Patch: c.Patch, SpecViolations: f.SpecViolations, Finding: f.Finding, Fails: f.Fails}
 		if f.JudgedAs != c.Mode {
 			ss.Fuzz.JudgedAs = f.JudgedAs
 		}

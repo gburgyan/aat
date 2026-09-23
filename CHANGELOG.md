@@ -28,6 +28,14 @@ the graph and plan formats may still change before 1.0.
   stop the run. Case IDs such as `quantity.above-max` are stable, so `--fuzz-case` replays one, and the archive,
   `summary.json`, `--json`, and `aat run show` record each case and its finding. `run batch` takes the same flags. See
   [Fuzzing](https://gburgyan.github.io/aat/fuzzing/).
+- **Fuzzing leaves fields out and fuzzes what the template writes itself.** Each input the template sends in the
+  body, the query, or a header gets `missing` (and `null` in the body), judged as negative for a required input and
+  positive for an optional one. The template's own body values get `remove`, `null`, `wrong-type`, and `empty`, the
+  body gets an unknown property, and literal query parameters get `remove`, all as edge cases unless the OpenAPI spec
+  refuses them. They patch the request the template built, so the rest of it is what the plan sends. A new finding,
+  `undocumented-status`, marks a status the node's operation doesn't list. A case's copy of the setup now includes the
+  earlier steps that build on it, such as the `addItem` a checkout needs, and a copied step that fails reports its
+  case as `not-sent` without stopping the run. The shop example's `quantity` input now declares `min: 1`.
 - **`raw: true` sends a step value exactly as written**, with no expression evaluation or type coercion. See
   [Raw Values](https://gburgyan.github.io/aat/value-flow/#raw-values).
 - **`expectFailure` takes status classes.** `status: [4xx]` passes on any refusal and still fails on a 5xx or a

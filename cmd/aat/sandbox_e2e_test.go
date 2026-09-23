@@ -334,14 +334,14 @@ func TestShopExample(t *testing.T) {
 
 	t.Run("fuzz finds a planted bug", func(t *testing.T) {
 		t.Parallel()
-		// The planted bug: adding a negative quantity fails with a 500 instead
-		// of the sandbox's 400.
+		// The planted bug: adding a quantity of 0 fails with a 500 instead of
+		// the sandbox's 400.
 		p := newShopProjectWith(t, func(h http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/items") {
 					body, _ := io.ReadAll(r.Body)
 					r.Body = io.NopCloser(bytes.NewReader(body))
-					if bytes.Contains(body, []byte(`"quantity": -1`)) || bytes.Contains(body, []byte(`"quantity":-1`)) {
+					if bytes.Contains(body, []byte(`"quantity": 0`)) || bytes.Contains(body, []byte(`"quantity":0`)) {
 						http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
 						return
 					}
@@ -367,8 +367,7 @@ func TestShopExample(t *testing.T) {
 			}
 		}
 		require.Len(t, failing, 1)
-		assert.Equal(t, "quantity.negative", failing[0].ID)
-		assert.Equal(t, "negative", failing[0].JudgedAs, "the spec's minimum makes -1 invalid")
+		assert.Equal(t, "quantity.below-min", failing[0].ID, "the graph's min: 1 makes 0 a negative case")
 
 		// The happy path still passed, and the archive records the case.
 		assert.True(t, stepByNode(t, res.summary, "checkoutCart").Passed)
@@ -376,7 +375,7 @@ func TestShopExample(t *testing.T) {
 		require.NoError(t, err)
 		var recorded *archive.FuzzRecord
 		for _, s := range arc.Steps {
-			if s.Fuzz != nil && s.Fuzz.ID == "quantity.negative" {
+			if s.Fuzz != nil && s.Fuzz.ID == "quantity.below-min" {
 				recorded = s.Fuzz
 			}
 		}
@@ -386,7 +385,7 @@ func TestShopExample(t *testing.T) {
 
 		// Replaying the one case finds it again.
 		args.OutputDir = filepath.Join(t.TempDir(), "runs")
-		args.Fuzz = &engine.FuzzConfig{Targets: []string{"addItem"}, Cases: []string{"quantity.negative"}}
+		args.Fuzz = &engine.FuzzConfig{Targets: []string{"addItem"}, Cases: []string{"quantity.below-min"}}
 		res = runCommand(context.Background(), &args, io.Discard, TerminalInfo{})
 		assert.EqualError(t, res.err, "fuzzing found 1 server-error")
 		assert.Equal(t, 1, res.summary.Fuzz.Cases)

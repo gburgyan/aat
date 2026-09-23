@@ -3,10 +3,13 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -256,4 +259,184 @@ func TestFuzz_CapIsSeeded(t *testing.T) {
 	uncapped := buildQuantityEngine(t, server.URL).WithFuzz(&FuzzConfig{Targets: []string{"add"}}).
 		Run(context.Background(), quantityPlan())
 	assert.False(t, uncapped.FuzzCapped)
+}
+
+// buildChannelEngine sends {"channel": "web", "quantity": N} and its server
+// fails when channel is missing (the bug), refuses a quantity that isn't a
+// number, and accepts anything else.
+func buildChannelEngine(t *testing.T) *Engine {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"bad json"}`))
+			return
+		}
+		if _, ok := body["channel"]; !ok {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"nil channel"}`))
+			return
+		}
+		if _, ok := body["quantity"].(float64); !ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"quantity"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	g := &graph.Graph{Version: "1.0.0", Nodes: map[string]*graph.Node{
+		"addItem": {Name: "addItem", Adapter: "test.addItem", Inputs: []graph.Input{
+			{Name: "quantity", Type: "integer", Default: &graph.InputDefault{Value: 2}},
+		}},
+	}}
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.addItem", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "test.addItem", Protocol: "http",
+		Request: adapter.TemplateRequest{
+			Method: "POST", Path: "/items", Headers: map[string]string{"Content-Type": "application/json"},
+			Body: `{"channel": "web", "quantity": {{quantity}}}`,
+		},
+	})))
+	return NewEngine(g, registry, NewExecutorRouter(adapter.NewHTTPExecutor(server.URL), &adapter.EnvironmentConfig{}))
+}
+
+func TestFuzz_TemplateFieldsAndMissingInputs(t *testing.T) {
+	result := buildChannelEngine(t).WithFuzz(&FuzzConfig{Targets: []string{"add"}}).Run(context.Background(), quantityPlan())
+	assert.EqualError(t, result.Error, "fuzzing found 1 server-error")
+
+	byID := map[string]StepResult{}
+	for _, s := range result.Steps {
+		if s.Fuzz != nil {
+			byID[s.Fuzz.Case.ID] = s
+		}
+	}
+	remove := byID["body.channel.remove"]
+	require.NotNil(t, remove.Fuzz, "the template's own field is fuzzed")
+	assert.Equal(t, FindingServerError, remove.Fuzz.Finding)
+	assert.JSONEq(t, `{"quantity": 2}`, string(remove.Request.Body))
+
+	missing := byID["quantity.missing"]
+	require.NotNil(t, missing.Fuzz)
+	assert.Equal(t, plan.FuzzNegative, missing.Fuzz.Case.Mode, "quantity is required")
+	assert.Empty(t, missing.Fuzz.Finding, "refused with a 400")
+	assert.JSONEq(t, `{"channel": "web"}`, string(missing.Request.Body))
+
+	assert.JSONEq(t, `{"channel": "web", "quantity": null}`, string(byID["quantity.null"].Request.Body))
+	assert.JSONEq(t, `{"channel": 12345, "quantity": 2}`, string(byID["body.channel.wrong-type"].Request.Body))
+	assert.JSONEq(t, `{"aatFuzzExtra": "x", "channel": "web", "quantity": 2}`, string(byID["body.extra-property"].Request.Body))
+	assert.Empty(t, byID["body.extra-property"].Fuzz.Finding)
+}
+
+const undocumentedSpec = `openapi: "3.0.3"
+info: {title: fuzz, version: "1"}
+paths:
+  /items:
+    post:
+      operationId: addItem
+      requestBody:
+        content:
+          application/json:
+            schema: {type: object}
+      responses:
+        "200":
+          description: Added
+          content:
+            application/json:
+              schema: {type: object}
+`
+
+func TestFuzz_UndocumentedStatus(t *testing.T) {
+	specPath := filepath.Join(t.TempDir(), "spec.yaml")
+	require.NoError(t, os.WriteFile(specPath, []byte(undocumentedSpec), 0o644))
+	cache := oas.NewSpecCache()
+	require.NoError(t, cache.Load("spec.yaml", specPath))
+
+	eng := buildChannelEngine(t).WithOASSpecs(cache, "", false)
+	eng.graph.Nodes["addItem"].OAS = &graph.OASRef{OperationID: "addItem", Spec: "spec.yaml"}
+	result := eng.WithFuzz(&FuzzConfig{Targets: []string{"add"}, Cases: []string{"quantity.missing", "body.extra-property"}}).
+		Run(context.Background(), quantityPlan())
+
+	byID := map[string]*FuzzResult{}
+	for _, s := range result.Steps {
+		if s.Fuzz != nil {
+			byID[s.Fuzz.Case.ID] = s.Fuzz
+		}
+	}
+	require.NotNil(t, byID["quantity.missing"])
+	assert.Equal(t, FindingUndocumentedStatus, byID["quantity.missing"].Finding, "the spec lists no 400")
+	assert.False(t, byID["quantity.missing"].Fails, "a warning by default")
+	assert.Empty(t, byID["body.extra-property"].Finding, "200 is documented")
+	assert.Equal(t, OutcomePassed, result.Outcome, "error: %v", result.Error)
+}
+
+// TestFuzz_FailedSetupSkipsOnlyItsCase checks that when a case's copy of a
+// setup step fails, that case is not sent and the run carries on.
+func TestFuzz_FailedSetupSkipsOnlyItsCase(t *testing.T) {
+	var carts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/carts" {
+			// The second cart fails: the first case's setup.
+			if carts.Add(1) == 2 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"cartId":"c1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	min := 1.0
+	g := &graph.Graph{Version: "1.0.0", Nodes: map[string]*graph.Node{
+		"createCart": {Name: "createCart", Adapter: "test.createCart", Outputs: []graph.Output{{Name: "cartId", Type: "string"}}},
+		"addItem": {Name: "addItem", Adapter: "test.addItem", Inputs: []graph.Input{
+			{Name: "cartId", Type: "string", Default: &graph.InputDefault{From: "createCart.cartId"}},
+			{Name: "quantity", Type: "integer", Default: &graph.InputDefault{Value: 2}, Constraints: &graph.Constraint{Min: &min}},
+		}},
+	}}
+	registry := adapter.NewRegistry()
+	require.NoError(t, registry.Register("test.createCart", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "test.createCart", Protocol: "http",
+		Request:  adapter.TemplateRequest{Method: "POST", Path: "/carts"},
+		Response: adapter.TemplateResponse{Extract: map[string]adapter.ExtractRule{"cartId": {Path: "cartId"}}},
+	})))
+	require.NoError(t, registry.Register("test.addItem", adapter.NewTemplateAdapter(adapter.Template{
+		Adapter: "test.addItem", Protocol: "http",
+		Request: adapter.TemplateRequest{Method: "POST", Path: "/carts/{{cartId}}/items", Body: `{"quantity": {{quantity}}}`},
+	})))
+	eng := NewEngine(g, registry, NewExecutorRouter(adapter.NewHTTPExecutor(server.URL), &adapter.EnvironmentConfig{}))
+	p := &plan.Plan{Metadata: plan.Metadata{GraphVersion: "1.0.0"}, Execution: plan.Execution{Steps: []plan.Step{
+		{ID: "cart", Node: "createCart"},
+		{ID: "add", Node: "addItem"},
+	}}}
+
+	result := eng.WithFuzz(&FuzzConfig{Targets: []string{"add"}, Cases: []string{"quantity.at-min", "quantity.below-min"}}).
+		Run(context.Background(), p)
+	require.NoError(t, result.Error)
+	assert.Equal(t, OutcomePassed, result.Outcome, "a failed setup copy does not fail the run")
+
+	byID := map[string]*FuzzResult{}
+	for _, s := range result.Steps {
+		if s.Fuzz != nil {
+			byID[s.Fuzz.Case.ID] = s.Fuzz
+		}
+	}
+	assert.Equal(t, FindingNotSent, byID["quantity.at-min"].Finding, "its cart failed")
+	assert.Equal(t, FindingAcceptedInvalid, byID["quantity.below-min"].Finding, "the other case ran: this API accepts anything")
+}
+
+func TestFuzz_NotSentErrorIsNotSent(t *testing.T) {
+	eng := &Engine{fuzz: &FuzzConfig{}}
+	step := plan.Step{Fuzz: &plan.FuzzCase{ID: "x.y", Mode: plan.FuzzEdge}}
+	r := &StepResult{Request: &adapter.Request{}, Error: fmt.Errorf("executing: %w", &adapter.NotSentError{Err: errors.New("unknown field")})}
+	assert.Equal(t, FindingNotSent, eng.judgeFuzz(step, nil, r).Finding)
+	r = &StepResult{Request: &adapter.Request{}, Error: errors.New("connection refused")}
+	assert.Equal(t, FindingNoResponse, eng.judgeFuzz(step, nil, r).Finding)
 }

@@ -43,7 +43,7 @@ make clean         # Remove binaries and frontend artifacts (node_modules, dist)
 | `adapter/` | Adapter and Executor interfaces, HTTP and gRPC executors, Tier 1/3 loaders |
 | `domain/` | Domain knowledge: concepts, types, value pools |
 | `plan/` | Plan model, expression evaluator, validation, persistence |
-| `fuzz/` | Fuzz case generation from input types, constraints, and domain types and pools; `engine` expands and judges the cases |
+| `fuzz/` | Fuzz case generation from input types, constraints, domain types and pools, and the template's request fields; `engine` expands, patches, and judges the cases |
 | `intent/` | LLM-powered prompt → plan transformation |
 | `engine/` | Execution engine: scheduling, value resolution, retry, cleanup, verification |
 | `validate/` | Mechanical assertions (status, fields, predicates, schema) and JSONPath helpers |
@@ -71,7 +71,7 @@ Dependencies flow in one direction. No cycles. No lateral imports within a tier.
 
 **Foundation packages** (stdlib and third-party imports only; importable from any tier): `internal/httpstatus`, `internal/yamlx`, `internal/predicate`, `internal/version`, `internal/primer`, `internal/protoreg`, `internal/grpcstatus`, `internal/gjsonpath`
 **Leaf packages** (no aat imports other than foundation packages): `config`, `graph`, `domain`, `adapter`, `validate`, `internal/sandbox/shop`, `internal/sandbox/shopgrpc`
-**Mid-tier**: `graph/oas` → graph; `graph/proto` → graph; `llm` → config; `plan` → graph, config; `archive` → plan; `fuzz` → graph, domain, plan
+**Mid-tier**: `graph/oas` → graph; `graph/proto` → graph; `llm` → config; `plan` → graph, config; `archive` → plan; `fuzz` → graph, domain, plan, adapter
 **Orchestrators**: `engine` → graph, graph/oas, adapter, plan, domain, validate, archive, config, fuzz
 **Entry points**: `intent` → graph, domain, plan, llm; `mcp` → all packages; `server` → intent, archive, plan, config, adapter (for the protocol a step used)
 **Binaries**: `cmd/aat` → every package outside `internal/` (its tests also import `internal/sandbox/shop` and the root embed for the shop end-to-end test); `cmd/aat-sandbox` → internal/sandbox/shop, internal/sandbox/shopgrpc, root embed

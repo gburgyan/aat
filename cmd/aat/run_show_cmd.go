@@ -17,7 +17,7 @@ import (
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/engine"
-	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 	"github.com/spf13/cobra"
 	"github.com/tidwall/gjson"
@@ -501,7 +501,8 @@ func showRun(out io.Writer, a *archive.Archive, src shownRun, format showFormat)
 			if f.Fails {
 				mark = "FAIL"
 			}
-			fmt.Fprintf(&b, "  %s %-16s %s  %s=%s\n", mark, f.Finding, f.ID, f.Input, graph.FormatDefaultValue(f.Value, 40))
+			c := plan.FuzzCase{Input: f.Input, Value: f.Value, Patch: f.Patch}
+			fmt.Fprintf(&b, "  %s %-16s %s  %s\n", mark, f.Finding, f.ID, c.Describe())
 		}
 	}
 	if list.Error != "" {

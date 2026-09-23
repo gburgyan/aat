@@ -50,12 +50,49 @@ func TestExpandFuzzCases_Isolated(t *testing.T) {
 	p := fuzzPlan()
 	require.NoError(t, ExpandFuzzCases(p, "add", []FuzzCase{{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0}}, true))
 
-	assert.Equal(t, []string{"cart", "add", "cart__fuzz-quantity-zero", "add--fuzz-quantity-zero", "checkout"}, stepIDs(p))
+	assert.Equal(t, []string{"cart", "add", "cart__add--fuzz-quantity-zero", "add--fuzz-quantity-zero", "checkout"}, stepIDs(p))
 	child := p.Execution.Steps[3]
-	assert.Equal(t, []string{"cart__fuzz-quantity-zero"}, child.DependsOn)
-	assert.Equal(t, "cart__fuzz-quantity-zero.cartId", child.Values["cartId"].From, "the case reads its own cart")
+	assert.Equal(t, []string{"cart__add--fuzz-quantity-zero"}, child.DependsOn)
+	assert.Equal(t, "cart__add--fuzz-quantity-zero.cartId", child.Values["cartId"].From, "the case reads its own cart")
 }
 
 func TestExpandFuzzCases_UnknownTarget(t *testing.T) {
 	assert.ErrorContains(t, ExpandFuzzCases(fuzzPlan(), "pay", nil, false), `fuzz target "pay"`)
+}
+
+func TestExpandFuzzCases_TwoTargetsSameCase(t *testing.T) {
+	p := fuzzPlan()
+	c := []FuzzCase{{ID: "body.extra-property", Mode: FuzzEdge, Patch: []RequestPatch{{Where: "body", Path: "x", Op: "set", Value: "x"}}}}
+	require.NoError(t, ExpandFuzzCases(p, "add", c, true))
+	require.NoError(t, ExpandFuzzCases(p, "checkout", c, true))
+	seen := map[string]bool{}
+	for _, id := range stepIDs(p) {
+		assert.False(t, seen[id], "duplicate step %s", id)
+		seen[id] = true
+	}
+	assert.Contains(t, stepIDs(p), "cart__checkout--fuzz-body-extra-property")
+}
+
+// TestExpandFuzzCases_SetupIncludesStepsThatBuildOnIt checks that a case's
+// copy of the setup includes an earlier step the target reads nothing from
+// but that changes what it works on: adding the item the checkout needs.
+func TestExpandFuzzCases_SetupIncludesStepsThatBuildOnIt(t *testing.T) {
+	p := &Plan{Execution: Execution{Steps: []Step{
+		{ID: "products", Node: "listProducts"},
+		{ID: "cart", Node: "createCart"},
+		{ID: "item", Node: "addItem", DependsOn: []string{"cart", "products"}},
+		{ID: "unrelated", Node: "listOrders"},
+		{ID: "order", Node: "checkout", DependsOn: []string{"cart"}},
+	}}}
+	require.NoError(t, ExpandFuzzCases(p, "order", []FuzzCase{{ID: "tier.empty", Input: "tier", Value: ""}}, true))
+
+	assert.Equal(t, []string{
+		"products", "cart", "item", "unrelated", "order",
+		"products__order--fuzz-tier-empty", "cart__order--fuzz-tier-empty", "item__order--fuzz-tier-empty",
+		"order--fuzz-tier-empty",
+	}, stepIDs(p), "the item's prerequisites come too, in plan order; the unrelated step does not")
+	item := p.Execution.Steps[7]
+	assert.Equal(t, []string{"cart__order--fuzz-tier-empty", "products__order--fuzz-tier-empty"}, item.DependsOn)
+	assert.Equal(t, "order--fuzz-tier-empty", item.FuzzSetup)
+	assert.Empty(t, p.Execution.Steps[8].FuzzSetup, "the case's own step is not setup")
 }

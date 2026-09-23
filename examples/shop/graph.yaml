@@ -155,6 +155,8 @@ nodes:
           Units to add, required and at least 1 (400 VALIDATION_ERROR otherwise); the cart's total for
           this SKU may not exceed its stock
         default: 1
+        constraints:
+          min: 1
     outputs:
       - name: cartId
         type: string

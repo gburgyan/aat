@@ -874,8 +874,10 @@ place of `expectFailure`, which says the API *should* refuse the call.
 `aat run plan <plan> --fuzz <step-or-node>` runs the plan, then sends the step
 values its inputs allow (`positive`), forbid (`negative`), and say nothing
 about (`edge`), each as a sibling step on its own copy of the steps before it.
-Cases come from input types, `constraints`, and the domain file's types and
-pools; nothing about fuzzing goes in the graph. Inputs wired from earlier steps
+Cases come from input types, `constraints`, the domain file's types and
+pools, and the template (each input left out or null; the template's own
+body fields removed, nulled, or retyped); nothing about fuzzing goes in the
+graph. Inputs wired from earlier steps
 are left alone unless named with `--fuzz-input`. When the node has an OpenAPI
 operation, a request the spec refuses is judged as negative.
 

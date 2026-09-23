@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/gburgyan/aat/engine"
-	"github.com/gburgyan/aat/graph"
 )
 
 // fuzzNote marks a fuzz step's progress line with its mode and finding: red
@@ -65,8 +64,7 @@ func writeFuzzSummary(w io.Writer, lead string, steps []engine.StepResult, color
 			if s.Response != nil {
 				got = engine.ActualStatusText(s.Response, s.StatusCode)
 			}
-			_, _ = fmt.Fprintf(w, "%s  %s %s  %s=%s -> %s\n", lead, label, f.Case.ID, f.Case.Input,
-				graph.FormatDefaultValue(f.Case.Value, 40), got)
+			_, _ = fmt.Fprintf(w, "%s  %s %s  %s -> %s\n", lead, label, f.Case.ID, f.Case.Describe(), got)
 		}
 	}
 }
