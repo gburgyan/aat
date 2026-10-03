@@ -87,6 +87,16 @@ And because there is one description rather than a copy per person, improvement 
 
 The same property that makes the files fit an agent's context window makes them fit a reviewer's head: one operation per file, one plan per scenario, no hidden scripting between them. What is good for an assistant here is good for a person for the same reason — the API is broken into pieces small enough to hold one at a time, so you do not have to understand the whole thing to find the one thing you are looking for. None of it requires an LLM to be useful. When you want detail rather than summary, the [web UI](web-ui.md) turns a run into a timeline of every step, with the resolved value behind every input, every retry and assertion, and Copy-as-cURL on any step.
 
+## The demo an API never had
+
+When an agent writes the code, the question a person needs answered shifts from *how is this written?* to *what does it do?* For a web app that is easy: open a browser and click through it. An API has nothing to click. Its behaviour is a sequence of requests and responses that the code produces and nobody sees, so checking an agent's work on one has meant reading the code after all.
+
+AAT gives that behaviour a place to be seen. A [plan](plans.md) is a short list of named steps — create a cart, add an item, check out, pay, refund — that says what should happen in words both sides use. The agent writes it, runs it, and reads the result; the person reads the same plan and the same result. Neither translates for the other. It is a language for tests, not a transcript of one.
+
+The run is the demo. The [web UI](web-ui.md) puts each step on a timeline, and a step opens to the request that was sent, the response that came back, how every input got its value, and which assertion held or failed. When an agent says the refund flow works, the claim comes with the run that shows it, and checking it takes a minute in a viewer. When it doesn't work, the [archive](archives.md) is where the two of you meet: the person points at a step, and the agent reads the same step through the [MCP server's](mcp-server.md) archive tools or [`aat run show`](archives.md#inspecting-a-run-from-the-cli).
+
+None of this was built for supervision. It is the loop that keeps the agent honest — strict files, `aat validate --strict`, a run that names the failing step — seen from the other side. The evidence an agent needs to correct itself is the evidence a person needs to follow along, so it is there whether anyone looks or not. You do not have to read every line an agent wrote to know what it did to your API. You watch it run.
+
 ## The proof is that it runs
 
 Four complete projects against real, public APIs, each built openly: three run against an API's live test mode, and the fourth against the database itself, in a local container. Every claim in their READMEs is something a run recorded — and each project runs itself in CI and keeps the recording, so the claims are not only reproducible, they are downloadable.

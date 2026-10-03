@@ -11,7 +11,7 @@ One description of your API does four jobs:
 - **Know when an API you depend on changes** — [run the plans on a schedule](ci-cd.md#scheduled-runs-against-a-provider) against a vendor's sandbox, and a red run leaves the exact exchange to send them.
 - **Get an integration working, then hand it to an agent** — an agent iterates against the sandbox until the calls work, and the [MCP server](mcp-server.md) hands a coding assistant the same graph.
 
-Every job runs through the same guardrails — strict files, a validator that names the wrong line, a run that names the failing step — which is what AAT puts at the interface between agents and APIs.
+Every job runs through the same guardrails — strict files, a validator that names the wrong line, a run that names the failing step — which is what AAT puts at the interface between agents and APIs. The same plans and runs are how a person sees what an agent did to the API without reading its code: [the demo an API never had](why.md#the-demo-an-api-never-had).
 
 ```bash
 aat-sandbox init shop && cd shop     # after installing: see Install

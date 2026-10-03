@@ -67,6 +67,7 @@ Nobody wired the data by hand: the graph says where each input comes from, and t
 - **Run one plan across every configuration.** Regions, card brands, parcel sizes: layers multiply plans into a matrix, and permutations that would send the same requests are skipped: [Matrix testing](https://gburgyan.github.io/aat/batch-layers/).
 - **Give integrators a kit their AI tools can code against.** The graph your tests keep true, served over MCP; a working client has taken a single prompt: [Share your API with integrators](https://gburgyan.github.io/aat/integration-kit/).
 - **Send a run instead of a screenshot.** One file with every request, response, resolved value, retry, and assertion, opened in the same viewer by whoever you send it to: [Archives](https://gburgyan.github.io/aat/archives/).
+- **See what an agent did to your API.** A plan reads as a list of named steps, and a run shows every request and response on a timeline: the demo an API never had, for whoever is checking an agent's work without reading its code: [Why AAT](https://gburgyan.github.io/aat/why/#the-demo-an-api-never-had).
 
 ## Why
 
