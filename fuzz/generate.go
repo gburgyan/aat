@@ -49,43 +49,33 @@ type Options struct {
 	Skip []string
 	// Only limits the cases to those with these IDs.
 	Only []string
-	// Max caps the number of cases, after Skip and Only; 0 means all of them.
-	// When it caps, Seed picks which run.
+	// Max caps the number of cases, after the rest of the options; 0 means
+	// all of them. When it caps, Seed picks which run.
 	Max  int
 	Seed uint64
 	// Now dates the date cases; zero means time.Now.
 	Now time.Time
 }
 
-// AllModes lists the case modes in the order cases are generated.
-var AllModes = []string{plan.FuzzPositive, plan.FuzzNegative, plan.FuzzEdge}
-
 // Generate returns the cases for a step, positive first, input by input in
 // the order the node declares its inputs.
 func Generate(t Target, opts Options) ([]plan.FuzzCase, error) {
-	cases, _, err := GenerateCapped(t, opts)
-	return cases, err
-}
-
-// GenerateCapped is Generate, and also reports whether Options.Max dropped
-// cases, which makes the run's seed worth reporting.
-func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 	modes := map[string]bool{}
 	for _, m := range opts.Modes {
-		if !contains(AllModes, m) {
-			return nil, false, fmt.Errorf("unknown fuzz mode %q: use %s", m, strings.Join(AllModes, ", "))
+		if !slices.Contains(plan.FuzzModes, m) {
+			return nil, fmt.Errorf("unknown fuzz mode %q: use %s", m, strings.Join(plan.FuzzModes, ", "))
 		}
 		modes[m] = true
 	}
 	if len(modes) == 0 {
-		for _, m := range AllModes {
+		for _, m := range plan.FuzzModes {
 			modes[m] = true
 		}
 	}
 	named := map[string]bool{}
 	for _, in := range opts.Inputs {
-		if !hasInput(t.Node, in) {
-			return nil, false, fmt.Errorf("node %s has no input %q to fuzz", t.Node.Name, in)
+		if !slices.ContainsFunc(t.Node.Inputs, func(ni graph.Input) bool { return ni.Name == in }) {
+			return nil, fmt.Errorf("node %s has no input %q to fuzz", t.Node.Name, in)
 		}
 		named[in] = true
 	}
@@ -124,22 +114,41 @@ func GenerateCapped(t Target, opts Options) ([]plan.FuzzCase, bool, error) {
 	if len(named) == 0 {
 		keep(templateCases(fields, !grpc))
 	}
-	sort.SliceStable(cases, func(i, j int) bool { return modeRank(cases[i].Mode) < modeRank(cases[j].Mode) })
-	cases = slices.DeleteFunc(cases, func(c plan.FuzzCase) bool {
-		return c.Input != "" && slices.Contains(opts.Skip, c.Input) || len(opts.Only) > 0 && !slices.Contains(opts.Only, c.ID)
+	sort.SliceStable(cases, func(i, j int) bool {
+		return slices.Index(plan.FuzzModes, cases[i].Mode) < slices.Index(plan.FuzzModes, cases[j].Mode)
 	})
+	cases, _ = Cap(Select(cases, opts), opts.Max, opts.Seed)
+	return cases, nil
+}
 
-	if opts.Max > 0 && len(cases) > opts.Max {
-		r := rand.New(rand.NewPCG(opts.Seed, 0x66757a7a)) // "fuzz"
-		picked := r.Perm(len(cases))[:opts.Max]
-		sort.Ints(picked)
-		capped := make([]plan.FuzzCase, len(picked))
-		for i, p := range picked {
-			capped[i] = cases[p]
-		}
-		return capped, true, nil
+// Select returns the cases opts asks for: those of its Modes, of its Inputs
+// (a case of no input, such as one for a field the template writes, only
+// when it names none), and with an ID in Only, leaving out those of its Skip
+// inputs. Generate applies it to the cases it makes; a caller applies it to
+// cases made elsewhere, such as the ones a plan pins.
+func Select(cases []plan.FuzzCase, opts Options) []plan.FuzzCase {
+	return slices.DeleteFunc(slices.Clone(cases), func(c plan.FuzzCase) bool {
+		return len(opts.Modes) > 0 && !slices.Contains(opts.Modes, c.Mode) ||
+			len(opts.Inputs) > 0 && !slices.Contains(opts.Inputs, c.Input) ||
+			c.Input != "" && slices.Contains(opts.Skip, c.Input) ||
+			len(opts.Only) > 0 && !slices.Contains(opts.Only, c.ID)
+	})
+}
+
+// Cap returns at most max of cases, in their order, and whether it dropped
+// any; seed picks which stay. A max of 0 keeps them all.
+func Cap(cases []plan.FuzzCase, max int, seed uint64) ([]plan.FuzzCase, bool) {
+	if max <= 0 || len(cases) <= max {
+		return cases, false
 	}
-	return cases, false, nil
+	r := rand.New(rand.NewPCG(seed, 0x66757a7a)) // "fuzz"
+	picked := r.Perm(len(cases))[:max]
+	sort.Ints(picked)
+	capped := make([]plan.FuzzCase, len(picked))
+	for i, p := range picked {
+		capped[i] = cases[p]
+	}
+	return capped, true
 }
 
 // unencodable lists the strategies whose values a protobuf message can't
@@ -326,7 +335,7 @@ func enumCases(b *builder, values []string) {
 	}
 	b.add(plan.FuzzNegative, "not-in-enum", "aat-fuzz-not-a-member")
 	if len(values) > 0 {
-		if flipped := flipCase(values[0]); flipped != values[0] && !contains(values, flipped) {
+		if flipped := flipCase(values[0]); flipped != values[0] && !slices.Contains(values, flipped) {
 			b.add(plan.FuzzNegative, "enum-wrong-case", flipped)
 		}
 	}
@@ -485,31 +494,4 @@ func flipCase(s string) string {
 		return u
 	}
 	return strings.ToLower(s)
-}
-
-func modeRank(m string) int {
-	for i, x := range AllModes {
-		if x == m {
-			return i
-		}
-	}
-	return len(AllModes)
-}
-
-func hasInput(n *graph.Node, name string) bool {
-	for _, in := range n.Inputs {
-		if in.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/gburgyan/aat/engine"
-	"github.com/gburgyan/aat/fuzz"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -83,8 +82,8 @@ func fuzzConfigFromFlags(cmd *cobra.Command) (*engine.FuzzConfig, error) {
 	cfg := &engine.FuzzConfig{Targets: targets}
 	cfg.Modes, _ = flags.GetStringSlice("fuzz-mode")
 	for _, m := range cfg.Modes {
-		if !slices.Contains(fuzz.AllModes, m) {
-			return nil, fmt.Errorf("--fuzz-mode %s: use %s", m, strings.Join(fuzz.AllModes, ", "))
+		if !slices.Contains(plan.FuzzModes, m) {
+			return nil, fmt.Errorf("--fuzz-mode %s: use %s", m, strings.Join(plan.FuzzModes, ", "))
 		}
 	}
 	cfg.Inputs, _ = flags.GetStringSlice("fuzz-input")

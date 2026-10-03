@@ -248,3 +248,29 @@ func TestNewHTTPExecutorWithClient(t *testing.T) {
 	assert.Equal(t, "https://api.example.com", exec.BaseURL)
 	assert.Same(t, client, exec.Client)
 }
+
+// TestHTTPExecutor_RefusesWhatHTTPCannotSend checks that a request net/http
+// would refuse is a NotSentError, returned before anything is sent.
+func TestHTTPExecutor_RefusesWhatHTTPCannotSend(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	}))
+	defer srv.Close()
+	exec := NewHTTPExecutor(srv.URL)
+
+	for name, req := range map[string]*Request{
+		"control character in a value": {Method: "GET", Path: "/x", Headers: map[string]string{"X-Hint": "a\x00b"}},
+		"space in a name":              {Method: "GET", Path: "/x", Headers: map[string]string{"X Hint": "a"}},
+		"unparsable path":              {Method: "GET", Path: "/x%zz"},
+	} {
+		_, err := exec.Execute(context.Background(), req)
+		var notSent *NotSentError
+		assert.ErrorAs(t, err, &notSent, name)
+	}
+	assert.False(t, called)
+
+	resp, err := exec.Execute(context.Background(), &Request{Method: "GET", Path: "/x", Headers: map[string]string{"X-Hint": "tab\tand ünïcödé"}})
+	require.NoError(t, err, "a tab and bytes above ASCII are allowed")
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}

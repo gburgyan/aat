@@ -139,6 +139,9 @@ type StepResult struct {
 	// FuzzSetup, on a copy of a setup step made for a fuzz case, is the ID
 	// of the case's step.
 	FuzzSetup string
+	// FuzzSetupFailed, on such a copy, is true when it failed, so its case
+	// was not sent.
+	FuzzSetupFailed bool
 	// KnownIssue is set when the step carried a knownIssue entry, whether or
 	// not it ended up applying. Applied says it kept this step's failure out
 	// of the run's outcome; Expired says the entry had lapsed.

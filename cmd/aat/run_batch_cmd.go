@@ -90,7 +90,10 @@ A batch that finds no plans exits 2.`,
 			return batchSetupFailure(jsonFlag, err)
 		}
 		if fuzzCfg != nil {
-			fuzzCfg.AllowNoTarget = true // a plan without the target runs as written
+			// A plan without the target runs as written; a name no plan has is
+			// an error once the batch has run.
+			fuzzCfg.AllowNoTarget = true
+			fuzzCfg.Matched = &engine.FuzzMatches{}
 		}
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
@@ -165,7 +168,7 @@ type batchArgs struct {
 // BatchSummary is the machine-readable JSON output for batch CI/CD pipelines.
 type BatchSummary struct {
 	Outcome     string           `json:"outcome"`
-	Error       string           `json:"error,omitempty"` // why the batch stopped before running its plans
+	Error       string           `json:"error,omitempty"` // why the batch stopped before running its plans, or what its --fuzz flags matched in none
 	BatchID     string           `json:"batch_id,omitempty"`
 	Runs        []BatchRunResult `json:"runs"`
 	Summary     BatchStats       `json:"summary"`
@@ -292,6 +295,9 @@ func executeBatch(ba *batchArgs) int {
 		if res.batchDir != "" {
 			_, _ = fmt.Fprintf(os.Stdout, "Archive: %s\n", res.batchDir)
 		}
+		if res.err != nil {
+			fmt.Fprintf(os.Stderr, "aat: %s\n", res.err)
+		}
 		return batchExitCode(res)
 	}
 
@@ -304,7 +310,7 @@ func executeBatch(ba *batchArgs) int {
 // batchExitCode maps a batchResult to a process exit code.
 // 0 = all pass, 1 = any fail, 2 = any error or setup error.
 func batchExitCode(res *batchResult) int {
-	if res.setupErr {
+	if res.setupErr || res.err != nil {
 		return exitCodeInfra
 	}
 	if res.summary == nil {
@@ -525,10 +531,17 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		}
 	}
 
+	// A --fuzz, --fuzz-input, or --fuzz-case name that no plan matched did
+	// nothing, which a run of every plan as written must not pass for.
+	var fuzzErr error
+	if !args.NoFuzz {
+		fuzzErr = args.Fuzz.Unmatched()
+	}
+
 	aggregateOutcome := "passed"
 	if stats.AbortedPlans > 0 {
 		aggregateOutcome = "aborted"
-	} else if stats.ErrorPlans > 0 {
+	} else if stats.ErrorPlans > 0 || fuzzErr != nil {
 		aggregateOutcome = "error"
 	} else if stats.FailedPlans > 0 {
 		aggregateOutcome = "failed"
@@ -582,6 +595,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 
 	summary := &BatchSummary{
 		Outcome:     aggregateOutcome,
+		Error:       errString(fuzzErr),
 		BatchID:     batchID,
 		Runs:        runs,
 		Summary:     stats,
@@ -591,6 +605,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	return &batchResult{
 		summary:  summary,
 		batchDir: batchDir,
+		err:      fuzzErr,
 	}
 }
 

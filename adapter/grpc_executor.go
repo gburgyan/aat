@@ -104,19 +104,23 @@ func (e *GRPCExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 		return nil, &NotSentError{Err: fmt.Errorf("building the request for %s: %w", req.Path, err)}
 	}
 
+	var pairs []string
+	for k, v := range req.Headers {
+		// Metadata keys are lowercase on the wire; grpc-go rejects
+		// anything else rather than folding it.
+		key := strings.ToLower(k)
+		if err := metadataError(key, v); err != nil {
+			return nil, &NotSentError{Err: fmt.Errorf("building the request for %s: %w", req.Path, err)}
+		}
+		pairs = append(pairs, key, outgoingMetadataValue(key, v))
+	}
+
 	conn, err := e.pool.Get(e.target, e.secure, e.tls)
 	if err != nil {
 		return nil, err
 	}
 
-	if len(req.Headers) > 0 {
-		pairs := make([]string, 0, len(req.Headers)*2)
-		for k, v := range req.Headers {
-			// Metadata keys are lowercase on the wire; grpc-go rejects
-			// anything else rather than folding it.
-			key := strings.ToLower(k)
-			pairs = append(pairs, key, outgoingMetadataValue(key, v))
-		}
+	if len(pairs) > 0 {
 		ctx = metadata.AppendToOutgoingContext(ctx, pairs...)
 	}
 
@@ -307,6 +311,29 @@ func outgoingMetadataValue(key, value string) string {
 		}
 	}
 	return value
+}
+
+// metadataError says why grpc-go would refuse to send a metadata pair, or
+// returns nil when it would send it. grpc-go checks every pair before it
+// sends anything and fails the call with INTERNAL, which would read as the
+// server's answer: a key must be made of lowercase letters, digits, "-", "_",
+// and ".", and a value of a key without the -bin suffix of printable ASCII.
+func metadataError(key, value string) error {
+	if key == "" {
+		return fmt.Errorf("a metadata key is empty")
+	}
+	if strings.Trim(key, "abcdefghijklmnopqrstuvwxyz0123456789-_.") != "" {
+		return fmt.Errorf("metadata key %q has a character gRPC does not allow (use 0-9, a-z, -, _, and .)", key)
+	}
+	if strings.HasSuffix(key, binarySuffix) {
+		return nil
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 0x20 || value[i] > 0x7e {
+			return fmt.Errorf("metadata %s: gRPC allows only printable ASCII in a value whose key does not end in %s", key, binarySuffix)
+		}
+	}
+	return nil
 }
 
 // incomingMetadataValue is the form a value is recorded in. A binary value is

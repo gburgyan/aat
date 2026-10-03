@@ -110,12 +110,13 @@ const (
 	FindingAcceptedInvalid    = "accepted-invalid"
 	FindingRejectedValid      = "rejected-valid"
 	FindingUndocumentedStatus = "undocumented-status"
+	FindingThrottled          = "throttled"
 	FindingNotSent            = "not-sent"
 )
 
 // FuzzFindings lists the findings, most serious first.
 var FuzzFindings = []string{FindingServerError, FindingNoResponse, FindingSchemaViolation, FindingAcceptedInvalid,
-	FindingRejectedValid, FindingUndocumentedStatus, FindingNotSent}
+	FindingRejectedValid, FindingUndocumentedStatus, FindingThrottled, FindingNotSent}
 
 // FuzzModes lists the case modes.
 var FuzzModes = []string{FuzzPositive, FuzzNegative, FuzzEdge}
@@ -173,6 +174,19 @@ func (p PinnedFuzzCase) Case() FuzzCase {
 // Pin returns a case as a plan writes it.
 func (c FuzzCase) Pin() PinnedFuzzCase {
 	return PinnedFuzzCase{ID: c.ID, Mode: c.Mode, Input: c.Input, Value: c.Value, Patch: c.Patch}
+}
+
+// Unfuzzable says why a step can't be a fuzz target, or returns "" when it
+// can: one that sends a raw body sends it whatever a case changes, and one
+// that expects to fail is set up to be refused, whatever a case sends.
+func (s Step) Unfuzzable() string {
+	switch {
+	case s.RawBody != "":
+		return "sends a raw body, which replaces whatever a fuzz case changes"
+	case s.ExpectFailure != nil:
+		return "expects to fail, so the API refuses its fuzz cases whatever they send"
+	}
+	return ""
 }
 
 // StripFuzz removes every step's fuzz: block, for --no-fuzz.
@@ -266,7 +280,7 @@ type FuzzExpandOptions struct {
 // in an instantiated plan. A sibling is the target with the case's value set
 // raw on its input, or its patch; it has no assertions, retries, repeat,
 // expectFailure, or known issue, since the engine judges it by the fuzz checks
-// alone.
+// alone. (The engine gives it back a retry for a rate limit.)
 //
 // Outside the shared scope, each case also gets its own copy of the steps the
 // target depends on, and of the earlier steps that build on them, so a case

@@ -1,6 +1,7 @@
 package fuzz
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -86,7 +87,7 @@ func TestGenerate_FromTypesAndConstraints(t *testing.T) {
 	}
 
 	// Positive cases come first, then negative, then edge.
-	rank := func(m string) int { return modeRank(m) }
+	rank := func(m string) int { return slices.Index(plan.FuzzModes, m) }
 	for i := 1; i < len(cases); i++ {
 		assert.LessOrEqual(t, rank(cases[i-1].Mode), rank(cases[i].Mode))
 	}
@@ -207,15 +208,17 @@ func TestGenerate_OptionalInputMissingIsPositive(t *testing.T) {
 func TestGenerate_CapAfterSkipAndOnly(t *testing.T) {
 	now := time.Date(2026, 9, 22, 0, 0, 0, 0, time.UTC)
 	for seed := uint64(1); seed <= 20; seed++ {
-		cases, capped, err := GenerateCapped(addItemTarget(), Options{Skip: []string{"note"}, Max: 10, Seed: seed, Now: now})
+		all, err := Generate(addItemTarget(), Options{Skip: []string{"note"}, Now: now})
 		require.NoError(t, err)
-		assert.True(t, capped)
+		cases, err := Generate(addItemTarget(), Options{Skip: []string{"note"}, Max: 10, Seed: seed, Now: now})
+		require.NoError(t, err)
+		assert.Greater(t, len(all), 10)
 		assert.Len(t, cases, 10)
 		for _, c := range cases {
 			assert.NotEqual(t, "note", c.Input, c.ID)
 		}
 
-		cases, _, err = GenerateCapped(addItemTarget(), Options{Only: []string{"quantity.below-min", "quantity.above-max"}, Max: 5, Seed: seed, Now: now})
+		cases, err = Generate(addItemTarget(), Options{Only: []string{"quantity.below-min", "quantity.above-max"}, Max: 5, Seed: seed, Now: now})
 		require.NoError(t, err)
 		assert.Len(t, cases, 2, "both named cases, whatever the seed")
 	}

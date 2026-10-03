@@ -64,6 +64,31 @@ func (e *Engine) stepFailed(step plan.Step, r *StepResult) bool {
 	return false
 }
 
+// coverSetupFailure reports whether a fuzz setup copy failed only as a
+// knownIssue lets its original fail and the happy path carry on: a failed
+// assertion or a strict OpenAPI violation on a response that otherwise did
+// what was asked. The copy is then used as the original is, and its result
+// carries the entry. Nothing is logged for the run: the copy's original
+// already answers for the defect.
+func (e *Engine) coverSetupFailure(p *plan.Plan, step plan.Step, r *StepResult) bool {
+	if r.Error != nil || r.ResponseBodyError != nil {
+		return false
+	}
+	if step.ExpectFailure != nil {
+		if r.ExpectFailure == nil || !r.ExpectFailure.Passed {
+			return false
+		}
+	} else if r.StatusCode >= 400 {
+		return false
+	}
+	ki, active := e.knownIssueFor(p, step)
+	if ki == nil || !active {
+		return false
+	}
+	r.KnownIssue = &KnownIssueResult{Until: ki.Until, Reason: ki.Reason, URL: ki.URL, Applied: true}
+	return true
+}
+
 // withExpiry names the lapsed entry on the error of a failure it would have
 // covered, so a build that has just turned red says why it stopped being
 // forgiven rather than looking like a new problem.

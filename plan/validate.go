@@ -815,6 +815,9 @@ func Validate(p *Plan, g *graph.Graph) error {
 		if node, ok := g.Nodes[step.Node]; ok {
 			errs = append(errs, validateFuzzSettings(fmt.Sprintf("step %d (%s)", i, sid), step.FuzzSettings, node)...)
 		}
+		if why := step.Unfuzzable(); why != "" && step.FuzzSettings != nil {
+			errs = append(errs, fmt.Sprintf("step %d (%s): fuzz: the step %s", i, sid, why))
+		}
 	}
 
 	errs = append(errs, validateKnownIssue("knownIssue", p.KnownIssue)...)

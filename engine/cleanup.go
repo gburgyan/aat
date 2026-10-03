@@ -111,7 +111,7 @@ func (e *Engine) runCleanupChain(ctx context.Context, entry CleanupEntry, cleanu
 	node := e.graph.Nodes[entry.NodeName]
 	var inputs map[string]any
 	if node != nil {
-		inputs = resolveCleanupInputs(node, entry, ancestors, state)
+		inputs = resolveCleanupInputs(node, entry, ancestors, state, e.outputSources(state, entry.ForStep))
 	}
 	skip, whenErr := e.cleanupSkip(entry, cleanupFor, inputs, ancestors, state, run)
 	if skip != nil {

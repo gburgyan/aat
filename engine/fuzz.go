@@ -3,8 +3,11 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
@@ -12,6 +15,7 @@ import (
 	"github.com/gburgyan/aat/fuzz"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/graph/oas"
+	"github.com/gburgyan/aat/internal/grpcstatus"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -33,6 +37,10 @@ const (
 	// FindingUndocumentedStatus is a status the node's OpenAPI operation does
 	// not list among its responses.
 	FindingUndocumentedStatus = plan.FindingUndocumentedStatus
+	// FindingThrottled is a 429, or a gRPC RESOURCE_EXHAUSTED, after the
+	// retries the target's retry block allows: the API turned the request away
+	// before judging the value, so the case says nothing about it.
+	FindingThrottled = plan.FindingThrottled
 	// FindingNotSent is a case that could not be sent: its copy of a setup
 	// step failed, or aat could not build the request. It says nothing about
 	// the API.
@@ -69,6 +77,76 @@ type FuzzConfig struct {
 	Cases []string
 	// Fail lists the findings that fail the run; nil means DefaultFuzzFail.
 	Fail []string
+	// Matched, when set, collects what Targets, Inputs, and Cases matched in
+	// every run given this configuration, so a batch can check them across
+	// its plans with Unmatched.
+	Matched *FuzzMatches
+}
+
+// FuzzMatches is what a FuzzConfig's names matched: the targets, inputs, and
+// case IDs that named something in a run. It is safe to share between runs
+// that run at once.
+type FuzzMatches struct {
+	mu                     sync.Mutex
+	targets, inputs, cases map[string]bool
+}
+
+func newFuzzMatches() *FuzzMatches {
+	return &FuzzMatches{targets: map[string]bool{}, inputs: map[string]bool{}, cases: map[string]bool{}}
+}
+
+// add records what a run matched.
+func (m *FuzzMatches) add(run *FuzzMatches) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.targets == nil {
+		m.targets, m.inputs, m.cases = map[string]bool{}, map[string]bool{}, map[string]bool{}
+	}
+	for _, pair := range []struct{ to, from map[string]bool }{{m.targets, run.targets}, {m.inputs, run.inputs}, {m.cases, run.cases}} {
+		for name := range pair.from {
+			pair.to[name] = true
+		}
+	}
+}
+
+// Unmatched returns an error naming each of the configuration's targets,
+// inputs, and cases that no run given it matched, or nil when every one
+// matched in some run. Without Matched it returns nil.
+func (c *FuzzConfig) Unmatched() error {
+	if c == nil || c.Matched == nil {
+		return nil
+	}
+	c.Matched.mu.Lock()
+	defer c.Matched.mu.Unlock()
+	if c.Matched.targets == nil {
+		return c.unmatched(newFuzzMatches())
+	}
+	return c.unmatched(c.Matched)
+}
+
+// unmatched says which of the configuration's names matched nothing in m.
+// The cases are only checked once every target matched, since a target that
+// matched nothing has none.
+func (c *FuzzConfig) unmatched(m *FuzzMatches) error {
+	var errs []error
+	for _, t := range c.Targets {
+		if !m.targets[t] {
+			errs = append(errs, fmt.Errorf("--fuzz %s: no step has that ID, and no step of that node is meant to succeed", t))
+		}
+	}
+	for _, in := range c.Inputs {
+		if !m.inputs[in] {
+			errs = append(errs, fmt.Errorf("--fuzz-input %s: no step --fuzz names has that input", in))
+		}
+	}
+	if len(errs) == 0 {
+		for _, id := range c.Cases {
+			if !m.cases[id] {
+				errs = append(errs, fmt.Errorf("--fuzz-case %s: no step --fuzz names has a case with that ID", id))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // WithFuzz fuzzes the steps cfg names: each gets a sibling step per generated
@@ -82,12 +160,14 @@ func (e *Engine) WithFuzz(cfg *FuzzConfig) *Engine {
 type FuzzResult struct {
 	Case plan.FuzzCase
 	// JudgedAs is the mode the response was judged by: the case's own, or
-	// negative when the OpenAPI spec refuses the request the case built,
-	// since the spec is the API's own word on what it accepts.
+	// negative when the OpenAPI spec refuses the request the case built for a
+	// reason the target's own request didn't give it, since the spec is the
+	// API's own word on what it accepts.
 	JudgedAs string
-	// SpecViolations are the ways the request broke the OpenAPI spec. On a
-	// fuzz step they are the point, not a warning, so they are kept here
-	// rather than in the step's OAS validation.
+	// SpecViolations are the ways the request broke the OpenAPI spec that
+	// the target's own request did not. On a fuzz step they are the point,
+	// not a warning, so they are kept here rather than in the step's OAS
+	// validation.
 	SpecViolations []string
 	// Finding is one of the Finding constants, or empty when the response was
 	// what the case called for.
@@ -108,7 +188,9 @@ type fuzzJudging struct {
 
 // expandFuzz adds the fuzz cases to an instantiated plan: for each step the
 // CLI's FuzzConfig names or that has a fuzz: block, the generated cases and
-// the pinned ones, with the CLI's settings over the block's.
+// the pinned ones, with the CLI's settings over the block's. The modes,
+// inputs, skip list, case IDs, and cap apply to pinned cases as they do to
+// generated ones.
 func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 	cli := e.fuzz
 	e.fuzzJudge = map[string]fuzzJudging{}
@@ -119,7 +201,7 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		fromCLI bool
 	}
 	var targets []target
-	matched := map[string]bool{}
+	matched := newFuzzMatches()
 	for _, s := range p.Execution.Steps {
 		if s.Fuzz != nil || s.FuzzSetup != "" {
 			continue
@@ -127,27 +209,28 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		fromCLI := false
 		if cli != nil {
 			for _, t := range cli.Targets {
-				// A node name takes the plan's own steps of that node, not the
-				// mutation siblings and isolated clones instantiation made.
-				if s.StepID() == t || s.Node == t && s.VariantOf == "" {
-					fromCLI = true
-					matched[t] = true
+				switch {
+				case s.StepID() == t:
+					if why := s.Unfuzzable(); why != "" {
+						return fmt.Errorf("--fuzz %s: the step %s", t, why)
+					}
+				case s.Node == t && s.VariantOf == "" && s.Unfuzzable() == "":
+					// A node name takes the plan's own steps of that node that
+					// are meant to succeed: not the mutation siblings and
+					// isolated clones instantiation made, nor a negative step
+					// written for one bad request.
+				default:
+					continue
 				}
+				fromCLI = true
+				matched.targets[t] = true
 			}
 		}
 		if fromCLI || s.FuzzSettings != nil {
 			targets = append(targets, target{step: s, fromCLI: fromCLI})
 		}
 	}
-	if cli != nil && !cli.AllowNoTarget {
-		for _, t := range cli.Targets {
-			if !matched[t] {
-				return fmt.Errorf("--fuzz %s: the plan has no step with that ID and no step of that node", t)
-			}
-		}
-	}
 
-	found := map[string]bool{}
 	for _, tg := range targets {
 		step := tg.step
 		node := e.graph.Nodes[step.Node]
@@ -158,20 +241,31 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		if block == nil {
 			block = &plan.FuzzSettings{}
 		}
-		opts := fuzz.Options{Modes: block.Mode, Inputs: block.Inputs, Skip: block.Skip, Max: block.Cases, Seed: seed, Now: time.Now()}
-		only, scope, fail := block.Only, block.Scope, block.Fail
+		opts := fuzz.Options{Modes: block.Mode, Inputs: block.Inputs, Skip: block.Skip, Only: block.Only, Seed: seed, Now: time.Now()}
+		limit, scope, fail := block.Cases, block.Scope, block.Fail
+		generate := block.Generates()
 		if tg.fromCLI {
+			generate = true
 			if len(cli.Modes) > 0 {
 				opts.Modes = cli.Modes
 			}
 			if len(cli.Inputs) > 0 {
-				opts.Inputs = cli.Inputs
+				// --fuzz-input names inputs of any target: each target takes
+				// those its node has.
+				opts.Inputs = nil
+				for _, in := range cli.Inputs {
+					if slices.ContainsFunc(node.Inputs, func(ni graph.Input) bool { return ni.Name == in }) {
+						opts.Inputs = append(opts.Inputs, in)
+						matched.inputs[in] = true
+					}
+				}
+				generate = len(opts.Inputs) > 0
 			}
 			if cli.Max > 0 {
-				opts.Max = cli.Max
+				limit = cli.Max
 			}
 			if len(cli.Cases) > 0 {
-				only = cli.Cases
+				opts.Only = cli.Cases
 			}
 			if cli.Scope != "" {
 				scope = cli.Scope
@@ -185,33 +279,49 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		}
 
 		var cases []plan.FuzzCase
-		if tg.fromCLI || block.Generates() {
-			opts.Only = only
+		if generate {
 			tmpl, _ := e.registry.GetTemplate(node.Adapter)
-			generated, capped, err := fuzz.GenerateCapped(fuzz.Target{Step: step, Node: node, KB: e.KB, Template: tmpl}, opts)
+			generated, err := fuzz.Generate(fuzz.Target{Step: step, Node: node, KB: e.KB, Template: tmpl}, opts)
 			if err != nil {
 				return fmt.Errorf("fuzz target %s: %w", step.StepID(), err)
 			}
-			e.fuzzCapped = e.fuzzCapped || capped
 			cases = generated
 		}
 		// A pinned case replaces a generated one with its ID.
+		var pinned []plan.FuzzCase
 		for _, pc := range block.Pinned {
 			c, err := e.pinnedCase(step, node, pc)
 			if err != nil {
 				return err
 			}
-			cases = slices.DeleteFunc(cases, func(g plan.FuzzCase) bool { return g.ID == pc.ID })
-			if len(only) == 0 || slices.Contains(only, pc.ID) {
-				cases = append(cases, c)
+			pinned = append(pinned, c)
+		}
+		if tg.fromCLI && len(cli.Inputs) > 0 && len(opts.Inputs) == 0 {
+			pinned = nil // none of the named inputs is this target's
+		}
+		for _, c := range fuzz.Select(pinned, opts) {
+			cases = slices.DeleteFunc(cases, func(g plan.FuzzCase) bool { return g.ID == c.ID })
+			cases = append(cases, c)
+		}
+		for _, c := range cases {
+			if tg.fromCLI {
+				matched.cases[c.ID] = true // --fuzz-case names cases of the steps --fuzz names
 			}
 		}
-		// --fuzz-case names cases of the steps --fuzz names.
-		if tg.fromCLI {
-			for _, c := range cases {
-				found[c.ID] = true
+		// A block's only: list is checked against the cases the step has,
+		// before the cap picks among them; --fuzz-case is checked across
+		// every target, below.
+		if !tg.fromCLI || len(cli.Cases) == 0 {
+			for _, id := range block.Only {
+				if !slices.ContainsFunc(cases, func(c plan.FuzzCase) bool { return c.ID == id }) {
+					return fmt.Errorf("fuzz target %s: only: the step has no case %q", step.StepID(), id)
+				}
 			}
 		}
+		var capped bool
+		cases, capped = fuzz.Cap(cases, limit, seed)
+		e.fuzzCapped = e.fuzzCapped || capped
+
 		if scope == "" {
 			scope = plan.FuzzScopeReuse
 		}
@@ -224,16 +334,37 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 			return err
 		}
 		e.fuzzRun.groups[step.StepID()] = &fuzzGroup{scope: scope, readOnly: e.readOnlyStep(step), live: map[string]string{}}
-		for _, c := range cases {
-			e.fuzzRun.caseTarget[plan.FuzzStepID(step.StepID(), c.ID)] = step.StepID()
-		}
 		e.fuzzJudge[step.StepID()] = fuzzJudging{fail: fail, accept: block.Accept}
+		e.fuzzRun.settings[step.StepID()] = plan.FuzzSettings{Scope: scope, Fail: fail, Accept: block.Accept}
 	}
-	if cli != nil && len(matched) > 0 {
-		for _, id := range cli.Cases {
-			if !found[id] {
-				return fmt.Errorf("--fuzz-case %s: no target step has a case with that ID", id)
+
+	if cli != nil {
+		e.fuzzRun.matched = matched
+		if cli.Matched != nil {
+			cli.Matched.add(matched)
+		}
+		if !cli.AllowNoTarget {
+			if err := cli.unmatched(matched); err != nil {
+				return err
 			}
+		}
+	}
+
+	// Each case's steps are its own, and it retries a rate limit as its target
+	// would.
+	retries := map[string]*plan.RetryConfig{}
+	for _, tg := range targets {
+		retries[tg.step.StepID()] = throttleRetry(tg.step.Retry)
+	}
+	for i := range p.Execution.Steps {
+		s := &p.Execution.Steps[i]
+		switch {
+		case s.Fuzz != nil:
+			e.fuzzRun.caseTarget[s.StepID()] = s.Fuzz.Target
+			e.fuzzRun.owner[s.StepID()] = s.StepID()
+			s.Retry = retries[s.Fuzz.Target]
+		case s.FuzzSetup != "":
+			e.fuzzRun.owner[s.StepID()] = s.FuzzSetup
 		}
 	}
 	return nil
@@ -274,9 +405,29 @@ func (e *Engine) pinnedCase(step plan.Step, node *graph.Node, pc plan.PinnedFuzz
 }
 
 // refused reports whether the API refused a request it answered: a 4xx, or
-// a success whose body the graph's error detection reads as an error.
+// a success whose body the graph's error detection reads as an error. A
+// throttled request was turned away before its value was looked at, so it is
+// not a refusal.
 func refused(r *StepResult) bool {
-	return r.Response != nil && (r.StatusCode >= 400 && r.StatusCode < 500 || r.StatusCode < 400 && r.ResponseBodyError != nil)
+	return r.Response != nil && !throttled(r) && (r.StatusCode >= 400 && r.StatusCode < 500 || r.StatusCode < 400 && r.ResponseBodyError != nil)
+}
+
+// throttled reports whether the API answered with a rate limit: an HTTP 429,
+// or a gRPC RESOURCE_EXHAUSTED, which maps to it.
+func throttled(r *StepResult) bool {
+	return r.Response != nil && r.StatusCode == http.StatusTooManyRequests
+}
+
+// throttleRetry is the retry block a target's cases get: the target's own,
+// cut down to retrying a rate limit, so a case the API throttles is sent again
+// as the happy path would be, and nothing else a case finds is retried away.
+// It is nil when the target's block would not retry a 429.
+func throttleRetry(target *plan.RetryConfig) *plan.RetryConfig {
+	if !shouldRetry(CategoryTransient, http.StatusTooManyRequests, "", target, 1) &&
+		!shouldRetry(CategoryTransient, http.StatusTooManyRequests, grpcstatus.Name(grpcstatus.ResourceExhausted), target, 1) {
+		return nil
+	}
+	return &plan.RetryConfig{Max: target.Max, On: []string{strconv.Itoa(http.StatusTooManyRequests)}}
 }
 
 // notSent reports whether a request got no response because it was never
@@ -285,20 +436,39 @@ func notSent(r *StepResult) bool {
 	return r.Response == nil && (r.Request == nil || errors.As(r.Error, new(*adapter.NotSentError)))
 }
 
+// requestViolations lists the ways a request broke the OpenAPI spec, as
+// "path: message", or nil when it was not checked.
+func requestViolations(v *oas.ValidationResult) []string {
+	if v == nil || v.Request == nil || v.Request.Skipped {
+		return nil
+	}
+	var violations []string
+	for _, se := range v.Request.Errors {
+		if se.Path != "" {
+			violations = append(violations, se.Path+": "+se.Message)
+		} else {
+			violations = append(violations, se.Message)
+		}
+	}
+	return violations
+}
+
 // judgeFuzz decides a fuzz step's finding from its result.
 func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *FuzzResult {
 	c := step.Fuzz
 	mode := c.Mode
 	var violations []string
-	if v := r.OASValidation; v != nil && v.Request != nil && !v.Request.Skipped {
-		for _, se := range v.Request.Errors {
-			if se.Path != "" {
-				violations = append(violations, se.Path+": "+se.Message)
-			} else {
-				violations = append(violations, se.Message)
+	if v := r.OASValidation; v != nil && v.Request != nil {
+		// A violation the target's own request had too is the spec's quarrel
+		// with the happy path, not something the case did, so it neither makes
+		// the case negative nor is reported as the case's.
+		inherited := e.fuzzRun.inherited(c.Target)
+		for _, violation := range requestViolations(v) {
+			if !slices.Contains(inherited, violation) {
+				violations = append(violations, violation)
 			}
 		}
-		if !v.Request.Valid {
+		if len(violations) > 0 {
 			mode = plan.FuzzNegative
 		}
 		cp := *v
@@ -307,8 +477,8 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 	}
 
 	// A status the operation doesn't list has no schema to break, so the
-	// response validator's complaint about it is this finding, not a
-	// schema violation.
+	// response validator's complaint about it is that finding, not a schema
+	// violation.
 	undocumented := false
 	if e.oasCache != nil && r.Response != nil && grpcStatusName(r.Response) == "" {
 		documented, known := oas.StatusDocumented(node, e.graphOAS, e.oasCache, r.StatusCode)
@@ -317,7 +487,9 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 
 	finding := ""
 	// Anything with a response is judged on it: an error after one, such as
-	// outputs that couldn't be read, says nothing about whether it came.
+	// outputs that couldn't be read, says nothing about whether it came. The
+	// findings are tried most serious first, so a status the spec doesn't list
+	// never hides a value the API should not have taken.
 	switch {
 	case notSent(r):
 		finding = FindingNotSent
@@ -325,14 +497,16 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 		finding = FindingNoResponse
 	case r.StatusCode >= 500:
 		finding = FindingServerError
-	case undocumented:
-		finding = FindingUndocumentedStatus
-	case r.OASValidation != nil && r.OASValidation.Response != nil && !r.OASValidation.Response.Valid && !r.OASValidation.Response.Skipped:
+	case throttled(r):
+		finding = FindingThrottled
+	case !undocumented && r.OASValidation != nil && r.OASValidation.Response != nil && !r.OASValidation.Response.Valid && !r.OASValidation.Response.Skipped:
 		finding = FindingSchemaViolation
 	case mode == plan.FuzzNegative && !refused(r):
 		finding = FindingAcceptedInvalid
 	case mode == plan.FuzzPositive && refused(r):
 		finding = FindingRejectedValid
+	case undocumented:
+		finding = FindingUndocumentedStatus
 	}
 	judging, ok := e.fuzzJudge[c.Target]
 	if !ok {
@@ -444,11 +618,39 @@ type fuzzRunState struct {
 	groups     map[string]*fuzzGroup // by target step ID
 	caseTarget map[string]string     // case step ID → target step ID
 	caseSetup  map[string]string     // case step ID → a Setup constant
-	warnings   []string
+	// owner maps the ID of each fuzz case, and of each copy of a setup step
+	// made for one, to the case's step ID.
+	owner map[string]string
+	// baseline holds each target's own request violations, by its step ID.
+	baseline map[string][]string
+	// settings holds the scope, fail list, and accepted statuses each
+	// target's cases ran with, by its step ID.
+	settings map[string]plan.FuzzSettings
+	// matched is what the CLI's names matched, or nil without them.
+	matched  *FuzzMatches
+	warnings []string
 }
 
 func newFuzzRunState() *fuzzRunState {
-	return &fuzzRunState{groups: map[string]*fuzzGroup{}, caseTarget: map[string]string{}, caseSetup: map[string]string{}}
+	return &fuzzRunState{groups: map[string]*fuzzGroup{}, caseTarget: map[string]string{}, caseSetup: map[string]string{},
+		owner: map[string]string{}, baseline: map[string][]string{}, settings: map[string]plan.FuzzSettings{}}
+}
+
+// inherited returns the violations of a target's own request, which its
+// cases inherit rather than cause.
+func (f *fuzzRunState) inherited(target string) []string {
+	if f == nil {
+		return nil
+	}
+	return f.baseline[target]
+}
+
+// targetRan records a fuzz target's own result, which its cases are judged
+// against.
+func (f *fuzzRunState) targetRan(step plan.Step, r *StepResult) {
+	if f.groups[step.StepID()] != nil {
+		f.baseline[step.StepID()] = requestViolations(r.OASValidation)
+	}
 }
 
 // readOnlyStep reports whether a step only reads: an HTTP GET, HEAD, or
@@ -528,9 +730,9 @@ func (f *fuzzRunState) setupCopyFailed(step plan.Step) {
 }
 
 // caseJudged records how a case's response leaves its setup: clean when the
-// API refused the request or it was never sent, since a refusal changes
-// nothing, or when the target only reads, and changed otherwise, so the next
-// case sets up afresh.
+// API refused or throttled the request or it was never sent, since none of
+// those changes anything, or when the target only reads, and changed
+// otherwise, so the next case sets up afresh.
 func (f *fuzzRunState) caseJudged(step plan.Step, r *StepResult) {
 	caseID := step.StepID()
 	g := f.groups[f.caseTarget[caseID]]
@@ -539,5 +741,5 @@ func (f *fuzzRunState) caseJudged(step plan.Step, r *StepResult) {
 	}
 	g.failures = 0
 	g.building = ""
-	g.clean = g.readOnly || refused(r) || notSent(r)
+	g.clean = g.readOnly || refused(r) || throttled(r) || notSent(r)
 }

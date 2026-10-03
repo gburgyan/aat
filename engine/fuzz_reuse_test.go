@@ -33,11 +33,14 @@ type travelAPI struct {
 	reads          int
 	failAfterFirst bool
 	roomyCopies    bool
+	// log holds each request's method and path.
+	log []string
 }
 
 func (a *travelAPI) handler(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.log = append(a.log, r.Method+" "+r.URL.Path)
 	w.Header().Set("Content-Type", "application/json")
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/airports":
