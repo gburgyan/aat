@@ -229,7 +229,7 @@ func TestFormatExecutionSummary_Fuzz(t *testing.T) {
 	out := formatExecutionSummary(result, "run-1")
 	assert.Contains(t, out, "| 500 server-error (fails the run) |")
 	assert.Contains(t, out, "### Fuzzing")
-	assert.Contains(t, out, "2 cases, 1 as expected, 1 server-error; 1 fail the run.")
+	assert.Contains(t, out, "2 cases: 1 as expected, 1 server-error (1 failing).")
 	assert.Contains(t, out, "- `quantity.zero` on add (positive, quantity=0): server-error -> 500")
 	assert.NotContains(t, out, "`quantity.above-max` on")
 }

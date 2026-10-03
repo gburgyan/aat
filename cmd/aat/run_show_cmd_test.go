@@ -277,3 +277,20 @@ func TestRunShow_RunNotFound(t *testing.T) {
 	require.ErrorIs(t, err, archive.ErrRunNotFound)
 	assert.Contains(t, err.Error(), "a run is latest, a run ID, batch-ID/run-ID, batch-ID/plan-name, or a path")
 }
+
+// TestShownStepPassed_Fuzz checks that aat run show judges a fuzz case by its
+// finding, as the run did, and a setup copy by whether it failed.
+func TestShownStepPassed_Fuzz(t *testing.T) {
+	refused := archive.StepRecord{Response: &archive.ResponseRecord{Status: 400}, Fuzz: &archive.FuzzRecord{ID: "quantity.below-min"}}
+	assert.True(t, shownStepPassed(refused), "a refused negative case is what it called for")
+	refused.Fuzz.Fails = true
+	assert.False(t, shownStepPassed(refused))
+
+	copied := archive.StepRecord{Response: &archive.ResponseRecord{Status: 409}, FuzzSetup: "add__fuzz_q",
+		ExpectFailure: &archive.ExpectFailureRecord{Passed: true}}
+	assert.True(t, shownStepPassed(copied))
+	copied.FuzzSetupFailed = true
+	assert.False(t, shownStepPassed(copied))
+
+	assert.False(t, shownStepPassed(archive.StepRecord{Response: &archive.ResponseRecord{Status: 400}}), "a main step's 400 still fails")
+}

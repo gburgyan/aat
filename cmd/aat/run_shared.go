@@ -118,6 +118,9 @@ type FuzzStepSummary struct {
 	// Setup is how the steps the case ran on came to be: fresh, reused, or
 	// failed.
 	Setup string `json:"setup,omitempty"`
+	// OutputsError says why the outputs of a successful response could not
+	// be read; the case was judged on the response anyway.
+	OutputsError string `json:"outputs_error,omitempty"`
 }
 
 // FuzzRunSummary counts a run's fuzz cases in the JSON summary, as
@@ -367,6 +370,7 @@ func toStepSummary(step engine.StepResult) StepSummary {
 			ss.Fuzz.JudgedAs = f.JudgedAs
 		}
 		ss.Fuzz.Setup = f.Setup
+		ss.Fuzz.OutputsError = step.OutputsError
 		ss.Passed = !f.Fails
 		if f.Fails {
 			ss.Error = f.Finding
@@ -408,6 +412,15 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		}
 	}
 	ss.FailedAssertions = failedAssertions(step.Validation)
+
+	// A copy of a setup step made for a fuzz case passed unless it failed,
+	// as the engine decided: a knownIssue may have covered it.
+	if step.FuzzSetup != "" {
+		ss.Passed = !step.FuzzSetupFailed
+		if !ss.Passed && ss.Error == "" {
+			ss.Error = "the fuzz case's copy of this setup step failed"
+		}
+	}
 
 	return ss
 }

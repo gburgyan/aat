@@ -593,6 +593,39 @@ func SummarizeFuzz(steps []StepResult) *archive.FuzzSummary {
 	return s
 }
 
+// DescribeFuzz says how a run's fuzz cases came out, as every report of a run
+// says it: "50 cases: 47 as expected, 1 server-error, 2 accepted-invalid (1
+// failing) · setup: 4 fresh, 46 reused".
+func DescribeFuzz(s *archive.FuzzSummary) string {
+	var parts []string
+	if n := s.Findings[archive.FindingOK]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d as expected", n))
+	}
+	for _, f := range AllFindings {
+		if n := s.Findings[f]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, f))
+		}
+	}
+	text := fmt.Sprintf("%d case", s.Cases)
+	if s.Cases != 1 {
+		text += "s"
+	}
+	text += ": " + strings.Join(parts, ", ")
+	if s.Failing > 0 {
+		text += fmt.Sprintf(" (%d failing)", s.Failing)
+	}
+	var setup []string
+	for _, k := range []string{SetupFresh, SetupReused, SetupFailed} {
+		if n := s.Setup[k]; n > 0 {
+			setup = append(setup, fmt.Sprintf("%d %s", n, k))
+		}
+	}
+	if len(setup) > 0 {
+		text += " · setup: " + strings.Join(setup, ", ")
+	}
+	return text
+}
+
 // Setup of a fuzz case: how the steps it runs on came to be.
 const (
 	// SetupFresh is a case whose copy of the setup was sent for it.

@@ -217,13 +217,7 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 	// Fuzz cases: the counts, and each case with a finding
 	if fs := engine.SummarizeFuzz(result.Steps); fs != nil {
 		b.WriteString("\n### Fuzzing\n\n")
-		fmt.Fprintf(&b, "%d cases, %d as expected", fs.Cases, fs.Findings[archive.FindingOK])
-		for _, f := range engine.AllFindings {
-			if n := fs.Findings[f]; n > 0 {
-				fmt.Fprintf(&b, ", %d %s", n, f)
-			}
-		}
-		fmt.Fprintf(&b, "; %d fail the run.\n", fs.Failing)
+		fmt.Fprintf(&b, "%s.\n", engine.DescribeFuzz(fs))
 		for _, step := range result.Steps {
 			f := step.Fuzz
 			if f == nil || f.Finding == "" {

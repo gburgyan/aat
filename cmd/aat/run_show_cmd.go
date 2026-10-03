@@ -495,7 +495,7 @@ func showRun(out io.Writer, a *archive.Archive, src shownRun, format showFormat)
 		fmt.Fprintf(&b, "seed: %d\n", list.Seed)
 	}
 	if list.Fuzz != nil {
-		fmt.Fprintf(&b, "fuzz: %s\n", describeFuzz(list.Fuzz))
+		fmt.Fprintf(&b, "fuzz: %s\n", engine.DescribeFuzz(list.Fuzz))
 		for _, f := range list.FuzzFindings {
 			mark := "warn"
 			if f.Fails {
@@ -614,10 +614,15 @@ func newShownStepRow(index int, id string, s archive.StepRecord) shownStepRow {
 
 // shownStepPassed applies the run summary's rule: a step fails on an error, a
 // failed assertion, an unmet expected failure, an error in its response body,
-// or a status of 400 or more that it did not expect.
+// or a status of 400 or more that it did not expect. A fuzz case, and a copy
+// of a setup step made for one, is judged as archive.StepPassed judges it: a
+// refused case is often what it called for.
 func shownStepPassed(s archive.StepRecord) bool {
 	if !archive.StepPassed(s) {
 		return false
+	}
+	if s.Fuzz != nil || s.FuzzSetup != "" {
+		return true
 	}
 	return s.ExpectFailure != nil || s.Response == nil || s.Response.Status < 400
 }
@@ -1261,26 +1266,4 @@ func fuzzFindings(steps []archive.StepRecord) []archive.FuzzRecord {
 		}
 	}
 	return out
-}
-
-// describeFuzz says how a run's fuzz cases came out, as in "50 cases: 48 as
-// expected, 1 server-error, 1 accepted-invalid (1 failing)".
-func describeFuzz(s *archive.FuzzSummary) string {
-	var parts []string
-	if n := s.Findings[archive.FindingOK]; n > 0 {
-		parts = append(parts, fmt.Sprintf("%d as expected", n))
-	}
-	for _, f := range engine.AllFindings {
-		if n := s.Findings[f]; n > 0 {
-			parts = append(parts, fmt.Sprintf("%d %s", n, f))
-		}
-	}
-	text := pluralize(s.Cases, "case") + ": " + strings.Join(parts, ", ")
-	if s.Failing > 0 {
-		text += fmt.Sprintf(" (%d failing)", s.Failing)
-	}
-	if setup := describeSetup(s.Setup); setup != "" {
-		text += " · setup: " + setup
-	}
-	return text
 }

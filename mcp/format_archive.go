@@ -338,6 +338,14 @@ func formatFailureAnalysis(a *archive.Archive) string {
 	for _, fs := range failedSteps {
 		fmt.Fprintf(&b, "### %s\n\n", fs.Node)
 
+		if f := fs.Fuzz; f != nil {
+			judged := f.Mode
+			if f.JudgedAs != "" {
+				judged = f.JudgedAs
+			}
+			fmt.Fprintf(&b, "**Fuzz case:** `%s` on step %s, judged as %s: **%s**\n\n", f.ID, f.Target, judged, f.Finding)
+		}
+
 		if fs.ErrorClass != nil {
 			fmt.Fprintf(&b, "**Category:** %s\n", fs.ErrorClass.Category)
 			fmt.Fprintf(&b, "**Detail:** %s\n", fs.ErrorClass.Detail)
@@ -564,6 +572,8 @@ func suggestNextSteps(category string) string {
 		return "Network error. Check connectivity and the API base URL."
 	case "response_error":
 		return "The API returned 200 OK but the response body contains an error. Check request inputs and API documentation."
+	case "fuzz":
+		return "A fuzz case's finding failed the run. It is a finding about the API: a 5xx or no response is a bug to report, and accepted-invalid or rejected-valid says the API and the graph disagree about what the input allows. Replay one with --fuzz-case, or pin it with --fuzz-save."
 	default:
 		return ""
 	}
@@ -571,13 +581,22 @@ func suggestNextSteps(category string) string {
 
 // --- internal helpers ---
 
-// findFailedSteps returns steps that have errors, status >= 400, or failed validation.
+// findFailedSteps returns steps that have errors, status >= 400, or failed
+// validation. A fuzz case is failed only when its finding failed the run,
+// whatever its status: refusing a case is often what it called for. A copy of
+// a setup step made for a case never fails the run, so it is left out.
 func findFailedSteps(steps []archive.StepRecord) []archive.StepRecord {
 	var failed []archive.StepRecord
 	for _, s := range steps {
 		// A failure a knownIssue covers is accounted for and has a date; it is
 		// not what an assistant asking "why did this run fail?" is looking for.
-		if s.KnownIssue != nil && s.KnownIssue.Applied {
+		if s.KnownIssue != nil && s.KnownIssue.Applied || s.FuzzSetup != "" {
+			continue
+		}
+		if s.Fuzz != nil {
+			if s.Fuzz.Fails {
+				failed = append(failed, s)
+			}
 			continue
 		}
 		isFailed := false
@@ -608,6 +627,11 @@ func findFailedSteps(steps []archive.StepRecord) []archive.StepRecord {
 func collectFailureCategories(steps []archive.StepRecord) []string {
 	var cats []string
 	for _, s := range steps {
+		if s.Fuzz != nil {
+			// A fuzz case's status is the finding's evidence, not the cause.
+			cats = append(cats, "fuzz")
+			continue
+		}
 		if s.ErrorClass != nil {
 			cats = append(cats, s.ErrorClass.Category)
 		} else if s.Response != nil {

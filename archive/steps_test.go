@@ -77,6 +77,10 @@ func TestStepPassed(t *testing.T) {
 		{name: "passed expect-failure", step: StepRecord{ExpectFailure: &ExpectFailureRecord{Passed: true}}, expected: true},
 		{name: "response body error", step: StepRecord{ResponseBodyError: &ResponseBodyErrorRecord{RulePath: "errors"}}, expected: false},
 		{name: "no validation or errors", step: StepRecord{}, expected: true},
+		{name: "refused fuzz case", step: StepRecord{Fuzz: &FuzzRecord{}, Response: &ResponseRecord{Status: 400}}, expected: true},
+		{name: "failing fuzz case", step: StepRecord{Fuzz: &FuzzRecord{Finding: "accepted-invalid", Fails: true}}, expected: false},
+		{name: "setup copy", step: StepRecord{FuzzSetup: "add__fuzz_q", Validation: &ValidationRecord{Passed: false}}, expected: true},
+		{name: "failed setup copy", step: StepRecord{FuzzSetup: "add__fuzz_q", FuzzSetupFailed: true}, expected: false},
 	}
 
 	for _, tt := range tests {

@@ -74,11 +74,14 @@ type StepRecord struct {
 	Fuzz *FuzzRecord `json:"fuzz,omitempty"`
 	// FuzzSetup, on a copy of a setup step made for a fuzz case, is the ID of
 	// the case's step.
-	FuzzSetup     string               `json:"fuzzSetup,omitempty" redact:"-"`
-	OASValidation *OASValidationRecord `json:"oasValidation,omitempty"`
-	Error         string               `json:"error,omitempty"`
-	RetryCount    int                  `json:"retryCount,omitempty"`
-	RetriedOn     []string             `json:"retriedOn,omitempty" redact:"-"` // error category of each retried attempt, in order
+	FuzzSetup string `json:"fuzzSetup,omitempty" redact:"-"`
+	// FuzzSetupFailed, on such a copy, is true when it failed, so its case
+	// was not sent.
+	FuzzSetupFailed bool                 `json:"fuzzSetupFailed,omitempty"`
+	OASValidation   *OASValidationRecord `json:"oasValidation,omitempty"`
+	Error           string               `json:"error,omitempty"`
+	RetryCount      int                  `json:"retryCount,omitempty"`
+	RetriedOn       []string             `json:"retriedOn,omitempty" redact:"-"` // error category of each retried attempt, in order
 	// CleanupFor, on a cleanup step, is the ID of the step whose resource it
 	// releases, or of the cleanup step before it in a chain.
 	CleanupFor string `json:"cleanupFor,omitempty" redact:"-"`
