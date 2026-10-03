@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -38,6 +39,10 @@ type jsonFrame struct {
 	array bool
 	// index is the element an array is on.
 	index int
+	// shifted is set on an array once a conditional or iteration block has
+	// opened in it: the block may send no element or several, so the index
+	// of every element after it is not known.
+	shifted bool
 	// key is the segment of the value an object is on, and keyNext says the
 	// next string is a key rather than a value.
 	key     string
@@ -131,7 +136,7 @@ func scanJSONTemplate(text string, visit func(jsonEvent)) bool {
 		return parent + "." + seg
 	}
 	emit := func(ev jsonEvent) {
-		ev.inBlock = blocks > 0
+		ev.inBlock = blocks > 0 || slices.ContainsFunc(stack, func(f *jsonFrame) bool { return f.shifted })
 		visit(ev)
 	}
 
@@ -155,6 +160,7 @@ func scanJSONTemplate(text string, visit func(jsonEvent)) bool {
 			switch {
 			case strings.HasPrefix(tag, "?"):
 				blocks++ // a block's content stays where it is
+				top().shifted = top().array
 			case strings.HasPrefix(tag, "/"):
 				if blocks > 0 {
 					blocks--
@@ -163,6 +169,7 @@ func scanJSONTemplate(text string, visit func(jsonEvent)) bool {
 				// The list fills the array or object the block is in.
 				emit(jsonEvent{kind: eventPlaceholder, name: strings.TrimSpace(tag[1:]), path: containerPath()})
 				blocks++
+				top().shifted = top().array
 			case isElementRef(tag):
 				// The element an iteration block is on, not an input.
 			case !top().array && top().keyNext:
@@ -201,7 +208,8 @@ func scanJSONTemplate(text string, visit func(jsonEvent)) bool {
 				}
 				for _, name := range names {
 					if !isElementRef(name) {
-						emit(jsonEvent{kind: eventPlaceholder, name: name, path: valuePath(), whole: raw == `"{{`+name+`}}"`})
+						whole, ok := wholePlaceholder(raw[1 : len(raw)-1])
+						emit(jsonEvent{kind: eventPlaceholder, name: name, path: valuePath(), whole: ok && whole == name})
 					}
 				}
 			}

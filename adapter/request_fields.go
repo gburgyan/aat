@@ -78,8 +78,8 @@ func (t *Template) RequestFields() ([]RequestField, bool) {
 			continue
 		}
 		f := RequestField{Where: FieldQuery, Path: name, InBlock: param.inBlock}
-		if names := placeholderNames(value); len(names) == 1 && strings.TrimSpace(value) == "{{"+names[0]+"}}" {
-			f.Input = names[0]
+		if input, whole := wholePlaceholder(strings.TrimSpace(value)); whole {
+			f.Input = input
 		} else {
 			f.Kind = "string"
 		}
@@ -96,9 +96,8 @@ func (t *Template) RequestFields() ([]RequestField, bool) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		value := headers[name]
-		if ph := placeholderNames(value); len(ph) == 1 && strings.TrimSpace(value) == "{{"+ph[0]+"}}" {
-			fields = append(fields, RequestField{Where: FieldHeader, Path: name, Input: ph[0]})
+		if input, whole := wholePlaceholder(strings.TrimSpace(headers[name])); whole {
+			fields = append(fields, RequestField{Where: FieldHeader, Path: name, Input: input})
 		}
 	}
 	return fields, bodyOK
@@ -189,6 +188,8 @@ const (
 // is not there adds it. It returns an error when the body isn't JSON, when a
 // path goes through something that isn't there, or for a field to remove that
 // isn't there, so a case that can't be built is not sent as something else.
+// A query or header value is rendered as a template renders one: nil is
+// empty, and a list or map is JSON.
 func ApplyPatch(req *Request, where, path, op string, value any) error {
 	if op != PatchRemove && op != PatchSet {
 		return fmt.Errorf("unknown patch operation %q", op)
@@ -197,46 +198,68 @@ func ApplyPatch(req *Request, where, path, op string, value any) error {
 	case FieldBody:
 		return patchBody(req, path, op, value)
 	case FieldQuery:
-		base, query, _ := strings.Cut(req.Path, "?")
-		params, err := url.ParseQuery(query)
-		if err != nil {
-			return fmt.Errorf("reading the query: %w", err)
-		}
-		if op == PatchRemove {
-			if _, ok := params[path]; !ok {
-				return fmt.Errorf("the query has no parameter %q", path)
-			}
-			params.Del(path)
-		} else {
-			params.Set(path, fmt.Sprint(value))
-		}
-		req.Path = base
-		if encoded := params.Encode(); encoded != "" {
-			req.Path += "?" + encoded
-		}
-		return nil
+		return patchQuery(req, path, op, value)
 	case FieldHeader:
 		if op == PatchRemove {
-			found := false
-			for k := range req.Headers {
-				if strings.EqualFold(k, path) {
-					delete(req.Headers, k)
-					found = true
-				}
-			}
-			if !found {
+			if _, ok := headerValue(req.Headers, path); !ok {
 				return fmt.Errorf("the request has no header %q", path)
 			}
+			deleteHeaderFold(req.Headers, path)
 			return nil
 		}
 		if req.Headers == nil {
 			req.Headers = map[string]string{}
 		}
-		req.Headers[path] = fmt.Sprint(value)
+		// Header names compare case-insensitively: one spelling is sent.
+		setHeader(req.Headers, path, formatValue(value))
 		return nil
 	default:
 		return fmt.Errorf("unknown patch target %q", where)
 	}
+}
+
+// patchQuery removes the query parameter name, or sets it to value. The rest
+// of the query stays as the template wrote it: its order, its encoding, and a
+// pair with no "=". A name matches a parameter written encoded or not, so
+// filter[status] matches filter%5Bstatus%5D. Setting a parameter that is not
+// there adds it.
+func patchQuery(req *Request, name, op string, value any) error {
+	base, query, _ := strings.Cut(req.Path, "?")
+	var pairs []string
+	if query != "" {
+		pairs = strings.Split(query, "&")
+	}
+	decoded := func(s string) string {
+		if d, err := url.QueryUnescape(s); err == nil {
+			return d
+		}
+		return s
+	}
+	want := decoded(name)
+	kept := make([]string, 0, len(pairs)+1)
+	found := false
+	for _, pair := range pairs {
+		key, _, _ := strings.Cut(pair, "=")
+		if key != name && decoded(key) != want {
+			kept = append(kept, pair)
+			continue
+		}
+		if op == PatchSet && !found {
+			kept = append(kept, key+"="+url.QueryEscape(formatValue(value)))
+		}
+		found = true
+	}
+	switch {
+	case !found && op == PatchRemove:
+		return fmt.Errorf("the query has no parameter %q", name)
+	case !found:
+		kept = append(kept, url.QueryEscape(want)+"="+url.QueryEscape(formatValue(value)))
+	}
+	req.Path = base
+	if len(kept) > 0 {
+		req.Path += "?" + strings.Join(kept, "&")
+	}
+	return nil
 }
 
 func patchBody(req *Request, path, op string, value any) error {

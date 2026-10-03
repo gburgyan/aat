@@ -155,7 +155,7 @@ func TestApplyPatch(t *testing.T) {
 		{name: "remove a missing field", where: FieldBody, path: "coupon", op: PatchRemove, wantErr: `nothing at "coupon"`},
 		{name: "path through nothing", where: FieldBody, path: "billing.zip", op: PatchSet, wantErr: `nothing at "billing.zip"`},
 		{name: "remove a query parameter", where: FieldQuery, path: "limit", op: PatchRemove, wantPath: "/items?source=web"},
-		{name: "set a query parameter", where: FieldQuery, path: "limit", op: PatchSet, value: "-1", wantPath: "/items?limit=-1&source=web"},
+		{name: "set a query parameter", where: FieldQuery, path: "limit", op: PatchSet, value: "-1", wantPath: "/items?source=web&limit=-1"},
 		{name: "remove a header", where: FieldHeader, path: "x-request-id", op: PatchRemove, wantHeaders: map[string]string{}},
 		{name: "remove a missing header", where: FieldHeader, path: "X-Trace", op: PatchRemove, wantErr: `no header "X-Trace"`},
 	}
@@ -182,6 +182,73 @@ func TestApplyPatch(t *testing.T) {
 
 	req := &Request{Body: []byte("name=x")}
 	assert.ErrorContains(t, ApplyPatch(req, FieldBody, "name", PatchRemove, nil), "not JSON")
+}
+
+// TestApplyPatch_QueryKeepsTheRest checks that a query patch changes its own
+// parameter and leaves the rest of the query as the template wrote it.
+func TestApplyPatch_QueryKeepsTheRest(t *testing.T) {
+	for _, tt := range []struct {
+		name, path, param, op string
+		value                 any
+		want                  string
+	}{
+		{"a semicolon elsewhere", "/x?q=a;b&limit=5", "limit", PatchRemove, nil, "/x?q=a;b"},
+		{"a flag", "/x?verbose&limit=5", "limit", PatchSet, 7, "/x?verbose&limit=7"},
+		{"an encoded name", "/x?filter%5Bstatus%5D=open&page=2", "filter[status]", PatchRemove, nil, "/x?page=2"},
+		{"an encoded name in the patch", "/x?filter[status]=open", "filter%5Bstatus%5D", PatchSet, "a b", "/x?filter[status]=a+b"},
+		{"a new parameter", "/x", "limit", PatchSet, -1, "/x?limit=-1"},
+		{"a repeated parameter", "/x?tag=a&tag=b&n=1", "tag", PatchSet, "c", "/x?tag=c&n=1"},
+		{"the last parameter", "/x?limit=5", "limit", PatchRemove, nil, "/x"},
+		{"null", "/x?limit=5", "limit", PatchSet, nil, "/x?limit="},
+	} {
+		req := &Request{Path: tt.path}
+		require.NoError(t, ApplyPatch(req, FieldQuery, tt.param, tt.op, tt.value), tt.name)
+		assert.Equal(t, tt.want, req.Path, tt.name)
+	}
+}
+
+// TestApplyPatch_HeaderHasOneSpelling checks that setting a header replaces
+// it whatever its case, so the request sends one value, not a random one.
+func TestApplyPatch_HeaderHasOneSpelling(t *testing.T) {
+	req := &Request{Headers: map[string]string{"Authorization": "Bearer good"}}
+	require.NoError(t, ApplyPatch(req, FieldHeader, "authorization", PatchSet, "Bearer bad"))
+	assert.Equal(t, map[string]string{"authorization": "Bearer bad"}, req.Headers)
+	require.NoError(t, ApplyPatch(req, FieldHeader, "X-Count", PatchSet, 1e22))
+	assert.Equal(t, "10000000000000000000000", req.Headers["X-Count"])
+}
+
+// TestTemplate_RequestFields_Spaces checks that a placeholder written with
+// spaces inside, {{ name }}, is the whole value as {{name}} is.
+func TestTemplate_RequestFields_Spaces(t *testing.T) {
+	tmpl := &Template{Protocol: "http", Request: TemplateRequest{Method: "POST", Path: "/x?limit={{ limit }}",
+		Headers: map[string]string{"X-Hint": "{{ hint }}"},
+		Body:    `{"name": "{{ name }}", "quantity": {{ quantity }}}`}}
+	fields, ok := tmpl.RequestFields()
+	require.True(t, ok)
+	assert.Equal(t, []RequestField{
+		{Where: FieldBody, Path: "name", Input: "name"},
+		{Where: FieldBody, Path: "quantity", Input: "quantity"},
+		{Where: FieldQuery, Path: "limit", Input: "limit"},
+		{Where: FieldHeader, Path: "X-Hint", Input: "hint"},
+	}, fields)
+}
+
+// TestTemplate_RequestFields_ElementsAfterABlock checks that an array element
+// after a conditional or iteration block counts as being in one: the block
+// may send any number of elements, so its index isn't known.
+func TestTemplate_RequestFields_ElementsAfterABlock(t *testing.T) {
+	tmpl := &Template{Protocol: "http", Request: TemplateRequest{Method: "POST", Path: "/x",
+		Body: `{"items": [{"sku": "{{first}}"}, {{?primary}}{"sku": "{{primary}}"},{{/primary}} {"sku": "{{c}}"}],
+"extras": [{{#more}}{"sku": "{{.}}"}{{/more}}, {"sku": "{{d}}"}], "after": "{{e}}"}`}}
+	fields, ok := tmpl.RequestFields()
+	require.True(t, ok)
+	inBlock := map[string]bool{}
+	for _, f := range fields {
+		if f.Input != "" {
+			inBlock[f.Input] = f.InBlock
+		}
+	}
+	assert.Equal(t, map[string]bool{"first": false, "primary": true, "c": true, "d": true, "e": false}, inBlock)
 }
 
 // TestTemplate_RequestFields_QueryBlocks checks the query of paths with
