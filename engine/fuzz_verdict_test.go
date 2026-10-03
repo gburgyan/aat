@@ -212,3 +212,29 @@ func TestFuzz_InheritedViolationsDontJudgeTheCase(t *testing.T) {
 	assert.Contains(t, byID["quantity.below-min"].SpecViolations[0], "quantity")
 	assert.Equal(t, FindingAcceptedInvalid, byID["quantity.below-min"].Finding)
 }
+
+// TestFuzz_PositiveValueTheConstraintRulesOut checks that a positive value
+// the step's constraint rules out is judged as edge: the plan would never
+// send it, so its refusal is not a rejected-valid.
+func TestFuzz_PositiveValueTheConstraintRulesOut(t *testing.T) {
+	eng := buildHintEngine(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Hint") == "same" {
+			w.WriteHeader(http.StatusBadRequest)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	})
+	p := pinnedPlan(
+		plan.PinnedFuzzCase{ID: "hint.pool-1", Mode: plan.FuzzPositive, Input: "hint", Value: "same"},
+		plan.PinnedFuzzCase{ID: "hint.pool-2", Mode: plan.FuzzPositive, Input: "hint", Value: "other"},
+	)
+	p.Execution.Steps[0].Values = map[string]plan.StepValue{"hint": {Default: "plain", Constraint: `value != "same"`}}
+	result := eng.Run(context.Background(), p)
+	require.NoError(t, result.Error)
+	byID := map[string]*FuzzResult{}
+	for _, s := range fuzzSteps(result) {
+		byID[s.Fuzz.Case.ID] = s.Fuzz
+	}
+	assert.Equal(t, plan.FuzzEdge, byID["hint.pool-1"].JudgedAs)
+	assert.Empty(t, byID["hint.pool-1"].Finding, "an edge case may be refused")
+	assert.Equal(t, plan.FuzzPositive, byID["hint.pool-2"].JudgedAs)
+}

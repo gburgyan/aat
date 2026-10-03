@@ -238,6 +238,8 @@ func PinFuzzCase(p *Plan, c FuzzCase, finding string, fail []string) (*Plan, err
 // FuzzStepID returns the ID of the sibling step that runs a case against the
 // step targetID, as in addItem__fuzz_quantity_below_min. It keeps to letters,
 // digits, and underscores, so expressions can name it and its setup copies.
+// Two case IDs can make one step ID, as sort.enum-price and sort.enum--price
+// do; ExpandFuzzCases numbers the second.
 func FuzzStepID(targetID, caseID string) string {
 	return identifier(targetID) + "__fuzz_" + identifier(caseID)
 }
@@ -329,8 +331,11 @@ func ExpandFuzzCases(p *Plan, targetID string, cases []FuzzCase, opts FuzzExpand
 	for _, c := range cases {
 		c.Target = targetID
 		childID := FuzzStepID(targetID, c.ID)
-		if _, taken := byID[childID]; taken {
-			return fmt.Errorf("fuzz case %q: step %q already exists", c.ID, childID)
+		for n := 2; ; n++ {
+			if _, taken := byID[childID]; !taken {
+				break
+			}
+			childID = fmt.Sprintf("%s_%d", FuzzStepID(targetID, c.ID), n)
 		}
 
 		var idMap map[string]string

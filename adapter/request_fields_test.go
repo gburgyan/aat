@@ -47,6 +47,62 @@ func TestTemplate_RequestFields(t *testing.T) {
 	assert.Equal(t, want, fields, "a placeholder inside a longer string (note) is not a field of its own; a path segment is not a field")
 }
 
+// TestTemplate_RequestFields_DynamicKeys checks that a value under a key an
+// input picks is not a field: there is no path to patch it at.
+func TestTemplate_RequestFields_DynamicKeys(t *testing.T) {
+	tmpl := &Template{Protocol: "http", Request: TemplateRequest{Method: "POST", Path: "/x",
+		Body: `{"metadata": {"{{k}}": {"source": "x"}}, "{{other}}": "v", "kept": 1}`}}
+	fields, ok := tmpl.RequestFields()
+	require.True(t, ok)
+	assert.Equal(t, []RequestField{
+		{Where: FieldBody, Path: "metadata", Kind: "object"},
+		{Where: FieldBody, Path: "kept", Kind: "number"},
+	}, fields)
+}
+
+// TestTemplate_DropsEmpty checks which inputs the builder leaves out when
+// they are empty.
+func TestTemplate_DropsEmpty(t *testing.T) {
+	tmpl := &Template{Protocol: "http", Request: TemplateRequest{
+		Method:  "POST",
+		Path:    "/products{{?category}}?category={{ category }}{{/category}}{{?a|b}}&a={{a}}{{/a|b}}",
+		Headers: map[string]string{"X-Hint": "{{hint}}", "Authorization": "Bearer {{token}}"},
+		Body:    `{"name": "{{name}}", {{?note}}"note": "{{note}}",{{/note}} "x": 1}`,
+		Form:    nil,
+	}}
+	for input, want := range map[string]bool{
+		"category": true,  // in its own block, even with spaces in the placeholder
+		"note":     true,  // in its own block in the body
+		"hint":     true,  // the whole value of a header
+		"a":        false, // its block is sent when b has a value
+		"token":    false, // part of a header's value
+		"name":     false, // sent as "" in the body
+		"unused":   false,
+	} {
+		assert.Equal(t, want, tmpl.DropsEmpty(input), input)
+	}
+
+	form := &Template{Protocol: "http", Request: TemplateRequest{Method: "POST", Path: "/x",
+		Form: FormFields{{Key: "email", Value: "{{email}}"}, {Key: "label", Value: "user {{label}}"}}}}
+	assert.True(t, form.DropsEmpty("email"))
+	assert.False(t, form.DropsEmpty("label"))
+}
+
+// TestTemplate_HeaderRefuses checks which values a header the template fills
+// from an input can't carry.
+func TestTemplate_HeaderRefuses(t *testing.T) {
+	tmpl := &Template{Protocol: "http", Request: TemplateRequest{Method: "GET", Path: "/x",
+		Headers: map[string]string{"X-Hint": "v={{hint}}"}}}
+	assert.True(t, tmpl.HeaderRefuses("hint", "a\x00b"))
+	assert.False(t, tmpl.HeaderRefuses("hint", "Zoë"))
+	assert.False(t, tmpl.HeaderRefuses("other", "a\x00b"), "no header sends it")
+
+	grpc := &Template{Protocol: ProtocolGRPC, Request: TemplateRequest{
+		Metadata: map[string]string{"x-hint": "{{hint}}", "x-blob-bin": "{{blob}}"}}}
+	assert.True(t, grpc.HeaderRefuses("hint", "Zoë"))
+	assert.False(t, grpc.HeaderRefuses("blob", "Zoë"), "a -bin value is bytes")
+}
+
 func TestTemplate_RequestFields_NotJSON(t *testing.T) {
 	fields, ok := (&Template{Request: TemplateRequest{Body: `name={{name}}`, Path: "/x?a={{a}}"}}).RequestFields()
 	assert.False(t, ok)

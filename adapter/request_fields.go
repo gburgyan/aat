@@ -52,9 +52,13 @@ func (t *Template) RequestFields() ([]RequestField, bool) {
 	}
 	if strings.TrimSpace(body) != "" {
 		bodyOK = scanJSONTemplate(body, func(ev jsonEvent) {
+			// A value under a key an input picks has no path to patch.
+			if !plainPath(ev.path) {
+				return
+			}
 			switch ev.kind {
 			case eventPlaceholder:
-				if ev.whole && !strings.Contains(ev.path, "*") {
+				if ev.whole {
 					fields = append(fields, RequestField{Where: FieldBody, Path: ev.path, Input: ev.name, InBlock: ev.inBlock})
 				}
 			case eventLiteral, eventContainer:
@@ -98,6 +102,17 @@ func (t *Template) RequestFields() ([]RequestField, bool) {
 		}
 	}
 	return fields, bodyOK
+}
+
+// plainPath reports whether a GJSON path is keys and indexes alone, with no
+// wildcard standing for a key an input picks.
+func plainPath(path string) bool {
+	for _, seg := range gjsonpath.Split(path) {
+		if seg.Kind != gjsonpath.Key {
+			return false
+		}
+	}
+	return true
 }
 
 // queryParam is one name=value pair of a templated query string, with its

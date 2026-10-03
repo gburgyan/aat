@@ -249,3 +249,24 @@ func TestPinFuzzCase(t *testing.T) {
 	_, err = PinFuzzCase(p, c, FindingRejectedValid, nil)
 	assert.ErrorContains(t, err, "not in the plan as written")
 }
+
+// TestExpandFuzzCases_CollidingStepIDs checks that two cases whose IDs make
+// one step ID both run: the second is numbered, where it used to abort the
+// run.
+func TestExpandFuzzCases_CollidingStepIDs(t *testing.T) {
+	p := fuzzPlan()
+	cases := []FuzzCase{
+		{ID: "sort.enum-created_at", Mode: FuzzPositive, Input: "sort", Value: "created_at"},
+		{ID: "sort.enum--created_at", Mode: FuzzPositive, Input: "sort", Value: "-created_at"},
+		{ID: "sort.enum-€", Mode: FuzzPositive, Input: "sort", Value: "€"},
+		{ID: "sort.enum-$", Mode: FuzzPositive, Input: "sort", Value: "$"},
+	}
+	require.NoError(t, ExpandFuzzCases(p, "add", cases, FuzzExpandOptions{Scope: FuzzScopeIsolated}))
+	var fuzzIDs []string
+	for _, s := range p.Execution.Steps {
+		if s.Fuzz != nil {
+			fuzzIDs = append(fuzzIDs, s.StepID())
+		}
+	}
+	assert.Equal(t, []string{"add__fuzz_sort_enum_created_at", "add__fuzz_sort_enum_created_at_2", "add__fuzz_sort_enum_", "add__fuzz_sort_enum__2"}, fuzzIDs)
+}

@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -159,10 +160,11 @@ func (e *Engine) WithFuzz(cfg *FuzzConfig) *Engine {
 // FuzzResult is how a fuzz step's response was judged.
 type FuzzResult struct {
 	Case plan.FuzzCase
-	// JudgedAs is the mode the response was judged by: the case's own, or
+	// JudgedAs is the mode the response was judged by: the case's own; or
 	// negative when the OpenAPI spec refuses the request the case built for a
 	// reason the target's own request didn't give it, since the spec is the
-	// API's own word on what it accepts.
+	// API's own word on what it accepts; or edge for a positive value the
+	// step's constraint rules out.
 	JudgedAs string
 	// SpecViolations are the ways the request broke the OpenAPI spec that
 	// the target's own request did not. On a fuzz step they are the point,
@@ -336,6 +338,14 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		e.fuzzRun.groups[step.StepID()] = &fuzzGroup{scope: scope, readOnly: e.readOnlyStep(step), live: map[string]string{}}
 		e.fuzzJudge[step.StepID()] = fuzzJudging{fail: fail, accept: block.Accept}
 		e.fuzzRun.settings[step.StepID()] = plan.FuzzSettings{Scope: scope, Fail: fail, Accept: block.Accept}
+		for name, sv := range step.Values {
+			if sv.Constraint != "" {
+				if e.fuzzRun.constraints[step.StepID()] == nil {
+					e.fuzzRun.constraints[step.StepID()] = map[string]string{}
+				}
+				e.fuzzRun.constraints[step.StepID()][name] = sv.Constraint
+			}
+		}
 	}
 
 	if cli != nil {
@@ -474,6 +484,12 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 		cp := *v
 		cp.Request = nil
 		r.OASValidation = &cp
+	}
+	// A positive value the step's constraint rules out, such as a destination
+	// equal to the origin, is not known to be allowed: the plan would never
+	// send it.
+	if mode == plan.FuzzPositive && e.fuzzRun.breaksConstraint(c, r.Inputs) {
+		mode = plan.FuzzEdge
 	}
 
 	// A status the operation doesn't list has no schema to break, so the
@@ -626,6 +642,9 @@ type fuzzRunState struct {
 	// settings holds the scope, fail list, and accepted statuses each
 	// target's cases ran with, by its step ID.
 	settings map[string]plan.FuzzSettings
+	// constraints holds each target's value constraints, by its step ID and
+	// then input.
+	constraints map[string]map[string]string
 	// matched is what the CLI's names matched, or nil without them.
 	matched  *FuzzMatches
 	warnings []string
@@ -633,7 +652,25 @@ type fuzzRunState struct {
 
 func newFuzzRunState() *fuzzRunState {
 	return &fuzzRunState{groups: map[string]*fuzzGroup{}, caseTarget: map[string]string{}, caseSetup: map[string]string{},
-		owner: map[string]string{}, baseline: map[string][]string{}, settings: map[string]plan.FuzzSettings{}}
+		owner: map[string]string{}, baseline: map[string][]string{}, settings: map[string]plan.FuzzSettings{},
+		constraints: map[string]map[string]string{}}
+}
+
+// breaksConstraint reports whether a case's value fails the constraint its
+// target's step value puts on the input, given the inputs the case resolved.
+func (f *fuzzRunState) breaksConstraint(c *plan.FuzzCase, inputs map[string]any) bool {
+	if f == nil || len(c.Patch) > 0 {
+		return false
+	}
+	constraint := f.constraints[c.Target][c.Input]
+	value, ok := inputs[c.Input]
+	if constraint == "" || !ok {
+		return false
+	}
+	others := maps.Clone(inputs)
+	delete(others, c.Input)
+	holds, err := checkConstraint(constraint, value, others)
+	return err == nil && !holds
 }
 
 // inherited returns the violations of a target's own request, which its

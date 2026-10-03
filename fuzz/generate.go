@@ -21,6 +21,7 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/domain"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/internal/gjsonpath"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -108,7 +109,7 @@ func Generate(t Target, opts Options) ([]plan.FuzzCase, error) {
 		if len(named) == 0 && wired(t.Step.Values[in.Name]) {
 			continue
 		}
-		keep(inputCases(in, t.Step.Values[in.Name], t.KB, now))
+		keep(sendable(inputCases(in, t.Step.Values[in.Name], t.KB, now), t.Template, in.Name))
 		keep(absenceCases(in, t.Step.Values[in.Name], fields))
 	}
 	if len(named) == 0 {
@@ -149,6 +150,22 @@ func Cap(cases []plan.FuzzCase, max int, seed uint64) ([]plan.FuzzCase, bool) {
 		capped[i] = cases[p]
 	}
 	return capped, true
+}
+
+// sendable returns the value cases for input whose value reaches the request
+// as itself. It leaves out "" where the template leaves an empty input out,
+// since that case would send what leaving the input out sends, and a string
+// a header the input fills can't carry, which the client would refuse to
+// send.
+func sendable(cases []plan.FuzzCase, tmpl *adapter.Template, input string) []plan.FuzzCase {
+	if tmpl == nil {
+		return cases
+	}
+	dropsEmpty := tmpl.DropsEmpty(input)
+	return slices.DeleteFunc(cases, func(c plan.FuzzCase) bool {
+		s, ok := c.Value.(string)
+		return ok && (s == "" && dropsEmpty || tmpl.HeaderRefuses(input, s))
+	})
 }
 
 // unencodable lists the strategies whose values a protobuf message can't
@@ -198,7 +215,7 @@ func absenceCases(in graph.Input, sv plan.StepValue, fields []adapter.RequestFie
 // they are edge cases; an OpenAPI spec, when there is one, judges them.
 // Fields inside blocks and elements of arrays are left alone.
 func templateCases(fields []adapter.RequestField, extraProperty bool) []plan.FuzzCase {
-	b := &builder{input: "body"}
+	b := &builder{} // the cases name no input; their IDs name the field
 	hasBody := false
 	for _, f := range fields {
 		if f.Where == adapter.FieldBody {
@@ -242,21 +259,20 @@ func templateCases(fields []adapter.RequestField, extraProperty bool) []plan.Fuz
 	return b.cases
 }
 
-// inArray reports whether a GJSON path goes through an array element.
+// inArray reports whether a GJSON path goes through an array element. An
+// escaped dot is part of a key, so v1\.2 is one key, not an index.
 func inArray(path string) bool {
-	for _, seg := range strings.Split(path, ".") {
-		if seg != "" && strings.Trim(seg, "0123456789") == "" {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(gjsonpath.Split(path), gjsonpath.Segment.IsIndex)
 }
 
 // wired reports whether a step value comes from another step or input, which
 // fuzzing leaves alone unless asked: an ID read from an earlier response is
-// what lets the step reach the state the plan built.
+// what lets the step reach the state the plan built. A default whose
+// expression reads an earlier step's output, {{createCart.cartId}}, is wired
+// too.
 func wired(sv plan.StepValue) bool {
-	return sv.From != "" || sv.FromSelection != "" || sv.FromResolved != "" || sv.FromInput != ""
+	return sv.From != "" || sv.FromSelection != "" || sv.FromResolved != "" || sv.FromInput != "" ||
+		!sv.Raw && len(plan.ExprValueOutputRefs(sv.Default)) > 0
 }
 
 // inputCases lists the cases for one input.
@@ -349,6 +365,12 @@ func numberCases(b *builder, c *graph.Constraint, integer bool) {
 		}
 		return f
 	}
+	// A bound no int64 holds, such as a max of 9223372036854775807, which
+	// reads as 2^63, has no exact integer case, and one past the precision
+	// of a float has no neighbour a step away.
+	exact := func(f float64) bool {
+		return !integer || f >= math.MinInt64 && f < -math.MinInt64
+	}
 	inRange := func(f float64) bool {
 		return (c.Min == nil || f >= *c.Min) && (c.Max == nil || f <= *c.Max)
 	}
@@ -356,13 +378,17 @@ func numberCases(b *builder, c *graph.Constraint, integer bool) {
 	if !integer {
 		step = 0.01
 	}
-	if c.Min != nil {
+	if c.Min != nil && exact(*c.Min) {
 		b.add(plan.FuzzPositive, "at-min", num(*c.Min))
-		b.add(plan.FuzzNegative, "below-min", num(*c.Min-step))
+		if below := *c.Min - step; below < *c.Min && exact(below) {
+			b.add(plan.FuzzNegative, "below-min", num(below))
+		}
 	}
-	if c.Max != nil {
+	if c.Max != nil && exact(*c.Max) {
 		b.add(plan.FuzzPositive, "at-max", num(*c.Max))
-		b.add(plan.FuzzNegative, "above-max", num(*c.Max+step))
+		if above := *c.Max + step; above > *c.Max && exact(above) {
+			b.add(plan.FuzzNegative, "above-max", num(above))
+		}
 	}
 	bounded := c.Min != nil || c.Max != nil
 	if inRange(0) && (c.Min == nil || *c.Min != 0) && (c.Max == nil || *c.Max != 0) {
@@ -395,31 +421,62 @@ func wrongType(s string) string {
 	return `"` + s + `"`
 }
 
+// maxCaseLength is the longest string a length case is built at. A longer
+// minLength or maxLength, such as the 2147483647 some generators write for "no
+// limit", would take gigabytes to build and send, so it gets no length cases;
+// the long edge case still tries a long value.
+const maxCaseLength = 1 << 16
+
 func stringCases(b *builder, c *graph.Constraint, pattern string, pool []string) {
-	for i, v := range samplePool(pool) {
-		b.add(plan.FuzzPositive, fmt.Sprintf("pool-%d", i+1), v)
+	var re *regexp.Regexp
+	if pattern != "" {
+		re, _ = regexp.Compile(pattern) // nil when it doesn't compile: nothing to match
 	}
-	if c.MinLength != nil && *c.MinLength > 0 {
-		b.add(plan.FuzzPositive, "at-min-length", fill(*c.MinLength))
+	allowed := func(s string) bool { return re == nil || re.MatchString(s) }
+	// A pool value the pattern refuses contradicts what the graph declares,
+	// so it is not known to be allowed.
+	for i, v := range samplePool(pool) {
+		mode := plan.FuzzPositive
+		if !allowed(v) {
+			mode = plan.FuzzEdge
+		}
+		b.add(mode, fmt.Sprintf("pool-%d", i+1), v)
+	}
+	// A positive length case is one the pattern allows too, or none.
+	if c.MinLength != nil && *c.MinLength > 0 && *c.MinLength <= maxCaseLength {
+		if v, ok := lengthValue(*c.MinLength, allowed); ok {
+			b.add(plan.FuzzPositive, "at-min-length", v)
+		}
 		b.add(plan.FuzzNegative, "below-min-length", fill(*c.MinLength-1))
 	}
-	if c.MaxLength != nil {
-		b.add(plan.FuzzPositive, "at-max-length", fill(*c.MaxLength))
+	if c.MaxLength != nil && *c.MaxLength < maxCaseLength {
+		if v, ok := lengthValue(*c.MaxLength, allowed); ok {
+			b.add(plan.FuzzPositive, "at-max-length", v)
+		}
 		b.add(plan.FuzzNegative, "above-max-length", fill(*c.MaxLength+1))
 	}
-	if pattern != "" {
-		if re, err := regexp.Compile(pattern); err == nil {
-			for _, candidate := range []string{"aat fuzz!", "!@#$%", "0", "a", ""} {
-				if !re.MatchString(candidate) {
-					b.add(plan.FuzzNegative, "pattern-mismatch", candidate)
-					break
-				}
+	if re != nil {
+		for _, candidate := range []string{"aat fuzz!", "!@#$%", "0", "a", ""} {
+			if !re.MatchString(candidate) {
+				b.add(plan.FuzzNegative, "pattern-mismatch", candidate)
+				break
 			}
 		}
 	}
 	for _, e := range edgeStrings {
 		b.add(plan.FuzzEdge, e.name, e.value)
 	}
+}
+
+// lengthValue returns a string of n characters that allowed accepts: a run of
+// one of a few common characters, or false when none of them is accepted.
+func lengthValue(n int, allowed func(string) bool) (string, bool) {
+	for _, ch := range []string{"a", "A", "0", "1", "x", "X"} {
+		if v := strings.Repeat(ch, max(n, 0)); allowed(v) {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 // edgeStrings are strings a declared type or constraint rarely rules out but
@@ -475,11 +532,7 @@ func (b *builder) addPatchID(id, mode, strategy string, patch []plan.RequestPatc
 			return
 		}
 	}
-	input := b.input
-	if input == "body" {
-		input = ""
-	}
-	b.cases = append(b.cases, plan.FuzzCase{ID: id, Mode: mode, Input: input, Strategy: strategy, Patch: patch})
+	b.cases = append(b.cases, plan.FuzzCase{ID: id, Mode: mode, Input: b.input, Strategy: strategy, Patch: patch})
 }
 
 func fill(n int) string {

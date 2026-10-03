@@ -160,4 +160,3 @@ func TestFuzzConfig_UnmatchedAcrossRuns(t *testing.T) {
 	assert.NoError(t, (*FuzzConfig)(nil).Unmatched())
 	assert.NoError(t, (&FuzzConfig{Targets: []string{"x"}}).Unmatched(), "nothing to check without Matched")
 }
-
