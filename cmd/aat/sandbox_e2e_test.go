@@ -407,6 +407,7 @@ func TestShopExample(t *testing.T) {
 		saved, err := filepath.Glob(filepath.Join(saveDir, "*.yaml"))
 		require.NoError(t, err)
 		require.Len(t, saved, 1)
+		assert.Equal(t, saved, res.summary.FuzzSaved, "the summary names what it wrote, for --quiet, --json, and a batch")
 		assert.Equal(t, "smoke--addItem--quantity.below-min.yaml", filepath.Base(saved[0]))
 		regression, err := plan.ParseFile(saved[0])
 		require.NoError(t, err)

@@ -170,6 +170,7 @@ type BatchSummary struct {
 	Outcome     string           `json:"outcome"`
 	Error       string           `json:"error,omitempty"` // why the batch stopped before running its plans, or what its --fuzz flags matched in none
 	BatchID     string           `json:"batch_id,omitempty"`
+	Seed        int64            `json:"seed,omitempty"` // --seed, or the one a --shuffle without it picked: it replays the batch
 	Runs        []BatchRunResult `json:"runs"`
 	Summary     BatchStats       `json:"summary"`
 	ArchivePath string           `json:"archive_path,omitempty"`
@@ -198,6 +199,13 @@ type BatchRunResult struct {
 	Permutation string   `json:"permutation,omitempty"`  // permutation label for grouping
 	Skipped     bool     `json:"skipped,omitempty"`      // true if skipped as a duplicate
 	DuplicateOf string   `json:"duplicate_of,omitempty"` // display name of canonical run
+	// Seed is the run's seed, when it drew from one: aat run plan --seed
+	// replays its picks.
+	Seed uint64 `json:"seed,omitempty"`
+	// FuzzSaved lists the regression plans --fuzz-save wrote for the run,
+	// and FuzzSaveError says why one could not be written.
+	FuzzSaved     []string `json:"fuzz_saved,omitempty"`
+	FuzzSaveError string   `json:"fuzz_save_error,omitempty"`
 }
 
 // BatchStats is the aggregate counts in the batch JSON summary.
@@ -294,6 +302,12 @@ func executeBatch(ba *batchArgs) int {
 		_, _ = fmt.Fprintln(os.Stdout)
 		if res.batchDir != "" {
 			_, _ = fmt.Fprintf(os.Stdout, "Archive: %s\n", res.batchDir)
+		}
+		if res.summary.Seed != 0 {
+			_, _ = fmt.Fprintf(os.Stdout, "Seed: %d\n", res.summary.Seed)
+		}
+		for _, r := range res.summary.Runs {
+			writeFuzzSaved(os.Stdout, os.Stderr, specDisplayName(r.PlanName, r.Permutation), r.FuzzSaved, r.FuzzSaveError)
 		}
 		if res.err != nil {
 			fmt.Fprintf(os.Stderr, "aat: %s\n", res.err)
@@ -455,15 +469,16 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		}
 	}
 
-	// 3b. Shuffle specs if requested
+	// 3b. Shuffle specs if requested. Without --seed, the shuffle picks a seed
+	// and the runs draw from it as they would from --seed, so the one seed
+	// it logs replays the order and every run's picks.
 	if args.Shuffle {
-		seed := args.Seed
-		if seed == 0 {
-			seed = time.Now().UnixNano()
+		if args.Seed == 0 {
+			args.Seed = int64(engine.NewRunSeed())
 		}
-		rng := rand.New(rand.NewSource(seed))
+		rng := rand.New(rand.NewSource(args.Seed))
 		rng.Shuffle(len(specs), func(i, j int) { specs[i], specs[j] = specs[j], specs[i] })
-		logf("aat: shuffled %d specs (seed=%d)\n", len(specs), seed)
+		logf("aat: shuffled %d specs (seed=%d)\n", len(specs), args.Seed)
 	}
 
 	// 4. Generate batch ID and create batch directory
@@ -557,6 +572,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			ToolVersion: version.Effective(),
 			Layers:      args.Layers,
 			LayerGroups: args.LayerGroups,
+			Seed:        args.Seed,
 		},
 		Runs: batchEntries,
 		Result: archive.BatchResult{
@@ -592,11 +608,18 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	}
 	logf(" (%s)\n", formatDuration(totalDur))
 	logf("Archive: %s\n", batchDir)
+	if args.Seed != 0 {
+		logf("Seed: %d (replay the batch's order and picks with --seed %d)\n", args.Seed, args.Seed)
+	}
+	for _, r := range runs {
+		writeFuzzSaved(out, os.Stderr, specDisplayName(r.PlanName, r.Permutation), r.FuzzSaved, r.FuzzSaveError)
+	}
 
 	summary := &BatchSummary{
 		Outcome:     aggregateOutcome,
 		Error:       errString(fuzzErr),
 		BatchID:     batchID,
+		Seed:        args.Seed,
 		Runs:        runs,
 		Summary:     stats,
 		ArchivePath: batchDir,
@@ -774,11 +797,12 @@ func specRunContext(rctx *runContext, spec batchRunSpec, batchSeed int64) *runCo
 }
 
 // runSeed derives a batch run's seed from the batch seed and the run's plan
-// and permutation. It keeps to 53 bits, as engine.NewRunSeed does.
+// and permutation. It keeps to 53 bits, as engine.NewRunSeed does, and is
+// never 0, which reads as no seed.
 func runSeed(batchSeed int64, planPath, permutation string) uint64 {
 	h := fnv.New64a()
 	_, _ = fmt.Fprintf(h, "%d\x00%s\x00%s", batchSeed, planPath, permutation)
-	return h.Sum64() >> 11
+	return max(h.Sum64()>>11, 1)
 }
 
 // buildPlanResult constructs BatchRunResult and BatchRunEntry from a runResult.
@@ -795,6 +819,9 @@ func buildPlanResult(planName, permutation string, res *runResult) (BatchRunResu
 
 	if res.summary != nil {
 		br.Outcome = res.summary.Outcome
+		br.Seed = res.summary.Seed
+		br.FuzzSaved, br.FuzzSaveError = res.summary.FuzzSaved, res.summary.FuzzSaveError
+		be.Seed = res.summary.Seed
 		br.StepCount = res.summary.Summary.TotalSteps
 		br.PassedSteps = res.summary.Summary.PassedSteps
 		br.FailedSteps = res.summary.Summary.FailedSteps

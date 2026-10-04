@@ -959,6 +959,50 @@ func TestShuffleDifferentFromOriginal(t *testing.T) {
 	assert.ElementsMatch(t, origOrder, shuffledOrder, "should contain the same plans")
 }
 
+// TestShuffleWithoutSeedReplaysWithTheOneItLogs checks that a shuffle without
+// --seed picks one seed for the order and the runs, and reports it, so passing
+// it back replays both.
+func TestShuffleWithoutSeedReplaysWithTheOneItLogs(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+	}))
+	defer apiServer.Close()
+
+	planDir := t.TempDir()
+	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta"} {
+		writeFile(t, filepath.Join(planDir, name+".yaml"),
+			"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: "+name+"\n")
+	}
+	envFile := writeTestEnv(t, "none", apiServer.URL)
+	run := func(seed int64) *batchResult {
+		res := batchCommand(context.Background(), &batchArgs{
+			runArgs:  runArgs{EnvPath: envFile, GraphPath: "testdata/test_graph.yaml", TemplatesPath: "testdata/templates", OutputDir: filepath.Join(t.TempDir(), "runs")},
+			PlanDirs: []string{planDir},
+			Shuffle:  true,
+			Seed:     seed,
+		}, io.Discard)
+		require.NotNil(t, res.summary)
+		return res
+	}
+	order := func(res *batchResult) []string {
+		var names []string
+		for _, r := range res.summary.Runs {
+			names = append(names, r.PlanName)
+		}
+		return names
+	}
+
+	first := run(0)
+	require.NotZero(t, first.summary.Seed, "the seed the shuffle picked is reported")
+	again := run(first.summary.Seed)
+	assert.Equal(t, order(first), order(again))
+
+	batch, err := archive.ReadBatch(filepath.Join(first.batchDir, "batch.json"))
+	require.NoError(t, err)
+	assert.Equal(t, first.summary.Seed, batch.Metadata.Seed)
+}
+
 // --- Helpers ---
 
 func writeFile(t *testing.T, path, content string) {
@@ -975,6 +1019,7 @@ func TestRunSeed(t *testing.T) {
 	assert.NotEqual(t, base, runSeed(7, "plans/other.yaml", ""), "each plan gets its own")
 	assert.NotEqual(t, base, runSeed(7, "plans/smoke.yaml", "eu"), "each permutation gets its own")
 	assert.Less(t, base, uint64(1)<<53)
+	assert.NotZero(t, base, "0 reads as no seed")
 }
 
 func TestSpecRunContext_Seed(t *testing.T) {

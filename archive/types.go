@@ -444,6 +444,9 @@ type BatchMetadata struct {
 	ToolVersion string     `json:"toolVersion,omitempty" redact:"-"`
 	Layers      []string   `json:"layers,omitempty" redact:"-"`      // CLI layers applied at the batch level
 	LayerGroups [][]string `json:"layerGroups,omitempty" redact:"-"` // layer groups for permutation
+	// Seed is the batch's seed, when it had one: --seed replays its order and
+	// its runs' picks.
+	Seed int64 `json:"seed,omitempty" redact:"-"`
 }
 
 // BatchRunEntry is a summary of a single run within a batch.
@@ -462,6 +465,8 @@ type BatchRunEntry struct {
 	Skipped     bool           `json:"skipped,omitempty"`                // true if this run was skipped as a duplicate
 	DuplicateOf string         `json:"duplicateOf,omitempty" redact:"-"` // display name of canonical run (when skipped)
 	Issues      map[string]int `json:"issues,omitempty"`
+	// Seed is the run's seed, when it drew from one.
+	Seed uint64 `json:"seed,omitempty" redact:"-"`
 }
 
 // BatchResult captures the aggregate outcome of a batch.

@@ -85,6 +85,10 @@ type RunSummary struct {
 	ArchivePath string       `json:"archive_path,omitempty"`
 	// Fuzz counts the run's fuzz cases by finding, when it had any.
 	Fuzz *FuzzRunSummary `json:"fuzz,omitempty"`
+	// FuzzSaved lists the regression plans --fuzz-save wrote, and
+	// FuzzSaveError says why one could not be written.
+	FuzzSaved     []string `json:"fuzz_saved,omitempty"`
+	FuzzSaveError string   `json:"fuzz_save_error,omitempty"`
 	// Seed is what `aat run plan --seed` takes to replay the run's pool picks
 	// and random selections; set when the run made such a choice.
 	Seed      uint64 `json:"seed,omitempty"`
@@ -1200,8 +1204,10 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 	if result.DrewRandomly() {
 		logf("Seed: %d (replay its picks with --seed %d)\n", result.Seed, result.Seed)
 	}
+	var saved []string
+	var saveErr error
 	if rctx.FuzzSave != "" {
-		saved, saveErr := saveFuzzFindings(p, result, fuzzSaveOptions{
+		saved, saveErr = saveFuzzFindings(p, result, fuzzSaveOptions{
 			Dir: rctx.FuzzSave, All: rctx.FuzzSaveAll, PlanPath: planPath, PlanName: rctx.PlanName, Layers: effectiveLayers, Seed: result.Seed,
 		})
 		for _, path := range saved {
@@ -1217,6 +1223,7 @@ func loadAndRunPlanToDir(ctx context.Context, rctx *runContext, planPath, runDir
 
 	// Build machine-readable summary
 	summary := buildRunSummary(result, archivePath)
+	summary.FuzzSaved, summary.FuzzSaveError = saved, errString(saveErr)
 
 	// 8b. Dump accumulated run state for external harness consumption.
 	// A path of "-" means stdout: attach the export to the summary so it is

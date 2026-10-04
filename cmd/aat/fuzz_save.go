@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -90,6 +91,21 @@ func pinnedPlan(p *plan.Plan, result *engine.RunResult, f *engine.FuzzResult, op
 	}
 	cp.Intent.Description = desc
 	return cp, nil
+}
+
+// writeFuzzSaved prints the regression plans --fuzz-save wrote, to out, and
+// why one could not be written, to errOut. label, when set, names the run, as
+// a batch needs.
+func writeFuzzSaved(out, errOut io.Writer, label string, saved []string, saveErr string) {
+	for _, path := range saved {
+		_, _ = fmt.Fprintf(out, "Saved fuzz regression plan: %s\n", path)
+	}
+	if saveErr != "" {
+		if label != "" {
+			label += ": "
+		}
+		_, _ = fmt.Fprintf(errOut, "aat: warning: %sfuzz regression plan not written: %s\n", label, saveErr)
+	}
 }
 
 var unsafeFileChars = regexp.MustCompile(`[^A-Za-z0-9._+-]+`)

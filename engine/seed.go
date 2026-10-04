@@ -21,9 +21,13 @@ func (e *Engine) WithSeed(seed uint64) *Engine {
 
 // NewRunSeed returns a random seed for a run that was given none. It keeps to
 // 53 bits so the number survives JSON readers that hold it as a float, such
-// as the web UI.
+// as the web UI, and is never 0, which every --seed flag reads as "pick one".
 func NewRunSeed() uint64 {
-	return rand.Uint64() >> 11
+	for {
+		if seed := rand.Uint64() >> 11; seed != 0 {
+			return seed
+		}
+	}
 }
 
 // stepDraws hands each resolution of a step its own random source, derived

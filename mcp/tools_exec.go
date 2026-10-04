@@ -299,8 +299,10 @@ func (s *Server) loadNamedPlan(name string) (*plan.Plan, map[string]*graph.Input
 	if err != nil {
 		return nil, nil, err
 	}
+	// The validation error says what failed: "plan validation failed:" and
+	// the list. It is wrapped, not flattened, so a caller can still read it.
 	if _, err := plan.InstantiateAndValidateWithLayers(p, s.ctx.Graph, layeredDefaults); err != nil {
-		return nil, nil, fmt.Errorf("plan validation failed:\n%v", err)
+		return nil, nil, fmt.Errorf("plan %s: %w", name, err)
 	}
 	return p, layeredDefaults, nil
 }
