@@ -268,8 +268,9 @@ func header(id string) plan.PinnedFuzzCase {
 	return plan.PinnedFuzzCase{ID: id, Mode: plan.FuzzEdge, Patch: []plan.RequestPatch{{Where: "header", Path: "X-Case", Op: "set", Value: id}}}
 }
 
-// TestFuzzReuse_ReadOnlyTargetKeepsItsSetup checks that cases the API accepts
-// on a target that only reads leave the setup as it was.
+// TestFuzzReuse_ReadOnlyTargetKeepsItsSetup checks that the cases of a
+// target that only reads run on the happy path's own setup under reuse: they
+// can't change it, so a copy would protect nothing. Isolated still copies.
 func TestFuzzReuse_ReadOnlyTargetKeepsItsSetup(t *testing.T) {
 	eng, api := buildTravelEngine(t)
 	p := travelPlan()
@@ -278,12 +279,21 @@ func TestFuzzReuse_ReadOnlyTargetKeepsItsSetup(t *testing.T) {
 		FuzzSettings: &plan.FuzzSettings{Pinned: []plan.PinnedFuzzCase{header("h.a"), header("h.b"), header("h.c")}}})
 	result := eng.Run(context.Background(), p)
 	require.NoError(t, result.Error)
-	assert.Equal(t, []string{SetupFresh, SetupReused, SetupReused}, setups(result))
-	assert.Equal(t, 2, api.creates)
+	assert.Equal(t, []string{"", "", ""}, setups(result))
+	assert.Equal(t, 1, api.creates, "no copy of the reservation")
+	assert.Empty(t, result.FuzzWarnings, "shared is not warned about on a target that only reads")
+
+	eng, api = buildTravelEngine(t)
+	p.Execution.Steps[4].FuzzSettings.Scope = plan.FuzzScopeIsolated
+	result = eng.Run(context.Background(), p)
+	require.NoError(t, result.Error)
+	assert.Equal(t, []string{SetupFresh, SetupFresh, SetupFresh}, setups(result))
+	assert.Equal(t, 4, api.creates)
 }
 
 // TestFuzzReuse_ExpectFailureCopyEndsOnlyItsCase checks that a setup copy of
-// an expectFailure step that gets a success ends its case, not the run.
+// an expectFailure step the target depends on, which gets a success, ends its
+// case, not the run.
 func TestFuzzReuse_ExpectFailureCopyEndsOnlyItsCase(t *testing.T) {
 	eng, api := buildTravelEngine(t)
 	api.roomyCopies = true // the happy path's third traveler is refused; a copy's is not
@@ -291,8 +301,8 @@ func TestFuzzReuse_ExpectFailureCopyEndsOnlyItsCase(t *testing.T) {
 	p.Execution.Steps = append(p.Execution.Steps,
 		plan.Step{ID: "t3", Node: "addTraveler", Values: map[string]plan.StepValue{"reservationId": {From: "res.id"}, "name": {Default: "Cy"}},
 			ExpectFailure: &plan.ExpectFailure{Status: plan.ExpectedStatuses{{Code: 409}}}},
-		plan.Step{ID: "read", Node: "getReservation", Values: map[string]plan.StepValue{"reservationId": {From: "res.id"}},
-			FuzzSettings: &plan.FuzzSettings{Pinned: []plan.PinnedFuzzCase{header("h.a")}}},
+		plan.Step{ID: "read", Node: "getReservation", Values: map[string]plan.StepValue{"reservationId": {From: "res.id"}}, DependsOn: []string{"t3"},
+			FuzzSettings: &plan.FuzzSettings{Scope: plan.FuzzScopeIsolated, Pinned: []plan.PinnedFuzzCase{header("h.a")}}},
 	)
 	result := eng.Run(context.Background(), p)
 	require.NoError(t, result.Error)

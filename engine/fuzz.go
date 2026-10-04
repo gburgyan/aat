@@ -327,15 +327,22 @@ func (e *Engine) expandFuzz(p *plan.Plan, seed uint64) error {
 		if scope == "" {
 			scope = plan.FuzzScopeReuse
 		}
-		if scope == plan.FuzzScopeShared && len(cases) > 0 && !e.readOnlyStep(step) {
+		readOnly := e.readOnlyStep(step)
+		if scope == plan.FuzzScopeShared && len(cases) > 0 && !readOnly {
 			e.fuzzRun.warnings = append(e.fuzzRun.warnings, fmt.Sprintf(
 				"fuzz scope shared on %s: each case the API accepts changes the state the rest of the plan sees; reuse or isolated keeps it apart",
 				step.StepID()))
 		}
-		if err := plan.ExpandFuzzCases(p, step.StepID(), cases, plan.FuzzExpandOptions{Scope: scope, ReadOnly: e.readOnlyStep}); err != nil {
+		// A target that only reads can't change its setup, so under reuse its
+		// cases all run on the happy path's own: a copy would protect nothing.
+		runOn := scope
+		if scope == plan.FuzzScopeReuse && readOnly {
+			runOn = plan.FuzzScopeShared
+		}
+		if err := plan.ExpandFuzzCases(p, step.StepID(), cases, plan.FuzzExpandOptions{Scope: runOn, ReadOnly: e.readOnlyStep}); err != nil {
 			return err
 		}
-		e.fuzzRun.groups[step.StepID()] = &fuzzGroup{scope: scope, readOnly: e.readOnlyStep(step), live: map[string]string{}}
+		e.fuzzRun.groups[step.StepID()] = &fuzzGroup{scope: runOn, readOnly: readOnly, live: map[string]string{}}
 		e.fuzzJudge[step.StepID()] = fuzzJudging{fail: fail, accept: block.Accept}
 		e.fuzzRun.settings[step.StepID()] = plan.FuzzSettings{Scope: scope, Fail: fail, Accept: block.Accept}
 		for name, sv := range step.Values {

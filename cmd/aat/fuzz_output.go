@@ -39,6 +39,18 @@ func quietSetupCopy(r engine.StepResult) bool {
 	return r.FuzzSetup != "" && !r.FuzzSetupFailed
 }
 
+// countedSteps counts a run's steps as its progress lines number them: every
+// step but the copies of setup steps made for fuzz cases.
+func countedSteps(steps []engine.StepResult) int {
+	n := 0
+	for _, s := range steps {
+		if s.FuzzSetup == "" {
+			n++
+		}
+	}
+	return n
+}
+
 // writeFuzzWarnings prints the problems with how a run fuzzed.
 func writeFuzzWarnings(w io.Writer, lead string, warnings []string, color bool) {
 	for _, msg := range warnings {

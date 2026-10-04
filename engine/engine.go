@@ -242,13 +242,28 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		}
 	}()
 	verificationSteps := plan.VerificationSteps(instantiatedPlan, e.graph, e.layeredDefaults)
-	total := len(sorted) + len(verificationSteps)
+	// Progress counts the steps a reader follows: the plan's own, its fuzz
+	// cases, and its verification steps. A copy of a setup step made for a
+	// fuzz case has no number of its own, since most are reused or hidden: it
+	// takes the number of the step after it, the case it was made for.
+	counted := 0
+	for _, step := range sorted {
+		if step.FuzzSetup == "" {
+			counted++
+		}
+	}
+	total := counted + len(verificationSteps)
+	position := 0
 
 	if e.Observer != nil {
 		e.Observer.OnRunStart(total)
 	}
 
-	for i, step := range sorted {
+	for _, step := range sorted {
+		i := position
+		if step.FuzzSetup == "" {
+			position++
+		}
 		if ctx.Err() != nil {
 			return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 		}
@@ -527,7 +542,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 
 	// Main flow complete — run verification steps (read-only checks with their
 	// own assertions), then cleanup.
-	verResults, verOutcome, verErr := e.runVerification(ctx, verificationSteps, state, len(sorted), total)
+	verResults, verOutcome, verErr := e.runVerification(ctx, verificationSteps, state, counted, total)
 	stepResults = append(stepResults, verResults...)
 	if verOutcome == OutcomeError && ctx.Err() != nil {
 		return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
@@ -601,8 +616,18 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 	}
 
 	// steps holds a result for each main step that ran, in plan order, and then
-	// the verification results.
-	mainSteps := steps[:min(len(steps), len(p.Execution.Steps))]
+	// the verification results. A fuzz setup copy that was reused has no
+	// result, so the main steps are told apart by ID, not counted off.
+	planIDs := make(map[string]bool, len(p.Execution.Steps))
+	for _, s := range p.Execution.Steps {
+		planIDs[s.StepID()] = true
+	}
+	var mainSteps []StepResult
+	for _, r := range steps {
+		if planIDs[r.StepID] {
+			mainSteps = append(mainSteps, r)
+		}
+	}
 	run := newCleanupRun(e.planStepIDs(p), allow, mainSteps)
 	results := make([]StepResult, 0, total)
 	for _, entry := range planEntries {

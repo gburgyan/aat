@@ -62,8 +62,10 @@ type RequestPatch struct {
 // every earlier step that builds on those, with their own prerequisites, in
 // plan order. A step that adds an item to a cart the target checks out is
 // part of the setup even when the target reads nothing from it. A step builds
-// on the setup only through a step that changes something: one that depends
-// only on read-only steps, as readOnly reports them, is left out. Fuzz steps
+// on the setup only when it changes something, through a step that changes
+// something: one that only reads, as readOnly reports it, one that expects to
+// be refused, such as a mutation's negative sibling, and one that depends only
+// on read-only steps are left out, unless the target needs them. Fuzz steps
 // and the copies made for other cases are never part of it.
 func fuzzSetupClosure(steps []Step, idx int, byID map[string]Step, readOnly func(Step) bool) []Step {
 	in := map[string]bool{}
@@ -73,7 +75,8 @@ func fuzzSetupClosure(steps []Step, idx int, byID map[string]Step, readOnly func
 	for changed := true; changed; {
 		changed = false
 		for _, s := range steps[:idx] {
-			if in[s.StepID()] || s.Fuzz != nil || s.FuzzSetup != "" || s.IsSlotMarker() {
+			if in[s.StepID()] || s.Fuzz != nil || s.FuzzSetup != "" || s.IsSlotMarker() ||
+				s.ExpectFailure != nil || readOnly != nil && readOnly(s) {
 				continue
 			}
 			builds := false

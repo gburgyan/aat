@@ -2,8 +2,10 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -181,4 +183,105 @@ func TestFuzz_FailureSurvivesAnEarlyEnd(t *testing.T) {
 	result := eng.Run(context.Background(), p)
 	assert.Equal(t, OutcomeFailed, result.Outcome)
 	assert.EqualError(t, result.Error, "fuzzing found 1 server-error")
+}
+
+// TestFuzz_ProgressCountsWhatAReaderFollows checks that progress numbers the
+// plan's steps and fuzz cases one after another, with a total that holds no
+// setup copies: a copy takes the number of the case it was made for.
+func TestFuzz_ProgressCountsWhatAReaderFollows(t *testing.T) {
+	eng, _ := buildTravelEngine(t)
+	obs := &recordingObserver{}
+	eng.WithProgress(obs)
+	result := eng.Run(context.Background(), travelPlan(
+		name("name.empty", plan.FuzzNegative, ""), name("name.ok", plan.FuzzPositive, "Lin"), name("name.empty2", plan.FuzzNegative, "")))
+	require.NoError(t, result.Error)
+
+	require.Equal(t, "run_start", obs.events[0].kind)
+	assert.Equal(t, 7, obs.events[0].total, "four plan steps and three cases")
+	var caseIndexes, copyIndexes []int
+	for _, ev := range obs.events {
+		if ev.kind != "step_complete" {
+			continue
+		}
+		assert.Equal(t, 7, ev.total)
+		r := result.Steps[len(caseIndexes)+len(copyIndexes)]
+		if r.FuzzSetup != "" {
+			copyIndexes = append(copyIndexes, ev.index)
+			continue
+		}
+		caseIndexes = append(caseIndexes, ev.index)
+	}
+	assert.Equal(t, []int{0, 1, 2, 3, 4, 5, 6}, caseIndexes)
+	assert.NotEmpty(t, copyIndexes)
+	for _, idx := range copyIndexes {
+		assert.Contains(t, []int{4, 5, 6}, idx, "a copy takes its case's number")
+	}
+}
+
+// TestFuzz_VerificationNeverReleasesACleanup checks that when reuse leaves a
+// setup copy unsent, a verification step is still not taken for a main step
+// that released a resource: the steps are told apart by ID, not counted off.
+func TestFuzz_VerificationNeverReleasesACleanup(t *testing.T) {
+	var mu sync.Mutex
+	var deletes []string
+	creates := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete:
+			deletes = append(deletes, r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
+		case r.URL.Path == "/things":
+			creates++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":"t` + strconv.Itoa(creates) + `"}`))
+		default:
+			var body struct {
+				Tag string `json:"tag"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Tag == "" {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+			_, _ = w.Write([]byte(`{}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+	g := &graph.Graph{Version: "1.0.0", Nodes: map[string]*graph.Node{
+		"createThing": {Name: "createThing", Adapter: "t.createThing", Outputs: []graph.Output{{Name: "id", Type: "string"}},
+			Cleanup: graph.CleanupPairing{Node: "deleteThing"}},
+		"deleteThing": {Name: "deleteThing", Adapter: "t.deleteThing", Inputs: []graph.Input{{Name: "id", Type: "string"}}},
+		"tagThing": {Name: "tagThing", Adapter: "t.tagThing", Inputs: []graph.Input{
+			{Name: "id", Type: "string"}, {Name: "tag", Type: "string", Default: &graph.InputDefault{Value: "red"}}}},
+	}}
+	registry := adapter.NewRegistry()
+	for name, tmpl := range map[string]adapter.Template{
+		"t.createThing": {Request: adapter.TemplateRequest{Method: "POST", Path: "/things"},
+			Response: adapter.TemplateResponse{Extract: map[string]adapter.ExtractRule{"id": {Path: "id"}}}},
+		"t.deleteThing": {Request: adapter.TemplateRequest{Method: "DELETE", Path: "/things/{{id}}"}},
+		"t.tagThing":    {Request: adapter.TemplateRequest{Method: "POST", Path: "/things/{{id}}/tags", Body: `{"tag": "{{tag}}"}`}},
+	} {
+		tmpl.Adapter, tmpl.Protocol = name, "http"
+		require.NoError(t, registry.Register(name, adapter.NewTemplateAdapter(tmpl)))
+	}
+	eng := NewEngine(g, registry, NewExecutorRouter(adapter.NewHTTPExecutor(server.URL), &adapter.EnvironmentConfig{}))
+	p := &plan.Plan{Metadata: plan.Metadata{GraphVersion: "1.0.0"}, Execution: plan.Execution{
+		Steps: []plan.Step{
+			{ID: "thing", Node: "createThing"},
+			{ID: "tag", Node: "tagThing", Values: map[string]plan.StepValue{"id": {From: "thing.id"}},
+				FuzzSettings: &plan.FuzzSettings{Pinned: []plan.PinnedFuzzCase{
+					{ID: "tag.a", Mode: plan.FuzzNegative, Input: "tag", Value: ""},
+					{ID: "tag.b", Mode: plan.FuzzNegative, Input: "tag", Value: ""},
+				}}},
+		},
+		Verification: []plan.VerificationStep{{Node: "deleteThing", Values: map[string]plan.StepValue{"id": {From: "thing.id"}}}},
+	}}
+	result := eng.Run(context.Background(), p)
+	require.NoError(t, result.Error)
+	require.Equal(t, 1, result.FuzzCopiesSkipped, "the second case reused the first's copy")
+	assert.Empty(t, result.CleanupSkipped, "the verification's DELETE released nothing a main step made")
+	assert.ElementsMatch(t, []string{"/things/t1", "/things/t2", "/things/t1"}, deletes,
+		"the verification deletes t1, then cleanup deletes the copy's t2 and t1 as registered")
 }

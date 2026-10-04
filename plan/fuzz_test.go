@@ -286,3 +286,32 @@ func TestExpandFuzzCases_PrerequisiteListedAfterTheTarget(t *testing.T) {
 	assert.Equal(t, []string{"add", "cart__add__fuzz_q_zero", "add__fuzz_q_zero", "cart"}, stepIDs(p))
 	assert.Equal(t, "cart__add__fuzz_q_zero.cartId", p.Execution.Steps[2].Values["cartId"].From, "the case reads its own cart")
 }
+
+// TestExpandFuzzCases_SetupLeavesOutStepsThatBuildNothing checks that a step
+// that only reads, or expects to be refused, is not copied for a case when
+// the target doesn't need it: it changes nothing the case works on.
+func TestExpandFuzzCases_SetupLeavesOutStepsThatBuildNothing(t *testing.T) {
+	p := &Plan{Execution: Execution{Steps: []Step{
+		{ID: "cart", Node: "createCart"},
+		{ID: "item", Node: "addItem", DependsOn: []string{"cart"}},
+		{ID: "view", Node: "getCart", DependsOn: []string{"cart"}},
+		{ID: "item--neg", Node: "addItem", DependsOn: []string{"cart"}, VariantOf: "item",
+			ExpectFailure: &ExpectFailure{Status: ExpectedStatuses{{Code: 400}}}},
+		{ID: "order", Node: "checkout", DependsOn: []string{"cart"}},
+	}}}
+	readOnly := func(s Step) bool { return s.Node == "getCart" }
+	require.NoError(t, ExpandFuzzCases(p, "order", []FuzzCase{{ID: "q.a", Mode: FuzzEdge, Input: "tier", Value: "x"}},
+		FuzzExpandOptions{Scope: FuzzScopeIsolated, ReadOnly: readOnly}))
+	assert.Equal(t, []string{"cart", "item", "view", "item--neg", "order",
+		"cart__order__fuzz_q_a", "item__order__fuzz_q_a", "order__fuzz_q_a"}, stepIDs(p))
+
+	// A step the target depends on is copied whatever it is.
+	p = &Plan{Execution: Execution{Steps: []Step{
+		{ID: "cart", Node: "createCart"},
+		{ID: "view", Node: "getCart", DependsOn: []string{"cart"}},
+		{ID: "order", Node: "checkout", DependsOn: []string{"cart", "view"}},
+	}}}
+	require.NoError(t, ExpandFuzzCases(p, "order", []FuzzCase{{ID: "q.a", Mode: FuzzEdge, Input: "tier", Value: "x"}},
+		FuzzExpandOptions{Scope: FuzzScopeIsolated, ReadOnly: readOnly}))
+	assert.Contains(t, stepIDs(p), "view__order__fuzz_q_a")
+}

@@ -56,11 +56,10 @@ func (o *CLIProgressObserver) OnCleanupSkipped(skip engine.CleanupSkip) {
 func (o *CLIProgressObserver) OnRunComplete(result *engine.RunResult) {
 	color := o.term.IsTTY
 	_, _ = fmt.Fprintln(o.out)
-	total := len(result.Steps)
-	// steps the run meant to execute, for ABORTED and STOPPED: setup copies a
-	// fuzz case reused, or skipped once its setup failed, were never meant to
-	// be sent
-	planned := max(o.total-result.FuzzCopiesSkipped, total)
+	// Steps are counted as progress counts them: without the copies of setup
+	// steps made for fuzz cases, which the fuzz summary's setup counts.
+	total := countedSteps(result.Steps)
+	planned := max(o.total, total)
 	elapsed := formatDuration(result.Elapsed())
 	switch result.Outcome {
 	case engine.OutcomePassed:

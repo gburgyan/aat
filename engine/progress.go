@@ -7,10 +7,13 @@ import "github.com/gburgyan/aat/plan"
 // Implementations must not block for extended periods.
 type ProgressObserver interface {
 	// OnRunStart is called once at the beginning of execution with the total
-	// number of steps.
+	// number of steps: the plan's own, its fuzz cases, and its verification
+	// steps, but not the copies of setup steps made for fuzz cases.
 	OnRunStart(total int)
 
-	// OnStepStart is called immediately before a step begins execution.
+	// OnStepStart is called immediately before a step begins execution. A
+	// copy of a setup step made for a fuzz case has the index of the step
+	// after it.
 	OnStepStart(index, total int, step plan.Step)
 
 	// OnStepComplete is called after a step finishes (success or failure).
