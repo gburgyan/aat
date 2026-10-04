@@ -20,7 +20,11 @@ func fuzzNote(result engine.StepResult, color bool) string {
 	if f.JudgedAs != "" && f.JudgedAs != judged {
 		judged += "→" + f.JudgedAs
 	}
-	mode := colorize("fuzz "+f.Case.ID+" ("+judged+")", colorDim, color)
+	label := "fuzz " + f.Case.ID + " (" + judged + ")"
+	if f.Setup == engine.SetupRebuilt {
+		label += ", setup rebuilt"
+	}
+	mode := colorize(label, colorDim, color)
 	switch {
 	case f.Fails:
 		return mode + " " + colorize(strings.ToUpper(f.Finding), colorRed, color)

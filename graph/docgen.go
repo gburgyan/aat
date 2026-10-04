@@ -345,6 +345,12 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 				}
 				details += "status: " + statuses
 			}
+			if rule.Stale {
+				if details != "" {
+					details += ", "
+				}
+				details += "stale"
+			}
 			ruleStr := rule.Rule
 			if rule.Rule == "equals" && rule.Value != nil {
 				ruleStr = fmt.Sprintf("equals %v", rule.Value)

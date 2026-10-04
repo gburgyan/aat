@@ -117,6 +117,9 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 		if s.ResponseBodyError.Status != 0 {
 			fmt.Fprintf(&b, "  Treated as: status %d\n", s.ResponseBodyError.Status)
 		}
+		if s.ResponseBodyError.Stale {
+			b.WriteString("  Stale: the state the request worked on is used up\n")
+		}
 		b.WriteString("\n")
 	}
 

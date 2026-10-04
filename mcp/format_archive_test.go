@@ -439,7 +439,12 @@ func TestFormatStepRecord_BodyErrorStatus(t *testing.T) {
 	step.ResponseBodyError = &archive.ResponseBodyErrorRecord{RulePath: "*.result.errors", Rule: "non-empty",
 		Message: "email is not valid", Category: "VALIDATION", Status: 400}
 	assert.Contains(t, formatStepRecord(&step, 1, 1), "Treated as: status 400")
+	assert.NotContains(t, formatStepRecord(&step, 1, 1), "Stale")
 	assert.Len(t, findFailedSteps([]archive.StepRecord{step}), 1)
+
+	step.ResponseBodyError.Stale = true
+	assert.Contains(t, formatStepRecord(&step, 1, 1), "Stale: the state the request worked on is used up")
+	step.ResponseBodyError.Stale = false
 
 	step.ExpectFailure = &archive.ExpectFailureRecord{Actual: 400, Passed: true}
 	assert.Empty(t, findFailedSteps([]archive.StepRecord{step}), "the failure it expected")

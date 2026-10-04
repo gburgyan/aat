@@ -1328,6 +1328,7 @@ func toResponseBodyErrorDetail(r *archive.ResponseBodyErrorRecord) *ResponseBody
 		Code:     r.Code,
 		Category: r.Category,
 		Status:   r.Status,
+		Stale:    r.Stale,
 	}
 }
 

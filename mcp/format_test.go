@@ -139,6 +139,16 @@ func TestFormatOutputTable(t *testing.T) {
 	}
 }
 
+// TestFormatNodeDetail_StaleRule checks that node detail marks a rule whose
+// errors mean the state the request worked on is used up.
+func TestFormatNodeDetail_StaleRule(t *testing.T) {
+	g := &graph.Graph{
+		ErrorDetection: []graph.ErrorDetectionRule{{Path: "error.code", Rule: "equals", Value: "EXPIRED", Stale: true}},
+		Nodes:          map[string]*graph.Node{"addTraveler": {Name: "addTraveler"}},
+	}
+	assert.Contains(t, formatNodeDetail(g.Nodes["addTraveler"], g), "- Path: `error.code`, Rule: equals EXPIRED, stale\n")
+}
+
 func TestFormatNodeDetail(t *testing.T) {
 	t.Run("full node", func(t *testing.T) {
 		g := &graph.Graph{

@@ -428,6 +428,11 @@ type ErrorDetectionRule struct {
 	// ErrorStatus, written on the rule as status and categories, gives what
 	// the rule detects the HTTP status it stands for.
 	ErrorStatus ErrorStatus `yaml:",inline"`
+	// Stale says the error means the state the request worked on is used up,
+	// such as an expired session or a full reservation, rather than that the
+	// request was wrong. A fuzz case that gets one on a reused setup is sent
+	// again on a fresh one.
+	Stale bool `yaml:"stale,omitempty"`
 }
 
 // ErrorStatus gives an error detected in a successful response's body the

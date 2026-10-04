@@ -385,6 +385,24 @@ func TestStepResult_FailureStatus(t *testing.T) {
 	assert.Equal(t, "201", (&StepResult{StatusCode: 201}).StatusText())
 }
 
+// TestCheckErrorDetection_Stale checks that a rule's stale flag reaches the
+// error it detects, and the summary.
+func TestCheckErrorDetection_Stale(t *testing.T) {
+	rules := []graph.ErrorDetectionRule{
+		{Path: "error.code", Rule: "equals", Value: "EXPIRED", Stale: true},
+		{Path: "error", Rule: "exists"},
+	}
+	rbe := CheckErrorDetection(rules, []byte(`{"error":{"code":"EXPIRED"}}`))
+	require.NotNil(t, rbe)
+	assert.True(t, rbe.Stale)
+	assert.Equal(t, `response body error detected at "error.code" (rule: equals, stale)`, rbe.Summary())
+
+	rbe = CheckErrorDetection(rules, []byte(`{"error":{"code":"BAD_NAME"}}`))
+	require.NotNil(t, rbe)
+	assert.False(t, rbe.Stale)
+	assert.Equal(t, `response body error detected at "error" (rule: exists)`, rbe.Summary())
+}
+
 func TestResponseBodyError_SummaryWithStatus(t *testing.T) {
 	rbe := &ResponseBodyError{RulePath: "*.result.errors", Rule: "non-empty", Message: "email is not valid", Code: "E102",
 		Category: "VALIDATION", Status: 400}

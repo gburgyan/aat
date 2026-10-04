@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -354,6 +355,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			skipped := StepResult{StepID: step.StepID(), Node: step.Node, Error: fmt.Errorf("not sent: %s", reason), StartTime: time.Now()}
 			skipped.Fuzz = e.judgeFuzz(step, node, &skipped)
 			skipped.Fuzz.Setup = SetupFailed
+			skipped.Fuzz.Stale = e.fuzzRun.stale[step.StepID()]
 			stepResults = append(stepResults, skipped)
 			if e.Observer != nil {
 				e.Observer.OnStepStart(i, total, step)
@@ -428,8 +430,18 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				stepResults = append(stepResults, stepResult)
 				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 			}
+			// A reused setup that turned out to be used up is built afresh
+			// and the case sent again: its copies and the case go next, the
+			// copies no longer skipped, and the case keeps its number.
+			if copies := e.fuzzRun.rebuild(step, &stepResult); copies != nil {
+				queue = slices.Insert(queue, idx+1, append(copies, queue[idx])...)
+				copiesSkipped -= len(copies)
+				position--
+				continue
+			}
 			stepResult.Fuzz = e.judgeFuzz(step, node, &stepResult)
 			stepResult.Fuzz.Setup = e.fuzzRun.caseSetup[step.StepID()]
+			stepResult.Fuzz.Stale = e.fuzzRun.stale[step.StepID()]
 			e.fuzzRun.caseJudged(step, &stepResult)
 			if stepResult.Fuzz.Fails && outcome == OutcomePassed {
 				outcome = OutcomeFailed

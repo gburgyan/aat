@@ -1228,6 +1228,26 @@ func TestToStepSummary_BodyError(t *testing.T) {
 	assert.Contains(t, toStepSummary(step).Error, "got 400")
 }
 
+// TestToStepSummary_FuzzStale checks that a rebuilt case's JSON summary
+// says what the setup it reused answered, and that its progress line says the
+// setup was rebuilt.
+func TestToStepSummary_FuzzStale(t *testing.T) {
+	step := engine.StepResult{StepID: "add__fuzz_name_ok", Node: "addItem", StatusCode: 201, Response: &adapter.Response{StatusCode: 201},
+		Fuzz: &engine.FuzzResult{Case: plan.FuzzCase{ID: "name.ok", Mode: plan.FuzzPositive, Input: "name", Value: "Lin", Target: "add"},
+			Setup: engine.SetupRebuilt, Stale: &engine.StaleAnswer{Status: 200,
+				BodyError: &engine.ResponseBodyError{RulePath: "error.code", Rule: "equals", Code: "FULL", Stale: true}}}}
+	ss := toStepSummary(step)
+	require.NotNil(t, ss.Fuzz)
+	assert.Equal(t, engine.SetupRebuilt, ss.Fuzz.Setup)
+	assert.Equal(t, &StaleSummary{Status: 200, BodyError: &BodyErrorSummary{RulePath: "error.code", Rule: "equals", Code: "FULL", Stale: true}},
+		ss.Fuzz.Stale)
+	assert.Nil(t, ss.BodyError, "the answer it was judged on reported none")
+
+	assert.Equal(t, "fuzz name.ok (positive), setup rebuilt", fuzzNote(step, false))
+	step.Fuzz.Setup, step.Fuzz.Stale = engine.SetupReused, nil
+	assert.Equal(t, "fuzz name.ok (positive)", fuzzNote(step, false))
+}
+
 // TestWriteStepResult_BodyError checks that a progress line marks a body
 // error and says what it was.
 func TestWriteStepResult_BodyError(t *testing.T) {

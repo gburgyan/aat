@@ -531,6 +531,9 @@ errorDetection:
     rule: non-empty
     details: {category: "*.result.errors.0.type"}
     categories: {VALIDATION: 400}
+  - path: "*.result.expired"
+    rule: exists
+    stale: true
 errorStatus:
   status: 500
   categories: {TEMPORARY: 503}
@@ -542,6 +545,7 @@ nodes:
 	require.NoError(t, err)
 	docs := GenerateDocs(g, nil)
 	assert.Contains(t, docs, "status: VALIDATION 400")
+	assert.Contains(t, docs, "| `*.result.expired` | exists | stale |")
 	assert.Contains(t, docs, "Errors a rule gives no status: TEMPORARY 503, otherwise 500 (graph `errorStatus`).")
 	assert.True(t, strings.Contains(docs, "`*.result.errors`"))
 }

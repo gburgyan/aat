@@ -225,6 +225,9 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 			if step.Response != nil {
 				status = step.StatusText()
 			}
+			if f.Setup == engine.SetupRebuilt {
+				status += ", setup rebuilt"
+			}
 			fmt.Fprintf(&b, "- `%s` on %s (%s, %s): %s -> %s\n", f.Case.ID, f.Case.Target, f.Case.Mode, f.Case.Describe(), f.Finding, status)
 		}
 	}

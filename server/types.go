@@ -366,6 +366,9 @@ type ResponseBodyErrorDetail struct {
 	Category string `json:"category,omitempty"`
 	// Status is the HTTP status the error stands for; 0 when none.
 	Status int `json:"status,omitempty"`
+	// Stale is set when the rule marks the error as one that means the state
+	// the request worked on is used up.
+	Stale bool `json:"stale,omitempty"`
 }
 
 // OASValidationDetail captures runtime OAS schema validation for a step.

@@ -404,6 +404,9 @@ errorDetection:
     details: {category: "*.result.errors.0.type"}
     status: 500
     categories: {VALIDATION: 400}
+  - path: "*.result.expired"
+    rule: exists
+    stale: true
 errorStatus:
   status: 502
   categories: {TEMPORARY: 503}
@@ -412,8 +415,10 @@ nodes:
     adapter: getUser
 `))
 	require.NoError(t, err)
-	require.Len(t, g.ErrorDetection, 1)
+	require.Len(t, g.ErrorDetection, 2)
 	assert.Equal(t, ErrorStatus{Status: 500, Categories: map[string]int{"VALIDATION": 400}}, g.ErrorDetection[0].ErrorStatus)
+	assert.False(t, g.ErrorDetection[0].Stale)
+	assert.True(t, g.ErrorDetection[1].Stale)
 	assert.Equal(t, &ErrorStatus{Status: 502, Categories: map[string]int{"TEMPORARY": 503}}, g.ErrorStatus)
 }
 
@@ -443,6 +448,11 @@ func TestParse_UnknownKeys(t *testing.T) {
 			name: "misspelled status on an error detection rule",
 			yaml: "version: 1.0.0\nerrorDetection:\n  - path: e\n    rule: exists\n    statuss: 500\n" + head[len("version: 1.0.0\n"):],
 			want: `line 5: unknown key "statuss" in error detection rule (did you mean "status"?)`,
+		},
+		{
+			name: "misspelled stale on an error detection rule",
+			yaml: "version: 1.0.0\nerrorDetection:\n  - path: e\n    rule: exists\n    stal: true\n" + head[len("version: 1.0.0\n"):],
+			want: `line 5: unknown key "stal" in error detection rule (did you mean "stale"?)`,
 		},
 		{
 			name: "misspelled categories in errorStatus",

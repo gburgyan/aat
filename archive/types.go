@@ -174,9 +174,19 @@ type FuzzRecord struct {
 	// OutputsError says why the outputs of a successful response could not
 	// be read; the case was judged on the response anyway.
 	OutputsError string `json:"outputsError,omitempty"`
-	// Setup is how the steps the case ran on came to be: fresh, reused, or
-	// failed; empty on the happy path's own.
+	// Setup is how the steps the case ran on came to be: fresh, reused,
+	// rebuilt, or failed; empty on the happy path's own.
 	Setup string `json:"setup,omitempty" redact:"-"`
+	// Stale is the answer the case got on a reused setup that turned out to
+	// be used up, before it was sent again on a rebuilt one.
+	Stale *StaleRecord `json:"stale,omitempty"`
+}
+
+// StaleRecord is an answer that showed a fuzz case's reused setup was used
+// up: the status it came back with, and the error its body reported, if any.
+type StaleRecord struct {
+	Status    int                      `json:"status"`
+	BodyError *ResponseBodyErrorRecord `json:"bodyError,omitempty"`
 }
 
 // ExpectFailureRecord captures the outcome of a negative assertion. Expected
@@ -234,13 +244,21 @@ type ResponseBodyErrorRecord struct {
 	// Status is the HTTP status the error stands for, from its rule or the
 	// graph's errorStatus; 0 when neither gives one.
 	Status int `json:"status,omitempty"`
+	// Stale is set when the rule marks the error as one that means the state
+	// the request worked on is used up.
+	Stale bool `json:"stale,omitempty"`
 }
 
 // Summary describes the error in one line, as every report of a run shows it:
 // `response body error detected at "result.errors" (rule: non-empty): email
 // is not valid [code: E102] [category: VALIDATION], treated as status 400`.
+// A stale error's rule reads "(rule: exists, stale)".
 func (r ResponseBodyErrorRecord) Summary() string {
-	text := fmt.Sprintf("response body error detected at %q (rule: %s)", r.RulePath, r.Rule)
+	rule := r.Rule
+	if r.Stale {
+		rule += ", stale"
+	}
+	text := fmt.Sprintf("response body error detected at %q (rule: %s)", r.RulePath, rule)
 	if r.Message != "" {
 		text += ": " + r.Message
 	}
@@ -421,7 +439,7 @@ type FuzzSummary struct {
 	// Failing counts the cases whose finding failed the run.
 	Failing int `json:"failing"`
 	// Setup counts the cases by how their setup came to be: fresh, reused,
-	// or failed.
+	// rebuilt, or failed.
 	Setup map[string]int `json:"setup,omitempty"`
 }
 

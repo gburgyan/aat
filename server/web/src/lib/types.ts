@@ -315,6 +315,8 @@ export interface ResponseBodyErrorDetail {
   category?: string;
   /** The HTTP status the error stands for, from its rule or the graph's errorStatus. */
   status?: number;
+  /** Set when the rule marks the error as meaning the state the request worked on is used up. */
+  stale?: boolean;
 }
 
 export interface OASValidationDetail {

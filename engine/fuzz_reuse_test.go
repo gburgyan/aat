@@ -25,7 +25,12 @@ import (
 // airports, and GET /reservations/{id} reads a reservation. With
 // failAfterFirst, every reservation request after the first fails with a 503;
 // with roomyCopies, every reservation after the first takes three travelers;
-// with dropReads, reading a reservation drops the connection.
+// with dropReads, reading a reservation drops the connection. Used up:
+// with maxCreates, reservations beyond it fail with a 503; with expireAfter,
+// a reservation answers a 410 to traveler requests beyond it, or, with
+// expiredBody, a 200 whose body says EXPIRED; a traveler named goneName gets a
+// 410; and with leaky, a refused traveler is added anyway, and a full
+// reservation answers a 200 whose body says FULL.
 type travelAPI struct {
 	mu             sync.Mutex
 	reservations   map[string]int
@@ -35,6 +40,15 @@ type travelAPI struct {
 	failAfterFirst bool
 	roomyCopies    bool
 	dropReads      bool
+	maxCreates     int
+	expireAfter    int
+	expiredBody    bool
+	goneName       string
+	leaky          bool
+	// asked counts the traveler requests per reservation, and gone those
+	// with goneName.
+	asked map[string]int
+	gone  int
 	// onRequest, when set, sees each request first.
 	onRequest func(r *http.Request)
 	// log holds each request's method and path.
@@ -64,7 +78,7 @@ func (a *travelAPI) handler(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, `{"travelers":%d}`, a.reservations[strings.TrimPrefix(r.URL.Path, "/reservations/")])
 	case r.Method == http.MethodPost && r.URL.Path == "/reservations":
 		a.creates++
-		if a.failAfterFirst && a.creates > 1 {
+		if a.failAfterFirst && a.creates > 1 || a.maxCreates > 0 && a.creates > a.maxCreates {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(`{}`))
 			return
@@ -83,11 +97,29 @@ func (a *travelAPI) handler(w http.ResponseWriter, r *http.Request) {
 		if a.roomyCopies && id != "r1" {
 			limit = 3
 		}
+		if a.asked == nil {
+			a.asked = map[string]int{}
+		}
+		a.asked[id]++
 		switch {
+		case a.expireAfter > 0 && a.asked[id] > a.expireAfter && a.expiredBody:
+			_, _ = w.Write([]byte(`{"error":{"code":"EXPIRED"}}`))
+			return
+		case a.expireAfter > 0 && a.asked[id] > a.expireAfter:
+			w.WriteHeader(http.StatusGone)
+		case a.goneName != "" && body.Name == a.goneName:
+			a.gone++
+			w.WriteHeader(http.StatusGone)
 		case body.Name == "crash":
 			w.WriteHeader(http.StatusInternalServerError)
 		case body.Name == "" || len(body.Name) > 20:
+			if a.leaky {
+				a.reservations[id]++
+			}
 			w.WriteHeader(http.StatusBadRequest)
+		case a.reservations[id] >= limit && a.leaky:
+			_, _ = w.Write([]byte(`{"error":{"code":"FULL"}}`))
+			return
 		case a.reservations[id] >= limit:
 			w.WriteHeader(http.StatusConflict)
 		default:

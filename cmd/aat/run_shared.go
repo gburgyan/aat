@@ -119,9 +119,12 @@ type FuzzStepSummary struct {
 	SpecViolations []string `json:"spec_violations,omitempty"`
 	Finding        string   `json:"finding,omitempty"`
 	Fails          bool     `json:"fails,omitempty"`
-	// Setup is how the steps the case ran on came to be: fresh, reused, or
-	// failed.
+	// Setup is how the steps the case ran on came to be: fresh, reused,
+	// rebuilt, or failed.
 	Setup string `json:"setup,omitempty"`
+	// Stale is the answer the case got on a reused setup that turned out to
+	// be used up, before it was sent again on a rebuilt one.
+	Stale *StaleSummary `json:"stale,omitempty"`
 	// OutputsError says why the outputs of a successful response could not
 	// be read; the case was judged on the response anyway.
 	OutputsError string `json:"outputs_error,omitempty"`
@@ -178,6 +181,25 @@ type BodyErrorSummary struct {
 	// Status is the HTTP status the error stands for; the step's status is
 	// the response's own.
 	Status int `json:"status,omitempty"`
+	// Stale is set when the rule marks the error as one that means the state
+	// the request worked on is used up.
+	Stale bool `json:"stale,omitempty"`
+}
+
+// StaleSummary is an answer that showed a fuzz case's reused setup was used
+// up, in the JSON summary.
+type StaleSummary struct {
+	Status    int               `json:"status"`
+	BodyError *BodyErrorSummary `json:"body_error,omitempty"`
+}
+
+// toBodyErrorSummary returns rbe as the JSON summary shows it, or nil.
+func toBodyErrorSummary(rbe *engine.ResponseBodyError) *BodyErrorSummary {
+	if rbe == nil {
+		return nil
+	}
+	return &BodyErrorSummary{RulePath: rbe.RulePath, Rule: rbe.Rule, Message: rbe.Message,
+		Code: rbe.Code, Category: rbe.Category, Status: rbe.Status, Stale: rbe.Stale}
 }
 
 // CleanupSkipSummary is a registered cleanup that did not run because it was
@@ -392,6 +414,9 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		}
 		ss.Fuzz.Setup = f.Setup
 		ss.Fuzz.OutputsError = step.OutputsError
+		if f.Stale != nil {
+			ss.Fuzz.Stale = &StaleSummary{Status: f.Stale.Status, BodyError: toBodyErrorSummary(f.Stale.BodyError)}
+		}
 		ss.Passed = !f.Fails
 		if f.Fails {
 			ss.Error = f.Finding
@@ -414,10 +439,7 @@ func toStepSummary(step engine.StepResult) StepSummary {
 	} else {
 		ss.Passed = true
 	}
-	if rbe := step.ResponseBodyError; rbe != nil {
-		ss.BodyError = &BodyErrorSummary{RulePath: rbe.RulePath, Rule: rbe.Rule, Message: rbe.Message,
-			Code: rbe.Code, Category: rbe.Category, Status: rbe.Status}
-	}
+	ss.BodyError = toBodyErrorSummary(step.ResponseBodyError)
 
 	// Display outputs
 	for _, do := range step.DisplayOutputs {

@@ -177,8 +177,19 @@ type FuzzResult struct {
 	// Fails is true when the finding fails the run.
 	Fails bool
 	// Setup says how the steps the case ran on came to be: SetupFresh,
-	// SetupReused, SetupFailed, or empty when it ran on the happy path's own.
+	// SetupReused, SetupRebuilt, SetupFailed, or empty when it ran on the
+	// happy path's own.
 	Setup string
+	// Stale is the answer the case got on a reused setup that turned out to
+	// be used up, before it was sent again on a rebuilt one; nil otherwise.
+	Stale *StaleAnswer
+}
+
+// StaleAnswer is an answer that showed a fuzz case's reused setup was used
+// up: the status it came back with, and the error its body reported, if any.
+type StaleAnswer struct {
+	Status    int
+	BodyError *ResponseBodyError
 }
 
 // fuzzJudging is how a target's cases are judged: the findings that fail the
@@ -445,6 +456,17 @@ func throttled(r *StepResult) bool {
 	return r.Response != nil && status == http.StatusTooManyRequests
 }
 
+// stale reports whether an answer says the state the request worked on is
+// used up, not that the request was wrong: an error in the body a rule marks
+// stale, or an HTTP 410, including a body error given that status.
+func stale(r *StepResult) bool {
+	if r.ResponseBodyError != nil && r.ResponseBodyError.Stale {
+		return true
+	}
+	status, _ := r.FailureStatus()
+	return r.Response != nil && status == http.StatusGone
+}
+
 // throttleRetry is the retry block a target's cases get: the target's own,
 // cut down to retrying a rate limit, so a case the API throttles is sent again
 // as the happy path would be, and nothing else a case finds is retried away.
@@ -638,7 +660,7 @@ func DescribeFuzz(s *archive.FuzzSummary) string {
 		text += fmt.Sprintf(" (%d failing)", s.Failing)
 	}
 	var setup []string
-	for _, k := range []string{SetupFresh, SetupReused, SetupFailed} {
+	for _, k := range []string{SetupFresh, SetupReused, SetupRebuilt, SetupFailed} {
 		if n := s.Setup[k]; n > 0 {
 			setup = append(setup, fmt.Sprintf("%d %s", n, k))
 		}
@@ -655,6 +677,9 @@ const (
 	SetupFresh = "fresh"
 	// SetupReused is a case that ran on the copy an earlier case left clean.
 	SetupReused = "reused"
+	// SetupRebuilt is a case sent again on a fresh copy after the copy it
+	// reused turned out to be used up (see stale).
+	SetupRebuilt = "rebuilt"
 	// SetupFailed is a case whose copy of the setup failed, or that wasn't
 	// tried because the target's setup kept failing.
 	SetupFailed = "failed"
@@ -705,14 +730,20 @@ type fuzzRunState struct {
 	// then input.
 	constraints map[string]map[string]string
 	// matched is what the CLI's names matched, or nil without them.
-	matched  *FuzzMatches
+	matched *FuzzMatches
+	// copies maps each case's step ID to the copies of the setup made for it,
+	// in the order they run.
+	copies map[string][]plan.Step
+	// stale maps the step ID of each case sent again on a rebuilt setup to
+	// the answer that showed the one it reused was used up.
+	stale    map[string]*StaleAnswer
 	warnings []string
 }
 
 func newFuzzRunState() *fuzzRunState {
 	return &fuzzRunState{groups: map[string]*fuzzGroup{}, caseTarget: map[string]string{}, caseSetup: map[string]string{},
 		owner: map[string]string{}, baseline: map[string][]string{}, settings: map[string]plan.FuzzSettings{},
-		constraints: map[string]map[string]string{}}
+		constraints: map[string]map[string]string{}, copies: map[string][]plan.Step{}, stale: map[string]*StaleAnswer{}}
 }
 
 // runsAfterPlan reports whether a step is sent once the plan's own steps are
@@ -734,15 +765,19 @@ func (f *fuzzRunState) runsAfterPlan(s plan.Step) bool {
 // runOrder returns sorted in the order Run sends it: the plan's own steps
 // and the cases that run on the target's own state, as sorted has them, then
 // the steps runsAfterPlan picks, in the same order. Nothing of the plan
-// depends on a case or a copy, so the order stays valid.
+// depends on a case or a copy, so the order stays valid. It also notes each
+// case's copies, for a rebuild.
 func (f *fuzzRunState) runOrder(sorted []plan.Step) []plan.Step {
 	own := make([]plan.Step, 0, len(sorted))
 	var after []plan.Step
 	for _, s := range sorted {
-		if f.runsAfterPlan(s) {
-			after = append(after, s)
-		} else {
+		if !f.runsAfterPlan(s) {
 			own = append(own, s)
+			continue
+		}
+		after = append(after, s)
+		if s.FuzzSetup != "" {
+			f.copies[s.FuzzSetup] = append(f.copies[s.FuzzSetup], s)
 		}
 	}
 	return append(own, after...)
@@ -851,8 +886,28 @@ func (f *fuzzRunState) beforeSetupCopy(step plan.Step, state *RunState) (reused 
 		// A fresh copy: whatever was live is no longer.
 		g.live, g.clean, g.building = map[string]string{}, false, caseID
 		f.caseSetup[caseID] = SetupFresh
+		if f.stale[caseID] != nil {
+			f.caseSetup[caseID] = SetupRebuilt
+		}
 	}
 	return false, ""
+}
+
+// rebuild decides whether a case is sent again on a fresh setup: one whose
+// reused setup turned out to be used up, which says nothing about the case's
+// value. It returns the case's copies of the setup to send first, or nil to
+// judge the answer as it is, which a case on a fresh setup always is, and a
+// case already rebuilt. The answer is recorded, and the reused copy is never
+// reused again.
+func (f *fuzzRunState) rebuild(step plan.Step, r *StepResult) []plan.Step {
+	caseID := step.StepID()
+	g := f.groups[f.caseTarget[caseID]]
+	if g == nil || f.caseSetup[caseID] != SetupReused || f.stale[caseID] != nil || !stale(r) || len(f.copies[caseID]) == 0 {
+		return nil
+	}
+	g.clean = false
+	f.stale[caseID] = &StaleAnswer{Status: r.StatusCode, BodyError: r.ResponseBodyError}
+	return slices.Clone(f.copies[caseID])
 }
 
 // setupCopySent records a copy that was sent and passed.
@@ -881,7 +936,8 @@ func (f *fuzzRunState) setupCopyFailed(step plan.Step) {
 // caseJudged records how a case's response leaves its setup: clean when the
 // API refused or throttled the request or it was never sent, since none of
 // those changes anything, or when the target only reads, and changed
-// otherwise, so the next case sets up afresh.
+// otherwise, so the next case sets up afresh. A stale answer says the setup
+// is used up, so it is never clean.
 func (f *fuzzRunState) caseJudged(step plan.Step, r *StepResult) {
 	caseID := step.StepID()
 	g := f.groups[f.caseTarget[caseID]]
@@ -890,5 +946,5 @@ func (f *fuzzRunState) caseJudged(step plan.Step, r *StepResult) {
 	}
 	g.failures = 0
 	g.building = ""
-	g.clean = g.readOnly || refused(r) || throttled(r) || notSent(r)
+	g.clean = !stale(r) && (g.readOnly || refused(r) || throttled(r) || notSent(r))
 }

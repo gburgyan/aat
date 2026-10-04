@@ -1118,6 +1118,26 @@ func TestToArchive_FuzzValueArchivedOnce(t *testing.T) {
 	assert.NotNil(t, p.Execution.Steps[1].Fuzz, "the run's plan is untouched")
 }
 
+// TestToArchive_FuzzStale checks that the archive keeps the answer that
+// showed a case's reused setup was used up.
+func TestToArchive_FuzzStale(t *testing.T) {
+	c := plan.FuzzCase{ID: "name.empty", Mode: plan.FuzzNegative, Input: "name", Value: "", Target: "add"}
+	result := &RunResult{Steps: []StepResult{
+		{StepID: "add__fuzz_name_empty", Node: "addItem", Fuzz: &FuzzResult{Case: c, Setup: SetupRebuilt,
+			Stale: &StaleAnswer{Status: 200, BodyError: &ResponseBodyError{RulePath: "error.code", Rule: "equals", Code: "EXPIRED", Stale: true}}}},
+		{StepID: "add__fuzz_name_empty2", Node: "addItem", Fuzz: &FuzzResult{Case: c, Setup: SetupRebuilt, Stale: &StaleAnswer{Status: 410}}},
+	}}
+	a := mustToArchive(t, result, archive.ArchiveMetadata{}, "", nil)
+	assert.Equal(t, SetupRebuilt, a.Steps[0].Fuzz.Setup)
+	assert.Equal(t, &archive.StaleRecord{Status: 200, BodyError: &archive.ResponseBodyErrorRecord{RulePath: "error.code", Rule: "equals",
+		Code: "EXPIRED", Stale: true}}, a.Steps[0].Fuzz.Stale)
+	assert.Equal(t, &archive.StaleRecord{Status: 410}, a.Steps[1].Fuzz.Stale)
+
+	data, err := json.Marshal(a.Steps[1].Fuzz)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"stale":{"status":410}`)
+}
+
 // TestToArchive_BodyErrorStatus checks that the archive keeps the status a
 // body error stands for, and that an expectFailure step records the status it
 // was matched by.

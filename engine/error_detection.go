@@ -20,6 +20,9 @@ type ResponseBodyError struct {
 	// Status is the HTTP status the error stands for, from its rule or the
 	// graph's errorStatus; 0 when neither gives one.
 	Status int
+	// Stale is set when the rule marks the error as one that means the state
+	// the request worked on is used up.
+	Stale bool
 }
 
 // Summary returns a human-readable summary of the detected error.
@@ -82,6 +85,7 @@ func CheckErrorDetection(rules []graph.ErrorDetectionRule, body []byte) *Respons
 				}
 			}
 			rbe.Status = rule.ErrorStatus.StatusFor(rbe.Category)
+			rbe.Stale = rule.Stale
 			return rbe
 		}
 	}

@@ -121,6 +121,13 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		}
 		rec.Fuzz.Setup = s.Fuzz.Setup
 		rec.Fuzz.OutputsError = s.OutputsError
+		if st := s.Fuzz.Stale; st != nil {
+			rec.Fuzz.Stale = &archive.StaleRecord{Status: st.Status}
+			if st.BodyError != nil {
+				bodyError := archive.ResponseBodyErrorRecord(*st.BodyError)
+				rec.Fuzz.Stale.BodyError = &bodyError
+			}
+		}
 	}
 	if s.FuzzSetup != "" {
 		rec.FuzzSetup = s.FuzzSetup
