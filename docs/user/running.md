@@ -48,7 +48,7 @@ Each step line shows the step index, the step ID, the HTTP status code, and the 
 
 ## Checkpoints
 
-`aat run plan --stop-after STEP` stops after a step passes and skips cleanup, so the resources created so far stay alive, and `--dump-state FILE` writes the session (base URLs, headers, and step inputs and outputs) for another tool to pick up, with credentials redacted unless `--dump-state-secrets` asks for them. The outcome is `stopped` with exit code `0`, unless a [fuzz](fuzzing.md) finding has already failed the run, which then stops `failed`. See [Checkpoints](checkpoints.md) for the dump format, stdout mode, security, and a pytest handoff example.
+`aat run plan --stop-after STEP` stops after a step passes and skips cleanup, so the resources created so far stay alive, and `--dump-state FILE` writes the session (base URLs, headers, and step inputs and outputs) for another tool to pick up, with credentials redacted unless `--dump-state-secrets` asks for them. The outcome is `stopped` with exit code `0`, unless a [fuzz](fuzzing.md) finding failed the run, which then stops `failed`. See [Checkpoints](checkpoints.md) for the dump format, stdout mode, security, and a pytest handoff example.
 
 ## Inspecting a Run
 
@@ -318,7 +318,7 @@ When you run a plan, AAT performs these steps in order:
 
 ### Step Execution Order
 
-Steps run in `dependsOn` order: a step waits until the steps it depends on have run. Of the steps ready to run, the one the plan lists first goes next, so a plan whose steps come after what they depend on runs in the order written.
+Steps run in `dependsOn` order: a step waits until the steps it depends on have run. Of the steps ready to run, the one the plan lists first goes next, so a plan whose steps come after what they depend on runs in the order written. Verification steps run after the main steps, and then the [fuzz cases](fuzzing.md#when-cases-run) that run on copies of their target's setup.
 
 ### Value Resolution at Runtime
 

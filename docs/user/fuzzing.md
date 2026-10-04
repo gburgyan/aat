@@ -26,24 +26,24 @@ cd examples/shop/
   [ 1/14] listProducts         200  0ms
   [ 2/14] createCart           201  0ms
   [ 3/14] addItem              201  0ms
-  [ 4/14] addItem__fuzz_quant~ 201  0ms  fuzz quantity.at-min (positive)
-  [ 5/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.below-min (negative)
-  [ 6/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.fraction (negative)
-  [ 7/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.overflow (negative)
-  [ 8/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.wrong-type (negative)
-  [ 9/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.missing (negative)
-  [10/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.null (negative)
-  [11/14] addItem__fuzz_quant~ 409  0ms  fuzz quantity.large (edge)
-  [12/14] addItem__fuzz_body_~ 201  0ms  fuzz body.extra-property (edge)
-  [13/14] checkout             201  0ms
-  [14/14] paymentCharge        201  0ms
+  [ 4/14] checkout             201  0ms
+  [ 5/14] paymentCharge        201  0ms
+  [ 6/14] addItem__fuzz_quant~ 201  0ms  fuzz quantity.at-min (positive)
+  [ 7/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.below-min (negative)
+  [ 8/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.fraction (negative)
+  [ 9/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.overflow (negative)
+  [10/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.wrong-type (negative)
+  [11/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.missing (negative)
+  [12/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.null (negative)
+  [13/14] addItem__fuzz_quant~ 409  0ms  fuzz quantity.large (edge)
+  [14/14] addItem__fuzz_body_~ 201  0ms  fuzz body.extra-property (edge)
 ...
-PASSED (14/14 steps, 5ms)
+PASSED (14/14 steps, 4ms)
 Fuzz: 9 cases: 9 as expected · setup: 2 fresh, 7 reused
 ```
 
-The happy path runs as usual, and each case runs as a step of its own. A case is a dead end: no later step reads
-anything from it. Everything after the target reads the original step, which ran with the plan's own values. So a
+The happy path runs first, as usual, and then each case runs as a step of its own. A case is a dead end: no later
+step reads anything from it. Everything after the target reads the original step, which ran with the plan's own values. So a
 case that stops `createCart` from making a cart can't take the cart away from `addItem`. Each case varies one step,
 and everything else is the happy path.
 
@@ -66,8 +66,7 @@ reason. So by default a case runs on a copy of the steps its target depends on, 
 also includes the earlier steps that build on those, such as the `addItem` a checkout needs even though it reads
 nothing from it. A step that changes nothing the target works on isn't copied unless the target depends on it: one that
 only reads, such as a `getCart`; one that expects to be refused, such as a mutation's negative sibling; and one that
-depends only on read-only steps, such as a wishlist made from `listProducts`. A target's cases all run before the
-steps that come after it in the plan.
+depends only on read-only steps, such as a wishlist made from `listProducts`.
 
 Making a copy for every case is expensive against a slow, rate-limited API, so the default scope, `reuse`, shares one:
 
@@ -77,6 +76,12 @@ Making a copy for every case is expensive against a slow, rate-limited API, so t
   `getOrder`, can't change its setup, so its cases run on the happy path's own, with no copies at all.
 - **When a copy is used up.** When a case is accepted (2xx), fails with a 5xx that may have half-written something, or
   gets no response, the copy may have changed. The next case gets a fresh one.
+- **Stale setups.** Some answers say the copy is used up, not that the case was wrong: a session that expired, or a
+  reservation that a refused case changed anyway. An HTTP 410 says so, and so does an error in the body that an
+  `errorDetection` rule marks [`stale`](graphs.md#stale-errors). A case that gets one on a copy it reused is sent again
+  on a fresh copy, once, and judged on that answer. The setup line counts it as `rebuilt`, its progress line says
+  `setup rebuilt`, and the archive and `--json` keep the answer it replaced as `fuzz.stale`. On a fresh copy, a stale
+  answer is judged as it is, since the case's value may be why. Either way, the next case gets a fresh copy.
 - **Read-only steps.** A setup step that only reads (a GET, HEAD, or OPTIONS with no cleanup pairing), such as
   `listProducts`, isn't copied at all, as long as it depends on nothing that is copied.
 - **Failed setup.** If a copy fails, its case is reported as `not-sent` and the run carries on. After three setups for
@@ -96,6 +101,21 @@ Other scopes:
 | `shared` | The happy path's own setup: no copies, but every case the API accepts changes what the rest of the plan sees. A run warns when a target that isn't read-only uses it |
 
 Set it with `--fuzz-scope` or `scope:` in the step's [`fuzz:` block](#the-fuzz-block).
+
+### When cases run
+
+Cases on copies run once the plan's own steps and its verification are done, target by target. They never hold up the
+plan, where a session or a hold the happy path made could expire while they ran. They see the API as the whole plan
+left it: in the quick start, the order is paid for before the first case is sent.
+
+- **When the plan fails.** A target's cases are still sent when a later step of the plan fails. The run fails on that
+  step's error, and verification is skipped as usual. A target that failed, or that the run never reached, sends no
+  cases.
+- **At a checkpoint.** With [`--stop-after`](checkpoints.md), the rest of the plan is skipped, but the cases of the
+  targets that ran are sent before the run stops. Nothing is cleaned up, the copies included.
+- **On the happy path's own setup.** Cases under `shared`, and those of a target that only reads, run right after their
+  target, before the plan moves on: the steps after it see what they did. A checkpoint at their target stops before
+  them.
 
 ## Cases
 
@@ -254,8 +274,9 @@ the others as written. A name in `--fuzz`, `--fuzz-input`, or `--fuzz-case` only
 that matches in none fails the batch with exit code 2, so a misspelled target doesn't pass as a batch with nothing
 fuzzed.
 
-`--stop-after` names a step of the plan, not a fuzz case or a copy made for one. A run that a fuzz finding has already
-failed stops `failed`, not `stopped`, so the finding isn't lost.
+`--stop-after` names a step of the plan, not a fuzz case or a copy made for one. The cases of the targets that ran are
+sent before the run stops ([When cases run](#when-cases-run)), and a run that a fuzz finding failed stops `failed`,
+not `stopped`, so the finding isn't lost.
 
 With `--fuzz-cases`, the seed picks which cases run, and the run prints the seed, so `--seed N` runs the same ones
 again.

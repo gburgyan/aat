@@ -49,6 +49,16 @@ the graph and plan formats may still change before 1.0.
   fuzzing `addItem` and `checkout` sends 143 requests where it sent 228; on Duffel's test API, ten booking cases took
   73 seconds with three searches instead of ten. Fuzz steps and their copies are named like
   `addItem__fuzz_quantity_below_min`, so a copied expression such as `{{search.firstSliceOrigin}}` still parses.
+- **Fuzz cases run after the happy path, and a used-up setup is rebuilt.** Cases on copies of their target's setup
+  run once the plan's own steps and its verification are done, so a long run of cases no longer holds up the plan
+  until a session it made expires. They are still sent when a later step of the plan fails, and before a
+  `--stop-after` checkpoint stops the run; `shared` cases still run right after their target. An `errorDetection`
+  rule's new `stale: true` says its error means the state the request worked on is used up (an expired session, a
+  reservation an earlier refused case filled), not that the request was wrong; an HTTP 410 says the same. A case that
+  gets such an answer on a reused setup is sent again, once, on a fresh copy and judged on that answer. The fuzz
+  summary counts it as `rebuilt`, and the archive and `--json` keep the answer it replaced as `fuzz.stale`. See
+  [When cases run](https://gburgyan.github.io/aat/fuzzing/#when-cases-run) and
+  [Stale Errors](https://gburgyan.github.io/aat/graphs/#stale-errors).
 - **A step's `fuzz:` block fuzzes it on every run, and `--fuzz-save` keeps findings as regression plans.** The block
   holds what `--fuzz` flags would say (`mode`, `inputs`, `cases`, `only`, `scope`, `fail`) plus `skip` (inputs never
   to fuzz), `accept` (statuses no case is faulted for, such as a busy API's 409), and `pinned` cases sent exactly as

@@ -483,10 +483,38 @@ What reads the status:
 | [`expectFailure`](plans.md#negative-testing-expectfailure) and mutations' `expectStatus` | Matches it: a `VALIDATION` error given 400 passes `status: [4xx]` | Never matches: the step fails |
 | [Status assertions](plans.md#assertions) | Read it | Read the response's own status |
 | [Retries](plans.md#retry) | Numeric and category rules match it, and the default retries it as that status, so a `TEMPORARY` error given 503 is retried. It is still a `response_error`, which `on: [response_error]` matches | `on: [response_error]` matches it; the default doesn't retry it |
-| [Fuzzing](fuzzing.md#findings) | A 5xx is a `server-error`, 429 is `throttled`, a 4xx is a refusal | A refusal |
+| [Fuzzing](fuzzing.md#findings) | A 5xx is a `server-error`, 429 is `throttled`, a 4xx is a refusal, and 410 is [stale](#stale-errors) | A refusal |
 
 The progress line marks such a step `BODY ERROR VALIDATION as 400`, and the archive, `--json`, `aat run show`, the
 web UI, and the MCP server record the status beside the response's own.
+
+### Stale Errors
+
+Some errors don't say the request was wrong. They say the state it worked on is used up: a session that expired, a
+cart at its limit, a reservation an earlier request already changed. Mark such a rule `stale`, and list it before a
+general rule that would match the same body, since the first rule that matches wins:
+
+```yaml
+errorDetection:
+  - path: '*.result.errors.#(code=="SESSION_EXPIRED")'
+    rule: exists
+    details:
+      message: "*.result.errors.0.message"
+      code: "*.result.errors.0.code"
+      category: "*.result.errors.0.type"
+    stale: true
+  - path: "*.result.errors"
+    rule: non-empty
+    details:
+      message: "*.result.errors.0.message"
+      code: "*.result.errors.0.code"
+      category: "*.result.errors.0.type"
+```
+
+A stale error takes its status as any other does, and fails a plan's step as any other does. It matters when
+[fuzzing](fuzzing.md#what-a-case-runs-on): a case that gets one, or an HTTP 410, on a setup an earlier case left
+behind is sent again on a fresh setup, instead of being judged on an answer about the setup. Mark only the errors that
+mean the state is used up: a case that gets one is sent twice. The error's summary reads `(rule: exists, stale)`.
 
 ## Types
 

@@ -181,6 +181,9 @@ errorStatus:
 That status is what `expectFailure`, status assertions, retries, and fuzz judging read: a VALIDATION error passes
 `expectFailure: {status: [4xx]}`, a TEMPORARY one is retried by default, and in a fuzz run a 500 is a `server-error`.
 Without a status, a body error fails the step, never matches `expectFailure`, and counts as a refusal when fuzzing.
+A rule with `stale: true` says its error means the state the request worked on is used up (an expired session, a
+reservation an earlier request filled), not that the request was wrong; list it before a general rule, since the
+first rule that matches wins. A fuzz case that gets one, or an HTTP 410, on a reused setup is sent again on a fresh one.
 
 ### Output Fields
 
@@ -909,7 +912,11 @@ operation, a request the spec refuses is judged as negative.
   while the API refuses them, and get a fresh one after a case is accepted,
   fails with a 5xx, or gets no response; read-only GET setup steps aren't
   copied. `isolated` copies per case; `shared` uses the happy path's own (warned
-  on a step that changes state).
+  on a step that changes state). Cases on copies run after the plan's own steps
+  and verification, and still run when a later plan step fails; `shared` cases
+  run right after their target. A case whose reused copy answers stale (a 410,
+  or a body error whose rule has `stale: true`) is sent once more on a fresh
+  copy (`setup: ... rebuilt`).
 - **Findings:** `server-error`, `no-response`, and `schema-violation` fail the
   run; `accepted-invalid` and `rejected-valid` are warnings (`--fuzz-fail`
   changes the set); `throttled` (a 429) and `not-sent` say nothing about the
