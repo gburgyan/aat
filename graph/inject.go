@@ -117,6 +117,9 @@ func DefaultShapeError(d *InputDefault, typ string) string {
 	if d == nil {
 		return ""
 	}
+	if d.PoolRef != "" && len(d.Pool) > 0 {
+		return "set pool or poolRef, not both"
+	}
 	if msg := ValueShapeError(d.Value, typ); msg != "" {
 		return msg
 	}

@@ -521,3 +521,31 @@ func TestGenerateDocs_IsDeterministic(t *testing.T) {
 	}
 	assert.Less(t, strings.Index(first, "anonUpsertPoints --> reader"), strings.Index(first, "zUpsertPoints --> reader"))
 }
+
+// TestGenerateDocs_ErrorStatus checks that generated docs say what status a
+// rule's errors stand for, and the graph's mapping.
+func TestGenerateDocs_ErrorStatus(t *testing.T) {
+	g, err := Parse([]byte(`version: 1.0.0
+errorDetection:
+  - path: "*.result.errors"
+    rule: non-empty
+    details: {category: "*.result.errors.0.type"}
+    categories: {VALIDATION: 400}
+  - path: "*.result.expired"
+    rule: exists
+    stale: true
+errorStatus:
+  status: 500
+  categories: {TEMPORARY: 503}
+nodes:
+  getUser:
+    description: Read a user
+    adapter: getUser
+`))
+	require.NoError(t, err)
+	docs := GenerateDocs(g, nil)
+	assert.Contains(t, docs, "status: VALIDATION 400")
+	assert.Contains(t, docs, "| `*.result.expired` | exists | stale |")
+	assert.Contains(t, docs, "Errors a rule gives no status: TEMPORARY 503, otherwise 500 (graph `errorStatus`).")
+	assert.True(t, strings.Contains(docs, "`*.result.errors`"))
+}

@@ -277,3 +277,43 @@ func TestRunShow_RunNotFound(t *testing.T) {
 	require.ErrorIs(t, err, archive.ErrRunNotFound)
 	assert.Contains(t, err.Error(), "a run is latest, a run ID, batch-ID/run-ID, batch-ID/plan-name, or a path")
 }
+
+// TestShownStepPassed_Fuzz checks that aat run show judges a fuzz case by its
+// finding, as the run did, and a setup copy by whether it failed.
+func TestShownStepPassed_Fuzz(t *testing.T) {
+	refused := archive.StepRecord{Response: &archive.ResponseRecord{Status: 400}, Fuzz: &archive.FuzzRecord{ID: "quantity.below-min"}}
+	assert.True(t, shownStepPassed(refused), "a refused negative case is what it called for")
+	refused.Fuzz.Fails = true
+	assert.False(t, shownStepPassed(refused))
+
+	copied := archive.StepRecord{Response: &archive.ResponseRecord{Status: 409}, FuzzSetup: "add__fuzz_q",
+		ExpectFailure: &archive.ExpectFailureRecord{Passed: true}}
+	assert.True(t, shownStepPassed(copied))
+	copied.FuzzSetupFailed = true
+	assert.False(t, shownStepPassed(copied))
+
+	assert.False(t, shownStepPassed(archive.StepRecord{Response: &archive.ResponseRecord{Status: 400}}), "a main step's 400 still fails")
+}
+
+// TestRunShow_StepBodyError checks that aat run show --step prints an error
+// a 200's body reported, and its JSON carries it.
+func TestRunShow_StepBodyError(t *testing.T) {
+	dir := t.TempDir()
+	a := showTestArchive()
+	a.Steps[0].ResponseBodyError = &archive.ResponseBodyErrorRecord{RulePath: "*.result.errors", Rule: "non-empty",
+		Message: "email is not valid", Category: "VALIDATION", Status: 400}
+	writeShowArchive(t, dir, showRunID, a)
+	id := archive.StepID(a.Steps[0])
+
+	out, _, err := runShow(t, dir, "latest", showOptions{Step: id})
+	require.NoError(t, err)
+	assert.Contains(t, out, `body error: response body error detected at "*.result.errors" (rule: non-empty): email is not valid [category: VALIDATION], treated as status 400`)
+
+	out, _, err = runShow(t, dir, "latest", showOptions{Step: id, JSON: true})
+	require.NoError(t, err)
+	var step shownStep
+	require.NoError(t, json.Unmarshal([]byte(out), &step), out)
+	require.NotNil(t, step.BodyError)
+	assert.Equal(t, 400, step.BodyError.Status)
+	assert.False(t, step.Passed)
+}

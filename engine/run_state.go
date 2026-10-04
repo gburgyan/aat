@@ -84,3 +84,9 @@ func (s *RunState) ExecutedSteps() []string {
 	copy(keys, s.order)
 	return keys
 }
+
+// AllInputs returns the inputs a step resolved, or false when it has none.
+func (s *RunState) AllInputs(stepID string) (map[string]any, bool) {
+	inputs, ok := s.inputs[stepID]
+	return inputs, ok
+}

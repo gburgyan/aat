@@ -109,7 +109,16 @@ func formatNodeDetail(node *graph.Node, g *graph.Graph) string {
 					fmt.Fprintf(&b, " (%s)", strings.Join(parts, ", "))
 				}
 			}
+			if statuses := rule.ErrorStatus.DescribeStatuses(); statuses != "" {
+				fmt.Fprintf(&b, ", status: %s", statuses)
+			}
+			if rule.Stale {
+				b.WriteString(", stale")
+			}
 			b.WriteString("\n")
+		}
+		if g.ErrorStatus != nil {
+			fmt.Fprintf(&b, "- Errors a rule gives no status: %s (graph errorStatus)\n", g.ErrorStatus.DescribeStatuses())
 		}
 	}
 
@@ -197,6 +206,9 @@ func formatGraphDefault(d *graph.InputDefault) string {
 			items = append(items[:3], "...")
 		}
 		return "[" + strings.Join(items, ", ") + "]"
+	}
+	if d.PoolRef != "" {
+		return "poolRef: " + d.PoolRef
 	}
 	if d.From != "" {
 		return "from: " + d.From

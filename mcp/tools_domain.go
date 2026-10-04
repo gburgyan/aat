@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/gburgyan/aat/graph"
 )
 
 // registerDomainTools adds the domain knowledge browsing tools to the MCP server.
@@ -168,6 +170,7 @@ func (s *Server) handleListValuePools(_ context.Context, _ mcp.CallToolRequest) 
 		return mcp.NewToolResultText("No value pools defined."), nil
 	}
 
+	usedBy := s.poolRefUses()
 	names := sortedMapKeys(s.ctx.KB.ValuePools)
 	var b strings.Builder
 	for i, name := range names {
@@ -189,8 +192,33 @@ func (s *Server) handleListValuePools(_ context.Context, _ mcp.CallToolRequest) 
 				b.WriteString(", ...")
 			}
 		}
+		if len(p.Groups) > 0 {
+			fmt.Fprintf(&b, "\n  Groups (poolRef %s.GROUP): %s", name, strings.Join(sortedMapKeys(p.Groups), ", "))
+		}
+		if uses := usedBy[name]; len(uses) > 0 {
+			fmt.Fprintf(&b, "\n  Used by: %s", strings.Join(uses, "; "))
+		}
 	}
 	return mcp.NewToolResultText(b.String()), nil
+}
+
+// poolRefUses maps each domain pool name to where the graph and the layers
+// name it with poolRef, as "node search input origin (airportCodes.us)".
+func (s *Server) poolRefUses() map[string][]string {
+	uses := s.ctx.Graph.PoolRefs()
+	if s.ctx.LayersDir != "" {
+		if layers, err := graph.LoadLayersFromDir(s.ctx.LayersDir); err == nil {
+			for _, name := range sortedMapKeys(layers) {
+				uses = append(uses, layers[name].PoolRefs()...)
+			}
+		}
+	}
+	byPool := map[string][]string{}
+	for _, u := range uses {
+		pool, _, _ := strings.Cut(u.Ref, ".")
+		byPool[pool] = append(byPool[pool], fmt.Sprintf("%s (%s)", u.Where, u.Ref))
+	}
+	return byPool
 }
 
 // handleExplainConcept returns full detail for a single domain concept.

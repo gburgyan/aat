@@ -275,12 +275,16 @@ func (s *Server) handleDebugFailingTest(_ context.Context, req mcp.GetPromptRequ
 	// Context from successful steps preceding the first failure
 	failedSteps := findFailedSteps(a.Steps)
 	if len(failedSteps) > 0 {
-		firstFailedNode := failedSteps[0].Node
+		// Steps are told apart by ID: a fuzz case shares its target's node.
+		firstFailed := archive.StepID(failedSteps[0])
 		ctxBuf.WriteString("## Successful Steps Before Failure\n\n")
 		hasSuccessful := false
 		for _, step := range a.Steps {
-			if step.Node == firstFailedNode {
+			if archive.StepID(step) == firstFailed {
 				break
+			}
+			if step.Fuzz != nil || step.FuzzSetup != "" {
+				continue // fuzz cases and their setup aren't the flow the plan built
 			}
 			status := 0
 			if step.Response != nil {

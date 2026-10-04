@@ -227,6 +227,32 @@ func TestGRPCExecutor_UnknownRequestFieldFailsBeforeTheWire(t *testing.T) {
 	assert.False(t, called, "a misspelled field never reaches the server")
 }
 
+// TestGRPCExecutor_MetadataGRPCRefusesIsNotSent checks that metadata grpc-go
+// would refuse before dialing is a NotSentError, not the INTERNAL status
+// grpc-go would make of it.
+func TestGRPCExecutor_MetadataGRPCRefusesIsNotSent(t *testing.T) {
+	called := false
+	exec := startShopServer(t, func(context.Context, *dynamicpb.Message) (proto.Message, error) {
+		called = true
+		return nil, nil
+	})
+	for _, md := range []map[string]string{
+		{"x-hint": "Zoë"},
+		{"x-hint": "a\x00b"},
+		{"x hint": "a"},
+	} {
+		req := grpcRequest(`{}`)
+		req.Headers = md
+		_, err := exec.Execute(context.Background(), req)
+		var notSent *NotSentError
+		assert.ErrorAs(t, err, &notSent, "%v", md)
+	}
+	assert.False(t, called)
+
+	assert.NoError(t, metadataError("x-trace-bin", "\x00\xff"), "a -bin value is bytes")
+	assert.NoError(t, metadataError("x-hint", "plain ~ text"))
+}
+
 func TestGRPCExecutor_StreamingMethodIsRefused(t *testing.T) {
 	exec := startShopServer(t, func(context.Context, *dynamicpb.Message) (proto.Message, error) {
 		return nil, nil

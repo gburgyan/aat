@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -66,6 +67,24 @@ type Engine struct {
 	// StepID() matches completes successfully. Cleanup is intentionally skipped
 	// so created resources stay alive for an external harness to consume.
 	stopAfterStep string
+
+	// seed is the seed WithSeed set; seedSet says whether it was called. Run
+	// picks a seed when it was not.
+	seed    uint64
+	seedSet bool
+	// draws hands out each step's random source during Run; nil outside it.
+	draws *stepDraws
+
+	// fuzz, when set, adds fuzz cases to the plan; see WithFuzz.
+	fuzz *FuzzConfig
+	// fuzzCapped is set during Run when --fuzz-cases dropped cases, so the
+	// seed chose which ran.
+	fuzzCapped bool
+	// fuzzJudge holds each fuzz target's fail list and accepted statuses
+	// during Run, by target step ID.
+	fuzzJudge map[string]fuzzJudging
+	// fuzzRun tracks each fuzz target's setup copies during Run.
+	fuzzRun *fuzzRunState
 }
 
 // NewEngine creates an Engine with the given dependencies.
@@ -143,6 +162,22 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		return &RunResult{Outcome: OutcomeError, Error: err}
 	}
 
+	// The seed the run's pool picks, random selections, and capped fuzz cases
+	// are drawn from
+	seed := e.seed
+	if !e.seedSet {
+		seed = NewRunSeed()
+	}
+
+	// 1b. Fuzz cases become sibling steps of the steps they target
+	e.fuzzCapped = false
+	e.fuzzRun = newFuzzRunState()
+	if e.fuzz != nil || planFuzzes(instantiatedPlan) {
+		if err := e.expandFuzz(instantiatedPlan, seed); err != nil {
+			return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan, Seed: seed}
+		}
+	}
+
 	// 2. Topological sort
 	sorted, err := TopologicalSort(instantiatedPlan.Execution.Steps)
 	if err != nil {
@@ -176,10 +211,21 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		return &RunResult{Outcome: OutcomeError, Error: err, InstantiatedPlan: instantiatedPlan}
 	}
 
-	// 4. Set plan for constraint-aware resolution
+	// 4. Set plan for constraint-aware resolution, and the seed the run's
+	// pool picks and random selections are drawn from
 	e.plan = instantiatedPlan
+	e.draws = newStepDraws(seed)
 	defer func() {
 		e.plan = nil
+		e.draws = nil
+		if result != nil {
+			result.Seed = seed
+			result.FuzzCapped = e.fuzzCapped
+			if e.fuzzRun != nil {
+				result.FuzzWarnings = e.fuzzRun.warnings
+				result.FuzzTargets = e.fuzzRun.settings
+			}
+		}
 	}()
 
 	state := NewRunState()
@@ -187,16 +233,81 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 	var stepResults []StepResult
 	outcome := OutcomePassed
 	kiLog := newKnownIssueLog()
+	// failedSetup maps a fuzz case's step to why its copy of the setup failed;
+	// the rest of that case is not sent.
+	failedSetup := map[string]string{}
+	copiesSkipped := 0
+	defer func() {
+		if result != nil {
+			result.FuzzCopiesSkipped = copiesSkipped
+		}
+	}()
 	verificationSteps := plan.VerificationSteps(instantiatedPlan, e.graph, e.layeredDefaults)
-	total := len(sorted) + len(verificationSteps)
+	// Progress counts the steps a reader follows: the plan's own, its fuzz
+	// cases, and its verification steps. A copy of a setup step made for a
+	// fuzz case has no number of its own, since most are reused or hidden: it
+	// takes the number of the step after it, the case it was made for.
+	counted := 0
+	for _, step := range sorted {
+		if step.FuzzSetup == "" {
+			counted++
+		}
+	}
+	total := counted + len(verificationSteps)
+	position := 0
 
 	if e.Observer != nil {
 		e.Observer.OnRunStart(total)
 	}
 
-	for i, step := range sorted {
+	// The plan's own steps run first, then its verification steps, then the
+	// fuzz cases that run on copies of their target's setup (see runOrder), so
+	// a long run of cases never holds up the plan. Once the plan has ended,
+	// on a failure or at a checkpoint, the rest of it is not sent, but the
+	// cases of every target that got through still are.
+	queue := e.fuzzRun.runOrder(sorted)
+	var end *runEnd
+	verified := false
+	var verErr error
+	// verify runs the verification steps, unless the plan ended early. It
+	// returns false when the run was interrupted.
+	verify := func() bool {
+		verified = true
+		if end != nil {
+			return true
+		}
+		verResults, verOutcome, err := e.runVerification(ctx, verificationSteps, state, position, total)
+		stepResults = append(stepResults, verResults...)
+		position += len(verResults)
+		if verOutcome == OutcomeError && ctx.Err() != nil {
+			return false
+		}
+		if verOutcome != OutcomePassed {
+			outcome = verOutcome
+		}
+		verErr = err
+		return true
+	}
+
+	for idx := 0; idx < len(queue); idx++ {
+		step := queue[idx]
+		after := e.fuzzRun.runsAfterPlan(step)
+		if after {
+			if g := e.fuzzRun.targetOf(step); g == nil || !g.passed {
+				continue
+			}
+		} else if end != nil {
+			continue
+		}
 		if ctx.Err() != nil {
 			return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+		}
+		if after && !verified && !verify() {
+			return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+		}
+		i := position
+		if step.FuzzSetup == "" {
+			position++
 		}
 
 		node, ok := e.graph.Nodes[step.Node]
@@ -216,24 +327,141 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			}
 		}
 
+		// A fuzz setup copy is reused while the target's cases have left the
+		// live copy as it was, and isn't sent once the target's setup has
+		// failed too often.
+		caseID := step.FuzzSetup
+		if step.Fuzz != nil {
+			caseID = step.StepID()
+		}
+		if step.FuzzSetup != "" && failedSetup[caseID] == "" {
+			reused, reason := e.fuzzRun.beforeSetupCopy(step, state)
+			if reason != "" {
+				failedSetup[caseID] = reason
+			}
+			if reused {
+				copiesSkipped++
+				continue
+			}
+		}
+
+		// A fuzz case whose setup failed is not sent, nor is the rest of its
+		// setup; only the case itself is reported.
+		if reason := failedSetup[caseID]; reason != "" {
+			if step.Fuzz == nil {
+				copiesSkipped++
+				continue
+			}
+			skipped := StepResult{StepID: step.StepID(), Node: step.Node, Error: fmt.Errorf("not sent: %s", reason), StartTime: time.Now()}
+			skipped.Fuzz = e.judgeFuzz(step, node, &skipped)
+			skipped.Fuzz.Setup = SetupFailed
+			skipped.Fuzz.Stale = e.fuzzRun.stale[step.StepID()]
+			stepResults = append(stepResults, skipped)
+			if e.Observer != nil {
+				e.Observer.OnStepStart(i, total, step)
+				e.Observer.OnStepComplete(i, total, skipped)
+			}
+			continue
+		}
+
 		if e.Observer != nil {
 			e.Observer.OnStepStart(i, total, step)
 		}
 
 		stepResult := e.executeStepWithTracking(ctx, step, node, state)
+		stepResult.FuzzSetup = step.FuzzSetup
 
 		// expectFailure is resolved before anything is displayed or decided,
-		// because whether the step failed at all depends on it.
+		// a fuzz setup copy's failure included, because whether the step failed
+		// at all depends on it.
 		if stepResult.Error == nil && step.ExpectFailure != nil {
+			// The status matched is the one the response stands for: an error
+			// a 200's body reports counts as the status its rule gives it.
+			status, name := stepResult.FailureStatus()
 			efr := &ExpectFailureResult{
 				ExpectedStatuses: step.ExpectFailure.Status,
-				ActualStatus:     stepResult.StatusCode,
+				ActualStatus:     status,
+				ActualName:       name,
 				Description:      step.ExpectFailure.Description,
 			}
 			// A gRPC step is matched by status name when the plan wrote one,
 			// so that codes sharing an HTTP status stay distinguishable.
-			efr.Passed = step.ExpectFailure.Status.Matches(stepResult.StatusCode, grpcStatusName(stepResult.Response))
+			efr.Passed = step.ExpectFailure.Status.Matches(status, name)
 			stepResult.ExpectFailure = efr
+		}
+
+		// A copy of a setup step made for a fuzz case ends that case when it
+		// fails, not the run: the case says nothing about the target then. A
+		// failure a knownIssue lets the happy path carry on past is passed over
+		// on the copy too.
+		if step.FuzzSetup != "" && (stepResult.Error != nil || e.stepFailed(step, &stepResult)) && !e.coverSetupFailure(instantiatedPlan, step, &stepResult) {
+			if stepResult.Error != nil && ctx.Err() != nil {
+				stepResults = append(stepResults, stepResult)
+				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+			}
+			stepResult.FuzzSetupFailed = true
+			failedSetup[step.FuzzSetup] = fmt.Sprintf("its copy of setup step %s failed", step.StepID())
+			e.fuzzRun.setupCopyFailed(step)
+			// One that failed only its checks may still have created something;
+			// one whose body says it failed did not, as on the happy path.
+			if stepResult.Error == nil && stepResult.StatusCode < 400 && stepResult.ResponseBodyError == nil && node.Cleanup.Node != "" {
+				if stepResult.Outputs != nil {
+					state.StoreOutputs(step.StepID(), stepResult.Outputs)
+				}
+				cleanupStack.Push(CleanupEntry{NodeName: node.Cleanup.Node, ForNode: node.Name, ForStep: step.StepID()})
+			}
+			stepResults = append(stepResults, stepResult)
+			if e.Observer != nil {
+				e.Observer.OnStepComplete(i, total, stepResult)
+			}
+			continue
+		}
+
+		if step.FuzzSetup != "" {
+			e.fuzzRun.setupCopySent(step)
+		} else if step.Fuzz == nil {
+			e.fuzzRun.targetRan(step, &stepResult)
+		}
+
+		// A fuzz step never ends the run: its finding is recorded, and fails
+		// the outcome when the configuration says it does.
+		if step.Fuzz != nil {
+			if stepResult.Error != nil && ctx.Err() != nil {
+				stepResults = append(stepResults, stepResult)
+				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+			}
+			// A reused setup that turned out to be used up is built afresh
+			// and the case sent again: its copies and the case go next, the
+			// copies no longer skipped, and the case keeps its number.
+			if copies := e.fuzzRun.rebuild(step, &stepResult); copies != nil {
+				queue = slices.Insert(queue, idx+1, append(copies, queue[idx])...)
+				copiesSkipped -= len(copies)
+				position--
+				continue
+			}
+			stepResult.Fuzz = e.judgeFuzz(step, node, &stepResult)
+			stepResult.Fuzz.Setup = e.fuzzRun.caseSetup[step.StepID()]
+			stepResult.Fuzz.Stale = e.fuzzRun.stale[step.StepID()]
+			e.fuzzRun.caseJudged(step, &stepResult)
+			if stepResult.Fuzz.Fails && outcome == OutcomePassed {
+				outcome = OutcomeFailed
+			}
+			// A case the API accepted may have created something to clean up,
+			// and the cleanup reads the step's outputs: without them it has
+			// nothing to name the resource by.
+			if stepResult.Response != nil && stepResult.StatusCode < 400 && stepResult.ResponseBodyError == nil && stepResult.OutputsError == "" {
+				if stepResult.Outputs != nil {
+					state.StoreOutputs(step.StepID(), stepResult.Outputs)
+				}
+				if node.Cleanup.Node != "" {
+					cleanupStack.Push(CleanupEntry{NodeName: node.Cleanup.Node, ForNode: node.Name, ForStep: step.StepID()})
+				}
+			}
+			stepResults = append(stepResults, stepResult)
+			if e.Observer != nil {
+				e.Observer.OnStepComplete(i, total, stepResult)
+			}
+			continue
 		}
 
 		// A knownIssue is resolved next, so the progress line, the archive,
@@ -241,7 +469,11 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		// A transport error is never covered: infrastructure is not a defect
 		// somebody else is going to fix by a date.
 		suppressed := false
-		if stepResult.Error == nil {
+		if step.FuzzSetup != "" {
+			// A copy's entry was settled above, without the log: the step it
+			// copies answers for the defect.
+			suppressed = stepResult.KnownIssue != nil && stepResult.KnownIssue.Applied
+		} else if stepResult.Error == nil {
 			if ki, active := e.knownIssueFor(instantiatedPlan, step); ki != nil {
 				failed := e.stepFailed(step, &stepResult)
 				switch {
@@ -269,7 +501,8 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 			}
 			outcome = OutcomeError
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, fmt.Errorf("step %s: %w", stepRef(step), stepResult.Error))
+			end = &runEnd{err: fmt.Errorf("step %s: %w", stepRef(step), stepResult.Error)}
+			continue
 		}
 
 		// Handle expectFailure steps: inverted success/failure logic
@@ -284,11 +517,13 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				if stepResult.Validation != nil && !stepResult.Validation.Passed && !suppressed {
 					outcome = OutcomeFailed
 					if !e.ContinueOnAssertionFailure {
-						return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s failed mechanical validation", stepRef(step))))
+						end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s failed mechanical validation", stepRef(step)))}
+						continue
 					}
 				}
-				if stopped := e.checkpointResult(step, stepResults, instantiatedPlan); stopped != nil {
-					return stopped
+				e.fuzzRun.targetPassed(step)
+				if e.atCheckpoint(step) {
+					end = &runEnd{checkpoint: &step}
 				}
 				continue
 			}
@@ -298,20 +533,24 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			// issue only keeps it out of the outcome.
 			if suppressed {
 				kiLog.endedEarly()
-				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, nil)
+				end = &runEnd{}
+				continue
 			}
 			outcome = OutcomeFailed
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s: expected failure status %s but got %s", stepRef(step),
-				strings.Join(step.ExpectFailure.Status.Strings(), ", "), ActualStatusText(stepResult.Response, stepResult.StatusCode))))
+			end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s: expected failure status %s but got %s", stepRef(step),
+				strings.Join(step.ExpectFailure.Status.Strings(), ", "), unexpectedStatusText(&stepResult)))}
+			continue
 		}
 
 		if stepResult.StatusCode >= 400 {
 			if suppressed {
 				kiLog.endedEarly()
-				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, nil)
+				end = &runEnd{}
+				continue
 			}
 			outcome = OutcomeFailed
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s returned %s", stepRef(step), failureStatusText(stepResult.Response, stepResult.StatusCode))))
+			end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s returned %s", stepRef(step), failureStatusText(stepResult.Response, stepResult.StatusCode)))}
+			continue
 		}
 
 		// Check for response body errors (API returned 2xx but body indicates error)
@@ -320,10 +559,12 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			// Do NOT push cleanup — failing node did not create a valid resource
 			if suppressed {
 				kiLog.endedEarly()
-				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, nil)
+				end = &runEnd{}
+				continue
 			}
 			outcome = OutcomeFailed
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s: %s", stepRef(step), stepResult.ResponseBodyError.Summary())))
+			end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s: %s", stepRef(step), stepResult.ResponseBodyError.Summary()))}
+			continue
 		}
 
 		// Store outputs keyed by step ID (supports step aliasing)
@@ -346,7 +587,8 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		// accepted the request and created a resource.
 		if err := e.oasStrictError(step, &stepResult); err != nil && !suppressed {
 			outcome = OutcomeFailed
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, err))
+			end = &runEnd{err: withExpiry(&stepResult, err)}
+			continue
 		}
 
 		// Run mechanical assertions if configured. The step stored its outputs
@@ -356,27 +598,37 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		if stepResult.Validation != nil && !stepResult.Validation.Passed && !suppressed {
 			outcome = OutcomeFailed
 			if !e.ContinueOnAssertionFailure {
-				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s failed mechanical validation", stepRef(step))))
+				end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s failed mechanical validation", stepRef(step)))}
+				continue
 			}
 		}
 
-		if stopped := e.checkpointResult(step, stepResults, instantiatedPlan); stopped != nil {
-			return stopped
+		e.fuzzRun.targetPassed(step)
+		if e.atCheckpoint(step) {
+			end = &runEnd{checkpoint: &step}
 		}
 	}
 
-	// Main flow complete — run verification steps (read-only checks with their
-	// own assertions), then cleanup.
-	verResults, verOutcome, verErr := e.runVerification(ctx, verificationSteps, state, len(sorted), total)
-	stepResults = append(stepResults, verResults...)
-	if verOutcome == OutcomeError && ctx.Err() != nil {
+	// Verification steps (read-only checks with their own assertions) run
+	// here when no fuzz case came after the plan, then cleanup.
+	if !verified && !verify() {
 		return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 	}
-	if verOutcome != OutcomePassed {
-		outcome = verOutcome
+	switch {
+	case end != nil && end.checkpoint != nil:
+		return e.checkpointResult(*end.checkpoint, stepResults, instantiatedPlan, outcome)
+	case end != nil:
+		return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, end.err)
 	}
-
 	return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, verErr)
+}
+
+// runEnd is how the plan's own steps ended before their last one: on an
+// error, which is nil when a knownIssue covered the failure, or at the
+// --stop-after checkpoint.
+type runEnd struct {
+	err        error
+	checkpoint *plan.Step
 }
 
 // runCleanup executes cleanup after the main flow. A graph-level cleanup
@@ -438,8 +690,18 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 	}
 
 	// steps holds a result for each main step that ran, in plan order, and then
-	// the verification results.
-	mainSteps := steps[:min(len(steps), len(p.Execution.Steps))]
+	// the verification results. A fuzz setup copy that was reused has no
+	// result, so the main steps are told apart by ID, not counted off.
+	planIDs := make(map[string]bool, len(p.Execution.Steps))
+	for _, s := range p.Execution.Steps {
+		planIDs[s.StepID()] = true
+	}
+	var mainSteps []StepResult
+	for _, r := range steps {
+		if planIDs[r.StepID] {
+			mainSteps = append(mainSteps, r)
+		}
+	}
 	run := newCleanupRun(e.planStepIDs(p), allow, mainSteps)
 	results := make([]StepResult, 0, total)
 	for _, entry := range planEntries {
@@ -461,8 +723,12 @@ func (e *Engine) runCleanup(ctx context.Context, p *plan.Plan, cleanupStack *Cle
 }
 
 // endRun runs cleanup for a run that ended with outcome and returns its result:
-// the steps that ran, what cleanup ran and skipped, and err.
+// the steps that ran, what cleanup ran and skipped, and err. A failed run
+// with no error of its own failed on its fuzz findings, and says so.
 func (e *Engine) endRun(ctx context.Context, p *plan.Plan, cleanupStack *CleanupStack, state *RunState, outcome Outcome, ki *knownIssueLog, steps []StepResult, err error) *RunResult {
+	if err == nil && outcome == OutcomeFailed {
+		err = fuzzFailureError(steps)
+	}
 	// Cleanup is gated on what really happened, not on what the run reports:
 	// a failure covered by a knownIssue leaves resources in the same state an
 	// uncovered one would, so a runOn: failure cleanup must still fire.
@@ -552,7 +818,7 @@ func (e *Engine) runVerification(ctx context.Context, steps []plan.Step, state *
 		if !ok {
 			return results, OutcomeError, fmt.Errorf("verification node %q not found in graph", step.Node)
 		}
-		fillValuesByOutputName(&step, node, state)
+		fillValuesByOutputName(&step, node, state, e.outputSources(state, ""))
 
 		idx := offset + i
 		if e.Observer != nil {
@@ -595,22 +861,37 @@ func (e *Engine) runVerification(ctx context.Context, steps []plan.Step, state *
 	return results, outcome, firstErr
 }
 
+// atCheckpoint reports whether step is the --stop-after checkpoint. It is
+// consulted after every step of the plan that passes, including an
+// expectFailure step whose expected error came back.
+func (e *Engine) atCheckpoint(step plan.Step) bool {
+	return e.stopAfterStep != "" && step.StepID() == e.stopAfterStep
+}
+
 // checkpointResult returns the stopped result when step is the --stop-after
 // checkpoint, or nil otherwise. A checkpoint skips cleanup and verification so
-// the resources created so far stay alive for an external harness. It is
-// consulted after every step that passes, including an expectFailure step
-// whose expected error came back.
-func (e *Engine) checkpointResult(step plan.Step, stepResults []StepResult, p *plan.Plan) *RunResult {
-	if e.stopAfterStep == "" || step.StepID() != e.stopAfterStep {
+// the resources created so far stay alive for an external harness. outcome is
+// the run's: a run that failed, such as on a fuzz finding, stops failed rather
+// than stopped, so the failure is not lost.
+func (e *Engine) checkpointResult(step plan.Step, stepResults []StepResult, p *plan.Plan, outcome Outcome) *RunResult {
+	if !e.atCheckpoint(step) {
 		return nil
 	}
-	return &RunResult{
+	r := &RunResult{
 		Outcome:          OutcomeStopped,
 		Stopped:          true,
 		StoppedAt:        step.StepID(),
 		Steps:            stepResults,
 		InstantiatedPlan: p,
 	}
+	if outcome == OutcomeFailed {
+		r.Outcome = OutcomeFailed
+		r.Error = fmt.Errorf("stopped at %q after an earlier failure", step.StepID())
+		if err := fuzzFailureError(stepResults); err != nil {
+			r.Error = fmt.Errorf("%w (stopped at %q)", err, step.StepID())
+		}
+	}
+	return r
 }
 
 // oasStrictError returns an error when strict OAS validation is enabled and
@@ -657,6 +938,20 @@ func oasErrorCount(v *oas.ValidationResult) int {
 	return n
 }
 
+// unexpectedStatusText says what an expectFailure step got instead of the
+// failure it expected, and, for an error its body reported, what made that
+// the status: "400 (a body error in a 200 response)".
+func unexpectedStatusText(r *StepResult) string {
+	text := r.ExpectFailure.ActualText()
+	switch rbe := r.ResponseBodyError; {
+	case rbe != nil && rbe.Status != 0:
+		text += fmt.Sprintf(" (a body error in a %d response)", r.StatusCode)
+	case rbe != nil:
+		text += ", whose body reports an error that its errorDetection rule gives no status, so it can't match a failure status"
+	}
+	return text
+}
+
 // stepRef names a step in an error message by its ID, which is what
 // --stop-after, dependsOn, and the archive use, adding the node when the two
 // differ so that two steps on one node can be told apart: "addSocks" (addItem).
@@ -670,11 +965,19 @@ func stepRef(step plan.Step) string {
 
 // stopAfterError returns an error when no step has the ID --stop-after names.
 // Run output shows a node beside each step ID, so when the name is a node the
-// error lists the IDs of the steps that run it.
+// error lists the IDs of the steps that run it. A fuzz case, or a copy of a
+// setup step made for one, is not a checkpoint: what it leaves behind is the
+// case's, not the plan's.
 func stopAfterError(name string, steps []plan.Step) error {
 	var ids []string
 	for _, step := range steps {
 		if step.StepID() == name {
+			switch {
+			case step.Fuzz != nil:
+				return fmt.Errorf("--stop-after: %q is a fuzz case of step %q; stop after a step of the plan", name, step.Fuzz.Target)
+			case step.FuzzSetup != "":
+				return fmt.Errorf("--stop-after: %q is a copy of setup step %q made for fuzz case %q; stop after a step of the plan", name, step.VariantOf, step.FuzzSetup)
+			}
 			return nil
 		}
 		if step.Node == name {
@@ -692,23 +995,49 @@ func stopAfterError(name string, steps []plan.Step) error {
 }
 
 // fillValuesByOutputName wires any node input the step leaves unset to the
-// most recently executed step that produced an output with the same name.
-func fillValuesByOutputName(step *plan.Step, node *graph.Node, state *RunState) {
+// first of sources, step IDs most recent first, that produced an output with
+// the same name.
+func fillValuesByOutputName(step *plan.Step, node *graph.Node, state *RunState, sources []string) {
 	if step.Values == nil {
 		step.Values = make(map[string]plan.StepValue)
 	}
-	executed := state.ExecutedSteps()
 	for _, input := range node.Inputs {
 		if _, set := step.Values[input.Name]; set {
 			continue
 		}
-		for i := len(executed) - 1; i >= 0; i-- {
-			if _, err := state.GetOutput(executed[i], input.Name); err == nil {
-				step.Values[input.Name] = plan.StepValue{From: executed[i] + "." + input.Name}
+		for _, id := range sources {
+			if _, err := state.GetOutput(id, input.Name); err == nil {
+				step.Values[input.Name] = plan.StepValue{From: id + "." + input.Name}
 				break
 			}
 		}
 	}
+}
+
+// outputSources lists, most recent first, the steps an input matched by
+// output name may read: for forStep, a fuzz case or a copy of a setup step
+// made for one, that case's own steps and then the happy path's; for anything
+// else, such as a verification step or a plan-level cleanup (forStep ""), the
+// happy path's alone. A fuzz case's resources are never taken for the happy
+// path's, nor another case's for its own.
+func (e *Engine) outputSources(state *RunState, forStep string) []string {
+	var owner map[string]string
+	if e.fuzzRun != nil {
+		owner = e.fuzzRun.owner
+	}
+	ownCase := owner[forStep]
+	executed := state.ExecutedSteps()
+	var own, main []string
+	for i := len(executed) - 1; i >= 0; i-- {
+		id := executed[i]
+		switch o := owner[id]; {
+		case o == "":
+			main = append(main, id)
+		case ownCase != "" && o == ownCase:
+			own = append(own, id)
+		}
+	}
+	return append(own, main...)
 }
 
 // stepInputs holds the inputs resolved for a step, so that every attempt of a
@@ -739,6 +1068,9 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	} else {
 		// Construct ResolveContext from engine fields
 		rctx := e.buildResolveContext(node)
+		if e.draws != nil {
+			rctx.Rand = e.draws.next(sid)
+		}
 		resolvedAt = rctx.Now
 
 		// Resolve inputs
@@ -762,6 +1094,9 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		// sent.
 		overlayValues, _ := e.router.ResolveValueOverride(node.Name)
 		for k, v := range overlayValues {
+			if step.Fuzz != nil && step.Fuzz.Input == k {
+				continue // the case's value is what the step is for
+			}
 			inputs[k] = v
 			resolutions = recordOverrideValue(resolutions, k, v)
 		}
@@ -792,8 +1127,16 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 	exec, cfg, rewrite := e.router.Resolve(node.Name)
 	actualBaseURL := exec.Target()
 
-	// Build request
+	// Build request, then apply a fuzz case's patch to it
 	req, err := adp.BuildRequest(inputs, cfg)
+	if err == nil && step.Fuzz != nil {
+		for _, p := range step.Fuzz.Patch {
+			if perr := adapter.ApplyPatch(req, p.Where, p.Path, p.Op, p.Value); perr != nil {
+				err = fmt.Errorf("fuzz case %s: %w", step.Fuzz.ID, perr)
+				break
+			}
+		}
+	}
 	if err != nil {
 		return StepResult{
 			StepID:        sid,
@@ -861,31 +1204,37 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		result.OriginalPath = originalPath
 	}
 
-	// Extract outputs (only on success)
+	// Extract outputs (only on success). An error the body reports is looked
+	// for first: such a body rarely has the shape a success's outputs are
+	// read from, and the error, not the outputs it lacks, is what the step
+	// came back with. A fuzz case is judged on its response, so one whose
+	// outputs can't be read, such as an error page behind a 200, carries on
+	// without them rather than failing as if nothing had come back.
 	if resp.StatusCode < 400 {
+		result.ResponseBodyError = e.detectBodyError(node, resp.Body)
 		outputs, err := adp.ExtractOutputs(resp)
-		if err != nil {
+		switch {
+		case err != nil && result.ResponseBodyError != nil:
+			// The body error is the step's failure; it has no outputs.
+		case err != nil && step.Fuzz == nil:
 			result.Error = fmt.Errorf("extracting outputs: %w", err)
 			return result
-		}
-		tmpl, hasTemplate := e.registry.GetTemplate(node.Adapter)
-		if hasTemplate {
-			convertHeaderOutputs(outputs, node, tmpl)
-		}
-		outputs = echoInputOutputs(outputs, node, inputs)
-		result.Outputs = outputs
+		case err != nil:
+			result.OutputsError = err.Error()
+		default:
+			tmpl, hasTemplate := e.registry.GetTemplate(node.Adapter)
+			if hasTemplate {
+				convertHeaderOutputs(outputs, node, tmpl)
+			}
+			outputs = echoInputOutputs(outputs, node, inputs)
+			result.Outputs = outputs
 
-		// Record transform script if present
-		if hasTemplate && tmpl.HasTransform() {
-			result.TransformScript = tmpl.Response.Transform
-		}
+			// Record transform script if present
+			if hasTemplate && tmpl.HasTransform() {
+				result.TransformScript = tmpl.Response.Transform
+			}
 
-		result.DisplayOutputs = displayOutputs(node, outputs)
-
-		// Check for errors buried in the response body
-		rules := effectiveErrorRules(node, e.graph)
-		if rbe := CheckErrorDetection(rules, resp.Body); rbe != nil {
-			result.ResponseBodyError = rbe
+			result.DisplayOutputs = displayOutputs(node, outputs)
 		}
 	}
 
@@ -965,9 +1314,13 @@ func (e *Engine) runStepAssertions(step plan.Step, node *graph.Node, state *RunS
 		}
 
 		schemaCheck := buildSchemaCheck(result.OASValidation)
+		// A status assertion reads the status the response stands for, so one
+		// that pins the failure an expectFailure step expects, such as a 400
+		// out of 4xx, holds for an error the body reports as one.
+		failureStatus, failureName := result.FailureStatus()
+		statusInfo := validate.StatusInfo{Code: failureStatus, GRPCName: failureName}
 
 		if len(normalAssertions) > 0 {
-			statusInfo := validate.StatusInfo{Code: resp.StatusCode, GRPCName: grpcStatusName(resp)}
 			nr := validate.RunMechanical(statusInfo, normalBody,
 				withDisplayedExprs(convertAssertions(normalAssertions), ectx), normalEval, schemaCheck)
 			merged.Results = append(merged.Results, nr.Results...)
@@ -976,7 +1329,7 @@ func (e *Engine) runStepAssertions(step plan.Step, node *graph.Node, state *RunS
 			}
 		}
 		if len(rawAssertions) > 0 {
-			rr := validate.RunMechanical(validate.StatusInfo{Code: resp.StatusCode, GRPCName: grpcStatusName(resp)}, resp.Body,
+			rr := validate.RunMechanical(statusInfo, resp.Body,
 				withDisplayedExprs(convertAssertions(rawAssertions), ectx), predicateEval, schemaCheck)
 			merged.Results = append(merged.Results, rr.Results...)
 			if !rr.Passed {

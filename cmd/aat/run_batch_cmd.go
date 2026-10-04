@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"math/rand"
 	"os"
@@ -81,6 +82,19 @@ A batch that finds no plans exits 2.`,
 		if err != nil {
 			return batchSetupFailure(jsonFlag, err)
 		}
+		fuzzCfg, err := fuzzConfigFromFlags(cmd)
+		noFuzz, _ := cmd.Flags().GetBool("no-fuzz")
+		fuzzSave, _ := cmd.Flags().GetString("fuzz-save")
+		fuzzSaveAll, _ := cmd.Flags().GetBool("fuzz-save-all")
+		if err != nil {
+			return batchSetupFailure(jsonFlag, err)
+		}
+		if fuzzCfg != nil {
+			// A plan without the target runs as written; a name no plan has is
+			// an error once the batch has run.
+			fuzzCfg.AllowNoTarget = true
+			fuzzCfg.Matched = &engine.FuzzMatches{}
+		}
 
 		outputDir := resolveOutputDir(cmd.Flags().Changed("output"), getString("output"), resolved.ArchiveDir)
 
@@ -106,6 +120,10 @@ A batch that finds no plans exits 2.`,
 				VerboseAuth:     verboseAuth,
 				SkipMutations:   noMutations,
 				Vars:            vars,
+				Fuzz:            fuzzCfg,
+				NoFuzz:          noFuzz,
+				FuzzSave:        fuzzSave,
+				FuzzSaveAll:     fuzzSaveAll,
 			},
 			PlanDirs:   resolved.PlanDirs,
 			FilterPath: filterPath,
@@ -131,7 +149,7 @@ func init() {
 		"layer group for permutation (comma-separated names, repeatable)")
 	runBatchCmd.Flags().Bool("no-dedup", false, "disable duplicate plan detection across permutations")
 	runBatchCmd.Flags().Bool("shuffle", false, "randomize plan execution order")
-	runBatchCmd.Flags().Int64("seed", 0, "random seed for --shuffle (0 = use current time)")
+	runBatchCmd.Flags().Int64("seed", 0, "seed for --shuffle and for each run's pool picks and random selections, which it derives from this seed, the plan, and its permutation (0 = a new seed each time)")
 
 	runCmd.AddCommand(runBatchCmd)
 }
@@ -144,14 +162,15 @@ type batchArgs struct {
 	Parallel   int    // concurrency limit; <=1 means sequential
 	NoDedup    bool   // disable duplicate plan detection
 	Shuffle    bool   // randomize plan execution order
-	Seed       int64  // random seed for shuffle (0 = use current time)
+	Seed       int64  // seed for --shuffle and each run's draws (0 = a new one each time)
 }
 
 // BatchSummary is the machine-readable JSON output for batch CI/CD pipelines.
 type BatchSummary struct {
 	Outcome     string           `json:"outcome"`
-	Error       string           `json:"error,omitempty"` // why the batch stopped before running its plans
+	Error       string           `json:"error,omitempty"` // why the batch stopped before running its plans, or what its --fuzz flags matched in none
 	BatchID     string           `json:"batch_id,omitempty"`
+	Seed        int64            `json:"seed,omitempty"` // --seed, or the one a --shuffle without it picked: it replays the batch
 	Runs        []BatchRunResult `json:"runs"`
 	Summary     BatchStats       `json:"summary"`
 	ArchivePath string           `json:"archive_path,omitempty"`
@@ -180,6 +199,13 @@ type BatchRunResult struct {
 	Permutation string   `json:"permutation,omitempty"`  // permutation label for grouping
 	Skipped     bool     `json:"skipped,omitempty"`      // true if skipped as a duplicate
 	DuplicateOf string   `json:"duplicate_of,omitempty"` // display name of canonical run
+	// Seed is the run's seed, when it drew from one: aat run plan --seed
+	// replays its picks.
+	Seed uint64 `json:"seed,omitempty"`
+	// FuzzSaved lists the regression plans --fuzz-save wrote for the run,
+	// and FuzzSaveError says why one could not be written.
+	FuzzSaved     []string `json:"fuzz_saved,omitempty"`
+	FuzzSaveError string   `json:"fuzz_save_error,omitempty"`
 }
 
 // BatchStats is the aggregate counts in the batch JSON summary.
@@ -277,6 +303,15 @@ func executeBatch(ba *batchArgs) int {
 		if res.batchDir != "" {
 			_, _ = fmt.Fprintf(os.Stdout, "Archive: %s\n", res.batchDir)
 		}
+		if res.summary.Seed != 0 {
+			_, _ = fmt.Fprintf(os.Stdout, "Seed: %d\n", res.summary.Seed)
+		}
+		for _, r := range res.summary.Runs {
+			writeFuzzSaved(os.Stdout, os.Stderr, specDisplayName(r.PlanName, r.Permutation), r.FuzzSaved, r.FuzzSaveError)
+		}
+		if res.err != nil {
+			fmt.Fprintf(os.Stderr, "aat: %s\n", res.err)
+		}
 		return batchExitCode(res)
 	}
 
@@ -289,7 +324,7 @@ func executeBatch(ba *batchArgs) int {
 // batchExitCode maps a batchResult to a process exit code.
 // 0 = all pass, 1 = any fail, 2 = any error or setup error.
 func batchExitCode(res *batchResult) int {
-	if res.setupErr {
+	if res.setupErr || res.err != nil {
 		return exitCodeInfra
 	}
 	if res.summary == nil {
@@ -434,15 +469,16 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		}
 	}
 
-	// 3b. Shuffle specs if requested
+	// 3b. Shuffle specs if requested. Without --seed, the shuffle picks a seed
+	// and the runs draw from it as they would from --seed, so the one seed
+	// it logs replays the order and every run's picks.
 	if args.Shuffle {
-		seed := args.Seed
-		if seed == 0 {
-			seed = time.Now().UnixNano()
+		if args.Seed == 0 {
+			args.Seed = int64(engine.NewRunSeed())
 		}
-		rng := rand.New(rand.NewSource(seed))
+		rng := rand.New(rand.NewSource(args.Seed))
 		rng.Shuffle(len(specs), func(i, j int) { specs[i], specs[j] = specs[j], specs[i] })
-		logf("aat: shuffled %d specs (seed=%d)\n", len(specs), seed)
+		logf("aat: shuffled %d specs (seed=%d)\n", len(specs), args.Seed)
 	}
 
 	// 4. Generate batch ID and create batch directory
@@ -510,10 +546,17 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 		}
 	}
 
+	// A --fuzz, --fuzz-input, or --fuzz-case name that no plan matched did
+	// nothing, which a run of every plan as written must not pass for.
+	var fuzzErr error
+	if !args.NoFuzz {
+		fuzzErr = args.Fuzz.Unmatched()
+	}
+
 	aggregateOutcome := "passed"
 	if stats.AbortedPlans > 0 {
 		aggregateOutcome = "aborted"
-	} else if stats.ErrorPlans > 0 {
+	} else if stats.ErrorPlans > 0 || fuzzErr != nil {
 		aggregateOutcome = "error"
 	} else if stats.FailedPlans > 0 {
 		aggregateOutcome = "failed"
@@ -529,6 +572,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 			ToolVersion: version.Effective(),
 			Layers:      args.Layers,
 			LayerGroups: args.LayerGroups,
+			Seed:        args.Seed,
 		},
 		Runs: batchEntries,
 		Result: archive.BatchResult{
@@ -564,10 +608,18 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	}
 	logf(" (%s)\n", formatDuration(totalDur))
 	logf("Archive: %s\n", batchDir)
+	if args.Seed != 0 {
+		logf("Seed: %d (replay the batch's order and picks with --seed %d)\n", args.Seed, args.Seed)
+	}
+	for _, r := range runs {
+		writeFuzzSaved(out, os.Stderr, specDisplayName(r.PlanName, r.Permutation), r.FuzzSaved, r.FuzzSaveError)
+	}
 
 	summary := &BatchSummary{
 		Outcome:     aggregateOutcome,
+		Error:       errString(fuzzErr),
 		BatchID:     batchID,
+		Seed:        args.Seed,
 		Runs:        runs,
 		Summary:     stats,
 		ArchivePath: batchDir,
@@ -576,6 +628,7 @@ func batchCommand(ctx context.Context, args *batchArgs, out io.Writer) *batchRes
 	return &batchResult{
 		summary:  summary,
 		batchDir: batchDir,
+		err:      fuzzErr,
 	}
 }
 
@@ -590,7 +643,7 @@ func batchSequential(ctx context.Context, rctx *runContext, specs []batchRunSpec
 		displayName := specDisplayName(planName, spec.permutation)
 
 		// Create a shallow copy of rctx with per-spec layers
-		specCtx := specRunContext(rctx, spec.layers)
+		specCtx := specRunContext(rctx, spec, args.Seed)
 
 		// Create streaming observer for sequential mode (unless output suppressed)
 		var observer engine.ProgressObserver
@@ -661,7 +714,7 @@ func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, 
 			noopLogf := func(string, ...any) {}
 
 			// Create a shallow copy of rctx with per-spec layers
-			specCtx := specRunContext(rctx, spec.layers)
+			specCtx := specRunContext(rctx, spec, args.Seed)
 
 			var observer engine.ProgressObserver
 			if renderer != nil {
@@ -727,11 +780,29 @@ func batchParallel(ctx context.Context, rctx *runContext, specs []batchRunSpec, 
 
 // specRunContext creates a shallow copy of runContext with layers overridden
 // for a specific batchRunSpec. This ensures each spec gets its own layer set
-// while sharing all other infrastructure.
-func specRunContext(rctx *runContext, layers []string) *runContext {
+// while sharing all other infrastructure. A batch seed (non-zero) gives the
+// run a seed of its own, derived from the plan and its permutation rather than
+// its position, so --shuffle does not change which values a run draws.
+func specRunContext(rctx *runContext, spec batchRunSpec, batchSeed int64) *runContext {
 	cp := *rctx
-	cp.Layers = layers
+	cp.Layers = spec.layers
+	cp.PlanName = strings.TrimSuffix(spec.entry.Name, filepath.Ext(spec.entry.Name))
+	if batchSeed != 0 {
+		// The plan's path within its directory, not its absolute path, so the
+		// seed replays in any checkout.
+		seed := runSeed(batchSeed, spec.entry.Name, spec.permutation)
+		cp.Seed = &seed
+	}
 	return &cp
+}
+
+// runSeed derives a batch run's seed from the batch seed and the run's plan
+// and permutation. It keeps to 53 bits, as engine.NewRunSeed does, and is
+// never 0, which reads as no seed.
+func runSeed(batchSeed int64, planPath, permutation string) uint64 {
+	h := fnv.New64a()
+	_, _ = fmt.Fprintf(h, "%d\x00%s\x00%s", batchSeed, planPath, permutation)
+	return max(h.Sum64()>>11, 1)
 }
 
 // buildPlanResult constructs BatchRunResult and BatchRunEntry from a runResult.
@@ -748,6 +819,9 @@ func buildPlanResult(planName, permutation string, res *runResult) (BatchRunResu
 
 	if res.summary != nil {
 		br.Outcome = res.summary.Outcome
+		br.Seed = res.summary.Seed
+		br.FuzzSaved, br.FuzzSaveError = res.summary.FuzzSaved, res.summary.FuzzSaveError
+		be.Seed = res.summary.Seed
 		br.StepCount = res.summary.Summary.TotalSteps
 		br.PassedSteps = res.summary.Summary.PassedSteps
 		br.FailedSteps = res.summary.Summary.FailedSteps

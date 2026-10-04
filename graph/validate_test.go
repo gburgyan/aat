@@ -839,9 +839,9 @@ func TestValidate_ErrorDetection_ValidGraphLevel(t *testing.T) {
 	g := &Graph{
 		Version: "1.0.0",
 		ErrorDetection: []ErrorDetectionRule{
-			{Path: "ErrorResponse.Result.Error", Rule: "non-empty", Details: &ErrorDetailMapping{
-				Message: "ErrorResponse.Result.Error.0.Message",
-				Code:    "ErrorResponse.Result.Error.0.SourceCode",
+			{Path: "orderResponse.result.errors", Rule: "non-empty", Details: &ErrorDetailMapping{
+				Message: "orderResponse.result.errors.0.message",
+				Code:    "orderResponse.result.errors.0.code",
 			}},
 		},
 		Nodes: map[string]*Node{

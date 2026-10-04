@@ -2,6 +2,7 @@ package archive
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/gburgyan/aat/plan"
@@ -42,6 +43,10 @@ type ArchiveMetadata struct {
 	// references none, for a run the MCP server executed, and in archives
 	// written before the mode was recorded.
 	OASValidation string `json:"oasValidation,omitempty" redact:"-"`
+	// Seed is the seed the run drew its pool picks and random selections
+	// from; `aat run plan --seed` with it replays them. It is 0 for a run that
+	// ended before any step, and in archives written before seeds were kept.
+	Seed uint64 `json:"seed,omitempty" redact:"-"`
 }
 
 // StepRecord captures the execution trace for a single step.
@@ -65,10 +70,19 @@ type StepRecord struct {
 	// applied. The step still reads as failed; see Archive.KnownIssues.
 	KnownIssue        *KnownIssueRecord        `json:"knownIssue,omitempty"`
 	ResponseBodyError *ResponseBodyErrorRecord `json:"responseBodyError,omitempty"`
-	OASValidation     *OASValidationRecord     `json:"oasValidation,omitempty"`
-	Error             string                   `json:"error,omitempty"`
-	RetryCount        int                      `json:"retryCount,omitempty"`
-	RetriedOn         []string                 `json:"retriedOn,omitempty" redact:"-"` // error category of each retried attempt, in order
+	// Fuzz, on a step the fuzzer made, is the case it sent and how its
+	// response was judged.
+	Fuzz *FuzzRecord `json:"fuzz,omitempty"`
+	// FuzzSetup, on a copy of a setup step made for a fuzz case, is the ID of
+	// the case's step.
+	FuzzSetup string `json:"fuzzSetup,omitempty" redact:"-"`
+	// FuzzSetupFailed, on such a copy, is true when it failed, so its case
+	// was not sent.
+	FuzzSetupFailed bool                 `json:"fuzzSetupFailed,omitempty"`
+	OASValidation   *OASValidationRecord `json:"oasValidation,omitempty"`
+	Error           string               `json:"error,omitempty"`
+	RetryCount      int                  `json:"retryCount,omitempty"`
+	RetriedOn       []string             `json:"retriedOn,omitempty" redact:"-"` // error category of each retried attempt, in order
 	// CleanupFor, on a cleanup step, is the ID of the step whose resource it
 	// releases, or of the cleanup step before it in a chain.
 	CleanupFor string `json:"cleanupFor,omitempty" redact:"-"`
@@ -137,14 +151,55 @@ type DisplayOutputRecord struct {
 	Value any    `json:"value,omitempty"`
 }
 
+// FuzzRecord is a fuzz case and its finding.
+type FuzzRecord struct {
+	ID       string `json:"id" redact:"-"`
+	Target   string `json:"target" redact:"-"`
+	Mode     string `json:"mode" redact:"-"`
+	Input    string `json:"input" redact:"-"`
+	Strategy string `json:"strategy" redact:"-"`
+	Value    any    `json:"value"`
+	// Patch is what the case changed in the request, for a case that left a
+	// field out or changed it rather than setting an input.
+	Patch []plan.RequestPatch `json:"patch,omitempty"`
+	// JudgedAs is the mode the response was judged by, when it differs from
+	// Mode: negative when the request broke the OpenAPI spec.
+	JudgedAs string `json:"judgedAs,omitempty" redact:"-"`
+	// SpecViolations are the ways the request broke the OpenAPI spec.
+	SpecViolations []string `json:"specViolations,omitempty"`
+	// Finding is empty when the response was what the case called for.
+	Finding string `json:"finding,omitempty" redact:"-"`
+	// Fails is true when the finding failed the run.
+	Fails bool `json:"fails,omitempty"`
+	// OutputsError says why the outputs of a successful response could not
+	// be read; the case was judged on the response anyway.
+	OutputsError string `json:"outputsError,omitempty"`
+	// Setup is how the steps the case ran on came to be: fresh, reused,
+	// rebuilt, or failed; empty on the happy path's own.
+	Setup string `json:"setup,omitempty" redact:"-"`
+	// Stale is the answer the case got on a reused setup that turned out to
+	// be used up, before it was sent again on a rebuilt one.
+	Stale *StaleRecord `json:"stale,omitempty"`
+}
+
+// StaleRecord is an answer that showed a fuzz case's reused setup was used
+// up: the status it came back with, and the error its body reported, if any.
+type StaleRecord struct {
+	Status    int                      `json:"status"`
+	BodyError *ResponseBodyErrorRecord `json:"bodyError,omitempty"`
+}
+
 // ExpectFailureRecord captures the outcome of a negative assertion. Expected
 // holds the statuses as the plan wrote them, so an HTTP plan archives numbers
 // and a gRPC one archives names.
 type ExpectFailureRecord struct {
 	Expected []plan.ExpectedStatus `json:"expected"`
-	Actual   int                   `json:"actual"`
-	// ActualName is the gRPC status the step came back with, and is empty for
-	// an HTTP step.
+	// Actual is the status the step was matched by: the response's own, or
+	// the one an error its body reports stands for (see
+	// ResponseBodyErrorRecord.Status); the response's own is in response.status.
+	Actual int `json:"actual"`
+	// ActualName is the gRPC status the step was matched by, and is empty for
+	// an HTTP step and for a body error's status.
 	ActualName string `json:"actualName,omitempty"`
 	Passed     bool   `json:"passed"`
 }
@@ -186,6 +241,37 @@ type ResponseBodyErrorRecord struct {
 	Message  string `json:"message,omitempty"`
 	Code     string `json:"code,omitempty"`
 	Category string `json:"category,omitempty" redact:"-"`
+	// Status is the HTTP status the error stands for, from its rule or the
+	// graph's errorStatus; 0 when neither gives one.
+	Status int `json:"status,omitempty"`
+	// Stale is set when the rule marks the error as one that means the state
+	// the request worked on is used up.
+	Stale bool `json:"stale,omitempty"`
+}
+
+// Summary describes the error in one line, as every report of a run shows it:
+// `response body error detected at "result.errors" (rule: non-empty): email
+// is not valid [code: E102] [category: VALIDATION], treated as status 400`.
+// A stale error's rule reads "(rule: exists, stale)".
+func (r ResponseBodyErrorRecord) Summary() string {
+	rule := r.Rule
+	if r.Stale {
+		rule += ", stale"
+	}
+	text := fmt.Sprintf("response body error detected at %q (rule: %s)", r.RulePath, rule)
+	if r.Message != "" {
+		text += ": " + r.Message
+	}
+	if r.Code != "" {
+		text += fmt.Sprintf(" [code: %s]", r.Code)
+	}
+	if r.Category != "" {
+		text += fmt.Sprintf(" [category: %s]", r.Category)
+	}
+	if r.Status != 0 {
+		text += fmt.Sprintf(", treated as status %d", r.Status)
+	}
+	return text
 }
 
 // OASValidationRecord captures runtime OAS schema validation for a step.
@@ -309,7 +395,9 @@ type ValueResolutionRecord struct {
 	ConstraintOK *bool  `json:"constraintOk,omitempty"`
 	PoolIndex    int    `json:"poolIndex,omitempty"`
 	PoolSize     int    `json:"poolSize,omitempty"`
-	Tried        []any  `json:"tried,omitempty"`
+	// PoolRef names the domain pool the pool came from, when poolRef named one.
+	PoolRef string `json:"poolRef,omitempty" redact:"-"`
+	Tried   []any  `json:"tried,omitempty"`
 	// Error, for source "error", says why the input couldn't be resolved. For a
 	// named selection that failed, InputName is the selection's name.
 	Error string `json:"error,omitempty"`
@@ -335,6 +423,24 @@ type RunSummary struct {
 	// OAS is the run's OpenAPI validation, recorded whenever the archive
 	// records a validation mode, a clean run included.
 	OAS *OASSummary `json:"oas,omitempty"`
+	// Seed replays the run's pool picks and random selections with
+	// aat run plan --seed.
+	Seed uint64 `json:"seed,omitempty"`
+	// Fuzz counts the run's fuzz cases by finding, when it had any.
+	Fuzz *FuzzSummary `json:"fuzz,omitempty"`
+}
+
+// FuzzSummary counts a run's fuzz cases in summary.json.
+type FuzzSummary struct {
+	Cases int `json:"cases"`
+	// Findings counts the cases by finding; "ok" counts those whose response
+	// was what they called for.
+	Findings map[string]int `json:"findings"`
+	// Failing counts the cases whose finding failed the run.
+	Failing int `json:"failing"`
+	// Setup counts the cases by how their setup came to be: fresh, reused,
+	// rebuilt, or failed.
+	Setup map[string]int `json:"setup,omitempty"`
 }
 
 // OASSummary is a run's OpenAPI validation in summary.json: the mode, and
@@ -383,6 +489,9 @@ type BatchMetadata struct {
 	ToolVersion string     `json:"toolVersion,omitempty" redact:"-"`
 	Layers      []string   `json:"layers,omitempty" redact:"-"`      // CLI layers applied at the batch level
 	LayerGroups [][]string `json:"layerGroups,omitempty" redact:"-"` // layer groups for permutation
+	// Seed is the batch's seed, when it had one: --seed replays its order and
+	// its runs' picks.
+	Seed int64 `json:"seed,omitempty" redact:"-"`
 }
 
 // BatchRunEntry is a summary of a single run within a batch.
@@ -401,6 +510,8 @@ type BatchRunEntry struct {
 	Skipped     bool           `json:"skipped,omitempty"`                // true if this run was skipped as a duplicate
 	DuplicateOf string         `json:"duplicateOf,omitempty" redact:"-"` // display name of canonical run (when skipped)
 	Issues      map[string]int `json:"issues,omitempty"`
+	// Seed is the run's seed, when it drew from one.
+	Seed uint64 `json:"seed,omitempty" redact:"-"`
 }
 
 // BatchResult captures the aggregate outcome of a batch.

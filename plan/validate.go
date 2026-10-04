@@ -467,7 +467,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 			if !ok || marker || step.ExpectFailure != nil {
 				continue
 			}
-			if msg := graph.DefaultShapeError(&graph.InputDefault{Value: sv.Default, Pool: sv.Pool}, in.Type); msg != "" {
+			if msg := graph.DefaultShapeError(&graph.InputDefault{Value: sv.Default, Pool: sv.Pool, PoolRef: sv.PoolRef}, in.Type); msg != "" {
 				errs = append(errs, fmt.Sprintf("step %d (%s): value %q: %s", i, sid, in.Name, msg))
 			}
 		}
@@ -515,10 +515,15 @@ func Validate(p *Plan, g *graph.Graph) error {
 				}
 			}
 
+			// raw sends a default as written, so it needs one and no other source
+			if sv.Raw && (sv.Default == nil || sv.From != "" || sv.FromSelection != "" || sv.FromResolved != "" || sv.FromInput != "" || len(sv.Pool) > 0 || sv.PoolRef != "") {
+				errs = append(errs, fmt.Sprintf("step %d (%s): value %q has raw: true, which sends its default as written, so it needs a default and no from, fromSelection, fromResolved, fromInput, pool, or poolRef", i, sid, name))
+			}
+
 			// Validate FromResolved: intra-step value reference
 			if sv.FromResolved != "" {
 				// Mutual exclusion: fromResolved cannot coexist with from, fromSelection, default, or pool
-				if sv.From != "" || sv.FromSelection != "" || sv.Default != nil || len(sv.Pool) > 0 {
+				if sv.From != "" || sv.FromSelection != "" || sv.Default != nil || len(sv.Pool) > 0 || sv.PoolRef != "" {
 					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromResolved but also has from/fromSelection/default/pool — these are mutually exclusive with fromResolved", i, sid, name))
 				}
 				// Referenced input must exist on the same graph node
@@ -537,7 +542,7 @@ func Validate(p *Plan, g *graph.Graph) error {
 			// Validate FromInput: cross-step input reference
 			if sv.FromInput != "" {
 				// Mutual exclusion: fromInput cannot coexist with from, fromSelection, fromResolved, default, or pool
-				if sv.From != "" || sv.FromSelection != "" || sv.FromResolved != "" || sv.Default != nil || len(sv.Pool) > 0 {
+				if sv.From != "" || sv.FromSelection != "" || sv.FromResolved != "" || sv.Default != nil || len(sv.Pool) > 0 || sv.PoolRef != "" {
 					errs = append(errs, fmt.Sprintf("step %d (%s): value %q has fromInput but also has from/fromSelection/fromResolved/default/pool — these are mutually exclusive with fromInput", i, sid, name))
 				}
 				srcStepID, srcInputName, err := splitRef(sv.FromInput)
@@ -759,12 +764,15 @@ func Validate(p *Plan, g *graph.Graph) error {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, sid, name, err))
 				}
 			}
-			if err := ValidateExprValue(sv.Default); err != nil {
-				errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
-			}
-			for _, ref := range ExprValueOutputRefs(sv.Default) {
-				if msg := refScope.check(ref, sid); msg != "" {
-					errs = append(errs, fmt.Sprintf("step %d (%s): value %q reads %s%s", i, sid, name, ref, msg))
+			// A raw value is sent as written: {{…}} in it is text.
+			if !sv.Raw {
+				if err := ValidateExprValue(sv.Default); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
+				}
+				for _, ref := range ExprValueOutputRefs(sv.Default) {
+					if msg := refScope.check(ref, sid); msg != "" {
+						errs = append(errs, fmt.Sprintf("step %d (%s): value %q reads %s%s", i, sid, name, ref, msg))
+					}
 				}
 			}
 			for k, entry := range sv.Pool {
@@ -807,6 +815,12 @@ func Validate(p *Plan, g *graph.Graph) error {
 		}
 
 		errs = append(errs, validateKnownIssue(fmt.Sprintf("step %d (%s)", i, sid), step.KnownIssue)...)
+		if node, ok := g.Nodes[step.Node]; ok {
+			errs = append(errs, validateFuzzSettings(fmt.Sprintf("step %d (%s)", i, sid), step.FuzzSettings, node)...)
+		}
+		if why := step.Unfuzzable(); why != "" && step.FuzzSettings != nil {
+			errs = append(errs, fmt.Sprintf("step %d (%s): fuzz: the step %s", i, sid, why))
+		}
 	}
 
 	errs = append(errs, validateKnownIssue("knownIssue", p.KnownIssue)...)
@@ -940,7 +954,7 @@ func validateVerificationValues(where, nodeName string, node *graph.Node, values
 			}
 		}
 		if marker, _ := AutowireMarker(sv); !marker {
-			if msg := graph.DefaultShapeError(&graph.InputDefault{Value: sv.Default, Pool: sv.Pool}, in.Type); msg != "" {
+			if msg := graph.DefaultShapeError(&graph.InputDefault{Value: sv.Default, Pool: sv.Pool, PoolRef: sv.PoolRef}, in.Type); msg != "" {
 				errs = append(errs, fmt.Sprintf("%s: value %q: %s", where, name, msg))
 			}
 		}

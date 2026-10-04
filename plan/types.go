@@ -111,6 +111,22 @@ type Step struct {
 	// later mutations to fail for the wrong reason (consumed tokens, depleted
 	// inventory, already-committed resources, etc.).
 	MutationScope string `yaml:"mutationScope,omitempty" json:"mutationScope,omitempty"`
+	// Fuzz is set on a step the fuzzer made: the case it sends. It is never
+	// read from a plan file.
+	Fuzz *FuzzCase `yaml:"-" json:"fuzz,omitempty"`
+	// FuzzSettings is the step's fuzz: block. A step that has one is fuzzed
+	// on every run, as --fuzz would fuzz it, with these settings; pinned
+	// cases are sent as written.
+	FuzzSettings *FuzzSettings `yaml:"fuzz,omitempty" json:"fuzzSettings,omitempty"`
+	// FuzzSetup is set on a copy of a setup step made for one fuzz case: the
+	// ID of the case's step. A copy that fails ends that case, not the run.
+	FuzzSetup string `yaml:"-" json:"fuzzSetup,omitempty"`
+	// FuzzSetupOf is the ID of the step a fuzz setup copy copies.
+	FuzzSetupOf string `yaml:"-" json:"fuzzSetupOf,omitempty"`
+	// VariantOf is set on a step instantiation made from another, a mutation
+	// sibling or a clone for an isolated mutation: the ID of the step it was
+	// made from. It is never read from a plan file.
+	VariantOf string `yaml:"-" json:"variantOf,omitempty"`
 }
 
 // Mutation is a negative-test variant of a step. At instantiation it produces
@@ -161,8 +177,11 @@ type StepSelection struct {
 // When a bare scalar appears in YAML (e.g., origin: "DEN"), only Default is set.
 // When a mapping appears, the full struct is unmarshalled.
 type StepValue struct {
-	Default       any              `yaml:"default,omitempty" json:"default,omitempty"`
-	Pool          []any            `yaml:"pool,omitempty" json:"pool,omitempty"`
+	Default any   `yaml:"default,omitempty" json:"default,omitempty"`
+	Pool    []any `yaml:"pool,omitempty" json:"pool,omitempty"`
+	// PoolRef names a domain value pool ("airportCodes", or
+	// "airportCodes.us" for a group) to use as the pool.
+	PoolRef       string           `yaml:"poolRef,omitempty" json:"poolRef,omitempty"`
 	PoolStrategy  *string          `yaml:"poolStrategy,omitempty" json:"poolStrategy,omitempty"`
 	Constraint    string           `yaml:"constraint,omitempty" json:"constraint,omitempty"`
 	From          string           `yaml:"from,omitempty" json:"from,omitempty"`
@@ -171,6 +190,10 @@ type StepValue struct {
 	FromResolved  string           `yaml:"fromResolved,omitempty" json:"fromResolved,omitempty"`
 	FromInput     string           `yaml:"fromInput,omitempty" json:"fromInput,omitempty"`
 	Locked        bool             `yaml:"locked,omitempty" json:"locked,omitempty"`
+	// Raw sends Default exactly as written: no {{…}} expressions are
+	// evaluated and no coercion to the input's type is made, so "12" stays a
+	// string and "{{x}}" stays text. It needs a default.
+	Raw bool `yaml:"raw,omitempty" json:"raw,omitempty"`
 	// Origin says where a value that instantiation merged in came from: "graph"
 	// for a graph default and "layer" for a layer's. It is empty for a value the
 	// plan sets.
@@ -192,6 +215,7 @@ func (sv StepValue) IsEmpty() bool {
 		sv.Select == nil &&
 		sv.Constraint == "" &&
 		len(sv.Pool) == 0 &&
+		sv.PoolRef == "" &&
 		sv.PoolStrategy == nil
 }
 

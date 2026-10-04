@@ -14,7 +14,9 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -957,6 +959,50 @@ func TestShuffleDifferentFromOriginal(t *testing.T) {
 	assert.ElementsMatch(t, origOrder, shuffledOrder, "should contain the same plans")
 }
 
+// TestShuffleWithoutSeedReplaysWithTheOneItLogs checks that a shuffle without
+// --seed picks one seed for the order and the runs, and reports it, so passing
+// it back replays both.
+func TestShuffleWithoutSeedReplaysWithTheOneItLogs(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+	}))
+	defer apiServer.Close()
+
+	planDir := t.TempDir()
+	for _, name := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta"} {
+		writeFile(t, filepath.Join(planDir, name+".yaml"),
+			"execution:\n  steps:\n    - node: testNode\n      values:\n        input1: "+name+"\n")
+	}
+	envFile := writeTestEnv(t, "none", apiServer.URL)
+	run := func(seed int64) *batchResult {
+		res := batchCommand(context.Background(), &batchArgs{
+			runArgs:  runArgs{EnvPath: envFile, GraphPath: "testdata/test_graph.yaml", TemplatesPath: "testdata/templates", OutputDir: filepath.Join(t.TempDir(), "runs")},
+			PlanDirs: []string{planDir},
+			Shuffle:  true,
+			Seed:     seed,
+		}, io.Discard)
+		require.NotNil(t, res.summary)
+		return res
+	}
+	order := func(res *batchResult) []string {
+		var names []string
+		for _, r := range res.summary.Runs {
+			names = append(names, r.PlanName)
+		}
+		return names
+	}
+
+	first := run(0)
+	require.NotZero(t, first.summary.Seed, "the seed the shuffle picked is reported")
+	again := run(first.summary.Seed)
+	assert.Equal(t, order(first), order(again))
+
+	batch, err := archive.ReadBatch(filepath.Join(first.batchDir, "batch.json"))
+	require.NoError(t, err)
+	assert.Equal(t, first.summary.Seed, batch.Metadata.Seed)
+}
+
 // --- Helpers ---
 
 func writeFile(t *testing.T, path, content string) {
@@ -964,4 +1010,77 @@ func writeFile(t *testing.T, path, content string) {
 	dir := filepath.Dir(path)
 	require.NoError(t, os.MkdirAll(dir, 0755))
 	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+}
+
+func TestRunSeed(t *testing.T) {
+	base := runSeed(7, "plans/smoke.yaml", "")
+	assert.Equal(t, base, runSeed(7, "plans/smoke.yaml", ""), "stable for the same run")
+	assert.NotEqual(t, base, runSeed(8, "plans/smoke.yaml", ""), "the batch seed changes it")
+	assert.NotEqual(t, base, runSeed(7, "plans/other.yaml", ""), "each plan gets its own")
+	assert.NotEqual(t, base, runSeed(7, "plans/smoke.yaml", "eu"), "each permutation gets its own")
+	assert.Less(t, base, uint64(1)<<53)
+	assert.NotZero(t, base, "0 reads as no seed")
+}
+
+func TestSpecRunContext_Seed(t *testing.T) {
+	spec := batchRunSpec{entry: config.PlanEntry{Name: "us/smoke.yaml", FullPath: "/home/ci/x/plans/us/smoke.yaml"}, layers: []string{"eu"}}
+	assert.Nil(t, specRunContext(&runContext{}, spec, 0).Seed, "no batch seed leaves each run to pick one")
+	got := specRunContext(&runContext{}, spec, 7)
+	require.NotNil(t, got.Seed)
+	assert.Equal(t, runSeed(7, "us/smoke.yaml", ""), *got.Seed)
+	assert.Equal(t, []string{"eu"}, got.Layers)
+	assert.Equal(t, "us/smoke", got.PlanName)
+
+	elsewhere := spec
+	elsewhere.entry.FullPath = "/Users/me/x/plans/us/smoke.yaml"
+	assert.Equal(t, *got.Seed, *specRunContext(&runContext{}, elsewhere, 7).Seed, "the same seed in any checkout")
+}
+
+func TestIsRetryable_FuzzFindingIsNotRetried(t *testing.T) {
+	assert.True(t, isRetryable(&runResult{outcome: engine.OutcomeFailed}))
+	assert.False(t, isRetryable(&runResult{outcome: engine.OutcomeFailed, fuzzFailed: true}))
+}
+
+func TestSaveFuzzFindings_PlanNameKeepsSubdirectoriesApart(t *testing.T) {
+	dir := t.TempDir()
+	p := &plan.Plan{Metadata: plan.Metadata{GraphVersion: "1.0.0"}, Execution: plan.Execution{Steps: []plan.Step{{ID: "add", Node: "addItem"}}}}
+	result := &engine.RunResult{Steps: []engine.StepResult{{Fuzz: &engine.FuzzResult{
+		Case:    plan.FuzzCase{ID: "quantity.zero", Mode: plan.FuzzNegative, Input: "quantity", Value: 0, Target: "add"},
+		Finding: engine.FindingServerError, Fails: true,
+	}}}}
+	var all []string
+	for _, name := range []string{"us/smoke", "eu/smoke"} {
+		paths, err := saveFuzzFindings(p, result, fuzzSaveOptions{Dir: dir, PlanPath: "/x/plans/" + name + ".yaml", PlanName: name})
+		require.NoError(t, err)
+		all = append(all, paths...)
+	}
+	require.Len(t, all, 2)
+	assert.NotEqual(t, all[0], all[1])
+	assert.Equal(t, "us-smoke--add--quantity.zero.yaml", filepath.Base(all[0]))
+}
+
+// TestSaveFuzzFindings_JudgedAsTheRunJudged checks that a saved case keeps
+// the accepted statuses, scope, and fail list its target ran with, so the
+// regression plan passes once the API is fixed.
+func TestSaveFuzzFindings_JudgedAsTheRunJudged(t *testing.T) {
+	dir := t.TempDir()
+	p := &plan.Plan{Metadata: plan.Metadata{GraphVersion: "1.0.0"}, Execution: plan.Execution{Steps: []plan.Step{{ID: "add", Node: "addItem"}}}}
+	result := &engine.RunResult{
+		Steps: []engine.StepResult{{Fuzz: &engine.FuzzResult{
+			Case:    plan.FuzzCase{ID: "quantity.at-min", Mode: plan.FuzzPositive, Input: "quantity", Value: 1, Target: "add"},
+			Finding: engine.FindingRejectedValid, Fails: true,
+		}}},
+		FuzzTargets: map[string]plan.FuzzSettings{"add": {Scope: plan.FuzzScopeIsolated, Fail: []string{engine.FindingRejectedValid},
+			Accept: plan.ExpectedStatuses{{Code: 409}}}},
+	}
+	paths, err := saveFuzzFindings(p, result, fuzzSaveOptions{Dir: dir, PlanPath: "/x/plans/smoke.yaml"})
+	require.NoError(t, err)
+	require.Len(t, paths, 1)
+	saved, err := plan.ParseFile(paths[0])
+	require.NoError(t, err)
+	block := saved.Execution.Steps[0].FuzzSettings
+	require.NotNil(t, block)
+	assert.Equal(t, plan.ExpectedStatuses{{Code: 409}}, block.Accept)
+	assert.Equal(t, plan.FuzzScopeIsolated, block.Scope)
+	assert.Equal(t, []string{engine.FindingRejectedValid}, block.Fail)
 }

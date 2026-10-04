@@ -388,6 +388,11 @@ func validateCommand(args *validateArgs, out io.Writer) int {
 		}
 	}
 
+	// 10. Pool references: every poolRef names a pool of the domain file
+	if section := validatePoolRefs(m, g); section != nil {
+		sections = append(sections, *section)
+	}
+
 	printSections(out, sections)
 
 	// Determine overall result
@@ -623,6 +628,74 @@ func validateLayers(dir string, g *graph.Graph) sectionResult {
 		return sectionResult{Name: "Layers", Status: "FAILED", Errors: errs}
 	}
 	return sectionResult{Name: "Layers", Status: "OK", Detail: "(" + pluralize(len(layers), "layer") + ")"}
+}
+
+// validatePoolRefs checks that every poolRef in the graph (its input defaults
+// and workflow inject values), the layers, the plans, and the workflow files
+// (step and verification values) names a value pool (or a group of one) in the
+// domain file. It returns nil when nothing uses poolRef. Files that fail to
+// load are skipped: their own sections report them.
+func validatePoolRefs(m *config.ProjectManifest, g *graph.Graph) *sectionResult {
+	uses := g.PoolRefs()
+	if m.LayersDir != "" && manifestDirExists(m.LayersDir) {
+		if layers, err := graph.LoadLayersFromDir(m.LayersDir); err == nil {
+			names := make([]string, 0, len(layers))
+			for name := range layers {
+				names = append(names, name)
+			}
+			sort.Strings(names)
+			for _, name := range names {
+				uses = append(uses, layers[name].PoolRefs()...)
+			}
+		}
+	}
+	planUses := func(path string) {
+		p, err := plan.ParseFile(path)
+		if err != nil {
+			return // the Plans or Workflows section reports it
+		}
+		for _, use := range p.PoolRefs() {
+			use.Where = path + ": " + use.Where
+			uses = append(uses, use)
+		}
+	}
+	if len(m.PlanDirs) > 0 {
+		if entries, err := config.ListPlans([]string(m.PlanDirs)); err == nil {
+			for _, entry := range entries {
+				planUses(entry.FullPath)
+			}
+		}
+	}
+	if m.WorkflowsDir != "" && manifestDirExists(m.WorkflowsDir) {
+		_ = filepath.WalkDir(m.WorkflowsDir, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && (strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")) {
+				planUses(path)
+			}
+			return nil
+		})
+	}
+	if len(uses) == 0 {
+		return nil
+	}
+
+	var kb *domain.KnowledgeBase
+	if m.DomainPath != "" {
+		loaded, err := domain.ParseFile(m.DomainPath)
+		if err != nil {
+			return nil // the Domain section reports it
+		}
+		kb = loaded
+	}
+	var errs []string
+	for _, use := range uses {
+		if _, err := kb.PoolRefValues(use.Ref); err != nil {
+			errs = append(errs, use.Where+": "+err.Error())
+		}
+	}
+	if len(errs) > 0 {
+		return &sectionResult{Name: "Pool refs", Status: "FAILED", Errors: errs}
+	}
+	return &sectionResult{Name: "Pool refs", Status: "OK", Detail: "(" + pluralize(len(uses), "reference") + ")"}
 }
 
 // validateDomain parses the domain knowledge file.

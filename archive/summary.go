@@ -56,6 +56,51 @@ func BuildRunSummary(a *Archive) *RunSummary {
 		Layers:        a.Metadata.Layers,
 		Issues:        issues,
 		OAS:           buildOASSummary(a.Metadata.OASValidation, allSteps, issues["oas"]),
+		Seed:          a.Metadata.Seed,
+		Fuzz:          BuildFuzzSummary(a.Steps),
+	}
+}
+
+// BuildFuzzSummary counts the fuzz cases among steps, or returns nil when
+// there are none.
+func BuildFuzzSummary(steps []StepRecord) *FuzzSummary {
+	var s *FuzzSummary
+	for _, step := range steps {
+		if step.Fuzz == nil {
+			continue
+		}
+		if s == nil {
+			s = &FuzzSummary{}
+		}
+		s.Add(step.Fuzz.Finding, step.Fuzz.Setup, step.Fuzz.Fails)
+	}
+	return s
+}
+
+// FindingOK is the key FuzzSummary.Findings counts the cases under whose
+// response was what they called for.
+const FindingOK = "ok"
+
+// Add counts one fuzz case: its finding, empty when the response was what
+// the case called for; its setup, empty on the happy path's own; and
+// whether its finding failed the run.
+func (s *FuzzSummary) Add(finding, setup string, fails bool) {
+	if s.Findings == nil {
+		s.Findings = map[string]int{}
+	}
+	if finding == "" {
+		finding = FindingOK
+	}
+	s.Cases++
+	s.Findings[finding]++
+	if setup != "" {
+		if s.Setup == nil {
+			s.Setup = map[string]int{}
+		}
+		s.Setup[setup]++
+	}
+	if fails {
+		s.Failing++
 	}
 }
 

@@ -2,7 +2,9 @@ package graph
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -157,6 +159,17 @@ func Validate(g *Graph) error {
 		}
 	}
 
+	// 6b. The status a detected error stands for, graph-wide
+	if g.ErrorStatus != nil {
+		msgs := validateErrorStatus(*g.ErrorStatus)
+		if g.ErrorStatus.Status == 0 && len(g.ErrorStatus.Categories) == 0 {
+			msgs = append(msgs, "needs a status, categories, or both")
+		}
+		for _, msg := range msgs {
+			errs = append(errs, "errorStatus: "+msg)
+		}
+	}
+
 	// 7. Conditions: validate references
 	for i, cond := range g.Conditions {
 		if cond.When == "" {
@@ -293,7 +306,31 @@ func ValidateWarnings(g *Graph) []string {
 		}
 	}
 
+	warnings = append(warnings, errorStatusWarnings(g)...)
+
 	return warnings
+}
+
+// errorStatusWarnings reports a graph errorStatus that can't do what it says:
+// one with no rule to give a status to, or categories no rule reads.
+func errorStatusWarnings(g *Graph) []string {
+	if g.ErrorStatus == nil {
+		return nil
+	}
+	rules := slices.Clone(g.ErrorDetection)
+	for _, name := range slices.Sorted(maps.Keys(g.Nodes)) {
+		if g.Nodes[name] != nil {
+			rules = append(rules, g.Nodes[name].ErrorDetection...)
+		}
+	}
+	if len(rules) == 0 {
+		return []string{"errorStatus is set, but the graph has no errorDetection rules to give a status to"}
+	}
+	readsCategory := slices.ContainsFunc(rules, func(r ErrorDetectionRule) bool { return r.Details != nil && r.Details.Category != "" })
+	if len(g.ErrorStatus.Categories) > 0 && !readsCategory {
+		return []string{"errorStatus.categories: no errorDetection rule reads a category (details.category), so only errorStatus.status applies"}
+	}
+	return nil
 }
 
 // validErrorDetectionRules is the set of supported error detection rule types.
@@ -325,6 +362,10 @@ func validateErrorDetectionRule(rule ErrorDetectionRule) []string {
 			errs = append(errs, "equals value must be a string, number, or boolean")
 		}
 	}
+	errs = append(errs, validateErrorStatus(rule.ErrorStatus)...)
+	if len(rule.ErrorStatus.Categories) > 0 && (rule.Details == nil || rule.Details.Category == "") {
+		errs = append(errs, "categories needs details.category, the path the error's category is read from")
+	}
 	if rule.Details != nil {
 		if rule.Details.Message != "" {
 			if msg := validateGjsonPath(rule.Details.Message); msg != "" {
@@ -340,6 +381,33 @@ func validateErrorDetectionRule(rule ErrorDetectionRule) []string {
 			if msg := validateGjsonPath(rule.Details.Category); msg != "" {
 				errs = append(errs, fmt.Sprintf("invalid details.category path %q: %s", rule.Details.Category, msg))
 			}
+		}
+	}
+	return errs
+}
+
+// validateErrorStatus checks the statuses a rule or the graph gives detected
+// errors: each is an error status, and each category is named once, since
+// categories match without case.
+func validateErrorStatus(m ErrorStatus) []string {
+	var errs []string
+	notError := func(status int) bool { return status < 400 || status > 599 }
+	if m.Status != 0 && notError(m.Status) {
+		errs = append(errs, fmt.Sprintf("status %d is not an error status (use 400 to 599)", m.Status))
+	}
+	seen := map[string]string{}
+	for _, name := range slices.Sorted(maps.Keys(m.Categories)) {
+		key := strings.ToLower(strings.TrimSpace(name))
+		switch {
+		case key == "":
+			errs = append(errs, "categories: a category needs a name")
+			continue
+		case seen[key] != "":
+			errs = append(errs, fmt.Sprintf("categories: %q and %q are the same category (categories match without case)", seen[key], name))
+		}
+		seen[key] = name
+		if notError(m.Categories[name]) {
+			errs = append(errs, fmt.Sprintf("categories: %s: status %d is not an error status (use 400 to 599)", name, m.Categories[name]))
 		}
 	}
 	return errs

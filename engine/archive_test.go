@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -698,9 +699,9 @@ func TestToArchive_ResponseBodyErrorConversion(t *testing.T) {
 				Node:       "step1",
 				StatusCode: 200,
 				ResponseBodyError: &ResponseBodyError{
-					RulePath: "ErrorResponse.Result.Error",
+					RulePath: "orderResponse.result.errors",
 					Rule:     "non-empty",
-					Message:  "Invalid itinerary ID",
+					Message:  "Invalid order ID",
 					Code:     "INVALID_INPUT",
 					Category: "validation",
 				},
@@ -713,9 +714,9 @@ func TestToArchive_ResponseBodyErrorConversion(t *testing.T) {
 	a := mustToArchive(t, result, meta, "", nil)
 
 	require.NotNil(t, a.Steps[0].ResponseBodyError)
-	assert.Equal(t, "ErrorResponse.Result.Error", a.Steps[0].ResponseBodyError.RulePath)
+	assert.Equal(t, "orderResponse.result.errors", a.Steps[0].ResponseBodyError.RulePath)
 	assert.Equal(t, "non-empty", a.Steps[0].ResponseBodyError.Rule)
-	assert.Equal(t, "Invalid itinerary ID", a.Steps[0].ResponseBodyError.Message)
+	assert.Equal(t, "Invalid order ID", a.Steps[0].ResponseBodyError.Message)
 	assert.Equal(t, "INVALID_INPUT", a.Steps[0].ResponseBodyError.Code)
 	assert.Equal(t, "validation", a.Steps[0].ResponseBodyError.Category)
 
@@ -1089,4 +1090,68 @@ func TestConvertRequest_HTTPOverrideStillRecordsOriginalURL(t *testing.T) {
 
 	assert.Equal(t, "http://localhost:9999/charges", rec.URL)
 	assert.Equal(t, "http://localhost:8765/charges", rec.OriginalURL)
+}
+
+// TestToArchive_FuzzValueArchivedOnce checks that a fuzz case's value is not
+// archived again where something else already holds it: the plan's copy of
+// the case, and a raw resolution's raw value equal to its final one.
+func TestToArchive_FuzzValueArchivedOnce(t *testing.T) {
+	long := strings.Repeat("a", 10000)
+	c := &plan.FuzzCase{ID: "name.long", Mode: plan.FuzzEdge, Input: "name", Value: long, Target: "add"}
+	p := &plan.Plan{Execution: plan.Execution{Steps: []plan.Step{
+		{ID: "add", Node: "addItem"},
+		{ID: "add__fuzz_name_long", Node: "addItem", Fuzz: c, Values: map[string]plan.StepValue{"name": {Default: long, Raw: true}}},
+	}}}
+	result := &RunResult{InstantiatedPlan: p, Steps: []StepResult{{
+		StepID: "add__fuzz_name_long", Node: "addItem", Fuzz: &FuzzResult{Case: *c},
+		Resolutions: []ValueResolution{
+			{InputName: "name", Source: "raw_value", RawValue: long, FinalValue: long},
+			{InputName: "date", Source: "raw_value", RawValue: "x", FinalValue: "y"},
+		},
+	}}}
+	a := mustToArchive(t, result, archive.ArchiveMetadata{}, "", nil)
+	assert.Nil(t, a.Metadata.InstantiatedPlan.Execution.Steps[1].Fuzz, "the step's record holds the case")
+	assert.Equal(t, long, a.Steps[0].Fuzz.Value)
+	assert.Nil(t, a.Steps[0].Resolutions[0].RawValue)
+	assert.Equal(t, long, a.Steps[0].Resolutions[0].FinalValue)
+	assert.Equal(t, "x", a.Steps[0].Resolutions[1].RawValue, "a raw value that changed keeps both")
+	assert.NotNil(t, p.Execution.Steps[1].Fuzz, "the run's plan is untouched")
+}
+
+// TestToArchive_FuzzStale checks that the archive keeps the answer that
+// showed a case's reused setup was used up.
+func TestToArchive_FuzzStale(t *testing.T) {
+	c := plan.FuzzCase{ID: "name.empty", Mode: plan.FuzzNegative, Input: "name", Value: "", Target: "add"}
+	result := &RunResult{Steps: []StepResult{
+		{StepID: "add__fuzz_name_empty", Node: "addItem", Fuzz: &FuzzResult{Case: c, Setup: SetupRebuilt,
+			Stale: &StaleAnswer{Status: 200, BodyError: &ResponseBodyError{RulePath: "error.code", Rule: "equals", Code: "EXPIRED", Stale: true}}}},
+		{StepID: "add__fuzz_name_empty2", Node: "addItem", Fuzz: &FuzzResult{Case: c, Setup: SetupRebuilt, Stale: &StaleAnswer{Status: 410}}},
+	}}
+	a := mustToArchive(t, result, archive.ArchiveMetadata{}, "", nil)
+	assert.Equal(t, SetupRebuilt, a.Steps[0].Fuzz.Setup)
+	assert.Equal(t, &archive.StaleRecord{Status: 200, BodyError: &archive.ResponseBodyErrorRecord{RulePath: "error.code", Rule: "equals",
+		Code: "EXPIRED", Stale: true}}, a.Steps[0].Fuzz.Stale)
+	assert.Equal(t, &archive.StaleRecord{Status: 410}, a.Steps[1].Fuzz.Stale)
+
+	data, err := json.Marshal(a.Steps[1].Fuzz)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"stale":{"status":410}`)
+}
+
+// TestToArchive_BodyErrorStatus checks that the archive keeps the status a
+// body error stands for, and that an expectFailure step records the status it
+// was matched by.
+func TestToArchive_BodyErrorStatus(t *testing.T) {
+	result := &RunResult{Steps: []StepResult{{
+		Node: "createOrder", StatusCode: 200, Response: &adapter.Response{StatusCode: 200},
+		ResponseBodyError: &ResponseBodyError{RulePath: "*.result.errors", Rule: "non-empty", Category: "VALIDATION", Status: 400},
+		ExpectFailure:     &ExpectFailureResult{ExpectedStatuses: plan.ExpectedStatuses{{Class: 4}}, ActualStatus: 400, Passed: true},
+	}}}
+	a := mustToArchive(t, result, archive.ArchiveMetadata{}, "", nil)
+	require.NotNil(t, a.Steps[0].ResponseBodyError)
+	assert.Equal(t, 400, a.Steps[0].ResponseBodyError.Status)
+	assert.Equal(t, 400, a.Steps[0].ExpectFailure.Actual)
+	assert.Empty(t, a.Steps[0].ExpectFailure.ActualName)
+	assert.Equal(t, 200, a.Steps[0].Response.Status, "the response keeps its own status")
+	assert.True(t, archive.StepPassed(a.Steps[0]))
 }

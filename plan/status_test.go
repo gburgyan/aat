@@ -40,7 +40,12 @@ func TestExpectedStatus_UnmarshalYAML(t *testing.T) {
 		{
 			name:    "a mapping is neither form",
 			yaml:    "status: [{code: 404}]\n",
-			wantErr: "a status is a code such as 404 or a gRPC name",
+			wantErr: "a status is a code such as 404, a class such as 4xx, or a gRPC name",
+		},
+		{
+			name: "classes",
+			yaml: "status: [4xx, 5XX, 409]\n",
+			want: ExpectedStatuses{{Class: 4}, {Class: 5}, {Code: 409}},
 		},
 	}
 
@@ -59,6 +64,29 @@ func TestExpectedStatus_UnmarshalYAML(t *testing.T) {
 			assert.Equal(t, tt.want, holder.Status)
 		})
 	}
+}
+
+func TestExpectedStatus_Class(t *testing.T) {
+	s := ExpectedStatuses{{Class: 4}}
+	assert.True(t, s.Matches(400, ""))
+	assert.True(t, s.Matches(422, ""))
+	assert.True(t, s.Matches(404, "NOT_FOUND"), "a gRPC status matches the class of the HTTP status it maps to")
+	assert.False(t, s.Matches(500, ""))
+	assert.False(t, s.Matches(200, ""))
+	assert.Equal(t, []string{"4xx"}, s.Strings())
+	assert.True(t, s[0].IsFailure())
+	assert.False(t, ExpectedStatus{Class: 2}.IsFailure(), "2xx is not a failure")
+
+	out, err := yaml.Marshal(ExpectedStatuses{{Class: 4}, {Code: 409}})
+	require.NoError(t, err)
+	assert.Equal(t, "- 4xx\n- 409\n", string(out))
+
+	data, err := json.Marshal(ExpectedStatuses{{Class: 5}})
+	require.NoError(t, err)
+	assert.JSONEq(t, `["5xx"]`, string(data))
+	var back ExpectedStatuses
+	require.NoError(t, json.Unmarshal(data, &back))
+	assert.Equal(t, ExpectedStatuses{{Class: 5}}, back)
 }
 
 func TestExpectedStatus_Matches(t *testing.T) {

@@ -132,6 +132,14 @@
         <span class="error-detail-label">Category</span>
         <span>{responseBodyError.category}</span>
       {/if}
+      {#if responseBodyError.status}
+        <span class="error-detail-label">Treated as</span>
+        <span><span class="badge badge-sm {responseBodyError.status >= 500 ? 'badge-error' : 'badge-warning'}">{responseBodyError.status}</span></span>
+      {/if}
+      {#if responseBodyError.stale}
+        <span class="error-detail-label">Stale</span>
+        <span>the state the request worked on is used up</span>
+      {/if}
     </div>
   </div>
 {/if}

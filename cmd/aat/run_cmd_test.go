@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/engine"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
@@ -1200,4 +1201,71 @@ func TestPlannedStepCount_IncludesVerificationAndMutations(t *testing.T) {
 	}}
 
 	assert.Equal(t, 3, plannedStepCount(p, g, nil), "the step, its mutation sibling, and the verification step")
+}
+
+// TestToStepSummary_BodyError checks that a step whose 200 reports an error
+// fails in the JSON summary and says what the error was, unless it expected
+// the failure.
+func TestToStepSummary_BodyError(t *testing.T) {
+	step := engine.StepResult{StepID: "order", Node: "createOrder", StatusCode: 200, Response: &adapter.Response{StatusCode: 200},
+		ResponseBodyError: &engine.ResponseBodyError{RulePath: "*.result.errors", Rule: "non-empty", Message: "email is not valid",
+			Code: "E102", Category: "VALIDATION", Status: 400}}
+	ss := toStepSummary(step)
+	assert.False(t, ss.Passed)
+	assert.Contains(t, ss.Error, "email is not valid")
+	require.NotNil(t, ss.BodyError)
+	assert.Equal(t, BodyErrorSummary{RulePath: "*.result.errors", Rule: "non-empty", Message: "email is not valid",
+		Code: "E102", Category: "VALIDATION", Status: 400}, *ss.BodyError)
+	assert.Equal(t, 200, ss.Status, "the step's status is the response's own")
+
+	step.ExpectFailure = &engine.ExpectFailureResult{ActualStatus: 400, Passed: true}
+	ss = toStepSummary(step)
+	assert.True(t, ss.Passed)
+	assert.Empty(t, ss.Error)
+	assert.NotNil(t, ss.BodyError)
+
+	step.ExpectFailure = &engine.ExpectFailureResult{ActualStatus: 400, Passed: false}
+	assert.Contains(t, toStepSummary(step).Error, "got 400")
+}
+
+// TestToStepSummary_FuzzStale checks that a rebuilt case's JSON summary
+// says what the setup it reused answered, and that its progress line says the
+// setup was rebuilt.
+func TestToStepSummary_FuzzStale(t *testing.T) {
+	step := engine.StepResult{StepID: "add__fuzz_name_ok", Node: "addItem", StatusCode: 201, Response: &adapter.Response{StatusCode: 201},
+		Fuzz: &engine.FuzzResult{Case: plan.FuzzCase{ID: "name.ok", Mode: plan.FuzzPositive, Input: "name", Value: "Lin", Target: "add"},
+			Setup: engine.SetupRebuilt, Stale: &engine.StaleAnswer{Status: 200,
+				BodyError: &engine.ResponseBodyError{RulePath: "error.code", Rule: "equals", Code: "FULL", Stale: true}}}}
+	ss := toStepSummary(step)
+	require.NotNil(t, ss.Fuzz)
+	assert.Equal(t, engine.SetupRebuilt, ss.Fuzz.Setup)
+	assert.Equal(t, &StaleSummary{Status: 200, BodyError: &BodyErrorSummary{RulePath: "error.code", Rule: "equals", Code: "FULL", Stale: true}},
+		ss.Fuzz.Stale)
+	assert.Nil(t, ss.BodyError, "the answer it was judged on reported none")
+
+	assert.Equal(t, "fuzz name.ok (positive), setup rebuilt", fuzzNote(step, false))
+	step.Fuzz.Setup, step.Fuzz.Stale = engine.SetupReused, nil
+	assert.Equal(t, "fuzz name.ok (positive)", fuzzNote(step, false))
+}
+
+// TestWriteStepResult_BodyError checks that a progress line marks a body
+// error and says what it was.
+func TestWriteStepResult_BodyError(t *testing.T) {
+	step := engine.StepResult{StepID: "order", Node: "createOrder", StatusCode: 200, Response: &adapter.Response{StatusCode: 200},
+		ResponseBodyError: &engine.ResponseBodyError{Message: "email is not valid", Code: "E102", Category: "VALIDATION", Status: 400}}
+	var b bytes.Buffer
+	writeStepResult(&b, "  ", 0, 1, step, TerminalInfo{Width: 120}, 0)
+	assert.Contains(t, b.String(), "BODY ERROR VALIDATION as 400")
+	assert.Contains(t, b.String(), "email is not valid [code: E102]")
+
+	step.ExpectFailure = &engine.ExpectFailureResult{ActualStatus: 400, Passed: true}
+	b.Reset()
+	writeStepResult(&b, "  ", 0, 1, step, TerminalInfo{Width: 120}, 0)
+	assert.Contains(t, b.String(), "BODY ERROR VALIDATION as 400")
+	assert.NotContains(t, b.String(), "email is not valid", "the failure it expected needs no explaining")
+
+	b.Reset()
+	writeCleanupResult(&b, "  ", engine.StepResult{Node: "cancelOrder", StatusCode: 200, Response: &adapter.Response{StatusCode: 200},
+		ResponseBodyError: &engine.ResponseBodyError{}}, TerminalInfo{Width: 120}, 0)
+	assert.Contains(t, b.String(), "BODY ERROR")
 }

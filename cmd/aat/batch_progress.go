@@ -42,6 +42,9 @@ func (o *BatchStreamObserver) OnRunStart(total int) {
 func (o *BatchStreamObserver) OnStepStart(index, total int, step plan.Step) {}
 
 func (o *BatchStreamObserver) OnStepComplete(index, total int, result engine.StepResult) {
+	if quietSetupCopy(result) {
+		return
+	}
 	writeStepResult(o.out, "    ", index, total, result, o.term, o.statusWidth)
 }
 
@@ -61,11 +64,16 @@ func (o *BatchStreamObserver) OnCleanupSkipped(skip engine.CleanupSkip) {
 func (o *BatchStreamObserver) OnRunComplete(result *engine.RunResult) {
 	color := o.term.IsTTY
 	writeOASTotal(o.out, "    ", result.Steps, color)
+	writeFuzzWarnings(o.out, "    ", result.FuzzWarnings, color)
+	writeFuzzSummary(o.out, "    ", result.Steps, color)
+	if result.DrewRandomly() {
+		_, _ = fmt.Fprintf(o.out, "    Seed: %d\n", result.Seed)
+	}
 	name := colorize(o.planName, colorCyan, color)
 	elapsed := formatDuration(result.Elapsed())
 	switch result.Outcome {
 	case engine.OutcomePassed:
-		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%d steps, %s)%s ──\n", name, colorOutcome("PASSED", color), len(result.Steps), elapsed, o.counter())
+		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%d steps, %s)%s ──\n", name, colorOutcome("PASSED", color), countedSteps(result.Steps), elapsed, o.counter())
 	case engine.OutcomeFailed:
 		_, _ = fmt.Fprintf(o.out, "  ── %s: %s (%s)%s ──\n", name, colorOutcome("FAILED", color), elapsed, o.counter())
 	case engine.OutcomeError:

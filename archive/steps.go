@@ -46,9 +46,17 @@ func FindStep(a *Archive, id string) (step *StepRecord, cleanup bool) {
 }
 
 // StepPassed reports whether a step recorded no error, no failed assertion,
-// no unmet expected failure, and no error in its response body. It does not
-// look at the HTTP status on its own.
+// no unmet expected failure, and no error in its response body that an
+// expectFailure step didn't match. It does not look at the HTTP status on its
+// own. A fuzz case passed unless its finding
+// failed the run, and a copy of a setup step made for one unless it failed.
 func StepPassed(s StepRecord) bool {
+	if s.Fuzz != nil {
+		return !s.Fuzz.Fails // a fuzz step is judged by its finding alone
+	}
+	if s.FuzzSetup != "" {
+		return !s.FuzzSetupFailed
+	}
 	if s.Error != "" {
 		return false
 	}
@@ -58,7 +66,8 @@ func StepPassed(s StepRecord) bool {
 	if s.ExpectFailure != nil && !s.ExpectFailure.Passed {
 		return false
 	}
-	if s.ResponseBodyError != nil {
+	// A body error an expectFailure step matched is the failure it expected.
+	if s.ResponseBodyError != nil && s.ExpectFailure == nil {
 		return false
 	}
 	return true

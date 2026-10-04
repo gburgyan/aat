@@ -26,3 +26,18 @@ type Request struct {
 
 // IsGRPC reports whether the request is sent as a gRPC call.
 func (r *Request) IsGRPC() bool { return r.Protocol == ProtocolGRPC }
+
+// NotSentError is an executor's error for a request it could not send: one it
+// failed to build, such as a gRPC message with a field its type doesn't have,
+// or one its protocol's client would refuse, such as a header value holding a
+// control character. Its message is the wrapped error's. A caller tells it
+// apart from a request that was sent and got no response with errors.As.
+type NotSentError struct {
+	Err error
+}
+
+// Error returns the wrapped error's message.
+func (e *NotSentError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the wrapped error.
+func (e *NotSentError) Unwrap() error { return e.Err }

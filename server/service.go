@@ -1267,6 +1267,7 @@ func toResolutionDetails(recs []archive.ValueResolutionRecord) []ResolutionDetai
 			ConstraintOK: r.ConstraintOK,
 			PoolIndex:    r.PoolIndex,
 			PoolSize:     r.PoolSize,
+			PoolRef:      r.PoolRef,
 			Tried:        r.Tried,
 		}
 	}
@@ -1326,6 +1327,8 @@ func toResponseBodyErrorDetail(r *archive.ResponseBodyErrorRecord) *ResponseBody
 		Message:  r.Message,
 		Code:     r.Code,
 		Category: r.Category,
+		Status:   r.Status,
+		Stale:    r.Stale,
 	}
 }
 

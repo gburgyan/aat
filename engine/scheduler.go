@@ -8,7 +8,8 @@ import (
 )
 
 // TopologicalSort returns plan steps in a valid execution order using Kahn's
-// algorithm. Dependencies come from explicit step.DependsOn references (step IDs).
+// algorithm, keeping to the plan's order wherever the dependencies allow.
+// Dependencies come from explicit step.DependsOn references (step IDs).
 //
 // Returns an error if a cycle is detected.
 func TopologicalSort(steps []plan.Step) ([]plan.Step, error) {
@@ -55,25 +56,34 @@ func TopologicalSort(steps []plan.Step) ([]plan.Step, error) {
 		}
 	}
 
-	// Kahn's BFS
-	var queue []string
-	for _, step := range steps {
-		sid := step.StepID()
-		if inDegree[sid] == 0 {
-			queue = append(queue, sid)
+	// Kahn's algorithm, taking the ready step that comes first in the plan:
+	// a plan whose order already respects its dependencies runs as written,
+	// and steps inserted right after another (such as fuzz cases after their
+	// target) run before the steps that follow it in the plan.
+	var ready []int
+	for i, step := range steps {
+		if inDegree[step.StepID()] == 0 {
+			ready = append(ready, i)
 		}
 	}
 
 	var sorted []plan.Step
-	for len(queue) > 0 {
-		sid := queue[0]
-		queue = queue[1:]
-		sorted = append(sorted, steps[stepIndex[sid]])
+	for len(ready) > 0 {
+		first := 0
+		for j := range ready {
+			if ready[j] < ready[first] {
+				first = j
+			}
+		}
+		idx := ready[first]
+		ready = append(ready[:first], ready[first+1:]...)
+		sid := steps[idx].StepID()
+		sorted = append(sorted, steps[idx])
 
 		for _, dep := range dependents[sid] {
 			inDegree[dep]--
 			if inDegree[dep] == 0 {
-				queue = append(queue, dep)
+				ready = append(ready, stepIndex[dep])
 			}
 		}
 	}

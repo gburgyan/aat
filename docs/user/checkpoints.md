@@ -56,6 +56,10 @@ How the stop works:
 - The outcome is `stopped` and the exit code is `0`. `--quiet` prints `STOPPED (5/5 steps)`, and the `--json` summary carries `"outcome": "stopped"` and `"stopped_at": "paymentCharge"`, with no `cleanup` array.
 - The run archive is still written, with outcome `stopped` and no cleanup records. See [Archives](archives.md).
 - A stopped run counts as a success, so `--retries` does not retry it.
+- A [fuzz](fuzzing.md) target's cases that run on copies of its setup are sent before the run stops, once the target
+  has run ([When cases run](fuzzing.md#when-cases-run)). A run a fuzz finding failed stops with outcome `failed` and
+  exit code `1` instead, with `stopped_at` set, so the finding isn't lost. A fuzz case, or a copy of a setup step made
+  for one, is not a checkpoint: naming one is an error.
 - An unknown step ID fails the run before any step runs, with outcome `error` and exit code `2`. A node name gets a pointer to the step IDs that run it:
 
     ```

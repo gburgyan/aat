@@ -301,6 +301,7 @@ type ResolutionDetail struct {
 	ConstraintOK *bool  `json:"constraintOk,omitempty"`
 	PoolIndex    int    `json:"poolIndex,omitempty"`
 	PoolSize     int    `json:"poolSize,omitempty"`
+	PoolRef      string `json:"poolRef,omitempty"`
 	Tried        []any  `json:"tried,omitempty"`
 }
 
@@ -363,6 +364,11 @@ type ResponseBodyErrorDetail struct {
 	Message  string `json:"message,omitempty"`
 	Code     string `json:"code,omitempty"`
 	Category string `json:"category,omitempty"`
+	// Status is the HTTP status the error stands for; 0 when none.
+	Status int `json:"status,omitempty"`
+	// Stale is set when the rule marks the error as one that means the state
+	// the request worked on is used up.
+	Stale bool `json:"stale,omitempty"`
 }
 
 // OASValidationDetail captures runtime OAS schema validation for a step.

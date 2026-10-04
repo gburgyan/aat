@@ -16,6 +16,8 @@ import (
 
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/config"
+	"github.com/gburgyan/aat/engine"
+	"github.com/gburgyan/aat/plan"
 	"github.com/gburgyan/aat/validate"
 	"github.com/spf13/cobra"
 	"github.com/tidwall/gjson"
@@ -407,16 +409,22 @@ type shownStepRow struct {
 
 // shownRunList is the step list of aat run show, and its --json document.
 type shownRunList struct {
-	Run            string               `json:"run,omitempty"`
-	ArchivePath    string               `json:"archive_path"`
-	Plan           string               `json:"plan,omitempty"`
-	Outcome        string               `json:"outcome"`
-	Error          string               `json:"error,omitempty"`
-	DurationMs     int64                `json:"duration_ms"`
-	Attempt        int                  `json:"attempt,omitempty"`
-	TotalAttempts  int                  `json:"total_attempts,omitempty"`
-	OtherAttempts  []string             `json:"other_attempts,omitempty"`
-	OAS            *shownOAS            `json:"oas,omitempty"`
+	Run           string    `json:"run,omitempty"`
+	ArchivePath   string    `json:"archive_path"`
+	Plan          string    `json:"plan,omitempty"`
+	Outcome       string    `json:"outcome"`
+	Error         string    `json:"error,omitempty"`
+	DurationMs    int64     `json:"duration_ms"`
+	Attempt       int       `json:"attempt,omitempty"`
+	TotalAttempts int       `json:"total_attempts,omitempty"`
+	OtherAttempts []string  `json:"other_attempts,omitempty"`
+	OAS           *shownOAS `json:"oas,omitempty"`
+	// Seed replays the run's pool picks and random selections with
+	// aat run plan --seed.
+	Seed uint64               `json:"seed,omitempty"`
+	Fuzz *archive.FuzzSummary `json:"fuzz,omitempty"`
+	// FuzzFindings lists the fuzz cases with a finding, failing ones first.
+	FuzzFindings   []archive.FuzzRecord `json:"fuzz_findings,omitempty"`
 	Steps          []shownStepRow       `json:"steps"`
 	Cleanup        []shownStepRow       `json:"cleanup,omitempty"`
 	CleanupSkipped []CleanupSkipSummary `json:"cleanup_skipped,omitempty"`
@@ -483,6 +491,20 @@ func showRun(out io.Writer, a *archive.Archive, src shownRun, format showFormat)
 	if list.OAS != nil {
 		fmt.Fprintf(&b, "oas: %s\n", list.OAS.describe())
 	}
+	if list.Seed != 0 {
+		fmt.Fprintf(&b, "seed: %d\n", list.Seed)
+	}
+	if list.Fuzz != nil {
+		fmt.Fprintf(&b, "fuzz: %s\n", engine.DescribeFuzz(list.Fuzz))
+		for _, f := range list.FuzzFindings {
+			mark := "warn"
+			if f.Fails {
+				mark = "FAIL"
+			}
+			c := plan.FuzzCase{Input: f.Input, Value: f.Value, Patch: f.Patch}
+			fmt.Fprintf(&b, "  %s %-16s %s  %s\n", mark, f.Finding, f.ID, c.Describe())
+		}
+	}
 	if list.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", list.Error)
 	}
@@ -538,6 +560,9 @@ func buildShownRunList(a *archive.Archive, src shownRun) shownRunList {
 		TotalAttempts: a.Metadata.TotalAttempts,
 		OtherAttempts: src.Attempts,
 		OAS:           newShownOAS(summary.OAS),
+		Seed:          summary.Seed,
+		Fuzz:          summary.Fuzz,
+		FuzzFindings:  fuzzFindings(a.Steps),
 		Steps:         []shownStepRow{},
 
 		KnownIssues:         a.KnownIssues,
@@ -589,10 +614,15 @@ func newShownStepRow(index int, id string, s archive.StepRecord) shownStepRow {
 
 // shownStepPassed applies the run summary's rule: a step fails on an error, a
 // failed assertion, an unmet expected failure, an error in its response body,
-// or a status of 400 or more that it did not expect.
+// or a status of 400 or more that it did not expect. A fuzz case, and a copy
+// of a setup step made for one, is judged as archive.StepPassed judges it: a
+// refused case is often what it called for.
 func shownStepPassed(s archive.StepRecord) bool {
 	if !archive.StepPassed(s) {
 		return false
+	}
+	if s.Fuzz != nil || s.FuzzSetup != "" {
+		return true
 	}
 	return s.ExpectFailure != nil || s.Response == nil || s.Response.Status < 400
 }
@@ -675,32 +705,33 @@ func writeKnownIssueRows(b *strings.Builder, issues []archive.KnownIssueRecord) 
 
 // shownStep is one step as aat run show prints it, and its --json document.
 type shownStep struct {
-	StepID            string                    `json:"step_id"`
-	Node              string                    `json:"node"`
-	Cleanup           bool                      `json:"cleanup,omitempty"`
-	CleanupFor        string                    `json:"cleanup_for,omitempty"`
-	Method            string                    `json:"method,omitempty"`
-	URL               string                    `json:"url,omitempty"`
-	Status            int                       `json:"status,omitempty"`
-	GRPCCode          string                    `json:"grpc_code,omitempty"`    // the gRPC status name, where the step made one
-	GRPCMessage       string                    `json:"grpc_message,omitempty"` // what the server said with it
-	Passed            bool                      `json:"passed"`
-	DurationMs        int64                     `json:"duration_ms"`
-	Retries           int                       `json:"retries,omitempty"`
-	RetriedOn         []string                  `json:"retried_on,omitempty"`
-	Requests          int                       `json:"requests,omitempty"`    // requests a repeated step sent
-	RepeatStop        string                    `json:"repeat_stop,omitempty"` // why a repeated step stopped
-	Iterations        []shownIterationRow       `json:"iterations,omitempty"`  // a repeated step's requests
-	Error             string                    `json:"error,omitempty"`
-	Inputs            map[string]any            `json:"inputs,omitempty"`
-	Outputs           map[string]any            `json:"outputs,omitempty"`
-	Validation        *shownValidation          `json:"validation,omitempty"`
-	RequestBodyBytes  int                       `json:"request_body_bytes,omitempty"`
-	RequestBodyForm   bool                      `json:"request_body_form,omitempty"`   // the request body is form-encoded
-	RequestFormFields int                       `json:"request_form_fields,omitempty"` // its fields, decoded
-	ResponseBodyBytes int                       `json:"response_body_bytes,omitempty"`
-	Resolutions       []archive.InputResolution `json:"resolutions,omitempty"`
-	Warnings          []string                  `json:"warnings,omitempty"`
+	StepID            string                           `json:"step_id"`
+	Node              string                           `json:"node"`
+	Cleanup           bool                             `json:"cleanup,omitempty"`
+	CleanupFor        string                           `json:"cleanup_for,omitempty"`
+	Method            string                           `json:"method,omitempty"`
+	URL               string                           `json:"url,omitempty"`
+	Status            int                              `json:"status,omitempty"`
+	GRPCCode          string                           `json:"grpc_code,omitempty"`    // the gRPC status name, where the step made one
+	GRPCMessage       string                           `json:"grpc_message,omitempty"` // what the server said with it
+	Passed            bool                             `json:"passed"`
+	DurationMs        int64                            `json:"duration_ms"`
+	Retries           int                              `json:"retries,omitempty"`
+	RetriedOn         []string                         `json:"retried_on,omitempty"`
+	Requests          int                              `json:"requests,omitempty"`    // requests a repeated step sent
+	RepeatStop        string                           `json:"repeat_stop,omitempty"` // why a repeated step stopped
+	Iterations        []shownIterationRow              `json:"iterations,omitempty"`  // a repeated step's requests
+	Error             string                           `json:"error,omitempty"`
+	BodyError         *archive.ResponseBodyErrorRecord `json:"body_error,omitempty"` // an error the body of a successful response reports
+	Inputs            map[string]any                   `json:"inputs,omitempty"`
+	Outputs           map[string]any                   `json:"outputs,omitempty"`
+	Validation        *shownValidation                 `json:"validation,omitempty"`
+	RequestBodyBytes  int                              `json:"request_body_bytes,omitempty"`
+	RequestBodyForm   bool                             `json:"request_body_form,omitempty"`   // the request body is form-encoded
+	RequestFormFields int                              `json:"request_form_fields,omitempty"` // its fields, decoded
+	ResponseBodyBytes int                              `json:"response_body_bytes,omitempty"`
+	Resolutions       []archive.InputResolution        `json:"resolutions,omitempty"`
+	Warnings          []string                         `json:"warnings,omitempty"`
 }
 
 // shownValidation is a shown step's assertion results, named and shaped as in
@@ -769,6 +800,9 @@ func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup bool, 
 	if view.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", view.Error)
 	}
+	if view.BodyError != nil {
+		fmt.Fprintf(&b, "body error: %s\n", view.BodyError.Summary())
+	}
 	writeShownInputs(&b, view.Inputs, view.Resolutions)
 	writeShownValues(&b, "outputs", view.Outputs)
 	if view.Validation != nil && len(view.Validation.Results) > 0 {
@@ -826,6 +860,7 @@ func buildShownStep(step *archive.StepRecord, id string, cleanup bool) shownStep
 		Requests:   len(step.Iterations),
 		RepeatStop: step.RepeatStop,
 		Error:      step.Error,
+		BodyError:  step.ResponseBodyError,
 		Inputs:     step.Inputs,
 		Outputs:    step.Outputs,
 	}
@@ -1222,4 +1257,18 @@ func shownRowStatus(row shownStepRow) string {
 	default:
 		return "-"
 	}
+}
+
+// fuzzFindings lists the fuzz cases among steps that have a finding, the
+// failing ones first.
+func fuzzFindings(steps []archive.StepRecord) []archive.FuzzRecord {
+	var out []archive.FuzzRecord
+	for _, failing := range []bool{true, false} {
+		for _, s := range steps {
+			if s.Fuzz != nil && s.Fuzz.Finding != "" && s.Fuzz.Fails == failing {
+				out = append(out, *s.Fuzz)
+			}
+		}
+	}
+	return out
 }

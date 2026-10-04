@@ -8,6 +8,7 @@ import (
 	"github.com/gburgyan/aat/archive"
 	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // testArchive builds a minimal archive for testing.
@@ -387,6 +388,28 @@ func TestFindFailedSteps_MixedResults(t *testing.T) {
 	assert.Equal(t, "err", failed[1].Node)
 }
 
+// TestFindFailedSteps_Fuzz checks that a fuzz case is failed only when its
+// finding failed the run, and that setup copies, which never fail it, are
+// left out.
+func TestFindFailedSteps_Fuzz(t *testing.T) {
+	refused := testStep("addItem", 400, 10)
+	refused.StepID, refused.Fuzz = "add__fuzz_quantity_below_min", &archive.FuzzRecord{ID: "quantity.below-min"}
+	accepted := testStep("listProducts", 200, 10)
+	accepted.StepID = "list__fuzz_category_not_in_enum"
+	accepted.Fuzz = &archive.FuzzRecord{ID: "category.not-in-enum", Target: "list", Mode: "negative", Finding: "accepted-invalid", Fails: true}
+	failedCopy := testStep("createCart", 503, 10)
+	failedCopy.FuzzSetup, failedCopy.FuzzSetupFailed = "add__fuzz_quantity_below_min", true
+
+	failed := findFailedSteps([]archive.StepRecord{testStep("listProducts", 200, 10), refused, failedCopy, accepted})
+	require.Len(t, failed, 1)
+	assert.Equal(t, "list__fuzz_category_not_in_enum", failed[0].StepID)
+
+	out := formatFailureAnalysis(testArchive("failed", testStep("listProducts", 200, 10), refused, failedCopy, accepted))
+	assert.Contains(t, out, "**Fuzz case:** `category.not-in-enum` on step list, judged as negative: **accepted-invalid**")
+	assert.Contains(t, out, "- **fuzz:**")
+	assert.NotContains(t, out, "- **client:**", "a refused case is not the failure")
+}
+
 func TestFindFailedSteps_AllPassed(t *testing.T) {
 	steps := []archive.StepRecord{
 		testStep("ok1", 200, 100),
@@ -407,4 +430,22 @@ func TestFormatArchiveDetail_FormBody(t *testing.T) {
 	assert.Contains(t, result, "**Request Body** (form):")
 	assert.Contains(t, result, "amount=2000\nmetadata[source]=aat-stripe\nname=AAT Stripe")
 	assert.NotContains(t, result, `&`, "not the one escaped string the archive holds")
+}
+
+// TestFormatStepRecord_BodyErrorStatus checks that a body error's status is
+// shown, and that a body error an expectFailure step matched is no failure.
+func TestFormatStepRecord_BodyErrorStatus(t *testing.T) {
+	step := testStep("createOrder", 200, 10)
+	step.ResponseBodyError = &archive.ResponseBodyErrorRecord{RulePath: "*.result.errors", Rule: "non-empty",
+		Message: "email is not valid", Category: "VALIDATION", Status: 400}
+	assert.Contains(t, formatStepRecord(&step, 1, 1), "Treated as: status 400")
+	assert.NotContains(t, formatStepRecord(&step, 1, 1), "Stale")
+	assert.Len(t, findFailedSteps([]archive.StepRecord{step}), 1)
+
+	step.ResponseBodyError.Stale = true
+	assert.Contains(t, formatStepRecord(&step, 1, 1), "Stale: the state the request worked on is used up")
+	step.ResponseBodyError.Stale = false
+
+	step.ExpectFailure = &archive.ExpectFailureRecord{Actual: 400, Passed: true}
+	assert.Empty(t, findFailedSteps([]archive.StepRecord{step}), "the failure it expected")
 }

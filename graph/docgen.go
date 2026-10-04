@@ -339,6 +339,18 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 				}
 				details = strings.Join(parts, ", ")
 			}
+			if statuses := rule.ErrorStatus.DescribeStatuses(); statuses != "" {
+				if details != "" {
+					details += ", "
+				}
+				details += "status: " + statuses
+			}
+			if rule.Stale {
+				if details != "" {
+					details += ", "
+				}
+				details += "stale"
+			}
 			ruleStr := rule.Rule
 			if rule.Rule == "equals" && rule.Value != nil {
 				ruleStr = fmt.Sprintf("equals %v", rule.Value)
@@ -346,6 +358,9 @@ func writeNodeSection(b *strings.Builder, name string, node *Node, g *Graph, opt
 			fmt.Fprintf(b, "| `%s` | %s | %s |\n", rule.Path, ruleStr, details)
 		}
 		b.WriteString("\n")
+		if g.ErrorStatus != nil {
+			fmt.Fprintf(b, "Errors a rule gives no status: %s (graph `errorStatus`).\n\n", g.ErrorStatus.DescribeStatuses())
+		}
 	}
 
 	// Connections via requires/satisfies
@@ -438,6 +453,9 @@ func formatDocDefault(d *InputDefault) string {
 			items = append(items[:3], "...")
 		}
 		return "[" + strings.Join(items, ", ") + "]"
+	}
+	if d.PoolRef != "" {
+		return "poolRef: " + d.PoolRef
 	}
 	if d.From != "" {
 		return "from: " + d.From

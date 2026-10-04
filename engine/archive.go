@@ -2,6 +2,8 @@ package engine
 
 import (
 	"encoding/json"
+	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/gburgyan/aat/adapter"
@@ -36,7 +38,7 @@ func ToArchive(result *RunResult, meta archive.ArchiveMetadata, baseURL string, 
 	a.CleanupSkipped = convertCleanupSkips(result.CleanupSkipped)
 	a.KnownIssues = convertKnownIssues(result.KnownIssues)
 	a.KnownIssuesResolved = convertKnownIssues(result.KnownIssuesResolved)
-	a.Metadata.InstantiatedPlan = redactPlan(result.InstantiatedPlan)
+	a.Metadata.InstantiatedPlan = withoutFuzzCases(redactPlan(result.InstantiatedPlan))
 
 	// Redact fails only on a value encoding/json cannot marshal. The archive is
 	// withheld then: returned unredacted, it would carry the secrets redaction
@@ -106,9 +108,30 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		rec.ExpectFailure = &archive.ExpectFailureRecord{
 			Expected:   s.ExpectFailure.ExpectedStatuses,
 			Actual:     s.ExpectFailure.ActualStatus,
-			ActualName: grpcStatusName(s.Response),
+			ActualName: s.ExpectFailure.ActualName,
 			Passed:     s.ExpectFailure.Passed,
 		}
+	}
+	if s.Fuzz != nil {
+		c := s.Fuzz.Case
+		rec.Fuzz = &archive.FuzzRecord{ID: c.ID, Target: c.Target, Mode: c.Mode, Input: c.Input, Strategy: c.Strategy,
+			Value: c.Value, Patch: c.Patch, SpecViolations: s.Fuzz.SpecViolations, Finding: s.Fuzz.Finding, Fails: s.Fuzz.Fails}
+		if s.Fuzz.JudgedAs != c.Mode {
+			rec.Fuzz.JudgedAs = s.Fuzz.JudgedAs
+		}
+		rec.Fuzz.Setup = s.Fuzz.Setup
+		rec.Fuzz.OutputsError = s.OutputsError
+		if st := s.Fuzz.Stale; st != nil {
+			rec.Fuzz.Stale = &archive.StaleRecord{Status: st.Status}
+			if st.BodyError != nil {
+				bodyError := archive.ResponseBodyErrorRecord(*st.BodyError)
+				rec.Fuzz.Stale.BodyError = &bodyError
+			}
+		}
+	}
+	if s.FuzzSetup != "" {
+		rec.FuzzSetup = s.FuzzSetup
+		rec.FuzzSetupFailed = s.FuzzSetupFailed
 	}
 	if s.KnownIssue != nil {
 		rec.KnownIssue = &archive.KnownIssueRecord{
@@ -131,13 +154,8 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		}
 	}
 	if s.ResponseBodyError != nil {
-		rec.ResponseBodyError = &archive.ResponseBodyErrorRecord{
-			RulePath: s.ResponseBodyError.RulePath,
-			Rule:     s.ResponseBodyError.Rule,
-			Message:  s.ResponseBodyError.Message,
-			Code:     s.ResponseBodyError.Code,
-			Category: s.ResponseBodyError.Category,
-		}
+		bodyError := archive.ResponseBodyErrorRecord(*s.ResponseBodyError)
+		rec.ResponseBodyError = &bodyError
 	}
 	if s.OASValidation != nil {
 		rec.OASValidation = convertOASValidation(s.OASValidation)
@@ -243,6 +261,22 @@ func convertResponse(resp *adapter.Response) *archive.ResponseRecord {
 	return rec
 }
 
+// withoutFuzzCases returns p without the case on each fuzz step, copying the
+// steps if it changes one. The step's record holds the case, and a case's
+// value, which can be ten thousand characters long, need not be archived
+// again in the plan.
+func withoutFuzzCases(p *plan.Plan) *plan.Plan {
+	if p == nil || !slices.ContainsFunc(p.Execution.Steps, func(s plan.Step) bool { return s.Fuzz != nil }) {
+		return p
+	}
+	cp := *p
+	cp.Execution.Steps = slices.Clone(p.Execution.Steps)
+	for i := range cp.Execution.Steps {
+		cp.Execution.Steps[i].Fuzz = nil
+	}
+	return &cp
+}
+
 // redactPlan returns p with its auth credentials' literal values and its
 // credential headers redacted, copying what it changes so the caller's plan is
 // untouched. Environment-variable references keep their variable names, which
@@ -319,13 +353,23 @@ func convertErrorClass(ec *ErrorClassification) *archive.ErrorClassRecord {
 	}
 }
 
+// archivedRawValue is the raw value a resolution record keeps: none for a raw
+// value sent as written, whose final value is the same, so a fuzz case's
+// value is not archived twice over.
+func archivedRawValue(r ValueResolution) any {
+	if r.Source == "raw_value" && reflect.DeepEqual(r.RawValue, r.FinalValue) {
+		return nil
+	}
+	return r.RawValue
+}
+
 func convertResolutions(resolutions []ValueResolution) []archive.ValueResolutionRecord {
 	records := make([]archive.ValueResolutionRecord, len(resolutions))
 	for i, r := range resolutions {
 		rec := archive.ValueResolutionRecord{
 			InputName:  r.InputName,
 			Source:     r.Source,
-			RawValue:   r.RawValue,
+			RawValue:   archivedRawValue(r),
 			FinalValue: r.FinalValue,
 			FromStep:   r.FromStep,
 			FromOutput: r.FromOutput,
@@ -334,6 +378,7 @@ func convertResolutions(resolutions []ValueResolution) []archive.ValueResolution
 			Constraint: r.Constraint,
 			PoolIndex:  r.PoolIndex,
 			PoolSize:   r.PoolSize,
+			PoolRef:    r.PoolRef,
 			Tried:      r.Tried,
 			Error:      r.Error,
 			Layer:      r.Layer,

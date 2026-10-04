@@ -104,6 +104,7 @@ Rich default fields:
 |-------|-------------|
 | `value` | Literal value |
 | `pool` | Array of candidate values, used when there is no `value` or the `value` fails `constraint` |
+| `poolRef` | A value pool of the [domain file](domain.md#value-pools) to use as the pool: `airportCodes`, or `airportCodes.us` for one of its groups. Set `pool` or `poolRef`, not both |
 | `poolStrategy` | How to pick from the pool: `random` (default) or `sequential` |
 | `constraint` | Predicate the value must satisfy, over `value` and the inputs already resolved for the step (see [Fallback Pools](value-flow.md#fallback-pools)) |
 | `from` | Reference to an upstream step output (`step.output`) |
@@ -378,7 +379,7 @@ This tells the backward chaining algorithm to stop traversing through this node,
 
 APIs sometimes return HTTP 200 with an error payload. Error detection rules let the graph declare patterns that indicate a "successful" response is actually an error.
 
-Rules can be defined at the graph level (apply to all nodes) or at the node level. A node's own rules replace the graph-level rules for that node; they are not merged. Rules are checked on responses with a status below 400, after outputs are extracted, and the first rule that triggers fails the step:
+Rules can be defined at the graph level (apply to all nodes) or at the node level. A node's own rules replace the graph-level rules for that node; they are not merged. Rules are checked on responses with a status below 400, before outputs are extracted, and the first rule that triggers fails the step. An error body rarely has the shape a success's outputs are read from, so the step fails with what the body says, not with the outputs it lacks:
 
 ```yaml
 # Graph-level: applies to all nodes
@@ -399,6 +400,31 @@ nodes:
           message: "errors.0.message"
 ```
 
+Paths are [GJSON](https://github.com/tidwall/gjson/blob/master/SYNTAX.md) paths, wildcards and queries included. An
+API that wraps every response in a root key named after the operation, and reports errors in a list beside warnings,
+needs a wildcard for the root, and a rule of its own for a response with no root key:
+
+```yaml
+# {"orderResponse": {"result": {"errors": [{"type": "VALIDATION", "message": "email is not valid", "code": "E102"}],
+#                               "warnings": [{"message": "slow day"}]}}}
+errorDetection:
+  - path: "*.result.errors"          # any root key: orderResponse, paymentResponse, ...
+    rule: non-empty
+    details:
+      message: "*.result.errors.0.message"
+      code: "*.result.errors.0.code"
+      category: "*.result.errors.0.type"
+  - path: "result.errors"            # a response with no root key
+    rule: non-empty
+    details:
+      message: "result.errors.0.message"
+      code: "result.errors.0.code"
+      category: "result.errors.0.type"
+```
+
+`warnings` is never read, so a success that carries warnings stays a success. A wildcard key matches only a key with
+the rest of the path below it, so `*.result.errors` doesn't match a bare `result`.
+
 ### Rule Types
 
 | Rule | Behavior |
@@ -416,6 +442,79 @@ The optional `details` section extracts error information from the response for 
 | `message` | gjson path to the error message |
 | `code` | gjson path to an error code |
 | `category` | gjson path to an error category |
+
+### The Status an Error Stands For
+
+A detected error is a failure, but not every failure means the same thing: a validation error is the API refusing the
+request, a temporary one is worth retrying, and an unexpected one is the server failing. Give a detected error the
+HTTP status it stands for, and everything that reads a status reads that one:
+
+```yaml
+errorDetection:
+  - path: "*.result.errors"
+    rule: non-empty
+    details:
+      message: "*.result.errors.0.message"
+      category: "*.result.errors.0.type"
+    status: 500                # this rule's errors whose category isn't listed, or that have none
+    categories:                # the category details.category reads, matched without case
+      VALIDATION: 400
+      TEMPORARY: 503
+
+# or once for the whole graph, for every rule that gives an error no status:
+errorStatus:
+  status: 500
+  categories:
+    VALIDATION: 400
+    CONFLICT: 409
+    TEMPORARY: 503
+```
+
+A detected error takes, in order: its rule's status for its category, its rule's `status`, the graph `errorStatus`
+status for its category, and the graph `errorStatus.status`. The graph mapping applies to node-level rules too, so a
+project whose errors all look alike declares it once. Statuses are 400 to 599, and a rule's `categories` needs a
+`details.category` to read the category from. Read the category from one element, such as `errors.0.type`, not a
+list such as `errors.#.type`.
+
+What reads the status:
+
+| What | With a status | Without one |
+|------|---------------|-------------|
+| [`expectFailure`](plans.md#negative-testing-expectfailure) and mutations' `expectStatus` | Matches it: a `VALIDATION` error given 400 passes `status: [4xx]` | Never matches: the step fails |
+| [Status assertions](plans.md#assertions) | Read it | Read the response's own status |
+| [Retries](plans.md#retry) | Numeric and category rules match it, and the default retries it as that status, so a `TEMPORARY` error given 503 is retried. It is still a `response_error`, which `on: [response_error]` matches | `on: [response_error]` matches it; the default doesn't retry it |
+| [Fuzzing](fuzzing.md#findings) | A 5xx is a `server-error`, 429 is `throttled`, a 4xx is a refusal, and 410 is [stale](#stale-errors) | A refusal |
+
+The progress line marks such a step `BODY ERROR VALIDATION as 400`, and the archive, `--json`, `aat run show`, the
+web UI, and the MCP server record the status beside the response's own.
+
+### Stale Errors
+
+Some errors don't say the request was wrong. They say the state it worked on is used up: a session that expired, a
+cart at its limit, a reservation an earlier request already changed. Mark such a rule `stale`, and list it before a
+general rule that would match the same body, since the first rule that matches wins:
+
+```yaml
+errorDetection:
+  - path: '*.result.errors.#(code=="SESSION_EXPIRED")'
+    rule: exists
+    details:
+      message: "*.result.errors.0.message"
+      code: "*.result.errors.0.code"
+      category: "*.result.errors.0.type"
+    stale: true
+  - path: "*.result.errors"
+    rule: non-empty
+    details:
+      message: "*.result.errors.0.message"
+      code: "*.result.errors.0.code"
+      category: "*.result.errors.0.type"
+```
+
+A stale error takes its status as any other does, and fails a plan's step as any other does. It matters when
+[fuzzing](fuzzing.md#what-a-case-runs-on): a case that gets one, or an HTTP 410, on a setup an earlier case left
+behind is sent again on a fresh setup, instead of being judged on an answer about the setup. Mark only the errors that
+mean the state is used up: a case that gets one is sent twice. The error's summary reads `(rule: exists, stale)`.
 
 ## Types
 
@@ -535,6 +634,14 @@ errorDetection:
     details:
       message: "error.message"
       code: "error.code"
+      category: "error.type"
+
+# The status a detected error stands for, for every rule that gives it none
+# (see The Status an Error Stands For)
+errorStatus:
+  status: 500
+  categories:
+    VALIDATION: 400
 
 # Workflow definitions (see workflows.md for details)
 workflows:

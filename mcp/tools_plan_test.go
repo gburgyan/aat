@@ -3,11 +3,13 @@ package mcp
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/config"
 	"github.com/gburgyan/aat/graph"
+	"github.com/gburgyan/aat/plan"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -436,4 +438,18 @@ func TestHandleValidatePlan_UnknownKey(t *testing.T) {
 	result := callTool(t, srv.handleValidatePlan, map[string]any{"yaml": src})
 	assert.True(t, result.IsError)
 	assert.Contains(t, resultText(t, result), `line 5: unknown key "fromSelecton" in step value (did you mean "fromSelection"?)`)
+}
+
+// TestLoadNamedPlan_ValidationError checks that a saved plan that fails
+// validation says so once, with its name, and keeps the validation error.
+func TestLoadNamedPlan_ValidationError(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "broken.yaml"), []byte("execution:\n  steps:\n    - node: nowhere\n"), 0o644))
+	srv := newTestServerWithPlans(twoNodeGraph(), dir)
+	_, _, err := srv.loadNamedPlan("broken")
+	require.Error(t, err)
+	assert.Equal(t, 1, strings.Count(err.Error(), "plan validation failed"), err.Error())
+	assert.True(t, strings.HasPrefix(err.Error(), "plan broken: "), err.Error())
+	var verr *plan.ValidationError
+	assert.ErrorAs(t, err, &verr)
 }

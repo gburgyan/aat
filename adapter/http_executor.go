@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/net/http/httpguts"
 )
 
 // DefaultRequestTimeout is how long NewHTTPExecutor's client waits for a
@@ -47,10 +49,15 @@ func NewHTTPExecutorWithClient(baseURL string, client *http.Client) *HTTPExecuto
 // Execute sends the request and returns the response. It joins BaseURL with
 // the request's relative Path, copies headers, and respects the context for
 // cancellation and timeouts.
+//
+// A request that can't be sent as it stands, such as one whose URL doesn't
+// parse or whose header holds a control character, is refused with a
+// NotSentError before anything goes out: net/http would refuse it too, but
+// with an error that reads like a failed exchange.
 func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, error) {
 	fullURL, err := JoinURL(e.BaseURL, req.Path)
 	if err != nil {
-		return nil, fmt.Errorf("building URL: %w", err)
+		return nil, &NotSentError{Err: fmt.Errorf("building URL: %w", err)}
 	}
 
 	var bodyReader io.Reader
@@ -60,10 +67,13 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 
 	httpReq, err := http.NewRequestWithContext(ctx, req.Method, fullURL, bodyReader)
 	if err != nil {
-		return nil, fmt.Errorf("creating HTTP request: %w", err)
+		return nil, &NotSentError{Err: fmt.Errorf("creating HTTP request: %w", err)}
 	}
 
 	for k, v := range req.Headers {
+		if err := headerError(k, v); err != nil {
+			return nil, &NotSentError{Err: err}
+		}
 		httpReq.Header.Set(k, v)
 	}
 
@@ -90,6 +100,19 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req *Request) (*Response, er
 		Headers:    httpResp.Header,
 		Body:       body,
 	}, nil
+}
+
+// headerError says why net/http would refuse to send a header, or returns nil
+// when it would send it: a name that isn't an HTTP token, or a value with a
+// control character other than a tab.
+func headerError(name, value string) error {
+	if !httpguts.ValidHeaderFieldName(name) {
+		return fmt.Errorf("header name %q is not valid in HTTP", name)
+	}
+	if !httpguts.ValidHeaderFieldValue(value) {
+		return fmt.Errorf("header %s: HTTP does not allow a control character in a header value", name)
+	}
+	return nil
 }
 
 // clientTimedOut reports whether err, from a request sent at start, is the

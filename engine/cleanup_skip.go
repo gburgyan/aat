@@ -11,15 +11,15 @@ import (
 
 // resolveCleanupInputs resolves a cleanup node's inputs by output name: first
 // from the cleanup steps before this one in its chain, nearest first; then from
-// the step that registered the cleanup; then from the most recently executed
-// step with an output of that name. Outputs are stored by step ID, so ForNode
-// stands in only for an entry without a ForStep.
-func resolveCleanupInputs(node *graph.Node, entry CleanupEntry, ancestors []StepResult, state *RunState) map[string]any {
+// the step that registered the cleanup; then from the first of sources, step
+// IDs most recent first (see Engine.outputSources), with an output of that
+// name. Outputs are stored by step ID, so ForNode stands in only for an entry
+// without a ForStep.
+func resolveCleanupInputs(node *graph.Node, entry CleanupEntry, ancestors []StepResult, state *RunState, sources []string) map[string]any {
 	source := entry.ForStep
 	if source == "" {
 		source = entry.ForNode
 	}
-	executed := state.ExecutedSteps()
 	lookup := func(name string) (any, bool) {
 		for _, a := range ancestors {
 			if val, ok := a.Outputs[name]; ok {
@@ -29,8 +29,8 @@ func resolveCleanupInputs(node *graph.Node, entry CleanupEntry, ancestors []Step
 		if val, err := state.GetOutput(source, name); err == nil {
 			return val, true
 		}
-		for i := len(executed) - 1; i >= 0; i-- {
-			if val, err := state.GetOutput(executed[i], name); err == nil {
+		for _, id := range sources {
+			if val, err := state.GetOutput(id, name); err == nil {
 				return val, true
 			}
 		}

@@ -32,9 +32,9 @@ For steps in the main flow and verification steps, AAT runs extraction, and then
 Within a step, the order is:
 
 1. The request is sent and the response arrives.
-2. `extract` rules run. Rules that read the body need a JSON body: a non-JSON body fails the step with `response body is not valid JSON` before the script starts. A template whose rules all read headers, or that has only a transform, runs on any body; its `json_path` calls return `nil` when the body is not JSON.
-3. The script runs and its return value replaces the step's outputs.
-4. The graph's `errorDetection` rules check the raw response body, not the transformed outputs.
+2. The graph's `errorDetection` rules check the raw response body. When one finds an error, the step fails with it, and an extract or script error after it is moot: an error body rarely has the shape a success's outputs are read from.
+3. `extract` rules run. Rules that read the body need a JSON body: a non-JSON body fails the step with `response body is not valid JSON` before the script starts. A template whose rules all read headers, or that has only a transform, runs on any body; its `json_path` calls return `nil` when the body is not JSON.
+4. The script runs and its return value replaces the step's outputs.
 5. Assertions without `raw: true` see the transformed outputs (see [Assertions](plans.md#assertions)), and later steps read them through `from` references.
 
 Cleanup steps run their template's transform too, on every cleanup response whatever its status. A script error there is ignored: the cleanup step still counts as passed and records no outputs.

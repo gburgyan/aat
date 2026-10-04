@@ -18,11 +18,11 @@ func TestApplySelection_ImplementsEveryStrategy(t *testing.T) {
 	for _, strategy := range plan.SelectionStrategies() {
 		t.Run(strategy, func(t *testing.T) {
 			sel := &plan.SelectionConfig{Strategy: strategy, SortField: "price", Filter: "id == 'b'"}
-			_, err := applySelection(arr, sel)
+			_, err := applySelection(arr, sel, nil)
 			assert.NoError(t, err)
 		})
 	}
-	_, err := applySelection(arr, &plan.SelectionConfig{Strategy: "llm"})
+	_, err := applySelection(arr, &plan.SelectionConfig{Strategy: "llm"}, nil)
 	assert.ErrorContains(t, err, `unknown selection strategy "llm"`)
 }
 
@@ -31,7 +31,7 @@ func TestApplySelection_FilterWithoutStrategyMeansMatch(t *testing.T) {
 		map[string]any{"sku": "a", "inStock": false},
 		map[string]any{"sku": "b", "inStock": true},
 	}
-	result, err := applySelection(arr, &plan.SelectionConfig{Filter: "inStock == true"})
+	result, err := applySelection(arr, &plan.SelectionConfig{Filter: "inStock == true"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "b", result.element.(map[string]any)["sku"])
 	assert.Equal(t, 1, result.index)
@@ -39,7 +39,7 @@ func TestApplySelection_FilterWithoutStrategyMeansMatch(t *testing.T) {
 
 func TestApplySelection_NilConfig_DefaultsToFirst(t *testing.T) {
 	arr := []any{"a", "b", "c"}
-	result, err := applySelection(arr, nil)
+	result, err := applySelection(arr, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "a", result.element)
 	assert.Equal(t, 0, result.index)
@@ -48,7 +48,7 @@ func TestApplySelection_NilConfig_DefaultsToFirst(t *testing.T) {
 
 func TestApplySelection_EmptyStrategy_DefaultsToFirst(t *testing.T) {
 	arr := []any{"a", "b", "c"}
-	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: ""})
+	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: ""}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "a", result.element)
 	assert.Equal(t, 0, result.index)
@@ -59,7 +59,7 @@ func TestApplySelection_First(t *testing.T) {
 		map[string]any{"id": "first", "val": 1},
 		map[string]any{"id": "second", "val": 2},
 	}
-	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: "first"})
+	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: "first"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, arr[0], result.element)
 	assert.Equal(t, 0, result.index)
@@ -71,7 +71,7 @@ func TestApplySelection_Last(t *testing.T) {
 		map[string]any{"id": "second"},
 		map[string]any{"id": "third"},
 	}
-	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: "last"})
+	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: "last"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, arr[2], result.element)
 	assert.Equal(t, 2, result.index)
@@ -79,7 +79,7 @@ func TestApplySelection_Last(t *testing.T) {
 
 func TestApplySelection_Index_Valid(t *testing.T) {
 	arr := []any{"a", "b", "c", "d"}
-	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: "index", Index: 2})
+	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: "index", Index: 2}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "c", result.element)
 	assert.Equal(t, 2, result.index)
@@ -87,14 +87,14 @@ func TestApplySelection_Index_Valid(t *testing.T) {
 
 func TestApplySelection_Index_OutOfBounds(t *testing.T) {
 	arr := []any{"a", "b"}
-	_, err := applySelection(arr, &plan.SelectionConfig{Strategy: "index", Index: 5})
+	_, err := applySelection(arr, &plan.SelectionConfig{Strategy: "index", Index: 5}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of bounds")
 }
 
 func TestApplySelection_Random_ElementInArray(t *testing.T) {
 	arr := []any{"a", "b", "c", "d", "e"}
-	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: "random"})
+	result, err := applySelection(arr, &plan.SelectionConfig{Strategy: "random"}, nil)
 	require.NoError(t, err)
 	assert.Contains(t, arr, result.element)
 	assert.GreaterOrEqual(t, result.index, 0)
@@ -110,7 +110,7 @@ func TestApplySelection_Min_SimpleField(t *testing.T) {
 	result, err := applySelection(arr, &plan.SelectionConfig{
 		Strategy: "min",
 		Field:    "price",
-	})
+	}, nil)
 	require.NoError(t, err)
 	m := result.element.(map[string]any)
 	assert.Equal(t, "cheapest", m["name"])
@@ -127,7 +127,7 @@ func TestApplySelection_Min_WithSortField(t *testing.T) {
 		Strategy:  "min",
 		Field:     "id",
 		SortField: "score",
-	})
+	}, nil)
 	require.NoError(t, err)
 	m := result.element.(map[string]any)
 	assert.Equal(t, "B", m["id"])
@@ -144,7 +144,7 @@ func TestApplySelection_Min_NestedField(t *testing.T) {
 		Strategy:  "min",
 		Field:     "id",
 		SortField: "details.weight",
-	})
+	}, nil)
 	require.NoError(t, err)
 	m := result.element.(map[string]any)
 	assert.Equal(t, "B", m["id"])
@@ -159,7 +159,7 @@ func TestApplySelection_Max(t *testing.T) {
 	result, err := applySelection(arr, &plan.SelectionConfig{
 		Strategy: "max",
 		Field:    "rating",
-	})
+	}, nil)
 	require.NoError(t, err)
 	m := result.element.(map[string]any)
 	assert.Equal(t, "high", m["name"])
@@ -175,7 +175,7 @@ func TestApplySelection_Match_Found(t *testing.T) {
 	result, err := applySelection(arr, &plan.SelectionConfig{
 		Strategy: "match",
 		Filter:   "carrier == 'UA'",
-	})
+	}, nil)
 	require.NoError(t, err)
 	m := result.element.(map[string]any)
 	assert.Equal(t, "x2", m["id"])
@@ -190,7 +190,7 @@ func TestApplySelection_Match_NotFound(t *testing.T) {
 	_, err := applySelection(arr, &plan.SelectionConfig{
 		Strategy: "match",
 		Filter:   "carrier == 'DL'",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no element matches")
 }
@@ -204,7 +204,7 @@ func TestApplySelection_Filter_PlusFirst(t *testing.T) {
 	result, err := applySelection(arr, &plan.SelectionConfig{
 		Strategy: "first",
 		Filter:   "stops == 0",
-	})
+	}, nil)
 	require.NoError(t, err)
 	m := result.element.(map[string]any)
 	assert.Equal(t, "a2", m["id"])
@@ -223,7 +223,7 @@ func TestApplySelection_Filter_PlusMin(t *testing.T) {
 		Strategy: "min",
 		Field:    "price",
 		Filter:   "carrier == 'AA'",
-	})
+	}, nil)
 	require.NoError(t, err)
 	m := result.element.(map[string]any)
 	assert.Equal(t, "a3", m["id"]) // cheapest AA flight
@@ -238,20 +238,20 @@ func TestApplySelection_Filter_ProducesEmpty(t *testing.T) {
 	_, err := applySelection(arr, &plan.SelectionConfig{
 		Strategy: "first",
 		Filter:   "carrier == 'DL'",
-	})
+	}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "matched no elements")
 }
 
 func TestApplySelection_EmptyArray(t *testing.T) {
-	_, err := applySelection([]any{}, nil)
+	_, err := applySelection([]any{}, nil, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "array is empty")
 }
 
 func TestApplySelection_UnknownStrategy(t *testing.T) {
 	arr := []any{"a"}
-	_, err := applySelection(arr, &plan.SelectionConfig{Strategy: "bogus"})
+	_, err := applySelection(arr, &plan.SelectionConfig{Strategy: "bogus"}, nil)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown selection strategy")
 }
@@ -266,7 +266,7 @@ func TestApplySelection_Min_IntegerValues(t *testing.T) {
 	result, err := applySelection(arr, &plan.SelectionConfig{
 		Strategy: "min",
 		Field:    "count",
-	})
+	}, nil)
 	require.NoError(t, err)
 	m := result.element.(map[string]any)
 	assert.Equal(t, "B", m["id"])
@@ -280,11 +280,11 @@ func TestApplySelection_MinMaxNumericStrings(t *testing.T) {
 		map[string]any{"id": "b", "total": "99.10"},
 		map[string]any{"id": "c", "total": "1000.00"},
 	}
-	lowest, err := applySelection(arr, &plan.SelectionConfig{Strategy: "min", SortField: "total"})
+	lowest, err := applySelection(arr, &plan.SelectionConfig{Strategy: "min", SortField: "total"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 1, lowest.index)
 
-	highest, err := applySelection(arr, &plan.SelectionConfig{Strategy: "max", SortField: "total"})
+	highest, err := applySelection(arr, &plan.SelectionConfig{Strategy: "max", SortField: "total"}, nil)
 	require.NoError(t, err)
 	assert.Equal(t, 2, highest.index)
 }

@@ -129,3 +129,48 @@ func TestTopologicalSort_StepAliasing(t *testing.T) {
 		assert.Less(t, pos["search_leg1"], pos["search_leg2"])
 	})
 }
+
+// TestTopologicalSort_FuzzCasesBeforeLaterSteps checks that a target's fuzz
+// cases, chained one after another, all run before the steps that follow the
+// target in the plan: under the shared scope a later step that ran between
+// them would change the state the remaining cases run on.
+func TestTopologicalSort_FuzzCasesBeforeLaterSteps(t *testing.T) {
+	p := &plan.Plan{Execution: plan.Execution{Steps: []plan.Step{
+		{ID: "cart", Node: "createCart"},
+		{ID: "add", Node: "addItem", DependsOn: []string{"cart"}},
+		{ID: "checkout", Node: "checkout", DependsOn: []string{"add"}},
+	}}}
+	var cases []plan.FuzzCase
+	for _, id := range []string{"q.a", "q.b", "q.c"} {
+		cases = append(cases, plan.FuzzCase{ID: id, Mode: plan.FuzzEdge, Input: "quantity", Value: 1})
+	}
+	for _, scope := range plan.FuzzScopes {
+		t.Run(scope, func(t *testing.T) {
+			cp := &plan.Plan{Execution: plan.Execution{Steps: append([]plan.Step(nil), p.Execution.Steps...)}}
+			require.NoError(t, plan.ExpandFuzzCases(cp, "add", cases, plan.FuzzExpandOptions{Scope: scope}))
+			sorted, err := TopologicalSort(cp.Execution.Steps)
+			require.NoError(t, err)
+			var ids []string
+			for _, s := range sorted {
+				ids = append(ids, s.StepID())
+			}
+			assert.Equal(t, "checkout", ids[len(ids)-1], "the cases run before checkout: %v", ids)
+		})
+	}
+}
+
+func TestTopologicalSort_KeepsPlanOrder(t *testing.T) {
+	steps := []plan.Step{
+		{ID: "a"},
+		{ID: "b", DependsOn: []string{"a"}},
+		{ID: "c"},
+		{ID: "d", DependsOn: []string{"c"}},
+	}
+	sorted, err := TopologicalSort(steps)
+	require.NoError(t, err)
+	var ids []string
+	for _, s := range sorted {
+		ids = append(ids, s.StepID())
+	}
+	assert.Equal(t, []string{"a", "b", "c", "d"}, ids)
+}

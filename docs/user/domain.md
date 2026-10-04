@@ -156,7 +156,22 @@ types:
 
 ## Value Pools
 
-Value pools provide curated test data for specific types. They are context for people and models choosing values — `aat prompt` samples them into the model's prompt, and the MCP server lists them — not a source the engine resolves inputs from.
+Value pools provide curated test data for specific types. People and models read them when they choose values — `aat prompt` samples them into the model's prompt, and the MCP server lists them — and a graph default, a layer, or a step value can draw from one with `poolRef`:
+
+```yaml
+# graph.yaml
+- name: origin
+  type: string
+  default:
+    poolRef: airportCodes.us        # one group; poolRef: airportCodes takes them all
+- name: destination
+  type: string
+  default:
+    poolRef: airportCodes.us
+    constraint: "value != origin"
+```
+
+The engine reads the pool when the step runs, so it behaves as a `pool` written in place: `constraint` and `poolStrategy` apply, the run's [seed](value-flow.md#replaying-a-runs-picks) decides the pick, and the archive records which pool the value came from. One list in the domain file then serves every input that takes an airport, and a layer switches them all to Europe with `poolRef: airportCodes.eu`. `aat validate` reports a `poolRef` that names no pool or group, with a suggestion.
 
 ### Flat Pools
 
@@ -197,7 +212,7 @@ valuePools:
         - intl-express
 ```
 
-Both `values` and `groups` can be present on the same pool. All values are combined when a pool is sampled or listed.
+Both `values` and `groups` can be present on the same pool. All values are combined when a pool is sampled or listed, and when a `poolRef` names the pool; `poolRef: shipping-methods.express` names one group.
 
 | Field | Required | Description |
 |-------|----------|-------------|

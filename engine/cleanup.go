@@ -111,7 +111,7 @@ func (e *Engine) runCleanupChain(ctx context.Context, entry CleanupEntry, cleanu
 	node := e.graph.Nodes[entry.NodeName]
 	var inputs map[string]any
 	if node != nil {
-		inputs = resolveCleanupInputs(node, entry, ancestors, state)
+		inputs = resolveCleanupInputs(node, entry, ancestors, state, e.outputSources(state, entry.ForStep))
 	}
 	skip, whenErr := e.cleanupSkip(entry, cleanupFor, inputs, ancestors, state, run)
 	if skip != nil {
@@ -230,7 +230,7 @@ func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, no
 	// An error reported in a successful response fails the cleanup step, so
 	// its chain goes no further.
 	if resp.StatusCode < 400 {
-		result.ResponseBodyError = CheckErrorDetection(effectiveErrorRules(node, e.graph), resp.Body)
+		result.ResponseBodyError = e.detectBodyError(node, resp.Body)
 	}
 
 	// Under --oas-validate, a cleanup exchange is checked against the spec as a

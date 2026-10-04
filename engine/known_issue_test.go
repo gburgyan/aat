@@ -11,6 +11,7 @@ import (
 	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
+	"github.com/gburgyan/aat/validate"
 )
 
 // clockAt pins the clock so an expiry can be tested either side of its date
@@ -246,4 +247,21 @@ func TestKnownIssue_StatusFailureEndsRunButStaysGreen(t *testing.T) {
 	assert.True(t, result.EndedEarly, "a short run must say it is short")
 	assert.Len(t, result.Steps, 1, "there were no outputs to continue from")
 	require.Len(t, result.KnownIssues, 1)
+}
+
+// TestCoverSetupFailure_ExpectedBodyError checks that a setup copy whose
+// expected failure came back as an error in a 200's body can be covered when
+// only an assertion failed.
+func TestCoverSetupFailure_ExpectedBodyError(t *testing.T) {
+	eng := &Engine{Now: clockAt("2026-10-01")}
+	p := &plan.Plan{}
+	step := plan.Step{ID: "neg", ExpectFailure: &plan.ExpectFailure{Status: plan.ExpectedStatuses{{Class: 4}}},
+		KnownIssue: &plan.KnownIssue{Until: mustDate(t, "2026-10-06"), Reason: "assertion is off"}}
+	r := &StepResult{StatusCode: 200, ResponseBodyError: &ResponseBodyError{Status: 400},
+		ExpectFailure: &ExpectFailureResult{ActualStatus: 400, Passed: true}, Validation: &validate.MechanicalResult{Passed: false}}
+	assert.True(t, eng.coverSetupFailure(p, step, r))
+
+	step.ExpectFailure = nil
+	r = &StepResult{StatusCode: 200, ResponseBodyError: &ResponseBodyError{Status: 400}}
+	assert.False(t, eng.coverSetupFailure(p, step, r), "a body error on a step meant to succeed is not covered")
 }

@@ -6,6 +6,116 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+### Added
+- **Runs can be replayed with the same pool picks.** Every run draws its pool orders and `random` selections from a
+  seed, and a run that made such a choice prints it; `aat run show`, the archive, and `summary.json` record it.
+  `aat run plan --seed N` and MCP `execute_plan`'s `seed` repeat those choices, and `aat run batch --seed N` now fixes
+  each run's picks as well as the shuffle. A step's picks depend on its ID, not on the order steps run in, so parallel
+  steps replay too, and a step's random named selections draw in name order, so several of them replay as well. A
+  `--shuffle` without `--seed` picks one seed for the order and the runs and prints it, and a batch reports each
+  run's seed in its `--json` output and `batch.json`. `--seed 0` picks a new seed in `run plan` as in `run batch`. `{{uuid}}` and `{{random N}}` stay unique. See
+  [Replaying a run's picks](https://gburgyan.github.io/aat/value-flow/#replaying-a-runs-picks).
+- **Defaults can draw from the domain file's value pools.** `poolRef: airportCodes`, or `poolRef: airportCodes.us`
+  for one group, works wherever `pool` does: graph defaults, layers, and step values, with `constraint` and
+  `poolStrategy`. One list then serves every input that takes that kind of value, where each default used to copy
+  it. `aat validate` checks every name, in the graph, its workflows' `inject` values, layers, plans, workflow files,
+  and verification values; the archive and web UI record which pool a value came from, and MCP
+  `list_value_pools` shows each pool's groups and the inputs that use it. See
+  [Value Pools](https://gburgyan.github.io/aat/domain/#value-pools).
+- **`--fuzz` tries a step with generated values, inside a real flow.** `aat run plan smoke --fuzz addItem` runs the
+  plan, then sends `addItem` values its inputs allow, values they forbid, and values they say nothing about, each as a
+  sibling step on its own copy of the steps before it. The cases come from each input's type and constraints and the
+  domain file's types and pools, so nothing about fuzzing goes in the graph; when the node has an OpenAPI operation,
+  a request the spec refuses is judged as negative. A 5xx, no response, or a response that breaks the spec fails the
+  run (`--fuzz-fail` changes that); a forbidden value accepted or an allowed one refused is a warning. Fuzz steps never
+  stop the run. Case IDs such as `quantity.above-max` are stable, so `--fuzz-case` replays one, and the archive,
+  `summary.json`, `--json`, and `aat run show` record each case and its finding. `run batch` takes the same flags. See
+  [Fuzzing](https://gburgyan.github.io/aat/fuzzing/).
+- **Fuzzing leaves fields out and fuzzes what the template writes itself.** Each input the template sends in the
+  body, the query, or a header gets `missing` (and `null` in the body), judged as negative for a required input and
+  positive for an optional one. The template's own body values get `remove`, `null`, `wrong-type`, and `empty`, the
+  body gets an unknown property, and literal query parameters get `remove`, all as edge cases unless the OpenAPI spec
+  refuses them. They patch the request the template built, so the rest of it is what the plan sends. A new finding,
+  `undocumented-status`, marks a status the node's operation doesn't list. A case's copy of the setup now includes the
+  earlier steps that build on it, such as the `addItem` a checkout needs, and a copied step that fails reports its
+  case as `not-sent` without stopping the run. The shop example's `quantity` input now declares `min: 1`.
+- **Fuzz cases share their setup while the API refuses them.** The new default scope, `reuse`, runs a target's cases
+  on one copy of the steps it depends on until a case is accepted, fails with a 5xx, or gets no response. Then the
+  next case gets a fresh copy. Refused cases, most of a run, cost one setup, and accepted ones never pile onto one
+  resource (a cart, a reservation with a traveler limit). Read-only setup steps (a GET with no cleanup pairing) aren't
+  copied at all. After three setups in a row fail, the target's remaining cases aren't tried. Copies' progress lines
+  are hidden unless they fail. The fuzz summary says how cases were set up (`setup: 2 fresh, 7 reused`), and `shared`
+  scope on a step that changes state is warned about. `isolated` keeps a fresh copy per case. On the shop,
+  fuzzing `addItem` and `checkout` sends 143 requests where it sent 228; on Duffel's test API, ten booking cases took
+  73 seconds with three searches instead of ten. Fuzz steps and their copies are named like
+  `addItem__fuzz_quantity_below_min`, so a copied expression such as `{{search.firstSliceOrigin}}` still parses.
+- **Fuzz cases run after the happy path, and a used-up setup is rebuilt.** Cases on copies of their target's setup
+  run once the plan's own steps and its verification are done, so a long run of cases no longer holds up the plan
+  until a session it made expires. They are still sent when a later step of the plan fails, and before a
+  `--stop-after` checkpoint stops the run; `shared` cases still run right after their target. An `errorDetection`
+  rule's new `stale: true` says its error means the state the request worked on is used up (an expired session, a
+  reservation an earlier refused case filled), not that the request was wrong; an HTTP 410 says the same. A case that
+  gets such an answer on a reused setup is sent again, once, on a fresh copy and judged on that answer. The fuzz
+  summary counts it as `rebuilt`, and the archive and `--json` keep the answer it replaced as `fuzz.stale`. See
+  [When cases run](https://gburgyan.github.io/aat/fuzzing/#when-cases-run) and
+  [Stale Errors](https://gburgyan.github.io/aat/graphs/#stale-errors).
+- **A step's `fuzz:` block fuzzes it on every run, and `--fuzz-save` keeps findings as regression plans.** The block
+  holds what `--fuzz` flags would say (`mode`, `inputs`, `cases`, `only`, `scope`, `fail`) plus `skip` (inputs never
+  to fuzz), `accept` (statuses no case is faulted for, such as a busy API's 409), and `pinned` cases sent exactly as
+  written. `--fuzz-save DIR` writes a plan per failing case with that case pinned, so it fails until the API is
+  fixed; `--no-fuzz` ignores the blocks. The MCP tool `generate_fuzz_cases` lists a step's cases as a block to keep.
+  See [Fuzzing: the fuzz block](https://gburgyan.github.io/aat/fuzzing/#the-fuzz-block).
+- **Fuzz verdicts hold up on real APIs and templates.** A 429 (or `RESOURCE_EXHAUSTED`) is a new finding,
+  `throttled`, rather than a refusal, and a case retries it when its target's `retry` block would. A request the
+  client refuses before sending, such as a header value with a control character, is `not-sent`, not a server error.
+  Findings are tried most serious first, so `undocumented-status` no longer hides `accepted-invalid`. A spec
+  violation the target's own request has too doesn't make a case negative, and a positive value the step's
+  `constraint` rules out is judged as edge. Cases the request can't carry as themselves aren't made: `""` where the
+  template leaves an empty input out, a value a header can't hold, and length cases past 65,536 characters; positive
+  length cases match the input's pattern. `--fuzz <node>` skips steps with `expectFailure` or a `rawBody`;
+  `--fuzz-input` names inputs of any target; `--fuzz-case` and a block's `only` are checked before the cap; pinned
+  cases follow the mode, input, skip, and cap settings; and a batch fails when a `--fuzz` name matches in none of its
+  plans. Fuzz copies and cases never stand in for the happy path's resources in verification and cleanup, a
+  `knownIssue` covers a setup copy as it covers its original, `--stop-after` keeps a fuzz failure, and `aat run show`
+  and MCP failure analysis judge a fuzz case by its finding. `--fuzz-save` keeps the case's `accept`, `scope`, and
+  `fail`, so the saved plan passes once the API is fixed; a run prints the plans it saved with `--quiet` and in a
+  batch too, and `--json` lists them in `fuzz_saved`. A `wrong-type` value carries JSON quotes only where the
+  template writes the input unquoted in its body. A setup copy leaves out steps that change nothing the target works
+  on (reads and negative steps it doesn't depend on), and a read-only target's cases run on the happy path's own
+  setup under `reuse`. The step counter numbers the plan's steps and cases, not their setup copies, and a fuzz
+  case's value is archived fewer times over (a tenth smaller on the shop). See
+  [Fuzzing](https://gburgyan.github.io/aat/fuzzing/).
+- **`raw: true` sends a step value exactly as written**, with no expression evaluation or type coercion. Its `{{…}}`
+  is text that validation doesn't check, and an unquoted YAML date is sent as written, not as a timestamp. See
+  [Raw Values](https://gburgyan.github.io/aat/value-flow/#raw-values).
+- **An error a 200's body reports can stand for the status it means.** An `errorDetection` rule takes `status` and
+  `categories` (the category its `details.category` reads, matched without case, to an HTTP status), and the graph's
+  new `errorStatus` gives every rule that names none the same mapping, so a project whose errors all look alike
+  declares it once. That status is what `expectFailure` and mutations' `expectStatus`, status assertions, retries,
+  and fuzz judging read: a validation error given 400 passes `expectFailure: {status: [4xx]}`, a temporary one given
+  503 is retried by default, and in a fuzz run an unexpected one given 500 is a `server-error` rather than a refusal.
+  Without a status, a body error behaves as before. See
+  [The Status an Error Stands For](https://gburgyan.github.io/aat/graphs/#the-status-an-error-stands-for).
+- **`expectFailure` takes status classes.** `status: [4xx]` passes on any refusal and still fails on a 5xx or a
+  success; it works in mutation `expectStatus` and overlay `expectFailure` too, and a gRPC status matches the class
+  of the HTTP status it maps to. See
+  [Negative Testing](https://gburgyan.github.io/aat/plans/#negative-testing-expectfailure).
+
+### Fixed
+- **An error a 200's body reports is read before the step's outputs.** Such a body rarely has the shape a success's
+  outputs are read from, so a step whose `errorDetection` rule matched used to fail as "extract path … not found":
+  an adapter error that hid the API's message and that `retry.on: [response_error]` never retried. The step now fails
+  with what the body says.
+- **Body errors are reported everywhere.** The `--json` summary used to report a step whose body held an error as
+  passed; it now fails it, with a `body_error` object. The progress line marks it (`BODY ERROR VALIDATION as 400`)
+  and prints the message, and `aat run show --step` shows it.
+
+### Changed
+- **Steps run in the order the plan lists them, wherever `dependsOn` allows.** Of the steps ready to run, the one
+  written first now goes next; before, a step that became ready went to the back of the queue, so a plan could run
+  its steps in an order it never wrote. See
+  [Step Execution Order](https://gburgyan.github.io/aat/running/#step-execution-order).
+
 ## [0.3.2] - 2026-09-22
 
 A bug-fix release: a gRPC call that outlives its deadline is now always an error, never a response the step asserts

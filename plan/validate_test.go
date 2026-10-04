@@ -2028,6 +2028,30 @@ func TestValidate_ExpectFailure(t *testing.T) {
 		assert.Contains(t, err.Error(), "status 200 must be a failure status")
 	})
 
+	t.Run("a success class", func(t *testing.T) {
+		p := &Plan{
+			Execution: Execution{
+				Steps: []Step{
+					{
+						Node: "searchFlights",
+						Values: map[string]StepValue{
+							"origin":        {Default: "DEN"},
+							"destination":   {Default: "SFO"},
+							"departureDate": {Default: "2026-03-15"},
+						},
+						ExpectFailure: &ExpectFailure{Status: ExpectedStatuses{{Class: 2}}},
+					},
+				},
+			},
+		}
+		err := Validate(p, g)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "status 2xx must be a failure status")
+
+		p.Execution.Steps[0].ExpectFailure.Status = ExpectedStatuses{{Class: 4}}
+		assert.NoError(t, Validate(p, g))
+	})
+
 	t.Run("contradicting status class assertion", func(t *testing.T) {
 		p := &Plan{
 			Execution: Execution{
