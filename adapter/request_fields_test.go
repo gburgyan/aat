@@ -270,3 +270,11 @@ func TestTemplate_RequestFields_QueryBlocks(t *testing.T) {
 	}, query("/air/offers?offer_request_id={{offerRequestId}}&sort={{sort}}&limit={{limit}}{{?after}}&after={{after}}{{/after}}"))
 	assert.Equal(t, []RequestField{{Where: FieldQuery, Path: "v", Kind: "string"}}, query("/x/{{id}}?v=2"))
 }
+
+func TestTemplate_SendsBare(t *testing.T) {
+	tmpl := &Template{Protocol: "http", Request: TemplateRequest{Method: "POST", Path: "/x?n={{n}}",
+		Body: `{"count": {{ count }}, "label": "{{label}}", "items": [{{first}}, "{{second}}"]}`}}
+	for input, want := range map[string]bool{"count": true, "first": true, "label": false, "second": false, "n": false} {
+		assert.Equal(t, want, tmpl.SendsBare(input), input)
+	}
+}

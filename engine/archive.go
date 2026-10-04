@@ -2,6 +2,8 @@ package engine
 
 import (
 	"encoding/json"
+	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/gburgyan/aat/adapter"
@@ -36,7 +38,7 @@ func ToArchive(result *RunResult, meta archive.ArchiveMetadata, baseURL string, 
 	a.CleanupSkipped = convertCleanupSkips(result.CleanupSkipped)
 	a.KnownIssues = convertKnownIssues(result.KnownIssues)
 	a.KnownIssuesResolved = convertKnownIssues(result.KnownIssuesResolved)
-	a.Metadata.InstantiatedPlan = redactPlan(result.InstantiatedPlan)
+	a.Metadata.InstantiatedPlan = withoutFuzzCases(redactPlan(result.InstantiatedPlan))
 
 	// Redact fails only on a value encoding/json cannot marshal. The archive is
 	// withheld then: returned unredacted, it would carry the secrets redaction
@@ -257,6 +259,22 @@ func convertResponse(resp *adapter.Response) *archive.ResponseRecord {
 	return rec
 }
 
+// withoutFuzzCases returns p without the case on each fuzz step, copying the
+// steps if it changes one. The step's record holds the case, and a case's
+// value, which can be ten thousand characters long, need not be archived
+// again in the plan.
+func withoutFuzzCases(p *plan.Plan) *plan.Plan {
+	if p == nil || !slices.ContainsFunc(p.Execution.Steps, func(s plan.Step) bool { return s.Fuzz != nil }) {
+		return p
+	}
+	cp := *p
+	cp.Execution.Steps = slices.Clone(p.Execution.Steps)
+	for i := range cp.Execution.Steps {
+		cp.Execution.Steps[i].Fuzz = nil
+	}
+	return &cp
+}
+
 // redactPlan returns p with its auth credentials' literal values and its
 // credential headers redacted, copying what it changes so the caller's plan is
 // untouched. Environment-variable references keep their variable names, which
@@ -333,13 +351,23 @@ func convertErrorClass(ec *ErrorClassification) *archive.ErrorClassRecord {
 	}
 }
 
+// archivedRawValue is the raw value a resolution record keeps: none for a raw
+// value sent as written, whose final value is the same, so a fuzz case's
+// value is not archived twice over.
+func archivedRawValue(r ValueResolution) any {
+	if r.Source == "raw_value" && reflect.DeepEqual(r.RawValue, r.FinalValue) {
+		return nil
+	}
+	return r.RawValue
+}
+
 func convertResolutions(resolutions []ValueResolution) []archive.ValueResolutionRecord {
 	records := make([]archive.ValueResolutionRecord, len(resolutions))
 	for i, r := range resolutions {
 		rec := archive.ValueResolutionRecord{
 			InputName:  r.InputName,
 			Source:     r.Source,
-			RawValue:   r.RawValue,
+			RawValue:   archivedRawValue(r),
 			FinalValue: r.FinalValue,
 			FromStep:   r.FromStep,
 			FromOutput: r.FromOutput,

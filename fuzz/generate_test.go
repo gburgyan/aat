@@ -393,3 +393,31 @@ func TestGenerate_EscapedDotIsNotAnIndex(t *testing.T) {
 	assert.False(t, inArray(`versions.v1\.2`))
 	assert.False(t, inArray(`v1\.2`))
 }
+
+// TestGenerate_WrongTypeFitsItsSlot checks that a wrong-type value carries
+// JSON quotes only where the template writes the input bare: anywhere else
+// the quotes would be sent too.
+func TestGenerate_WrongTypeFitsItsSlot(t *testing.T) {
+	target := Target{
+		Node: &graph.Node{Name: "list", Inputs: []graph.Input{
+			{Name: "limit", Type: "integer"},
+			{Name: "count", Type: "integer"},
+			{Name: "label", Type: "integer"},
+			{Name: "gift", Type: "boolean"},
+		}},
+		Step: plan.Step{ID: "list", Node: "list"},
+		Template: &adapter.Template{Request: adapter.TemplateRequest{
+			Method:  "POST",
+			Path:    "/items?limit={{limit}}",
+			Headers: map[string]string{"X-Gift": "{{gift}}"},
+			Body:    `{"count": {{count}}, "label": "{{label}}"}`,
+		}},
+	}
+	cases, err := Generate(target, Options{Only: []string{"limit.wrong-type", "count.wrong-type", "label.wrong-type", "gift.wrong-type"}})
+	require.NoError(t, err)
+	byID := caseByID(cases)
+	assert.Equal(t, "not-a-number", byID["limit.wrong-type"].Value, "a query parameter")
+	assert.Equal(t, `"not-a-number"`, byID["count.wrong-type"].Value, "a bare body slot")
+	assert.Equal(t, "not-a-number", byID["label.wrong-type"].Value, "a quoted body slot")
+	assert.Equal(t, "not-a-boolean", byID["gift.wrong-type"].Value, "a header")
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -1089,4 +1090,30 @@ func TestConvertRequest_HTTPOverrideStillRecordsOriginalURL(t *testing.T) {
 
 	assert.Equal(t, "http://localhost:9999/charges", rec.URL)
 	assert.Equal(t, "http://localhost:8765/charges", rec.OriginalURL)
+}
+
+// TestToArchive_FuzzValueArchivedOnce checks that a fuzz case's value is not
+// archived again where something else already holds it: the plan's copy of
+// the case, and a raw resolution's raw value equal to its final one.
+func TestToArchive_FuzzValueArchivedOnce(t *testing.T) {
+	long := strings.Repeat("a", 10000)
+	c := &plan.FuzzCase{ID: "name.long", Mode: plan.FuzzEdge, Input: "name", Value: long, Target: "add"}
+	p := &plan.Plan{Execution: plan.Execution{Steps: []plan.Step{
+		{ID: "add", Node: "addItem"},
+		{ID: "add__fuzz_name_long", Node: "addItem", Fuzz: c, Values: map[string]plan.StepValue{"name": {Default: long, Raw: true}}},
+	}}}
+	result := &RunResult{InstantiatedPlan: p, Steps: []StepResult{{
+		StepID: "add__fuzz_name_long", Node: "addItem", Fuzz: &FuzzResult{Case: *c},
+		Resolutions: []ValueResolution{
+			{InputName: "name", Source: "raw_value", RawValue: long, FinalValue: long},
+			{InputName: "date", Source: "raw_value", RawValue: "x", FinalValue: "y"},
+		},
+	}}}
+	a := mustToArchive(t, result, archive.ArchiveMetadata{}, "", nil)
+	assert.Nil(t, a.Metadata.InstantiatedPlan.Execution.Steps[1].Fuzz, "the step's record holds the case")
+	assert.Equal(t, long, a.Steps[0].Fuzz.Value)
+	assert.Nil(t, a.Steps[0].Resolutions[0].RawValue)
+	assert.Equal(t, long, a.Steps[0].Resolutions[0].FinalValue)
+	assert.Equal(t, "x", a.Steps[0].Resolutions[1].RawValue, "a raw value that changed keeps both")
+	assert.NotNil(t, p.Execution.Steps[1].Fuzz, "the run's plan is untouched")
 }

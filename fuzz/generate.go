@@ -109,7 +109,10 @@ func Generate(t Target, opts Options) ([]plan.FuzzCase, error) {
 		if len(named) == 0 && wired(t.Step.Values[in.Name]) {
 			continue
 		}
-		keep(sendable(inputCases(in, t.Step.Values[in.Name], t.KB, now), t.Template, in.Name))
+		// Without a template, where the input goes is unknown: a wrong-type
+		// value is then made to survive a bare JSON slot.
+		bare := t.Template == nil || t.Template.SendsBare(in.Name)
+		keep(sendable(inputCases(in, t.Step.Values[in.Name], t.KB, now, bare), t.Template, in.Name))
 		keep(absenceCases(in, t.Step.Values[in.Name], fields))
 	}
 	if len(named) == 0 {
@@ -275,8 +278,9 @@ func wired(sv plan.StepValue) bool {
 		!sv.Raw && len(plan.ExprValueOutputRefs(sv.Default)) > 0
 }
 
-// inputCases lists the cases for one input.
-func inputCases(in graph.Input, sv plan.StepValue, kb *domain.KnowledgeBase, now time.Time) []plan.FuzzCase {
+// inputCases lists the cases for one input. bare says the template writes it
+// outside a JSON string (see wrongType).
+func inputCases(in graph.Input, sv plan.StepValue, kb *domain.KnowledgeBase, now time.Time, bare bool) []plan.FuzzCase {
 	ft, err := graph.ParseFieldType(in.Type)
 	if err != nil {
 		ft = graph.FieldType{Kind: graph.TypeScalar, Name: "string"}
@@ -322,13 +326,13 @@ func inputCases(in graph.Input, sv plan.StepValue, kb *domain.KnowledgeBase, now
 
 	switch ft.Name {
 	case "integer":
-		numberCases(b, c, true)
+		numberCases(b, c, true, bare)
 	case "float", "money":
-		numberCases(b, c, false)
+		numberCases(b, c, false, bare)
 	case "boolean":
 		b.add(plan.FuzzPositive, "true", true)
 		b.add(plan.FuzzPositive, "false", false)
-		b.add(plan.FuzzNegative, "wrong-type", wrongType("not-a-boolean"))
+		b.add(plan.FuzzNegative, "wrong-type", wrongType("not-a-boolean", bare))
 	case "date":
 		b.add(plan.FuzzPositive, "today", now.Format("2006-01-02"))
 		b.add(plan.FuzzPositive, "next-year", now.AddDate(1, 0, 0).Format("2006-01-02"))
@@ -358,7 +362,7 @@ func enumCases(b *builder, values []string) {
 	b.add(plan.FuzzNegative, "empty", "")
 }
 
-func numberCases(b *builder, c *graph.Constraint, integer bool) {
+func numberCases(b *builder, c *graph.Constraint, integer, bare bool) {
 	num := func(f float64) any {
 		if integer {
 			return int64(f)
@@ -409,16 +413,20 @@ func numberCases(b *builder, c *graph.Constraint, integer bool) {
 		b.add(plan.FuzzNegative, "fraction", 1.5)
 		b.add(plan.FuzzNegative, "overflow", uint64(math.MaxUint64))
 	}
-	b.add(plan.FuzzNegative, "wrong-type", wrongType("not-a-number"))
+	b.add(plan.FuzzNegative, "wrong-type", wrongType("not-a-number", bare))
 }
 
-// wrongType returns a JSON string literal, quotes included, for an input that
-// takes a number or a boolean. Such an input usually sits in an unquoted
-// template slot, {"quantity": {{quantity}}}, where a string goes in as JSON
-// text, so the quotes make it a JSON string rather than broken JSON. In a
-// quoted or URL slot it is still text where a number belongs.
-func wrongType(s string) string {
-	return `"` + s + `"`
+// wrongType returns text for an input that takes a number or a boolean. Where
+// the template writes the input bare, {"quantity": {{quantity}}}, a string
+// goes in as JSON text, so it is a JSON string literal, quotes included,
+// rather than broken JSON. Anywhere else, a query parameter, a header, the
+// path, or a quoted slot, the quotes would be sent too, so it is the text
+// alone.
+func wrongType(s string, bare bool) string {
+	if bare {
+		return `"` + s + `"`
+	}
+	return s
 }
 
 // maxCaseLength is the longest string a length case is built at. A longer

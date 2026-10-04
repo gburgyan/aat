@@ -96,6 +96,9 @@ type jsonEvent struct {
 	// whole is true for a placeholder that is the entire value: {{n}} or
 	// "{{s}}", not part of a longer string or a key.
 	whole bool
+	// bare is true for a placeholder written outside a string, {{n}}, where
+	// a value goes in as JSON text.
+	bare bool
 	// inBlock is true inside a conditional or iteration block, where the
 	// value may not be sent, or is sent once per element.
 	inBlock bool
@@ -177,7 +180,7 @@ func scanJSONTemplate(text string, visit func(jsonEvent)) bool {
 				emit(jsonEvent{kind: eventPlaceholder, name: tag, path: join(containerPath(), "*")})
 				top().keyNext = false
 			default:
-				emit(jsonEvent{kind: eventPlaceholder, name: tag, path: valuePath(), whole: true})
+				emit(jsonEvent{kind: eventPlaceholder, name: tag, path: valuePath(), whole: true, bare: true})
 			}
 		case c == '"':
 			end, names, ok := scanJSONString(text, i)

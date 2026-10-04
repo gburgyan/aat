@@ -23,6 +23,23 @@ func (t *Template) DropsEmpty(input string) bool {
 	return found
 }
 
+// SendsBare reports whether the template writes input's placeholder outside a
+// JSON string in its body or message, as in {"quantity": {{quantity}}}, where
+// a string value goes in as JSON text rather than as a string.
+func (t *Template) SendsBare(input string) bool {
+	body := t.Request.Body
+	if t.Protocol == ProtocolGRPC {
+		body = t.Request.Message
+	}
+	bare := false
+	if strings.TrimSpace(body) != "" {
+		scanJSONTemplate(body, func(ev jsonEvent) {
+			bare = bare || ev.kind == eventPlaceholder && ev.bare && ev.name == input
+		})
+	}
+	return bare
+}
+
 // HeaderRefuses reports whether a header (gRPC metadata) the template fills
 // from input could not carry value: the client would refuse the request
 // before sending it, as HTTP refuses a control character and gRPC anything
