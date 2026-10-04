@@ -364,6 +364,8 @@ type ResponseBodyErrorDetail struct {
 	Message  string `json:"message,omitempty"`
 	Code     string `json:"code,omitempty"`
 	Category string `json:"category,omitempty"`
+	// Status is the HTTP status the error stands for; 0 when none.
+	Status int `json:"status,omitempty"`
 }
 
 // OASValidationDetail captures runtime OAS schema validation for a step.

@@ -83,7 +83,7 @@ func writeFuzzSummary(w io.Writer, lead string, steps []engine.StepResult, color
 			case f.Finding == engine.FindingNotSent && s.Error != nil:
 				got = "not sent: " + strings.TrimPrefix(s.Error.Error(), "not sent: ")
 			case s.Response != nil:
-				got = engine.ActualStatusText(s.Response, s.StatusCode)
+				got = s.StatusText()
 			}
 			_, _ = fmt.Fprintf(w, "%s  %s %s  %s -> %s\n", lead, label, f.Case.ID, f.Case.Describe(), got)
 		}

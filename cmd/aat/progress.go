@@ -109,6 +109,12 @@ func writeStepResult(w io.Writer, lead string, index, total int, result engine.S
 				_, _ = fmt.Fprintf(w, "%s%s: %v\n", indent, do.Label, do.Value)
 			}
 		}
+		// What the body's error says, when the step didn't expect it; a fuzz
+		// case's finding says what it meant.
+		if rbe := result.ResponseBodyError; rbe != nil && rbe.Message != "" && result.Fuzz == nil &&
+			(result.ExpectFailure == nil || !result.ExpectFailure.Passed) {
+			_, _ = fmt.Fprintf(w, "%s%s\n", indent, colorize(bodyErrorMessage(rbe), colorYellow, color))
+		}
 		for _, msg := range failedAssertions(result.Validation) {
 			_, _ = fmt.Fprintf(w, "%s%s\n", indent, colorize(msg, colorYellow, color))
 		}
@@ -135,7 +141,11 @@ func writeCleanupResult(w io.Writer, lead string, result engine.StepResult, term
 		_, _ = fmt.Fprintf(w, "%s %s: %s\n", prefix, colorize("ERROR", colorRed, color), result.Error)
 	case result.Response != nil:
 		duration := colorize(formatDuration(result.Duration), colorDim, color)
-		_, _ = fmt.Fprintf(w, "%s %s  %s\n", prefix, statusCol(result, statusWidth, color), duration)
+		mark := ""
+		if note := bodyErrorNote(result); note != "" {
+			mark = "  " + colorize(note, colorYellow, color)
+		}
+		_, _ = fmt.Fprintf(w, "%s %s  %s%s\n", prefix, statusCol(result, statusWidth, color), duration, mark)
 	default:
 		_, _ = fmt.Fprintf(w, "%s (no response)\n", prefix)
 	}
@@ -196,6 +206,14 @@ func stepMarks(result engine.StepResult, color bool) string {
 	if note := retryNote(result); note != "" {
 		marks += "  " + colorize(note, colorYellow, color)
 	}
+	if note := bodyErrorNote(result); note != "" {
+		// An error an expectFailure step matched is what it was for.
+		tone := colorYellow
+		if result.ExpectFailure != nil && result.ExpectFailure.Passed {
+			tone = colorDim
+		}
+		marks += "  " + colorize(note, tone, color)
+	}
 	if result.Validation != nil && !result.Validation.Passed {
 		marks += "  " + colorize("ASSERTIONS FAILED", colorYellow, color)
 	}
@@ -209,6 +227,32 @@ func stepMarks(result engine.StepResult, color bool) string {
 		marks += "  " + colorize(note, colorYellow, color)
 	}
 	return marks
+}
+
+// bodyErrorNote marks a step whose successful response's body reports an
+// error: "BODY ERROR VALIDATION as 400", with its category and the status it
+// stands for when it has them.
+func bodyErrorNote(result engine.StepResult) string {
+	rbe := result.ResponseBodyError
+	if rbe == nil {
+		return ""
+	}
+	note := "BODY ERROR"
+	if rbe.Category != "" {
+		note += " " + rbe.Category
+	}
+	if rbe.Status != 0 {
+		note += fmt.Sprintf(" as %d", rbe.Status)
+	}
+	return note
+}
+
+// bodyErrorMessage is what a body error says: its message, and its code.
+func bodyErrorMessage(rbe *engine.ResponseBodyError) string {
+	if rbe.Code != "" {
+		return fmt.Sprintf("%s [code: %s]", rbe.Message, rbe.Code)
+	}
+	return rbe.Message
 }
 
 // knownIssueNote marks a step whose failure a knownIssue covered, or whose

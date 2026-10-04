@@ -1019,6 +1019,7 @@ func TestGetStep_ResponseBodyError(t *testing.T) {
 		Message:  "booking failed",
 		Code:     "ERR-001",
 		Category: "business",
+		Status:   422,
 	}
 
 	a := makeArchive("run-20260101-100000-aaaa0001", "failed", step)
@@ -1034,6 +1035,7 @@ func TestGetStep_ResponseBodyError(t *testing.T) {
 	assert.Equal(t, "booking failed", detail.ResponseBodyError.Message)
 	assert.Equal(t, "ERR-001", detail.ResponseBodyError.Code)
 	assert.Equal(t, "business", detail.ResponseBodyError.Category)
+	assert.Equal(t, 422, detail.ResponseBodyError.Status)
 }
 
 func TestGetStep_CleanupStep(t *testing.T) {

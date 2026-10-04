@@ -294,3 +294,26 @@ func TestShownStepPassed_Fuzz(t *testing.T) {
 
 	assert.False(t, shownStepPassed(archive.StepRecord{Response: &archive.ResponseRecord{Status: 400}}), "a main step's 400 still fails")
 }
+
+// TestRunShow_StepBodyError checks that aat run show --step prints an error
+// a 200's body reported, and its JSON carries it.
+func TestRunShow_StepBodyError(t *testing.T) {
+	dir := t.TempDir()
+	a := showTestArchive()
+	a.Steps[0].ResponseBodyError = &archive.ResponseBodyErrorRecord{RulePath: "*.result.errors", Rule: "non-empty",
+		Message: "email is not valid", Category: "VALIDATION", Status: 400}
+	writeShowArchive(t, dir, showRunID, a)
+	id := archive.StepID(a.Steps[0])
+
+	out, _, err := runShow(t, dir, "latest", showOptions{Step: id})
+	require.NoError(t, err)
+	assert.Contains(t, out, `body error: response body error detected at "*.result.errors" (rule: non-empty): email is not valid [category: VALIDATION], treated as status 400`)
+
+	out, _, err = runShow(t, dir, "latest", showOptions{Step: id, JSON: true})
+	require.NoError(t, err)
+	var step shownStep
+	require.NoError(t, json.Unmarshal([]byte(out), &step), out)
+	require.NotNil(t, step.BodyError)
+	assert.Equal(t, 400, step.BodyError.Status)
+	assert.False(t, step.Passed)
+}

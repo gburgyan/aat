@@ -705,32 +705,33 @@ func writeKnownIssueRows(b *strings.Builder, issues []archive.KnownIssueRecord) 
 
 // shownStep is one step as aat run show prints it, and its --json document.
 type shownStep struct {
-	StepID            string                    `json:"step_id"`
-	Node              string                    `json:"node"`
-	Cleanup           bool                      `json:"cleanup,omitempty"`
-	CleanupFor        string                    `json:"cleanup_for,omitempty"`
-	Method            string                    `json:"method,omitempty"`
-	URL               string                    `json:"url,omitempty"`
-	Status            int                       `json:"status,omitempty"`
-	GRPCCode          string                    `json:"grpc_code,omitempty"`    // the gRPC status name, where the step made one
-	GRPCMessage       string                    `json:"grpc_message,omitempty"` // what the server said with it
-	Passed            bool                      `json:"passed"`
-	DurationMs        int64                     `json:"duration_ms"`
-	Retries           int                       `json:"retries,omitempty"`
-	RetriedOn         []string                  `json:"retried_on,omitempty"`
-	Requests          int                       `json:"requests,omitempty"`    // requests a repeated step sent
-	RepeatStop        string                    `json:"repeat_stop,omitempty"` // why a repeated step stopped
-	Iterations        []shownIterationRow       `json:"iterations,omitempty"`  // a repeated step's requests
-	Error             string                    `json:"error,omitempty"`
-	Inputs            map[string]any            `json:"inputs,omitempty"`
-	Outputs           map[string]any            `json:"outputs,omitempty"`
-	Validation        *shownValidation          `json:"validation,omitempty"`
-	RequestBodyBytes  int                       `json:"request_body_bytes,omitempty"`
-	RequestBodyForm   bool                      `json:"request_body_form,omitempty"`   // the request body is form-encoded
-	RequestFormFields int                       `json:"request_form_fields,omitempty"` // its fields, decoded
-	ResponseBodyBytes int                       `json:"response_body_bytes,omitempty"`
-	Resolutions       []archive.InputResolution `json:"resolutions,omitempty"`
-	Warnings          []string                  `json:"warnings,omitempty"`
+	StepID            string                           `json:"step_id"`
+	Node              string                           `json:"node"`
+	Cleanup           bool                             `json:"cleanup,omitempty"`
+	CleanupFor        string                           `json:"cleanup_for,omitempty"`
+	Method            string                           `json:"method,omitempty"`
+	URL               string                           `json:"url,omitempty"`
+	Status            int                              `json:"status,omitempty"`
+	GRPCCode          string                           `json:"grpc_code,omitempty"`    // the gRPC status name, where the step made one
+	GRPCMessage       string                           `json:"grpc_message,omitempty"` // what the server said with it
+	Passed            bool                             `json:"passed"`
+	DurationMs        int64                            `json:"duration_ms"`
+	Retries           int                              `json:"retries,omitempty"`
+	RetriedOn         []string                         `json:"retried_on,omitempty"`
+	Requests          int                              `json:"requests,omitempty"`    // requests a repeated step sent
+	RepeatStop        string                           `json:"repeat_stop,omitempty"` // why a repeated step stopped
+	Iterations        []shownIterationRow              `json:"iterations,omitempty"`  // a repeated step's requests
+	Error             string                           `json:"error,omitempty"`
+	BodyError         *archive.ResponseBodyErrorRecord `json:"body_error,omitempty"` // an error the body of a successful response reports
+	Inputs            map[string]any                   `json:"inputs,omitempty"`
+	Outputs           map[string]any                   `json:"outputs,omitempty"`
+	Validation        *shownValidation                 `json:"validation,omitempty"`
+	RequestBodyBytes  int                              `json:"request_body_bytes,omitempty"`
+	RequestBodyForm   bool                             `json:"request_body_form,omitempty"`   // the request body is form-encoded
+	RequestFormFields int                              `json:"request_form_fields,omitempty"` // its fields, decoded
+	ResponseBodyBytes int                              `json:"response_body_bytes,omitempty"`
+	Resolutions       []archive.InputResolution        `json:"resolutions,omitempty"`
+	Warnings          []string                         `json:"warnings,omitempty"`
 }
 
 // shownValidation is a shown step's assertion results, named and shaped as in
@@ -799,6 +800,9 @@ func showStep(out io.Writer, step *archive.StepRecord, id string, cleanup bool, 
 	if view.Error != "" {
 		fmt.Fprintf(&b, "error: %s\n", view.Error)
 	}
+	if view.BodyError != nil {
+		fmt.Fprintf(&b, "body error: %s\n", view.BodyError.Summary())
+	}
 	writeShownInputs(&b, view.Inputs, view.Resolutions)
 	writeShownValues(&b, "outputs", view.Outputs)
 	if view.Validation != nil && len(view.Validation.Results) > 0 {
@@ -856,6 +860,7 @@ func buildShownStep(step *archive.StepRecord, id string, cleanup bool) shownStep
 		Requests:   len(step.Iterations),
 		RepeatStop: step.RepeatStop,
 		Error:      step.Error,
+		BodyError:  step.ResponseBodyError,
 		Inputs:     step.Inputs,
 		Outputs:    step.Outputs,
 	}

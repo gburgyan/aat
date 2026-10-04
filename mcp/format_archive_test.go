@@ -431,3 +431,16 @@ func TestFormatArchiveDetail_FormBody(t *testing.T) {
 	assert.Contains(t, result, "amount=2000\nmetadata[source]=aat-stripe\nname=AAT Stripe")
 	assert.NotContains(t, result, `&`, "not the one escaped string the archive holds")
 }
+
+// TestFormatStepRecord_BodyErrorStatus checks that a body error's status is
+// shown, and that a body error an expectFailure step matched is no failure.
+func TestFormatStepRecord_BodyErrorStatus(t *testing.T) {
+	step := testStep("createOrder", 200, 10)
+	step.ResponseBodyError = &archive.ResponseBodyErrorRecord{RulePath: "*.result.errors", Rule: "non-empty",
+		Message: "email is not valid", Category: "VALIDATION", Status: 400}
+	assert.Contains(t, formatStepRecord(&step, 1, 1), "Treated as: status 400")
+	assert.Len(t, findFailedSteps([]archive.StepRecord{step}), 1)
+
+	step.ExpectFailure = &archive.ExpectFailureRecord{Actual: 400, Passed: true}
+	assert.Empty(t, findFailedSteps([]archive.StepRecord{step}), "the failure it expected")
+}

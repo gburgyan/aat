@@ -313,6 +313,8 @@ export interface ResponseBodyErrorDetail {
   message?: string;
   code?: string;
   category?: string;
+  /** The HTTP status the error stands for, from its rule or the graph's errorStatus. */
+  status?: number;
 }
 
 export interface OASValidationDetail {

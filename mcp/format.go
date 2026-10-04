@@ -109,7 +109,13 @@ func formatNodeDetail(node *graph.Node, g *graph.Graph) string {
 					fmt.Fprintf(&b, " (%s)", strings.Join(parts, ", "))
 				}
 			}
+			if statuses := rule.ErrorStatus.DescribeStatuses(); statuses != "" {
+				fmt.Fprintf(&b, ", status: %s", statuses)
+			}
 			b.WriteString("\n")
+		}
+		if g.ErrorStatus != nil {
+			fmt.Fprintf(&b, "- Errors a rule gives no status: %s (graph errorStatus)\n", g.ErrorStatus.DescribeStatuses())
 		}
 	}
 

@@ -161,6 +161,23 @@ type StepSummary struct {
 	// Fuzz, on a step the fuzzer made, is the case it sent and its finding.
 	// Such a step passed unless its finding failed the run.
 	Fuzz *FuzzStepSummary `json:"fuzz,omitempty"`
+	// BodyError is an error the body of a successful response reports, as
+	// the graph's errorDetection rules read it. A step with one failed, unless
+	// it expected the failure.
+	BodyError *BodyErrorSummary `json:"body_error,omitempty"`
+}
+
+// BodyErrorSummary is an error a successful response's body reports, in the
+// JSON summary.
+type BodyErrorSummary struct {
+	RulePath string `json:"rule_path"`
+	Rule     string `json:"rule"`
+	Message  string `json:"message,omitempty"`
+	Code     string `json:"code,omitempty"`
+	Category string `json:"category,omitempty"`
+	// Status is the HTTP status the error stands for; the step's status is
+	// the response's own.
+	Status int `json:"status,omitempty"`
 }
 
 // CleanupSkipSummary is a registered cleanup that did not run because it was
@@ -386,13 +403,20 @@ func toStepSummary(step engine.StepResult) StepSummary {
 		ss.Passed = step.ExpectFailure.Passed
 		if !ss.Passed {
 			ss.Error = fmt.Sprintf("expected status %v, got %s", step.ExpectFailure.ExpectedStatuses,
-				engine.ActualStatusText(step.Response, step.ExpectFailure.ActualStatus))
+				step.ExpectFailure.ActualText())
 		}
 	} else if step.StatusCode >= 400 {
 		ss.Passed = false
 		ss.Error = fmt.Sprintf("status %d", step.StatusCode)
+	} else if step.ResponseBodyError != nil {
+		ss.Passed = false
+		ss.Error = step.ResponseBodyError.Summary()
 	} else {
 		ss.Passed = true
+	}
+	if rbe := step.ResponseBodyError; rbe != nil {
+		ss.BodyError = &BodyErrorSummary{RulePath: rbe.RulePath, Rule: rbe.Rule, Message: rbe.Message,
+			Code: rbe.Code, Category: rbe.Category, Status: rbe.Status}
 	}
 
 	// Display outputs

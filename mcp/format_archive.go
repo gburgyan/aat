@@ -114,6 +114,9 @@ func formatStepRecord(s *archive.StepRecord, idx, total int) string {
 		if s.ResponseBodyError.Category != "" {
 			fmt.Fprintf(&b, "  Category: %s\n", s.ResponseBodyError.Category)
 		}
+		if s.ResponseBodyError.Status != 0 {
+			fmt.Fprintf(&b, "  Treated as: status %d\n", s.ResponseBodyError.Status)
+		}
 		b.WriteString("\n")
 	}
 
@@ -613,7 +616,7 @@ func findFailedSteps(steps []archive.StepRecord) []archive.StepRecord {
 		if s.Validation != nil && !s.Validation.Passed {
 			isFailed = true
 		}
-		if s.ResponseBodyError != nil {
+		if s.ResponseBodyError != nil && (s.ExpectFailure == nil || !s.ExpectFailure.Passed) {
 			isFailed = true
 		}
 		if isFailed {

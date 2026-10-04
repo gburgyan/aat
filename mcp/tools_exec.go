@@ -182,14 +182,12 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 				status = "ERROR"
 			} else if step.ExpectFailure != nil {
 				if step.ExpectFailure.Passed {
-					status = fmt.Sprintf("EXPECTED %d", step.StatusCode)
+					status = "EXPECTED " + step.ExpectFailure.ActualText()
 				} else {
-					status = fmt.Sprintf("UNEXPECTED %d", step.StatusCode)
+					status = "UNEXPECTED " + step.ExpectFailure.ActualText()
 				}
-			} else if step.StatusCode >= 400 {
-				status = fmt.Sprintf("%d", step.StatusCode)
 			} else if step.Response != nil {
-				status = fmt.Sprintf("%d", step.StatusCode)
+				status = step.StatusText()
 			}
 
 			if step.Validation != nil && !step.Validation.Passed {
@@ -225,7 +223,7 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 			}
 			status := "no response"
 			if step.Response != nil {
-				status = fmt.Sprintf("%d", step.StatusCode)
+				status = step.StatusText()
 			}
 			fmt.Fprintf(&b, "- `%s` on %s (%s, %s): %s -> %s\n", f.Case.ID, f.Case.Target, f.Case.Mode, f.Case.Describe(), f.Finding, status)
 		}
@@ -239,7 +237,7 @@ func formatExecutionSummary(result *engine.RunResult, runID string) string {
 			if step.Error != nil {
 				status = "ERROR"
 			} else if step.Response != nil {
-				status = fmt.Sprintf("%d", step.StatusCode)
+				status = step.StatusText()
 			}
 			label := step.StepID
 			if label == "" {
