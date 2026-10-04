@@ -2,6 +2,7 @@ package plan
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -200,4 +201,36 @@ func TestInstantiate_OutputRefsImplyDependsOn(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), `(assertion 0 reads "checkout", which implies the dependency)`)
 	})
+}
+
+// TestRawValuesAreText checks that a raw value's {{…}} is text everywhere: it
+// is not validated as an expression, read as a step reference, or renamed
+// when the step is copied, and a date YAML read as a timestamp is sent as it
+// was written.
+func TestRawValuesAreText(t *testing.T) {
+	raw := func(def any) *Plan {
+		p := outputRefsPlan(nil, nil, nil)
+		p.Execution.Steps[3].Values = map[string]StepValue{"amount": {Default: def, Raw: true}}
+		return p
+	}
+	for _, text := range []string{"{{7*7}}", "{{chekout.total}}", "{{checkout.total}}"} {
+		assert.NoError(t, Validate(raw(text), outputRefsGraph()), text)
+	}
+	assert.Empty(t, ValueOutputRefs(raw("{{checkout.total}}").Execution.Steps[3]), "a raw value orders no step after another")
+
+	s := raw("{{checkout.total}}").Execution.Steps[3]
+	rewriteStepRefs(&s, map[string]string{"checkout": "checkout__copy"})
+	assert.Equal(t, "{{checkout.total}}", s.Values["amount"].Default)
+
+	require.IsType(t, time.Time{}, mustParseYAMLDate(t, "1900-01-01"), "YAML reads an unquoted date as a timestamp")
+	assert.Equal(t, "1900-01-01", AsWritten(mustParseYAMLDate(t, "1900-01-01")))
+	assert.Equal(t, "2026-01-15T10:30:00Z", AsWritten(mustParseYAMLDate(t, "2026-01-15T10:30:00Z")))
+	assert.Equal(t, []any{"1900-01-01", 2}, AsWritten([]any{mustParseYAMLDate(t, "1900-01-01"), 2}))
+}
+
+func mustParseYAMLDate(t *testing.T, text string) any {
+	t.Helper()
+	p, err := Parse([]byte("execution:\n  steps:\n    - node: x\n      values:\n        d:\n          default: " + text + "\n          raw: true\n"))
+	require.NoError(t, err)
+	return p.Execution.Steps[0].Values["d"].Default
 }

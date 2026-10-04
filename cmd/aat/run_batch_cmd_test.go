@@ -1013,3 +1013,29 @@ func TestSaveFuzzFindings_PlanNameKeepsSubdirectoriesApart(t *testing.T) {
 	assert.NotEqual(t, all[0], all[1])
 	assert.Equal(t, "us-smoke--add--quantity.zero.yaml", filepath.Base(all[0]))
 }
+
+// TestSaveFuzzFindings_JudgedAsTheRunJudged checks that a saved case keeps
+// the accepted statuses, scope, and fail list its target ran with, so the
+// regression plan passes once the API is fixed.
+func TestSaveFuzzFindings_JudgedAsTheRunJudged(t *testing.T) {
+	dir := t.TempDir()
+	p := &plan.Plan{Metadata: plan.Metadata{GraphVersion: "1.0.0"}, Execution: plan.Execution{Steps: []plan.Step{{ID: "add", Node: "addItem"}}}}
+	result := &engine.RunResult{
+		Steps: []engine.StepResult{{Fuzz: &engine.FuzzResult{
+			Case:    plan.FuzzCase{ID: "quantity.at-min", Mode: plan.FuzzPositive, Input: "quantity", Value: 1, Target: "add"},
+			Finding: engine.FindingRejectedValid, Fails: true,
+		}}},
+		FuzzTargets: map[string]plan.FuzzSettings{"add": {Scope: plan.FuzzScopeIsolated, Fail: []string{engine.FindingRejectedValid},
+			Accept: plan.ExpectedStatuses{{Code: 409}}}},
+	}
+	paths, err := saveFuzzFindings(p, result, fuzzSaveOptions{Dir: dir, PlanPath: "/x/plans/smoke.yaml"})
+	require.NoError(t, err)
+	require.Len(t, paths, 1)
+	saved, err := plan.ParseFile(paths[0])
+	require.NoError(t, err)
+	block := saved.Execution.Steps[0].FuzzSettings
+	require.NotNil(t, block)
+	assert.Equal(t, plan.ExpectedStatuses{{Code: 409}}, block.Accept)
+	assert.Equal(t, plan.FuzzScopeIsolated, block.Scope)
+	assert.Equal(t, []string{engine.FindingRejectedValid}, block.Fail)
+}

@@ -43,6 +43,20 @@ func TestValidate_PoolRefs(t *testing.T) {
 		assert.Contains(t, buf.String(), `layer west: origin: poolRef "airports.asia": value pool "airports" has no group "asia" (it has eu, us)`)
 	})
 
+	t.Run("a workflow file's unknown pool fails", func(t *testing.T) {
+		manifest := writeLayeredProject(t, map[string]string{
+			"aat-project.yaml":       manifestWithDomain,
+			"domain.yaml":            poolRefDomain,
+			"workflows/extra.yaml":   "execution:\n  steps:\n    - node: SearchAir\n      values:\n        origin: {poolRef: airport}\n",
+			"workflows/slots/x.yaml": "execution:\n  steps:\n    - node: SearchAir\n  verification:\n    - node: SearchAir\n      values:\n        origin: {poolRef: airports.asia}\n",
+		})
+		var buf bytes.Buffer
+		code := validateCommand(&validateArgs{ManifestPath: manifest}, &buf)
+		assert.Equal(t, 1, code, buf.String())
+		assert.Contains(t, buf.String(), `extra.yaml: step SearchAir value origin: poolRef "airport"`)
+		assert.Contains(t, buf.String(), `x.yaml: verification SearchAir value origin: poolRef "airports.asia"`)
+	})
+
 	t.Run("no domain file fails", func(t *testing.T) {
 		manifest := writeLayeredProject(t, map[string]string{
 			"layers/west.yaml": "name: west\ninputs:\n  origin: {poolRef: airports}\n",

@@ -6,14 +6,22 @@ import (
 	"github.com/gburgyan/aat/graph"
 )
 
-// PoolRefs lists the poolRefs the plan's step values name, as
-// "step ID value NAME" and the ref, sorted.
+// PoolRefs lists the poolRefs the plan's step and verification values name,
+// as "step ID value NAME" or "verification NODE value NAME" and the ref,
+// sorted.
 func (p *Plan) PoolRefs() []graph.PoolRefUse {
 	var uses []graph.PoolRefUse
 	for _, s := range p.Execution.Steps {
 		for name, sv := range s.Values {
 			if sv.PoolRef != "" {
 				uses = append(uses, graph.PoolRefUse{Where: "step " + s.StepID() + " value " + name, Ref: sv.PoolRef})
+			}
+		}
+	}
+	for _, v := range p.Execution.Verification {
+		for name, sv := range v.Values {
+			if sv.PoolRef != "" {
+				uses = append(uses, graph.PoolRefUse{Where: "verification " + v.Node + " value " + name, Ref: sv.PoolRef})
 			}
 		}
 	}

@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/gburgyan/aat/graph"
 	"github.com/gburgyan/aat/plan"
 )
 
@@ -117,5 +119,40 @@ func TestDrewRandomly(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, (&RunResult{Steps: []StepResult{tt.step}}).DrewRandomly())
 		})
+	}
+}
+
+// TestSeed_ReplaysNamedSelections checks that a step with several random
+// named selections makes the same picks from the same seed: they draw from
+// one source, so they must draw in a fixed order.
+func TestSeed_ReplaysNamedSelections(t *testing.T) {
+	node := &graph.Node{Name: "pick", Inputs: []graph.Input{{Name: "a", Type: "string"}, {Name: "b", Type: "string"}, {Name: "c", Type: "string"}}}
+	g := &graph.Graph{Nodes: map[string]*graph.Node{"pick": node}}
+	items := func(prefix string) []any {
+		var out []any
+		for i := range 20 {
+			out = append(out, map[string]any{"id": fmt.Sprintf("%s%d", prefix, i)})
+		}
+		return out
+	}
+	state := NewRunState()
+	state.StoreOutputs("src", map[string]any{"xs": items("x"), "ys": items("y"), "zs": items("z")})
+	step := plan.Step{ID: "pick", Node: "pick",
+		Selections: map[string]plan.StepSelection{
+			"first":  {From: "src.xs", Strategy: "random"},
+			"second": {From: "src.ys", Strategy: "random"},
+			"third":  {From: "src.zs", Strategy: "random"},
+		},
+		Values: map[string]plan.StepValue{"a": {FromSelection: "first.id"}, "b": {FromSelection: "second.id"}, "c": {FromSelection: "third.id"}},
+	}
+	var want map[string]any
+	for range 40 {
+		draws := newStepDraws(42)
+		inputs, _, _, err := ResolveInputsWithContext(context.Background(), step, node, g, state, &ResolveContext{Now: time.Now(), Rand: draws.next("pick")})
+		require.NoError(t, err)
+		if want == nil {
+			want = inputs
+		}
+		require.Equal(t, want, inputs)
 	}
 }

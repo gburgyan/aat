@@ -191,12 +191,15 @@ func referencedSteps(step Step) []string {
 }
 
 // ValueOutputRefs returns the {{step.output}} references in the expressions of
-// a step's values and their pools, in value name order.
+// a step's values and their pools, in value name order. A raw value is text,
+// so it has none.
 func ValueOutputRefs(step Step) []OutputRef {
 	var refs []OutputRef
 	for _, name := range slices.Sorted(maps.Keys(step.Values)) {
 		sv := step.Values[name]
-		refs = append(refs, ExprValueOutputRefs(sv.Default)...)
+		if !sv.Raw {
+			refs = append(refs, ExprValueOutputRefs(sv.Default)...)
+		}
 		for _, entry := range sv.Pool {
 			refs = append(refs, ExprValueOutputRefs(entry)...)
 		}

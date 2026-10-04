@@ -396,6 +396,12 @@ func planFuzzes(p *plan.Plan) bool {
 // the request instead.
 func (e *Engine) pinnedCase(step plan.Step, node *graph.Node, pc plan.PinnedFuzzCase) (plan.FuzzCase, error) {
 	c := pc.Case()
+	if len(c.Patch) > 0 {
+		c.Patch = slices.Clone(c.Patch)
+		for i := range c.Patch {
+			c.Patch[i].Value = plan.AsWritten(c.Patch[i].Value)
+		}
+	}
 	if c.Value != nil || len(c.Patch) > 0 {
 		return c, nil
 	}

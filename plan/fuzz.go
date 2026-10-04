@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gburgyan/aat/graph"
 )
@@ -57,13 +58,13 @@ type RequestPatch struct {
 }
 
 // fuzzSetupClosure returns the steps a case's copy of the plan needs before
-// the step at idx: the steps it depends on, and every earlier step that
-// builds on those, with their own prerequisites, in plan order. A step that
-// adds an item to a cart the target checks out is part of the setup even when
-// the target reads nothing from it. A step builds on the setup only through a
-// step that changes something: one that depends only on read-only steps, as
-// readOnly reports them, is left out. Fuzz steps and the copies made for
-// other cases are never part of it.
+// the step at idx: the steps it depends on, wherever the plan lists them, and
+// every earlier step that builds on those, with their own prerequisites, in
+// plan order. A step that adds an item to a cart the target checks out is
+// part of the setup even when the target reads nothing from it. A step builds
+// on the setup only through a step that changes something: one that depends
+// only on read-only steps, as readOnly reports them, is left out. Fuzz steps
+// and the copies made for other cases are never part of it.
 func fuzzSetupClosure(steps []Step, idx int, byID map[string]Step, readOnly func(Step) bool) []Step {
 	in := map[string]bool{}
 	for _, s := range transitivePrereqClosure(steps[idx], byID) {
@@ -93,8 +94,8 @@ func fuzzSetupClosure(steps []Step, idx int, byID map[string]Step, readOnly func
 		}
 	}
 	var out []Step
-	for _, s := range steps[:idx] {
-		if in[s.StepID()] {
+	for i, s := range steps {
+		if i != idx && in[s.StepID()] {
 			out = append(out, s)
 		}
 	}
@@ -201,10 +202,11 @@ func StripFuzz(p *Plan) {
 
 // PinFuzzCase returns a copy of p that sends case c, which found finding,
 // on every run: the case is pinned in its target step's fuzz: block, every
-// other fuzz: block is removed, and the block's fail list is fail plus the
-// finding, so the plan fails until the API handles the case. The target must
-// be a step of p as written.
-func PinFuzzCase(p *Plan, c FuzzCase, finding string, fail []string) (*Plan, error) {
+// other fuzz: block is removed, and the block is judged as the case was, with
+// ran's scope and accepted statuses, and a fail list of ran's plus the
+// finding, so the plan fails until the API handles the case and passes once
+// it does. The target must be a step of p as written.
+func PinFuzzCase(p *Plan, c FuzzCase, finding string, ran FuzzSettings) (*Plan, error) {
 	data, err := Marshal(p)
 	if err != nil {
 		return nil, err
@@ -227,11 +229,15 @@ func PinFuzzCase(p *Plan, c FuzzCase, finding string, fail []string) (*Plan, err
 
 	pinned := c.Pin()
 	pinned.Found = finding
-	fail = slices.Clone(fail)
+	fail := slices.Clone(ran.Fail)
 	if !slices.Contains(fail, finding) {
 		fail = append(fail, finding)
 	}
-	cp.Execution.Steps[target].FuzzSettings = &FuzzSettings{Pinned: []PinnedFuzzCase{pinned}, Fail: fail}
+	block := &FuzzSettings{Pinned: []PinnedFuzzCase{pinned}, Fail: fail, Accept: ran.Accept}
+	if ran.Scope != FuzzScopeReuse {
+		block.Scope = ran.Scope
+	}
+	cp.Execution.Steps[target].FuzzSettings = block
 	return cp, nil
 }
 
@@ -411,6 +417,33 @@ func dependsOnAny(s Step, idMap map[string]string) bool {
 		}
 	}
 	return false
+}
+
+// AsWritten returns v with every date YAML read as a timestamp, such as an
+// unquoted 1900-01-01, turned back into the text it was written as, at any
+// depth. A raw value or a pinned case is sent as written, and a timestamp
+// would otherwise go out as 1900-01-01T00:00:00Z.
+func AsWritten(v any) any {
+	switch t := v.(type) {
+	case time.Time:
+		if t.Equal(t.Truncate(24*time.Hour)) && t.Location() == time.UTC {
+			return t.Format(dateLayout)
+		}
+		return t.Format(time.RFC3339Nano)
+	case []any:
+		out := make([]any, len(t))
+		for i, item := range t {
+			out[i] = AsWritten(item)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, item := range t {
+			out[k] = AsWritten(item)
+		}
+		return out
+	}
+	return v
 }
 
 // Describe says what the case sends, as in `quantity=-1`, `remove quantity`,

@@ -81,6 +81,10 @@ type RunResult struct {
 	// FuzzWarnings are problems with how the run fuzzed, such as the shared
 	// scope on a step that changes state.
 	FuzzWarnings []string
+	// FuzzTargets holds, by target step ID, the scope, fail list, and
+	// accepted statuses each fuzz target's cases ran with, so a saved case is
+	// judged as it was.
+	FuzzTargets map[string]plan.FuzzSettings
 	// FuzzCopiesSkipped counts the fuzz setup copies that weren't sent: a case
 	// reused the live copy, or its setup had already failed.
 	FuzzCopiesSkipped int

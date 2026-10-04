@@ -630,10 +630,11 @@ func validateLayers(dir string, g *graph.Graph) sectionResult {
 	return sectionResult{Name: "Layers", Status: "OK", Detail: "(" + pluralize(len(layers), "layer") + ")"}
 }
 
-// validatePoolRefs checks that every poolRef in the graph, the layers, and the
-// plans names a value pool (or a group of one) in the domain file. It returns
-// nil when nothing uses poolRef. Files that fail to load are skipped: their
-// own sections report them.
+// validatePoolRefs checks that every poolRef in the graph (its input defaults
+// and workflow inject values), the layers, the plans, and the workflow files
+// (step and verification values) names a value pool (or a group of one) in the
+// domain file. It returns nil when nothing uses poolRef. Files that fail to
+// load are skipped: their own sections report them.
 func validatePoolRefs(m *config.ProjectManifest, g *graph.Graph) *sectionResult {
 	uses := g.PoolRefs()
 	if m.LayersDir != "" && manifestDirExists(m.LayersDir) {
@@ -648,19 +649,30 @@ func validatePoolRefs(m *config.ProjectManifest, g *graph.Graph) *sectionResult 
 			}
 		}
 	}
+	planUses := func(path string) {
+		p, err := plan.ParseFile(path)
+		if err != nil {
+			return // the Plans or Workflows section reports it
+		}
+		for _, use := range p.PoolRefs() {
+			use.Where = path + ": " + use.Where
+			uses = append(uses, use)
+		}
+	}
 	if len(m.PlanDirs) > 0 {
 		if entries, err := config.ListPlans([]string(m.PlanDirs)); err == nil {
 			for _, entry := range entries {
-				p, err := plan.ParseFile(entry.FullPath)
-				if err != nil {
-					continue
-				}
-				for _, use := range p.PoolRefs() {
-					use.Where = entry.FullPath + ": " + use.Where
-					uses = append(uses, use)
-				}
+				planUses(entry.FullPath)
 			}
 		}
+	}
+	if m.WorkflowsDir != "" && manifestDirExists(m.WorkflowsDir) {
+		_ = filepath.WalkDir(m.WorkflowsDir, func(path string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && (strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".yml")) {
+				planUses(path)
+			}
+			return nil
+		})
 	}
 	if len(uses) == 0 {
 		return nil

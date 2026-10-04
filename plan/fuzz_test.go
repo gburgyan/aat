@@ -236,17 +236,20 @@ func TestPinFuzzCase(t *testing.T) {
 	p := fuzzPlan()
 	p.Execution.Steps[2].FuzzSettings = &FuzzSettings{Cases: 3}
 	c := FuzzCase{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0, Target: "add"}
-	pinned, err := PinFuzzCase(p, c, FindingRejectedValid, []string{FindingServerError})
+	pinned, err := PinFuzzCase(p, c, FindingRejectedValid, FuzzSettings{Fail: []string{FindingServerError},
+		Accept: ExpectedStatuses{{Code: 409}}, Scope: FuzzScopeIsolated})
 	require.NoError(t, err)
 	assert.Nil(t, pinned.Execution.Steps[2].FuzzSettings, "other blocks are removed")
 	block := pinned.Execution.Steps[1].FuzzSettings
 	require.NotNil(t, block)
 	assert.Equal(t, []string{FindingServerError, FindingRejectedValid}, block.Fail)
+	assert.Equal(t, ExpectedStatuses{{Code: 409}}, block.Accept, "judged as the case was: a 409 is still no finding")
+	assert.Equal(t, FuzzScopeIsolated, block.Scope)
 	assert.Equal(t, []PinnedFuzzCase{{ID: "quantity.zero", Mode: FuzzPositive, Input: "quantity", Value: 0, Found: FindingRejectedValid}}, block.Pinned)
 	assert.Equal(t, 3, p.Execution.Steps[2].FuzzSettings.Cases, "the plan itself is untouched")
 
 	c.Target = "add--neg"
-	_, err = PinFuzzCase(p, c, FindingRejectedValid, nil)
+	_, err = PinFuzzCase(p, c, FindingRejectedValid, FuzzSettings{})
 	assert.ErrorContains(t, err, "not in the plan as written")
 }
 
@@ -269,4 +272,17 @@ func TestExpandFuzzCases_CollidingStepIDs(t *testing.T) {
 		}
 	}
 	assert.Equal(t, []string{"add__fuzz_sort_enum_created_at", "add__fuzz_sort_enum_created_at_2", "add__fuzz_sort_enum_", "add__fuzz_sort_enum__2"}, fuzzIDs)
+}
+
+// TestExpandFuzzCases_PrerequisiteListedAfterTheTarget checks that a step the
+// target depends on is copied for each case wherever the plan lists it.
+func TestExpandFuzzCases_PrerequisiteListedAfterTheTarget(t *testing.T) {
+	p := &Plan{Execution: Execution{Steps: []Step{
+		{ID: "add", Node: "addItem", DependsOn: []string{"cart"}, Values: map[string]StepValue{"cartId": {From: "cart.cartId"}}},
+		{ID: "cart", Node: "createCart"},
+	}}}
+	require.NoError(t, ExpandFuzzCases(p, "add", []FuzzCase{{ID: "q.zero", Mode: FuzzPositive, Input: "quantity", Value: 0}},
+		FuzzExpandOptions{Scope: FuzzScopeIsolated}))
+	assert.Equal(t, []string{"add", "cart__add__fuzz_q_zero", "add__fuzz_q_zero", "cart"}, stepIDs(p))
+	assert.Equal(t, "cart__add__fuzz_q_zero.cartId", p.Execution.Steps[2].Values["cartId"].From, "the case reads its own cart")
 }

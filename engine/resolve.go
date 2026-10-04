@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math/rand/v2"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -92,9 +94,12 @@ func ResolveInputsWithContext(ctx context.Context, step plan.Step, node *graph.N
 	dedupCache := make(map[string]*selectionResult)
 
 	// Pre-resolve named selections: each selection yields a single element
-	// that may be referenced by multiple values via fromSelection.
+	// that may be referenced by multiple values via fromSelection. They
+	// resolve in name order: a random one draws from the step's source, so
+	// map order would give the same seed different picks.
 	namedSelections := make(map[string]*namedSelectionEntry)
-	for selName, sel := range step.Selections {
+	for _, selName := range slices.Sorted(maps.Keys(step.Selections)) {
+		sel := step.Selections[selName]
 		entry, selDecisions, err := resolveNamedSelection(ctx, selName, sel, step, g, state, dedupCache, rctx)
 		if err != nil {
 			// A selection from an output the earlier step didn't return leaves
@@ -510,11 +515,12 @@ func resolveInput(ctx context.Context, input graph.Input, step plan.Step, g *gra
 		}
 		if sv.Raw && sv.Default != nil {
 			// Sent as written: no expression, constraint, or pool
-			return sv.Default, nil, &ValueResolution{
+			value := plan.AsWritten(sv.Default)
+			return value, nil, &ValueResolution{
 				InputName:  input.Name,
 				Source:     "raw_value",
 				RawValue:   sv.Default,
-				FinalValue: sv.Default,
+				FinalValue: value,
 				PoolIndex:  -1,
 			}, nil
 		}

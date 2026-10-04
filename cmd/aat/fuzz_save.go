@@ -41,7 +41,7 @@ func saveFuzzFindings(p *plan.Plan, result *engine.RunResult, opts fuzzSaveOptio
 		if f == nil || f.Finding == "" || f.Finding == engine.FindingNotSent || (!f.Fails && !opts.All) {
 			continue
 		}
-		saved, err := pinnedPlan(p, f, opts)
+		saved, err := pinnedPlan(p, result, f, opts)
 		if err != nil {
 			return paths, fmt.Errorf("fuzz case %s: %w", f.Case.ID, err)
 		}
@@ -63,10 +63,15 @@ func saveFuzzFindings(p *plan.Plan, result *engine.RunResult, opts fuzzSaveOptio
 	return paths, nil
 }
 
-// pinnedPlan returns a copy of p with case f pinned on its target step, and
-// a description that says where it came from.
-func pinnedPlan(p *plan.Plan, f *engine.FuzzResult, opts fuzzSaveOptions) (*plan.Plan, error) {
-	cp, err := plan.PinFuzzCase(p, f.Case, f.Finding, engine.DefaultFuzzFail)
+// pinnedPlan returns a copy of p with case f of the run result pinned on its
+// target step, judged as the run judged it, and a description that says
+// where it came from.
+func pinnedPlan(p *plan.Plan, result *engine.RunResult, f *engine.FuzzResult, opts fuzzSaveOptions) (*plan.Plan, error) {
+	ran, ok := result.FuzzTargets[f.Case.Target]
+	if !ok {
+		ran.Fail = engine.DefaultFuzzFail
+	}
+	cp, err := plan.PinFuzzCase(p, f.Case, f.Finding, ran)
 	if err != nil {
 		return nil, err
 	}

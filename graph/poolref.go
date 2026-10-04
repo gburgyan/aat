@@ -9,14 +9,21 @@ type PoolRefUse struct {
 	Ref   string
 }
 
-// PoolRefs lists the poolRefs of the graph's input defaults, sorted by where
-// they are.
+// PoolRefs lists the poolRefs of the graph's input defaults and of its
+// workflows' inject values, sorted by where they are.
 func (g *Graph) PoolRefs() []PoolRefUse {
 	var uses []PoolRefUse
 	for name, node := range g.Nodes {
 		for _, in := range node.Inputs {
 			if in.Default != nil && in.Default.PoolRef != "" {
 				uses = append(uses, PoolRefUse{Where: "node " + name + " input " + in.Name, Ref: in.Default.PoolRef})
+			}
+		}
+	}
+	for _, wf := range g.Workflows {
+		for key, v := range wf.Inject {
+			if v.PoolRef != "" {
+				uses = append(uses, PoolRefUse{Where: "workflow " + wf.Name + " inject " + key, Ref: v.PoolRef})
 			}
 		}
 	}

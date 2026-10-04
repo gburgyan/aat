@@ -42,8 +42,13 @@ func TestPoolRefs(t *testing.T) {
 			{Name: "origin", Default: &InputDefault{PoolRef: "airportCodes.us"}},
 			{Name: "cabin", Default: &InputDefault{Value: "economy"}},
 		}},
-	}}
-	assert.Equal(t, []PoolRefUse{{Where: "node search input origin", Ref: "airportCodes.us"}}, g.PoolRefs())
+	}, Workflows: []Workflow{{Name: "eu-trip", Kind: "slot", Inject: map[string]InjectValue{
+		"origin": {InputDefault: InputDefault{PoolRef: "airportCodes.eu"}}, "cabin": InjectLiteral("business"),
+	}}}}
+	assert.Equal(t, []PoolRefUse{
+		{Where: "node search input origin", Ref: "airportCodes.us"},
+		{Where: "workflow eu-trip inject origin", Ref: "airportCodes.eu"},
+	}, g.PoolRefs())
 
 	l := &Layer{Name: "eu", Inputs: map[string]*InputDefault{"origin": {PoolRef: "airportCodes.eu"}, "cabin": {Value: "business"}}}
 	assert.Equal(t, []PoolRefUse{{Where: "layer eu: origin", Ref: "airportCodes.eu"}}, l.PoolRefs())

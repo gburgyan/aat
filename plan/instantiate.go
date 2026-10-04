@@ -553,7 +553,9 @@ func rewriteStepRefs(s *Step, idMap map[string]string) {
 				changed = true
 			}
 		}
-		if rewritten, ok := rewriteExprValueRefs(sv.Default, idMap); ok {
+		// A raw value is sent as written, so a {{step.output}} in it is text,
+		// not a reference to rename.
+		if rewritten, ok := rewriteExprValueRefs(sv.Default, idMap); ok && !sv.Raw {
 			sv.Default = rewritten
 			changed = true
 		}

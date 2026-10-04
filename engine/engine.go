@@ -222,6 +222,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			result.FuzzCapped = e.fuzzCapped
 			if e.fuzzRun != nil {
 				result.FuzzWarnings = e.fuzzRun.warnings
+				result.FuzzTargets = e.fuzzRun.settings
 			}
 		}
 	}()

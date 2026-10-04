@@ -764,12 +764,15 @@ func Validate(p *Plan, g *graph.Graph) error {
 					errs = append(errs, fmt.Sprintf("step %d (%s): invalid constraint expression for %q: %v", i, sid, name, err))
 				}
 			}
-			if err := ValidateExprValue(sv.Default); err != nil {
-				errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
-			}
-			for _, ref := range ExprValueOutputRefs(sv.Default) {
-				if msg := refScope.check(ref, sid); msg != "" {
-					errs = append(errs, fmt.Sprintf("step %d (%s): value %q reads %s%s", i, sid, name, ref, msg))
+			// A raw value is sent as written: {{…}} in it is text.
+			if !sv.Raw {
+				if err := ValidateExprValue(sv.Default); err != nil {
+					errs = append(errs, fmt.Sprintf("step %d (%s): invalid expression for %q: %v", i, sid, name, err))
+				}
+				for _, ref := range ExprValueOutputRefs(sv.Default) {
+					if msg := refScope.check(ref, sid); msg != "" {
+						errs = append(errs, fmt.Sprintf("step %d (%s): value %q reads %s%s", i, sid, name, ref, msg))
+					}
 				}
 			}
 			for k, entry := range sv.Pool {
