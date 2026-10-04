@@ -24,7 +24,8 @@ import (
 // refused with a 400, and "crash" fails with a 500. GET /airports lists
 // airports, and GET /reservations/{id} reads a reservation. With
 // failAfterFirst, every reservation request after the first fails with a 503;
-// with roomyCopies, every reservation after the first takes three travelers.
+// with roomyCopies, every reservation after the first takes three travelers;
+// with dropReads, reading a reservation drops the connection.
 type travelAPI struct {
 	mu             sync.Mutex
 	reservations   map[string]int
@@ -33,6 +34,9 @@ type travelAPI struct {
 	reads          int
 	failAfterFirst bool
 	roomyCopies    bool
+	dropReads      bool
+	// onRequest, when set, sees each request first.
+	onRequest func(r *http.Request)
 	// log holds each request's method and path.
 	log []string
 }
@@ -41,6 +45,9 @@ func (a *travelAPI) handler(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.log = append(a.log, r.Method+" "+r.URL.Path)
+	if a.onRequest != nil {
+		a.onRequest(r)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/airports":
@@ -48,6 +55,12 @@ func (a *travelAPI) handler(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"airports":["DEN","SFO"]}`))
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/reservations/"):
 		a.reads++
+		if a.dropReads {
+			if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
 		_, _ = fmt.Fprintf(w, `{"travelers":%d}`, a.reservations[strings.TrimPrefix(r.URL.Path, "/reservations/")])
 	case r.Method == http.MethodPost && r.URL.Path == "/reservations":
 		a.creates++

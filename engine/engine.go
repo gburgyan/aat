@@ -259,13 +259,54 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		e.Observer.OnRunStart(total)
 	}
 
-	for _, step := range sorted {
-		i := position
-		if step.FuzzSetup == "" {
-			position++
+	// The plan's own steps run first, then its verification steps, then the
+	// fuzz cases that run on copies of their target's setup (see runOrder), so
+	// a long run of cases never holds up the plan. Once the plan has ended,
+	// on a failure or at a checkpoint, the rest of it is not sent, but the
+	// cases of every target that got through still are.
+	queue := e.fuzzRun.runOrder(sorted)
+	var end *runEnd
+	verified := false
+	var verErr error
+	// verify runs the verification steps, unless the plan ended early. It
+	// returns false when the run was interrupted.
+	verify := func() bool {
+		verified = true
+		if end != nil {
+			return true
+		}
+		verResults, verOutcome, err := e.runVerification(ctx, verificationSteps, state, position, total)
+		stepResults = append(stepResults, verResults...)
+		position += len(verResults)
+		if verOutcome == OutcomeError && ctx.Err() != nil {
+			return false
+		}
+		if verOutcome != OutcomePassed {
+			outcome = verOutcome
+		}
+		verErr = err
+		return true
+	}
+
+	for idx := 0; idx < len(queue); idx++ {
+		step := queue[idx]
+		after := e.fuzzRun.runsAfterPlan(step)
+		if after {
+			if g := e.fuzzRun.targetOf(step); g == nil || !g.passed {
+				continue
+			}
+		} else if end != nil {
+			continue
 		}
 		if ctx.Err() != nil {
 			return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+		}
+		if after && !verified && !verify() {
+			return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
+		}
+		i := position
+		if step.FuzzSetup == "" {
+			position++
 		}
 
 		node, ok := e.graph.Nodes[step.Node]
@@ -390,7 +431,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			stepResult.Fuzz = e.judgeFuzz(step, node, &stepResult)
 			stepResult.Fuzz.Setup = e.fuzzRun.caseSetup[step.StepID()]
 			e.fuzzRun.caseJudged(step, &stepResult)
-			if stepResult.Fuzz.Fails {
+			if stepResult.Fuzz.Fails && outcome == OutcomePassed {
 				outcome = OutcomeFailed
 			}
 			// A case the API accepted may have created something to clean up,
@@ -448,7 +489,8 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 			}
 			outcome = OutcomeError
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, fmt.Errorf("step %s: %w", stepRef(step), stepResult.Error))
+			end = &runEnd{err: fmt.Errorf("step %s: %w", stepRef(step), stepResult.Error)}
+			continue
 		}
 
 		// Handle expectFailure steps: inverted success/failure logic
@@ -463,11 +505,13 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				if stepResult.Validation != nil && !stepResult.Validation.Passed && !suppressed {
 					outcome = OutcomeFailed
 					if !e.ContinueOnAssertionFailure {
-						return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s failed mechanical validation", stepRef(step))))
+						end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s failed mechanical validation", stepRef(step)))}
+						continue
 					}
 				}
-				if stopped := e.checkpointResult(step, stepResults, instantiatedPlan, outcome); stopped != nil {
-					return stopped
+				e.fuzzRun.targetPassed(step)
+				if e.atCheckpoint(step) {
+					end = &runEnd{checkpoint: &step}
 				}
 				continue
 			}
@@ -477,20 +521,24 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			// issue only keeps it out of the outcome.
 			if suppressed {
 				kiLog.endedEarly()
-				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, nil)
+				end = &runEnd{}
+				continue
 			}
 			outcome = OutcomeFailed
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s: expected failure status %s but got %s", stepRef(step),
-				strings.Join(step.ExpectFailure.Status.Strings(), ", "), unexpectedStatusText(&stepResult))))
+			end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s: expected failure status %s but got %s", stepRef(step),
+				strings.Join(step.ExpectFailure.Status.Strings(), ", "), unexpectedStatusText(&stepResult)))}
+			continue
 		}
 
 		if stepResult.StatusCode >= 400 {
 			if suppressed {
 				kiLog.endedEarly()
-				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, nil)
+				end = &runEnd{}
+				continue
 			}
 			outcome = OutcomeFailed
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s returned %s", stepRef(step), failureStatusText(stepResult.Response, stepResult.StatusCode))))
+			end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s returned %s", stepRef(step), failureStatusText(stepResult.Response, stepResult.StatusCode)))}
+			continue
 		}
 
 		// Check for response body errors (API returned 2xx but body indicates error)
@@ -499,10 +547,12 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			// Do NOT push cleanup — failing node did not create a valid resource
 			if suppressed {
 				kiLog.endedEarly()
-				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, nil)
+				end = &runEnd{}
+				continue
 			}
 			outcome = OutcomeFailed
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s: %s", stepRef(step), stepResult.ResponseBodyError.Summary())))
+			end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s: %s", stepRef(step), stepResult.ResponseBodyError.Summary()))}
+			continue
 		}
 
 		// Store outputs keyed by step ID (supports step aliasing)
@@ -525,7 +575,8 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		// accepted the request and created a resource.
 		if err := e.oasStrictError(step, &stepResult); err != nil && !suppressed {
 			outcome = OutcomeFailed
-			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, err))
+			end = &runEnd{err: withExpiry(&stepResult, err)}
+			continue
 		}
 
 		// Run mechanical assertions if configured. The step stored its outputs
@@ -535,30 +586,37 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		if stepResult.Validation != nil && !stepResult.Validation.Passed && !suppressed {
 			outcome = OutcomeFailed
 			if !e.ContinueOnAssertionFailure {
-				return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s failed mechanical validation", stepRef(step))))
+				end = &runEnd{err: withExpiry(&stepResult, fmt.Errorf("step %s failed mechanical validation", stepRef(step)))}
+				continue
 			}
 		}
 
-		if stopped := e.checkpointResult(step, stepResults, instantiatedPlan, outcome); stopped != nil {
-			return stopped
+		e.fuzzRun.targetPassed(step)
+		if e.atCheckpoint(step) {
+			end = &runEnd{checkpoint: &step}
 		}
 	}
 
-	// Main flow complete — run verification steps (read-only checks with their
-	// own assertions), then cleanup.
-	verResults, verOutcome, verErr := e.runVerification(ctx, verificationSteps, state, counted, total)
-	stepResults = append(stepResults, verResults...)
-	if verOutcome == OutcomeError && ctx.Err() != nil {
+	// Verification steps (read-only checks with their own assertions) run
+	// here when no fuzz case came after the plan, then cleanup.
+	if !verified && !verify() {
 		return e.abortedResult(ctx, instantiatedPlan, cleanupStack, state, stepResults)
 	}
-	if verOutcome != OutcomePassed {
-		outcome = verOutcome
+	switch {
+	case end != nil && end.checkpoint != nil:
+		return e.checkpointResult(*end.checkpoint, stepResults, instantiatedPlan, outcome)
+	case end != nil:
+		return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, end.err)
 	}
-	if verErr == nil {
-		verErr = fuzzFailureError(stepResults)
-	}
-
 	return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, verErr)
+}
+
+// runEnd is how the plan's own steps ended before their last one: on an
+// error, which is nil when a knownIssue covered the failure, or at the
+// --stop-after checkpoint.
+type runEnd struct {
+	err        error
+	checkpoint *plan.Step
 }
 
 // runCleanup executes cleanup after the main flow. A graph-level cleanup
@@ -791,15 +849,20 @@ func (e *Engine) runVerification(ctx context.Context, steps []plan.Step, state *
 	return results, outcome, firstErr
 }
 
+// atCheckpoint reports whether step is the --stop-after checkpoint. It is
+// consulted after every step of the plan that passes, including an
+// expectFailure step whose expected error came back.
+func (e *Engine) atCheckpoint(step plan.Step) bool {
+	return e.stopAfterStep != "" && step.StepID() == e.stopAfterStep
+}
+
 // checkpointResult returns the stopped result when step is the --stop-after
 // checkpoint, or nil otherwise. A checkpoint skips cleanup and verification so
-// the resources created so far stay alive for an external harness. It is
-// consulted after every step that passes, including an expectFailure step
-// whose expected error came back. outcome is the run's so far: a run that has
-// already failed, such as on a fuzz finding, stops failed rather than
-// stopped, so the failure is not lost.
+// the resources created so far stay alive for an external harness. outcome is
+// the run's: a run that failed, such as on a fuzz finding, stops failed rather
+// than stopped, so the failure is not lost.
 func (e *Engine) checkpointResult(step plan.Step, stepResults []StepResult, p *plan.Plan, outcome Outcome) *RunResult {
-	if e.stopAfterStep == "" || step.StepID() != e.stopAfterStep {
+	if !e.atCheckpoint(step) {
 		return nil
 	}
 	r := &RunResult{

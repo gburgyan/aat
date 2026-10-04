@@ -683,6 +683,9 @@ type fuzzGroup struct {
 	failures int
 	// stopped, once set, says why the target's remaining cases are not sent.
 	stopped string
+	// passed is set once the target's own step got through without ending the
+	// run, so its cases may be sent after the plan.
+	passed bool
 }
 
 // fuzzRunState is what the engine tracks about fuzz cases during Run.
@@ -710,6 +713,59 @@ func newFuzzRunState() *fuzzRunState {
 	return &fuzzRunState{groups: map[string]*fuzzGroup{}, caseTarget: map[string]string{}, caseSetup: map[string]string{},
 		owner: map[string]string{}, baseline: map[string][]string{}, settings: map[string]plan.FuzzSettings{},
 		constraints: map[string]map[string]string{}}
+}
+
+// runsAfterPlan reports whether a step is sent once the plan's own steps are
+// done: a case that runs on a copy of its target's setup, and every such
+// copy. A case that runs on the target's own state (shared scope, or a target
+// that only reads) is sent right after its target instead, before the plan
+// moves on.
+func (f *fuzzRunState) runsAfterPlan(s plan.Step) bool {
+	switch {
+	case s.FuzzSetup != "":
+		return true
+	case s.Fuzz != nil:
+		g := f.groups[s.Fuzz.Target]
+		return g != nil && g.scope != plan.FuzzScopeShared
+	}
+	return false
+}
+
+// runOrder returns sorted in the order Run sends it: the plan's own steps
+// and the cases that run on the target's own state, as sorted has them, then
+// the steps runsAfterPlan picks, in the same order. Nothing of the plan
+// depends on a case or a copy, so the order stays valid.
+func (f *fuzzRunState) runOrder(sorted []plan.Step) []plan.Step {
+	own := make([]plan.Step, 0, len(sorted))
+	var after []plan.Step
+	for _, s := range sorted {
+		if f.runsAfterPlan(s) {
+			after = append(after, s)
+		} else {
+			own = append(own, s)
+		}
+	}
+	return append(own, after...)
+}
+
+// targetPassed records that a step got through without ending the run, so
+// the cases of a target it is may be sent.
+func (f *fuzzRunState) targetPassed(s plan.Step) {
+	if g := f.groups[s.StepID()]; g != nil {
+		g.passed = true
+	}
+}
+
+// targetOf returns the group of the target a fuzz case or setup copy was made
+// for, or nil for any other step.
+func (f *fuzzRunState) targetOf(s plan.Step) *fuzzGroup {
+	switch {
+	case s.FuzzSetup != "":
+		return f.groups[f.caseTarget[s.FuzzSetup]]
+	case s.Fuzz != nil:
+		return f.groups[s.Fuzz.Target]
+	}
+	return nil
 }
 
 // breaksConstraint reports whether a case's value fails the constraint its
