@@ -491,6 +491,8 @@ assertions:
 
 **Default status assertion.** Steps composed from workflow templates (recipes, `aat prompt`) that declare no status assertion get `status: 2xx`, so APIs that answer `201 Created` or `204 No Content` pass. Steps with `expectFailure` get no default.
 
+**A body error's status.** When the graph's [`errorDetection`](graphs.md#the-status-an-error-stands-for) gives an error in a 2xx body the status it stands for, a `status` assertion reads that status, not the response's own 200.
+
 **Status under `expectFailure`.** When a step has `expectFailure` — declared in the plan or added by an overlay — its `expectFailure.status` list is the status check. A `status` assertion that expects success (an exact code below 400, or a `1xx`–`3xx` class such as a composed `2xx` default) can never hold there: `aat validate plan` rejects a plan that declares both, and when an overlay adds `expectFailure` at run time the assertion is reported as skipped. One that agrees with the expected failure, such as `409` or `4xx`, is evaluated and can fail the step — useful to pin one code out of a broader `expectFailure` list. Other assertions still run against the error response.
 
 #### Retry
@@ -524,7 +526,11 @@ Each entry in `on` and `failOn` is an **error category** name, an **HTTP status 
 | `adapter` | Template rendering, input resolution, or output extraction errors |
 | `response_error` | A 2xx response whose body matched the graph's `errorDetection` rules |
 
-When `on` is omitted, the default retries `transient`, `timeout`, and `server` failures. A `failOn` match always wins, so `failOn: [auth]` stops the step on the first 401 even if `on` would otherwise retry it. Status codes must be in the range 100–599; `aat validate plan` rejects unknown category names and out-of-range codes rather than letting a typo silently disable retries.
+A `response_error` the graph gives [a status](graphs.md#the-status-an-error-stands-for) also matches that status and
+its category: an error given 503 matches `503` and `transient` as well as `response_error`.
+
+When `on` is omitted, the default retries `transient`, `timeout`, and `server` failures, and a `response_error` given
+one of their statuses. A `failOn` match always wins, so `failOn: [auth]` stops the step on the first 401 even if `on` would otherwise retry it. Status codes must be in the range 100–599; `aat validate plan` rejects unknown category names and out-of-range codes rather than letting a typo silently disable retries.
 
 **Waiting between attempts.** A retry waits an exponential backoff: about 500 ms before the first retry, doubling each time up to 10 seconds, with ±25% jitter.
 
@@ -635,10 +641,15 @@ A status class takes any status in it. `status: [4xx]` says the API must refuse 
 reason, and still fails the step on a 5xx or a success. A gRPC status matches the class of the HTTP status
 it maps to, so `4xx` takes `NOT_FOUND` and `INVALID_ARGUMENT` alike. Only `4xx` and `5xx` are failure classes.
 
+An API that answers an error with a 200 and reports it in the body can be tested the same way: when the graph's
+[`errorDetection`](graphs.md#the-status-an-error-stands-for) gives the error a status, that status is what
+`expectFailure` matches, so a validation error given 400 passes `status: [4xx]`. A body error given no status matches
+nothing, and the step fails saying so.
+
 When `expectFailure` is set:
 
 - The step passes if the response status matches one of the listed codes or classes
-- The step fails if the response returns a success status (2xx)
+- The step fails if the response returns a success status (2xx), unless an error in its body stands for a listed one
 - Retries are skipped — the first response determines the outcome
 - Cleanup still runs normally
 

@@ -78,10 +78,27 @@ the graph and plan formats may still change before 1.0.
 - **`raw: true` sends a step value exactly as written**, with no expression evaluation or type coercion. Its `{{…}}`
   is text that validation doesn't check, and an unquoted YAML date is sent as written, not as a timestamp. See
   [Raw Values](https://gburgyan.github.io/aat/value-flow/#raw-values).
+- **An error a 200's body reports can stand for the status it means.** An `errorDetection` rule takes `status` and
+  `categories` (the category its `details.category` reads, matched without case, to an HTTP status), and the graph's
+  new `errorStatus` gives every rule that names none the same mapping, so a project whose errors all look alike
+  declares it once. That status is what `expectFailure` and mutations' `expectStatus`, status assertions, retries,
+  and fuzz judging read: a validation error given 400 passes `expectFailure: {status: [4xx]}`, a temporary one given
+  503 is retried by default, and in a fuzz run an unexpected one given 500 is a `server-error` rather than a refusal.
+  Without a status, a body error behaves as before. See
+  [The Status an Error Stands For](https://gburgyan.github.io/aat/graphs/#the-status-an-error-stands-for).
 - **`expectFailure` takes status classes.** `status: [4xx]` passes on any refusal and still fails on a 5xx or a
   success; it works in mutation `expectStatus` and overlay `expectFailure` too, and a gRPC status matches the class
   of the HTTP status it maps to. See
   [Negative Testing](https://gburgyan.github.io/aat/plans/#negative-testing-expectfailure).
+
+### Fixed
+- **An error a 200's body reports is read before the step's outputs.** Such a body rarely has the shape a success's
+  outputs are read from, so a step whose `errorDetection` rule matched used to fail as "extract path … not found":
+  an adapter error that hid the API's message and that `retry.on: [response_error]` never retried. The step now fails
+  with what the body says.
+- **Body errors are reported everywhere.** The `--json` summary used to report a step whose body held an error as
+  passed; it now fails it, with a `body_error` object. The progress line marks it (`BODY ERROR VALIDATION as 400`)
+  and prints the message, and `aat run show --step` shows it.
 
 ### Changed
 - **Steps run in the order the plan lists them, wherever `dependsOn` allows.** Of the steps ready to run, the one

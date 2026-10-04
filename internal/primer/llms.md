@@ -129,7 +129,7 @@ Outputs have no JSON path in the graph: the node's template extracts each output
 | `satisfies` | no | Prerequisite tokens this node provides |
 | `requires` | no | Prerequisite tokens this node depends on |
 | `cleanup` | no | Node to run during teardown (e.g., delete what this node created), or `{node, when, releasedBy}` to skip it when it isn't needed (see Cleanup) |
-| `errorDetection` | no | Rules that fail a successful response whose body reports an error |
+| `errorDetection` | no | Rules that fail a successful response whose body reports an error (see Error Detection) |
 | `oas` | no | `operationId` (and optional `spec`) linking the node to an OpenAPI operation |
 
 Graph-level `conditions` are a separate top-level list, not a node field.
@@ -159,6 +159,28 @@ default:
     strategy: first
     field: productId
 ```
+
+### Error Detection
+
+An API that answers an error with a 200 and reports it in the body needs `errorDetection` rules, at the graph level or
+on a node (a node's rules replace the graph's). A rule's `path` is a GJSON path, wildcards included; `rule` is
+`exists`, `non-empty`, or `equals` (with `value`); `details` names where the message, code, and category are. The step
+fails with what the body says, before its outputs are extracted. Give an error the HTTP status it stands for, once
+for the graph with `errorStatus` or on a rule with `status` and `categories`:
+
+```yaml
+errorDetection:
+  - path: "*.result.errors"        # any root key; a bare root needs its own rule
+    rule: non-empty
+    details: {message: "*.result.errors.0.message", category: "*.result.errors.0.type"}
+errorStatus:
+  status: 500                       # categories not listed, or none
+  categories: {VALIDATION: 400, TEMPORARY: 503}
+```
+
+That status is what `expectFailure`, status assertions, retries, and fuzz judging read: a VALIDATION error passes
+`expectFailure: {status: [4xx]}`, a TEMPORARY one is retried by default, and in a fuzz run a 500 is a `server-error`.
+Without a status, a body error fails the step, never matches `expectFailure`, and counts as a refusal when fuzzing.
 
 ### Output Fields
 
@@ -567,7 +589,7 @@ assertions:
   - `server`: other 5xx
   - `client`: other 4xx
   - `auth`: 401 and 403
-  - `timeout`, `network`, `adapter` (the request couldn't be built or its outputs extracted), and `response_error` (an `errorDetection` rule matched)
+  - `timeout`, `network`, `adapter` (the request couldn't be built or its outputs extracted), and `response_error` (an `errorDetection` rule matched; one given a status matches that status and its category too)
 - **Defaults:** without `on`, a step retries `transient`, `timeout`, and `server`. `failOn` wins over `on`. Failed assertions and `expectFailure` steps never retry.
 - **Waits:** between attempts the step waits a backoff of 500 ms, doubling, capped at 10 s, with ±25% jitter.
   - It waits longer when the failed response asks: through `Retry-After`, or `RateLimit-Reset` on a 429 without one. Either may be seconds or an HTTP date.
@@ -683,7 +705,8 @@ a 2xx. Retries are skipped — the first response wins. Cleanup still runs.
 All `expectFailure.status` entries must be `>= 400`, or the class `4xx` or `5xx`,
 which takes any status in it: `status: [4xx]` passes on any refusal and fails
 on a 5xx. Classes work in mutation `expectStatus` and overlay `expectFailure`
-too. An expected-failure step
+too. An error a 200's body reports matches by the status `errorDetection` gives
+it (see Error Detection). An expected-failure step
 stores no outputs, so a later step can't read an ID from its error body. To check
 the rejected object afterwards, create it in an earlier step that succeeds and
 make the rejected call on it, or find it with a list step filtered by a value you
@@ -1278,7 +1301,8 @@ The archive is the primary debugging artifact. Read it to understand what happen
     "rule": "exists | non-empty | equals",
     "message": "string",
     "code": "string",
-    "category": "string"
+    "category": "string",
+    "status": 400
   },
   "retryCount": 0,
   "retriedOn": ["transient"],
@@ -1286,7 +1310,7 @@ The archive is the primary debugging artifact. Read it to understand what happen
 }
 ```
 
-Fields with no value are omitted. `errorClassification.category` uses the same names as a step's `retry.on` and `retry.failOn` lists; `responseBodyError` records the graph `errorDetection` rule that failed a successful response.
+Fields with no value are omitted. `errorClassification.category` uses the same names as a step's `retry.on` and `retry.failOn` lists; `responseBodyError` records the graph `errorDetection` rule that failed a successful response, and `status`, the status it stands for; an `expectFailure` record's `actual` is the status it was matched by.
 
 Sensitive headers (`Authorization`, `Proxy-Authorization`, `X-API-Key`, `X-Auth-Token`, `Cookie`, `Set-Cookie`) are redacted to `"[REDACTED]"`, and known secret values (every secret credential configured for the run) are redacted from every string in the archive, bodies and URLs included; a secret shorter than eight characters only where a whole value equals it. See [Archives](https://gburgyan.github.io/aat/archives/). A JSON body is embedded as JSON; any other body is stored as a JSON string.
 

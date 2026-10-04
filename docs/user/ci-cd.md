@@ -49,7 +49,7 @@ aat run plan smoke-test --json
 | `node` | string | Graph node name |
 | `status` | int | HTTP status code (`0` when no response arrived) |
 | `duration_ms` | int | Step duration in milliseconds, from the first attempt to the end of the last, retry and pacing waits included |
-| `passed` | bool | Whether the step succeeded: no error, a status below 400 (or one its `expectFailure` lists), and no failed assertion. A step a `knownIssue` covers is still `false` here — the entry forgives the *run*, not the step |
+| `passed` | bool | Whether the step succeeded: no error, a status below 400 (or one its `expectFailure` lists), no error reported in a successful response's body, and no failed assertion. A step a `knownIssue` covers is still `false` here — the entry forgives the *run*, not the step |
 | `error` | string | Error message, such as `status 400` (omitted if step passed) |
 | `retries` | int | Number of step-level retries |
 | `retried_on` | array | Error category of each retried attempt, in order, such as `["transient", "transient"]` (omitted if none) |
@@ -57,6 +57,7 @@ aat run plan smoke-test --json
 | `assertions_failed` | int | Number of failing assertions |
 | `failed_assertions` | array | One `"type: message"` string per failed assertion, such as `"status: expected status 200, got 201"` (omitted if none) |
 | `display_outputs` | array | Tagged outputs: `label`, `name`, `value` (omitted if none) |
+| `body_error` | object | An error a successful response's body reports, as the graph's [`errorDetection`](graphs.md#error-detection) reads it: `rule_path`, `rule`, `message`, `code`, `category`, and `status`, the status it [stands for](graphs.md#the-status-an-error-stands-for). The step's own `status` stays the response's (omitted when there is none) |
 
 **Example — passed plan:**
 

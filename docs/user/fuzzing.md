@@ -72,7 +72,7 @@ steps that come after it in the plan.
 Making a copy for every case is expensive against a slow, rate-limited API, so the default scope, `reuse`, shares one:
 
 - **Sharing.** A target's cases share a copy of its setup as long as the API refuses them. A refusal (a 4xx, or a
-  success whose body the graph's `errorDetection` reads as an error) changes nothing, so the next case can use the
+  success whose body the graph's `errorDetection` reads as an error it gives a 4xx or no status) changes nothing, so the next case can use the
   same cart; nor does a rate limit (`throttled`) or a case that was never sent. A target that only reads, such as
   `getOrder`, can't change its setup, so its cases run on the happy path's own, with no copies at all.
 - **When a copy is used up.** When a case is accepted (2xx), fails with a 5xx that may have half-written something, or
@@ -200,17 +200,23 @@ Each case's response gets one finding, or none when it was what the case called 
 
 | Finding | Meaning | Fails the run by default |
 |---------|---------|:---:|
-| `server-error` | A 5xx | yes |
+| `server-error` | A 5xx, or an error in a 2xx's body that `errorDetection` [gives a 5xx](graphs.md#the-status-an-error-stands-for) | yes |
 | `no-response` | The request was sent and got no response: a timeout, a dropped connection | yes |
 | `schema-violation` | The response breaks the OpenAPI spec | yes |
 | `accepted-invalid` | A success for a negative case | no |
-| `rejected-valid` | A 4xx for a positive case | no |
+| `rejected-valid` | A 4xx for a positive case, or an error in a 2xx's body that `errorDetection` gives a 4xx or no status | no |
 | `undocumented-status` | A status the node's OpenAPI operation doesn't list, with no `default` response | no |
 | `throttled` | A 429, or gRPC `RESOURCE_EXHAUSTED`, after the retries the target allows: the API turned the request away before judging its value | no |
 | `not-sent` | The case couldn't be sent: its setup failed (counted as `failed` in the setup line), or the request couldn't be built or its client refused it, such as a value a gRPC message can't hold | no |
 
 A case gets the most serious finding that applies, in the order of the table: a status the spec doesn't list never
 hides a forbidden value the API took.
+
+An API that answers an error with a 200 and reports it in the body is judged by the status the graph's
+[`errorDetection`](graphs.md#the-status-an-error-stands-for) gives that error: a validation error given 400 is a
+refusal, and an unexpected one given 500 a `server-error`. Without a status, any error in the body is a refusal. Give
+the errors statuses before fuzzing such an API, or every server failure it reports in a 200 reads as a refusal. A
+body the OpenAPI spec's 2xx schema doesn't describe is still a `schema-violation`.
 
 `--fuzz-fail` lists the findings that fail the run: `--fuzz-fail server-error,accepted-invalid` makes an API that
 takes forbidden values a failure. The others are warnings. A fuzz step never stops the run. It retries only a rate
@@ -285,7 +291,8 @@ Every key is optional.
 
 - **`accept`** is where a judgement goes that only fuzzing needs and the graph doesn't hold. An API that answers
   `409` to any request it can't serve right now isn't faulted for it: a status in `accept` is never
-  `accepted-invalid`, `rejected-valid`, or `undocumented-status`. A 5xx can't be accepted.
+  `accepted-invalid`, `rejected-valid`, or `undocumented-status`. A 5xx can't be accepted. A status in `accept` also
+  matches the status an error in a 2xx's body [stands for](graphs.md#the-status-an-error-stands-for).
 - **`pinned`** cases are sent as written, without the generator. A case sets either `input` and `value`, or `patch`.
   With only `pinned`, nothing else is generated. `mode`, `inputs`, `skip`, `only`, and `cases`, and the `--fuzz`
   flags, choose among pinned cases as they do among generated ones.
