@@ -11,7 +11,9 @@ the graph and plan formats may still change before 1.0.
   seed, and a run that made such a choice prints it; `aat run show`, the archive, and `summary.json` record it.
   `aat run plan --seed N` and MCP `execute_plan`'s `seed` repeat those choices, and `aat run batch --seed N` now fixes
   each run's picks as well as the shuffle. A step's picks depend on its ID, not on the order steps run in, so parallel
-  steps replay too, and a step's random named selections draw in name order, so several of them replay as well. `{{uuid}}` and `{{random N}}` stay unique. See
+  steps replay too, and a step's random named selections draw in name order, so several of them replay as well. A
+  `--shuffle` without `--seed` picks one seed for the order and the runs and prints it, and a batch reports each
+  run's seed in its `--json` output and `batch.json`. `--seed 0` picks a new seed in `run plan` as in `run batch`. `{{uuid}}` and `{{random N}}` stay unique. See
   [Replaying a run's picks](https://gburgyan.github.io/aat/value-flow/#replaying-a-runs-picks).
 - **Defaults can draw from the domain file's value pools.** `poolRef: airportCodes`, or `poolRef: airportCodes.us`
   for one group, works wherever `pool` does: graph defaults, layers, and step values, with `constraint` and
@@ -66,7 +68,13 @@ the graph and plan formats may still change before 1.0.
   plans. Fuzz copies and cases never stand in for the happy path's resources in verification and cleanup, a
   `knownIssue` covers a setup copy as it covers its original, `--stop-after` keeps a fuzz failure, and `aat run show`
   and MCP failure analysis judge a fuzz case by its finding. `--fuzz-save` keeps the case's `accept`, `scope`, and
-  `fail`, so the saved plan passes once the API is fixed. See [Fuzzing](https://gburgyan.github.io/aat/fuzzing/).
+  `fail`, so the saved plan passes once the API is fixed; a run prints the plans it saved with `--quiet` and in a
+  batch too, and `--json` lists them in `fuzz_saved`. A `wrong-type` value carries JSON quotes only where the
+  template writes the input unquoted in its body. A setup copy leaves out steps that change nothing the target works
+  on (reads and negative steps it doesn't depend on), and a read-only target's cases run on the happy path's own
+  setup under `reuse`. The step counter numbers the plan's steps and cases, not their setup copies, and a fuzz
+  case's value is archived fewer times over (a tenth smaller on the shop). See
+  [Fuzzing](https://gburgyan.github.io/aat/fuzzing/).
 - **`raw: true` sends a step value exactly as written**, with no expression evaluation or type coercion. Its `{{…}}`
   is text that validation doesn't check, and an unquoted YAML date is sent as written, not as a timestamp. See
   [Raw Values](https://gburgyan.github.io/aat/value-flow/#raw-values).

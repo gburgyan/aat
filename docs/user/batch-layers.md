@@ -194,7 +194,7 @@ Randomizes the order of execution. Without shuffling, all permutations of the sa
 aat run batch --shuffle --seed 42
 ```
 
-Fixes the random seed for reproducible ordering. When `--seed` is 0 (the default), AAT uses the current time. A non-zero seed also fixes each run's pool picks and random selections: a run's seed comes from the batch seed, its plan, and its permutation, not its place in the order, so shuffling doesn't change what it draws. See [Replaying a run's picks](value-flow.md#replaying-a-runs-picks).
+Fixes the random seed for reproducible ordering. A seed also fixes each run's pool picks and random selections: a run's seed comes from the batch seed, its plan, and its permutation, not its place in the order, so shuffling doesn't change what it draws. When `--seed` is 0 (the default), `--shuffle` picks a seed and uses it the same way, and the batch prints it (`Seed: N`), so `--seed N` replays both the order and the picks. Each run's own seed is in the batch's `--json` output and `batch.json`, and in its streamed output when it drew one, for `aat run plan --seed` to replay that run alone. See [Replaying a run's picks](value-flow.md#replaying-a-runs-picks).
 
 ### Parallel execution
 

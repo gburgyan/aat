@@ -23,22 +23,22 @@ cd examples/shop/
 ```
 
 ```
-  [ 1/23] listProducts         200  0ms
-  [ 2/23] createCart           201  0ms
-  [ 3/23] addItem              201  0ms
-  [ 5/23] addItem__fuzz_quant~ 201  0ms  fuzz quantity.at-min (positive)
-  [ 7/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.below-min (negative)
-  [ 9/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.fraction (negative)
-  [11/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.overflow (negative)
-  [13/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.wrong-type (negative)
-  [15/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.missing (negative)
-  [17/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.null (negative)
-  [19/23] addItem__fuzz_quant~ 409  0ms  fuzz quantity.large (edge)
-  [21/23] addItem__fuzz_body_~ 201  0ms  fuzz body.extra-property (edge)
-  [22/23] checkout             201  0ms
-  [23/23] paymentCharge        201  0ms
+  [ 1/14] listProducts         200  0ms
+  [ 2/14] createCart           201  0ms
+  [ 3/14] addItem              201  0ms
+  [ 4/14] addItem__fuzz_quant~ 201  0ms  fuzz quantity.at-min (positive)
+  [ 5/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.below-min (negative)
+  [ 6/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.fraction (negative)
+  [ 7/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.overflow (negative)
+  [ 8/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.wrong-type (negative)
+  [ 9/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.missing (negative)
+  [10/14] addItem__fuzz_quant~ 400  0ms  fuzz quantity.null (negative)
+  [11/14] addItem__fuzz_quant~ 409  0ms  fuzz quantity.large (edge)
+  [12/14] addItem__fuzz_body_~ 201  0ms  fuzz body.extra-property (edge)
+  [13/14] checkout             201  0ms
+  [14/14] paymentCharge        201  0ms
 ...
-PASSED (16/16 steps, 4ms)
+PASSED (14/14 steps, 5ms)
 Fuzz: 9 cases: 9 as expected · setup: 2 fresh, 7 reused
 ```
 
@@ -64,16 +64,17 @@ made. If every case ran on the happy path's cart, the cart would fill up. The re
 cart, and an API with a limit, such as a few travelers per reservation, would start refusing cases for the wrong
 reason. So by default a case runs on a copy of the steps its target depends on, wherever the plan lists them. The copy
 also includes the earlier steps that build on those, such as the `addItem` a checkout needs even though it reads
-nothing from it. A step that
-depends only on read-only steps, such as a wishlist made from `listProducts`, changes nothing the target works on and
-isn't copied. A target's cases all run before the steps that come after it in the plan.
+nothing from it. A step that changes nothing the target works on isn't copied unless the target depends on it: one that
+only reads, such as a `getCart`; one that expects to be refused, such as a mutation's negative sibling; and one that
+depends only on read-only steps, such as a wishlist made from `listProducts`. A target's cases all run before the
+steps that come after it in the plan.
 
 Making a copy for every case is expensive against a slow, rate-limited API, so the default scope, `reuse`, shares one:
 
 - **Sharing.** A target's cases share a copy of its setup as long as the API refuses them. A refusal (a 4xx, or a
   success whose body the graph's `errorDetection` reads as an error) changes nothing, so the next case can use the
   same cart; nor does a rate limit (`throttled`) or a case that was never sent. A target that only reads, such as
-  `getOrder`, never changes its setup, so its cases all share one.
+  `getOrder`, can't change its setup, so its cases run on the happy path's own, with no copies at all.
 - **When a copy is used up.** When a case is accepted (2xx), fails with a 5xx that may have half-written something, or
   gets no response, the copy may have changed. The next case gets a fresh one.
 - **Read-only steps.** A setup step that only reads (a GET, HEAD, or OPTIONS with no cleanup pairing), such as
@@ -84,7 +85,8 @@ Making a copy for every case is expensive against a slow, rate-limited API, so t
   the copy either.
 
 In the quick start, `at-min` was accepted, so the refused cases after it got a fresh cart and then shared it: `setup:
-2 fresh, 7 reused`. The copies' own lines are hidden unless one fails. They are in the archive with `fuzzSetup` set.
+2 fresh, 7 reused`. The copies' own lines are hidden unless one fails, and the step counter leaves them out: a copy
+that fails is shown with the number of the case it was made for. They are in the archive with `fuzzSetup` set.
 Other scopes:
 
 | Scope | What a case runs on |
@@ -160,7 +162,8 @@ what the plan would send. A query or header patch changes its own parameter or h
 template wrote it.
 Values are sent exactly as generated, like a step value with [`raw: true`](value-flow.md#raw-values): `{{…}}` in a
 value is not evaluated, and `"12"` stays a string. A `wrong-type` value for a number or a boolean is a JSON string,
-quotes included, so it arrives as a string even in an unquoted template slot such as `{"quantity": {{quantity}}}`.
+quotes included, where the template writes the input unquoted, as in `{"quantity": {{quantity}}}`, so it arrives as a
+string rather than as broken JSON. In a query parameter, a header, the path, or a quoted slot it is the text alone.
 
 ### The spec is the referee
 
@@ -304,6 +307,8 @@ The MCP server's [`generate_fuzz_cases`](mcp-server.md) tool lists the cases `--
 aat run plan smoke --fuzz addItem --fuzz-save plans/fuzz/
 # Saved fuzz regression plan: plans/fuzz/smoke--addItem--quantity.below-min.yaml
 ```
+
+The run prints each file it writes, with `--quiet` and in a batch too, and `--json` lists them in `fuzz_saved`.
 
 The saved plan is the one that ran, with a recipe written out in full. Its target step has a `fuzz:` block pinning the
 one case, with the `scope`, `accept`, and `fail` the case ran with, and `fail` includes the finding. On every run it

@@ -139,7 +139,7 @@ The `run plan` command adds:
 |------|------|---------|-------------|
 | `--stop-after` | string | — | Stop after the step with this ID passes and skip cleanup (see [Checkpoints](checkpoints.md)) |
 | `--dump-state` | path | — | Write the run state to a file with mode `0600`, with credentials redacted (`-` for stdout, which then carries only the state) |
-| `--seed` | int | — | Replay a run's pool picks and random selections; the run's output, archive, and `aat run show` give its seed (see [Replaying a run's picks](value-flow.md#replaying-a-runs-picks)) |
+| `--seed` | int | — | Replay a run's pool picks and random selections; the run's output, archive, and `aat run show` give its seed (see [Replaying a run's picks](value-flow.md#replaying-a-runs-picks)). `0` picks a new one |
 | `--dump-state-secrets` | bool | `false` | Keep live credentials in the `--dump-state` output, for a harness that sends requests as the run's session (see [Checkpoints: Security](checkpoints.md#security)) |
 
 The `run batch` command adds:
@@ -150,7 +150,7 @@ The `run batch` command adds:
 | `--layer-group` | string | — | Comma-separated layer names for permutations (repeatable) |
 | `--no-dedup` | bool | `false` | Disable duplicate plan detection across permutations |
 | `--shuffle` | bool | `false` | Randomize plan execution order |
-| `--seed` | int | `0` | Seed for `--shuffle` and for each run's pool picks and random selections (`0` = a new seed each time; the shuffle seed used is logged) |
+| `--seed` | int | `0` | Seed for `--shuffle` and for each run's pool picks and random selections (`0` = a new seed each time; with `--shuffle`, the one seed picked for the order and the runs is printed, and passing it back replays both) |
 
 See [Matrix Testing: Controlling Behavior](batch-layers.md#controlling-behavior) for how dedup, shuffle, and seed interact with layer groups.
 
