@@ -332,14 +332,18 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 		// a fuzz setup copy's failure included, because whether the step failed
 		// at all depends on it.
 		if stepResult.Error == nil && step.ExpectFailure != nil {
+			// The status matched is the one the response stands for: an error
+			// a 200's body reports counts as the status its rule gives it.
+			status, name := stepResult.FailureStatus()
 			efr := &ExpectFailureResult{
 				ExpectedStatuses: step.ExpectFailure.Status,
-				ActualStatus:     stepResult.StatusCode,
+				ActualStatus:     status,
+				ActualName:       name,
 				Description:      step.ExpectFailure.Description,
 			}
 			// A gRPC step is matched by status name when the plan wrote one,
 			// so that codes sharing an HTTP status stay distinguishable.
-			efr.Passed = step.ExpectFailure.Status.Matches(stepResult.StatusCode, grpcStatusName(stepResult.Response))
+			efr.Passed = step.ExpectFailure.Status.Matches(status, name)
 			stepResult.ExpectFailure = efr
 		}
 
@@ -477,7 +481,7 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 			}
 			outcome = OutcomeFailed
 			return e.endRun(ctx, instantiatedPlan, cleanupStack, state, outcome, kiLog, stepResults, withExpiry(&stepResult, fmt.Errorf("step %s: expected failure status %s but got %s", stepRef(step),
-				strings.Join(step.ExpectFailure.Status.Strings(), ", "), ActualStatusText(stepResult.Response, stepResult.StatusCode))))
+				strings.Join(step.ExpectFailure.Status.Strings(), ", "), unexpectedStatusText(&stepResult))))
 		}
 
 		if stepResult.StatusCode >= 400 {
@@ -859,6 +863,20 @@ func oasErrorCount(v *oas.ValidationResult) int {
 	return n
 }
 
+// unexpectedStatusText says what an expectFailure step got instead of the
+// failure it expected, and, for an error its body reported, what made that
+// the status: "400 (a body error in a 200 response)".
+func unexpectedStatusText(r *StepResult) string {
+	text := r.ExpectFailure.ActualText()
+	switch rbe := r.ResponseBodyError; {
+	case rbe != nil && rbe.Status != 0:
+		text += fmt.Sprintf(" (a body error in a %d response)", r.StatusCode)
+	case rbe != nil:
+		text += ", whose body reports an error that its errorDetection rule gives no status, so it can't match a failure status"
+	}
+	return text
+}
+
 // stepRef names a step in an error message by its ID, which is what
 // --stop-after, dependsOn, and the archive use, adding the node when the two
 // differ so that two steps on one node can be told apart: "addSocks" (addItem).
@@ -1111,13 +1129,18 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 		result.OriginalPath = originalPath
 	}
 
-	// Extract outputs (only on success). A fuzz case is judged on its
-	// response, so one whose outputs can't be read, such as an error page
-	// behind a 200, carries on without them rather than failing as if nothing
-	// had come back.
+	// Extract outputs (only on success). An error the body reports is looked
+	// for first: such a body rarely has the shape a success's outputs are
+	// read from, and the error, not the outputs it lacks, is what the step
+	// came back with. A fuzz case is judged on its response, so one whose
+	// outputs can't be read, such as an error page behind a 200, carries on
+	// without them rather than failing as if nothing had come back.
 	if resp.StatusCode < 400 {
+		result.ResponseBodyError = e.detectBodyError(node, resp.Body)
 		outputs, err := adp.ExtractOutputs(resp)
 		switch {
+		case err != nil && result.ResponseBodyError != nil:
+			// The body error is the step's failure; it has no outputs.
 		case err != nil && step.Fuzz == nil:
 			result.Error = fmt.Errorf("extracting outputs: %w", err)
 			return result
@@ -1137,12 +1160,6 @@ func (e *Engine) executeStepWith(ctx context.Context, step plan.Step, node *grap
 			}
 
 			result.DisplayOutputs = displayOutputs(node, outputs)
-		}
-
-		// Check for errors buried in the response body
-		rules := effectiveErrorRules(node, e.graph)
-		if rbe := CheckErrorDetection(rules, resp.Body); rbe != nil {
-			result.ResponseBodyError = rbe
 		}
 	}
 
@@ -1222,9 +1239,13 @@ func (e *Engine) runStepAssertions(step plan.Step, node *graph.Node, state *RunS
 		}
 
 		schemaCheck := buildSchemaCheck(result.OASValidation)
+		// A status assertion reads the status the response stands for, so one
+		// that pins the failure an expectFailure step expects, such as a 400
+		// out of 4xx, holds for an error the body reports as one.
+		failureStatus, failureName := result.FailureStatus()
+		statusInfo := validate.StatusInfo{Code: failureStatus, GRPCName: failureName}
 
 		if len(normalAssertions) > 0 {
-			statusInfo := validate.StatusInfo{Code: resp.StatusCode, GRPCName: grpcStatusName(resp)}
 			nr := validate.RunMechanical(statusInfo, normalBody,
 				withDisplayedExprs(convertAssertions(normalAssertions), ectx), normalEval, schemaCheck)
 			merged.Results = append(merged.Results, nr.Results...)
@@ -1233,7 +1254,7 @@ func (e *Engine) runStepAssertions(step plan.Step, node *graph.Node, state *RunS
 			}
 		}
 		if len(rawAssertions) > 0 {
-			rr := validate.RunMechanical(validate.StatusInfo{Code: resp.StatusCode, GRPCName: grpcStatusName(resp)}, resp.Body,
+			rr := validate.RunMechanical(statusInfo, resp.Body,
 				withDisplayedExprs(convertAssertions(rawAssertions), ectx), predicateEval, schemaCheck)
 			merged.Results = append(merged.Results, rr.Results...)
 			if !rr.Passed {

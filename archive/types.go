@@ -2,6 +2,7 @@ package archive
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/gburgyan/aat/plan"
@@ -183,9 +184,12 @@ type FuzzRecord struct {
 // and a gRPC one archives names.
 type ExpectFailureRecord struct {
 	Expected []plan.ExpectedStatus `json:"expected"`
-	Actual   int                   `json:"actual"`
-	// ActualName is the gRPC status the step came back with, and is empty for
-	// an HTTP step.
+	// Actual is the status the step was matched by: the response's own, or
+	// the one an error its body reports stands for (see
+	// ResponseBodyErrorRecord.Status); the response's own is in response.status.
+	Actual int `json:"actual"`
+	// ActualName is the gRPC status the step was matched by, and is empty for
+	// an HTTP step and for a body error's status.
 	ActualName string `json:"actualName,omitempty"`
 	Passed     bool   `json:"passed"`
 }
@@ -227,6 +231,29 @@ type ResponseBodyErrorRecord struct {
 	Message  string `json:"message,omitempty"`
 	Code     string `json:"code,omitempty"`
 	Category string `json:"category,omitempty" redact:"-"`
+	// Status is the HTTP status the error stands for, from its rule or the
+	// graph's errorStatus; 0 when neither gives one.
+	Status int `json:"status,omitempty"`
+}
+
+// Summary describes the error in one line, as every report of a run shows it:
+// `response body error detected at "result.errors" (rule: non-empty): email
+// is not valid [code: E102] [category: VALIDATION], treated as status 400`.
+func (r ResponseBodyErrorRecord) Summary() string {
+	text := fmt.Sprintf("response body error detected at %q (rule: %s)", r.RulePath, r.Rule)
+	if r.Message != "" {
+		text += ": " + r.Message
+	}
+	if r.Code != "" {
+		text += fmt.Sprintf(" [code: %s]", r.Code)
+	}
+	if r.Category != "" {
+		text += fmt.Sprintf(" [category: %s]", r.Category)
+	}
+	if r.Status != 0 {
+		text += fmt.Sprintf(", treated as status %d", r.Status)
+	}
+	return text
 }
 
 // OASValidationRecord captures runtime OAS schema validation for a step.

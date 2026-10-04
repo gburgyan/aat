@@ -3,6 +3,7 @@ package engine
 import (
 	"testing"
 
+	"github.com/gburgyan/aat/adapter"
 	"github.com/gburgyan/aat/graph"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -145,23 +146,23 @@ func TestCheckErrorDetection_EqualsRule(t *testing.T) {
 
 func TestCheckErrorDetection_DetailExtraction(t *testing.T) {
 	rules := []graph.ErrorDetectionRule{{
-		Path: "ErrorResponse.Result.Error",
+		Path: "orderResponse.result.errors",
 		Rule: "non-empty",
 		Details: &graph.ErrorDetailMapping{
-			Message:  "ErrorResponse.Result.Error.0.Message",
-			Code:     "ErrorResponse.Result.Error.0.SourceCode",
-			Category: "ErrorResponse.Result.Error.0.category",
+			Message:  "orderResponse.result.errors.0.message",
+			Code:     "orderResponse.result.errors.0.code",
+			Category: "orderResponse.result.errors.0.type",
 		},
 	}}
 
 	body := `{
-		"ErrorResponse": {
-			"Result": {
-				"Error": [
+		"orderResponse": {
+			"result": {
+				"errors": [
 					{
-						"Message": "Invalid itinerary ID",
-						"SourceCode": "INVALID_INPUT",
-						"category": "validation"
+						"message": "Invalid order ID",
+						"code": "INVALID_INPUT",
+						"type": "validation"
 					}
 				]
 			}
@@ -170,7 +171,7 @@ func TestCheckErrorDetection_DetailExtraction(t *testing.T) {
 
 	result := CheckErrorDetection(rules, []byte(body))
 	require.NotNil(t, result)
-	assert.Equal(t, "Invalid itinerary ID", result.Message)
+	assert.Equal(t, "Invalid order ID", result.Message)
 	assert.Equal(t, "INVALID_INPUT", result.Code)
 	assert.Equal(t, "validation", result.Category)
 }
@@ -286,4 +287,107 @@ func TestResponseBodyError_SummaryMinimal(t *testing.T) {
 	summary := rbe.Summary()
 	assert.Contains(t, summary, "error")
 	assert.NotContains(t, summary, "code:")
+}
+
+// envelopeRules read errors from an envelope whose root key names the
+// operation, and from one with no root key.
+func envelopeRules(m graph.ErrorStatus) []graph.ErrorDetectionRule {
+	rule := func(root string) graph.ErrorDetectionRule {
+		return graph.ErrorDetectionRule{Path: root + "result.errors", Rule: "non-empty", ErrorStatus: m,
+			Details: &graph.ErrorDetailMapping{Message: root + "result.errors.0.message", Category: root + "result.errors.0.type"}}
+	}
+	return []graph.ErrorDetectionRule{rule("*."), rule("")}
+}
+
+// TestCheckErrorDetection_EnvelopeRoots checks that a wildcard rule reads an
+// error under any root key, that a bare root needs a rule of its own, and
+// that warnings are not errors.
+func TestCheckErrorDetection_EnvelopeRoots(t *testing.T) {
+	rules := envelopeRules(graph.ErrorStatus{})
+	for _, body := range []string{
+		`{"orderResponse": {"result": {"errors": [{"type": "VALIDATION", "message": "email is not valid"}]}}}`,
+		`{"paymentResponse": {"result": {"errors": [{"type": "VALIDATION", "message": "email is not valid"}]}}}`,
+		`{"result": {"errors": [{"type": "VALIDATION", "message": "email is not valid"}]}}`,
+	} {
+		rbe := CheckErrorDetection(rules, []byte(body))
+		require.NotNil(t, rbe, body)
+		assert.Equal(t, "email is not valid", rbe.Message)
+		assert.Equal(t, "VALIDATION", rbe.Category)
+	}
+	assert.Nil(t, CheckErrorDetection(rules[:1], []byte(`{"result": {"errors": [{"message": "x"}]}}`)),
+		"the wildcard needs a key above result")
+	for _, body := range []string{
+		`{"orderResponse": {"result": {"warnings": [{"message": "no fares"}]}}}`,
+		`{"orderResponse": {"result": {"errors": []}}}`,
+		`{"result": {"status": "complete"}}`,
+	} {
+		assert.Nil(t, CheckErrorDetection(rules, []byte(body)), body)
+	}
+}
+
+// TestDetectBodyError_Status checks the order a detected error's status is
+// resolved in: the rule's categories, the rule's status, the graph's
+// categories, the graph's status, and none.
+func TestDetectBodyError_Status(t *testing.T) {
+	body := func(category string) []byte {
+		return []byte(`{"orderResponse": {"result": {"errors": [{"type": "` + category + `", "message": "m"}]}}}`)
+	}
+	graphStatus := &graph.ErrorStatus{Status: 500, Categories: map[string]int{"TEMPORARY": 503, "VALIDATION": 422}}
+	tests := []struct {
+		name     string
+		rule     graph.ErrorStatus
+		graph    *graph.ErrorStatus
+		category string
+		want     int
+	}{
+		{"rule category", graph.ErrorStatus{Status: 418, Categories: map[string]int{"VALIDATION": 400}}, graphStatus, "validation", 400},
+		{"rule status", graph.ErrorStatus{Status: 418, Categories: map[string]int{"VALIDATION": 400}}, graphStatus, "TEMPORARY", 418},
+		{"graph category", graph.ErrorStatus{Categories: map[string]int{"VALIDATION": 400}}, graphStatus, "TEMPORARY", 503},
+		{"graph status", graph.ErrorStatus{}, graphStatus, "UNKNOWN", 500},
+		{"no category", graph.ErrorStatus{}, graphStatus, "", 500},
+		{"none", graph.ErrorStatus{}, nil, "VALIDATION", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			node := &graph.Node{Name: "n"}
+			e := &Engine{graph: &graph.Graph{ErrorDetection: envelopeRules(tt.rule), ErrorStatus: tt.graph}}
+			rbe := e.detectBodyError(node, body(tt.category))
+			require.NotNil(t, rbe)
+			assert.Equal(t, tt.want, rbe.Status)
+		})
+	}
+
+	// The graph's mapping covers a node's own rules too.
+	node := &graph.Node{Name: "n", ErrorDetection: envelopeRules(graph.ErrorStatus{})}
+	e := &Engine{graph: &graph.Graph{ErrorStatus: graphStatus}}
+	assert.Equal(t, 503, e.detectBodyError(node, body("TEMPORARY")).Status)
+}
+
+func TestStepResult_FailureStatus(t *testing.T) {
+	status, name := (&StepResult{StatusCode: 200}).FailureStatus()
+	assert.Equal(t, 200, status)
+	assert.Empty(t, name)
+
+	status, _ = (&StepResult{StatusCode: 200, ResponseBodyError: &ResponseBodyError{}}).FailureStatus()
+	assert.Equal(t, 200, status, "an error with no status leaves the response's own")
+
+	status, name = (&StepResult{StatusCode: 200, Response: &adapter.Response{GRPC: &adapter.GRPCStatus{Name: "OK"}},
+		ResponseBodyError: &ResponseBodyError{Status: 400}}).FailureStatus()
+	assert.Equal(t, 400, status)
+	assert.Empty(t, name, "a body error's status has no gRPC name")
+
+	status, name = (&StepResult{StatusCode: 404, Response: &adapter.Response{GRPC: &adapter.GRPCStatus{Name: "NOT_FOUND"}}}).FailureStatus()
+	assert.Equal(t, 404, status)
+	assert.Equal(t, "NOT_FOUND", name)
+
+	assert.Equal(t, "200, body error as 500", (&StepResult{StatusCode: 200, ResponseBodyError: &ResponseBodyError{Status: 500}}).StatusText())
+	assert.Equal(t, "200, body error", (&StepResult{StatusCode: 200, ResponseBodyError: &ResponseBodyError{}}).StatusText())
+	assert.Equal(t, "201", (&StepResult{StatusCode: 201}).StatusText())
+}
+
+func TestResponseBodyError_SummaryWithStatus(t *testing.T) {
+	rbe := &ResponseBodyError{RulePath: "*.result.errors", Rule: "non-empty", Message: "email is not valid", Code: "E102",
+		Category: "VALIDATION", Status: 400}
+	assert.Equal(t, `response body error detected at "*.result.errors" (rule: non-empty): email is not valid [code: E102] [category: VALIDATION], treated as status 400`,
+		rbe.Summary())
 }

@@ -2,7 +2,10 @@ package graph
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gburgyan/aat/internal/protoreg"
@@ -23,8 +26,12 @@ type Graph struct {
 	OAS            string               `yaml:"oas,omitempty"`
 	Proto          string               `yaml:"proto,omitempty"`
 	ErrorDetection []ErrorDetectionRule `yaml:"errorDetection,omitempty"`
-	Nodes          map[string]*Node     `yaml:"nodes"`
-	Conditions     []Condition          `yaml:"conditions,omitempty"`
+	// ErrorStatus gives an error any rule detects the status it stands for,
+	// when the rule's own mapping gives it none: a project whose errors all
+	// look alike declares the mapping once.
+	ErrorStatus *ErrorStatus     `yaml:"errorStatus,omitempty"`
+	Nodes       map[string]*Node `yaml:"nodes"`
+	Conditions  []Condition      `yaml:"conditions,omitempty"`
 
 	// Computed index (not serialized). Built by BuildSatisfierIndex().
 	SatisfiersByToken map[string][]string `yaml:"-"` // requirement token → node names that satisfy it
@@ -418,6 +425,52 @@ type ErrorDetectionRule struct {
 	Rule    string              `yaml:"rule"`              // "exists", "non-empty", "equals"
 	Value   any                 `yaml:"value,omitempty"`   // required for "equals" rule
 	Details *ErrorDetailMapping `yaml:"details,omitempty"` // optional paths for extracting error details
+	// ErrorStatus, written on the rule as status and categories, gives what
+	// the rule detects the HTTP status it stands for.
+	ErrorStatus ErrorStatus `yaml:",inline"`
+}
+
+// ErrorStatus gives an error detected in a successful response's body the
+// HTTP status it stands for, so retries, expectFailure, status assertions, and
+// fuzz judging read the response as that status: a validation error as a 400,
+// a temporary one as a 503. Categories maps the category the rule's
+// details.category reads, matched case-insensitively, to a status; Status is
+// the status of any other category, or of an error with none.
+type ErrorStatus struct {
+	Status     int            `yaml:"status,omitempty"`
+	Categories map[string]int `yaml:"categories,omitempty"`
+}
+
+// StatusFor returns the status m gives an error of category: the one
+// Categories maps it to, compared without case or surrounding space, or else
+// Status. 0 means m gives it none.
+func (m ErrorStatus) StatusFor(category string) int {
+	category = strings.TrimSpace(category)
+	if category != "" {
+		for name, status := range m.Categories {
+			if strings.EqualFold(strings.TrimSpace(name), category) {
+				return status
+			}
+		}
+	}
+	return m.Status
+}
+
+// DescribeStatuses renders m for generated docs and the MCP server, with the
+// categories in name order: "TEMPORARY 503, VALIDATION 400, otherwise 500",
+// "500", or "" for an empty mapping.
+func (m ErrorStatus) DescribeStatuses() string {
+	var parts []string
+	for _, name := range slices.Sorted(maps.Keys(m.Categories)) {
+		parts = append(parts, fmt.Sprintf("%s %d", name, m.Categories[name]))
+	}
+	switch {
+	case m.Status != 0 && len(parts) > 0:
+		parts = append(parts, fmt.Sprintf("otherwise %d", m.Status))
+	case m.Status != 0:
+		parts = append(parts, strconv.Itoa(m.Status))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // ErrorDetailMapping maps gjson paths for extracting error details from a response body.

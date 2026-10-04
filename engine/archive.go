@@ -108,7 +108,7 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		rec.ExpectFailure = &archive.ExpectFailureRecord{
 			Expected:   s.ExpectFailure.ExpectedStatuses,
 			Actual:     s.ExpectFailure.ActualStatus,
-			ActualName: grpcStatusName(s.Response),
+			ActualName: s.ExpectFailure.ActualName,
 			Passed:     s.ExpectFailure.Passed,
 		}
 	}
@@ -147,13 +147,8 @@ func convertStepResult(s StepResult, baseURL string) archive.StepRecord {
 		}
 	}
 	if s.ResponseBodyError != nil {
-		rec.ResponseBodyError = &archive.ResponseBodyErrorRecord{
-			RulePath: s.ResponseBodyError.RulePath,
-			Rule:     s.ResponseBodyError.Rule,
-			Message:  s.ResponseBodyError.Message,
-			Code:     s.ResponseBodyError.Code,
-			Category: s.ResponseBodyError.Category,
-		}
+		bodyError := archive.ResponseBodyErrorRecord(*s.ResponseBodyError)
+		rec.ResponseBodyError = &bodyError
 	}
 	if s.OASValidation != nil {
 		rec.OASValidation = convertOASValidation(s.OASValidation)

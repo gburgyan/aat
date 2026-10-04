@@ -90,7 +90,8 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 		default:
 		}
 
-		if !shouldRetry(cls.Category, result.StatusCode, grpcStatusName(result.Response), step.Retry, attempt) {
+		failureStatus, failureName := result.FailureStatus()
+		if !shouldRetry(retryFailure{category: cls.Category, status: failureStatus, grpcName: failureName}, step.Retry, attempt) {
 			cls.Action = "failed_fast"
 			cls.RetryAttempt = attempt - 1
 			result.ErrorClass = cls
@@ -101,7 +102,7 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 		// Wait out the backoff, or as long as the server asked if that is longer.
 		wait := retryBackoff(attempt)
 		if result.Response != nil {
-			if after, ok := retryAfter(result.Response, result.StatusCode, time.Now()); ok {
+			if after, ok := retryAfter(result.Response, failureStatus, time.Now()); ok {
 				if after > maxRetryAfter {
 					cls.Action = "failed_fast"
 					cls.Detail += fmt.Sprintf("; the server asked to wait %s before retrying, longer than the %s limit",

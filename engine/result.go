@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/gburgyan/aat/adapter"
@@ -227,9 +228,23 @@ type DisplayOutput struct {
 // ExpectFailureResult captures the outcome of a negative assertion step.
 type ExpectFailureResult struct {
 	ExpectedStatuses plan.ExpectedStatuses // statuses that were expected, as the plan wrote them
-	ActualStatus     int                   // the actual response status
-	Passed           bool                  // true if ActualStatus is in ExpectedStatuses
-	Description      string                // from plan's expectFailure.description
+	// ActualStatus is the status the step was matched by: the response's own,
+	// or the one an error its body reports stands for (see FailureStatus).
+	ActualStatus int
+	// ActualName is the gRPC status name ActualStatus was matched by; "" for
+	// HTTP and for a body error's status.
+	ActualName  string
+	Passed      bool   // true if ActualStatus is in ExpectedStatuses
+	Description string // from plan's expectFailure.description
+}
+
+// ActualText renders the status the step was matched by: its gRPC name, or
+// the number.
+func (r *ExpectFailureResult) ActualText() string {
+	if r.ActualName != "" {
+		return r.ActualName
+	}
+	return strconv.Itoa(r.ActualStatus)
 }
 
 // KnownIssueResult records a step's knownIssue entry and what it did.

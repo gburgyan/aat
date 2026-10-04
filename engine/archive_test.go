@@ -699,9 +699,9 @@ func TestToArchive_ResponseBodyErrorConversion(t *testing.T) {
 				Node:       "step1",
 				StatusCode: 200,
 				ResponseBodyError: &ResponseBodyError{
-					RulePath: "ErrorResponse.Result.Error",
+					RulePath: "orderResponse.result.errors",
 					Rule:     "non-empty",
-					Message:  "Invalid itinerary ID",
+					Message:  "Invalid order ID",
 					Code:     "INVALID_INPUT",
 					Category: "validation",
 				},
@@ -714,9 +714,9 @@ func TestToArchive_ResponseBodyErrorConversion(t *testing.T) {
 	a := mustToArchive(t, result, meta, "", nil)
 
 	require.NotNil(t, a.Steps[0].ResponseBodyError)
-	assert.Equal(t, "ErrorResponse.Result.Error", a.Steps[0].ResponseBodyError.RulePath)
+	assert.Equal(t, "orderResponse.result.errors", a.Steps[0].ResponseBodyError.RulePath)
 	assert.Equal(t, "non-empty", a.Steps[0].ResponseBodyError.Rule)
-	assert.Equal(t, "Invalid itinerary ID", a.Steps[0].ResponseBodyError.Message)
+	assert.Equal(t, "Invalid order ID", a.Steps[0].ResponseBodyError.Message)
 	assert.Equal(t, "INVALID_INPUT", a.Steps[0].ResponseBodyError.Code)
 	assert.Equal(t, "validation", a.Steps[0].ResponseBodyError.Category)
 
@@ -1116,4 +1116,22 @@ func TestToArchive_FuzzValueArchivedOnce(t *testing.T) {
 	assert.Equal(t, long, a.Steps[0].Resolutions[0].FinalValue)
 	assert.Equal(t, "x", a.Steps[0].Resolutions[1].RawValue, "a raw value that changed keeps both")
 	assert.NotNil(t, p.Execution.Steps[1].Fuzz, "the run's plan is untouched")
+}
+
+// TestToArchive_BodyErrorStatus checks that the archive keeps the status a
+// body error stands for, and that an expectFailure step records the status it
+// was matched by.
+func TestToArchive_BodyErrorStatus(t *testing.T) {
+	result := &RunResult{Steps: []StepResult{{
+		Node: "createOrder", StatusCode: 200, Response: &adapter.Response{StatusCode: 200},
+		ResponseBodyError: &ResponseBodyError{RulePath: "*.result.errors", Rule: "non-empty", Category: "VALIDATION", Status: 400},
+		ExpectFailure:     &ExpectFailureResult{ExpectedStatuses: plan.ExpectedStatuses{{Class: 4}}, ActualStatus: 400, Passed: true},
+	}}}
+	a := mustToArchive(t, result, archive.ArchiveMetadata{}, "", nil)
+	require.NotNil(t, a.Steps[0].ResponseBodyError)
+	assert.Equal(t, 400, a.Steps[0].ResponseBodyError.Status)
+	assert.Equal(t, 400, a.Steps[0].ExpectFailure.Actual)
+	assert.Empty(t, a.Steps[0].ExpectFailure.ActualName)
+	assert.Equal(t, 200, a.Steps[0].Response.Status, "the response keeps its own status")
+	assert.True(t, archive.StepPassed(a.Steps[0]))
 }

@@ -428,17 +428,21 @@ func (e *Engine) pinnedCase(step plan.Step, node *graph.Node, pc plan.PinnedFuzz
 }
 
 // refused reports whether the API refused a request it answered: a 4xx, or
-// a success whose body the graph's error detection reads as an error. A
-// throttled request was turned away before its value was looked at, so it is
-// not a refusal.
+// a success whose body the graph's error detection reads as an error, unless
+// its rule gave that error another status. A throttled request was turned
+// away before its value was looked at, so it is not a refusal.
 func refused(r *StepResult) bool {
-	return r.Response != nil && !throttled(r) && (r.StatusCode >= 400 && r.StatusCode < 500 || r.StatusCode < 400 && r.ResponseBodyError != nil)
+	status, _ := r.FailureStatus()
+	unmapped := r.ResponseBodyError != nil && r.ResponseBodyError.Status == 0
+	return r.Response != nil && !throttled(r) && (status >= 400 && status < 500 || unmapped)
 }
 
 // throttled reports whether the API answered with a rate limit: an HTTP 429,
-// or a gRPC RESOURCE_EXHAUSTED, which maps to it.
+// a gRPC RESOURCE_EXHAUSTED, which maps to it, or an error in the body given
+// that status.
 func throttled(r *StepResult) bool {
-	return r.Response != nil && r.StatusCode == http.StatusTooManyRequests
+	status, _ := r.FailureStatus()
+	return r.Response != nil && status == http.StatusTooManyRequests
 }
 
 // throttleRetry is the retry block a target's cases get: the target's own,
@@ -446,8 +450,9 @@ func throttled(r *StepResult) bool {
 // as the happy path would be, and nothing else a case finds is retried away.
 // It is nil when the target's block would not retry a 429.
 func throttleRetry(target *plan.RetryConfig) *plan.RetryConfig {
-	if !shouldRetry(CategoryTransient, http.StatusTooManyRequests, "", target, 1) &&
-		!shouldRetry(CategoryTransient, http.StatusTooManyRequests, grpcstatus.Name(grpcstatus.ResourceExhausted), target, 1) {
+	if !shouldRetry(retryFailure{category: CategoryTransient, status: http.StatusTooManyRequests}, target, 1) &&
+		!shouldRetry(retryFailure{category: CategoryTransient, status: http.StatusTooManyRequests,
+			grpcName: grpcstatus.Name(grpcstatus.ResourceExhausted)}, target, 1) {
 		return nil
 	}
 	return &plan.RetryConfig{Max: target.Max, On: []string{strconv.Itoa(http.StatusTooManyRequests)}}
@@ -514,6 +519,11 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 		undocumented = known && !documented
 	}
 
+	// A response is judged by the status it stands for: an error a 200's
+	// body reports counts as the status its rule gives it, so a server error
+	// in a 200 is a server-error.
+	failureStatus, failureName := r.FailureStatus()
+
 	finding := ""
 	// Anything with a response is judged on it: an error after one, such as
 	// outputs that couldn't be read, says nothing about whether it came. The
@@ -524,7 +534,7 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 		finding = FindingNotSent
 	case r.Response == nil:
 		finding = FindingNoResponse
-	case r.StatusCode >= 500:
+	case failureStatus >= 500:
 		finding = FindingServerError
 	case throttled(r):
 		finding = FindingThrottled
@@ -543,7 +553,7 @@ func (e *Engine) judgeFuzz(step plan.Step, node *graph.Node, r *StepResult) *Fuz
 	}
 	fail := judging.fail
 	// A status the block accepts is never a judgement call against the API.
-	if r.Response != nil && judging.accept.Matches(r.StatusCode, grpcStatusName(r.Response)) {
+	if r.Response != nil && judging.accept.Matches(failureStatus, failureName) {
 		switch finding {
 		case FindingAcceptedInvalid, FindingRejectedValid, FindingUndocumentedStatus:
 			finding = ""

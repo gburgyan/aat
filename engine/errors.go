@@ -235,12 +235,35 @@ func defaultRetryable(cat ErrorCategory) bool {
 	}
 }
 
+// retryFailure is a failed attempt as retry rules read it.
+type retryFailure struct {
+	category ErrorCategory
+	// status is the status the attempt's response stands for (see
+	// StepResult.FailureStatus); 0 when there was no response.
+	status int
+	// grpcName is the gRPC status name, "" for HTTP and for a body error's
+	// status.
+	grpcName string
+}
+
+// statusCategory returns the category of the status an error a 200's body
+// reports was given: such a response_error is retried, and matched by
+// category rules, as that status would be. ok is false for any other failure.
+func (f retryFailure) statusCategory() (ErrorCategory, bool) {
+	if f.category != CategoryResponseError || f.status < 400 {
+		return 0, false
+	}
+	cat, _ := classifyStatusCode(f.status)
+	return cat, true
+}
+
 // shouldRetry determines whether a failed step should be retried based on
-// the error category, the HTTP status code, the gRPC status name ("" for an
-// HTTP step), the retry configuration, and the current attempt number. Rules
+// the failure, the retry configuration, and the current attempt number. Rules
 // in On/FailOn are category names (e.g. "transient"), HTTP status codes
 // written as integers (e.g. 503), or gRPC status names (e.g. "UNAVAILABLE").
-func shouldRetry(cat ErrorCategory, status int, grpcName string, config *plan.RetryConfig, attempt int) bool {
+// An error a 200's body reports matches response_error, and, when it was
+// given a status, that status and its category too.
+func shouldRetry(f retryFailure, config *plan.RetryConfig, attempt int) bool {
 	if config == nil {
 		return false
 	}
@@ -249,16 +272,16 @@ func shouldRetry(cat ErrorCategory, status int, grpcName string, config *plan.Re
 	}
 
 	// FailOn overrides everything — if any rule matches, never retry
-	for _, f := range config.FailOn {
-		if retryRuleMatches(f, cat, status, grpcName) {
+	for _, rule := range config.FailOn {
+		if retryRuleMatches(rule, f) {
 			return false
 		}
 	}
 
 	// If On is specified, only retry when a rule matches
 	if len(config.On) > 0 {
-		for _, o := range config.On {
-			if retryRuleMatches(o, cat, status, grpcName) {
+		for _, rule := range config.On {
+			if retryRuleMatches(rule, f) {
 				return true
 			}
 		}
@@ -266,24 +289,30 @@ func shouldRetry(cat ErrorCategory, status int, grpcName string, config *plan.Re
 	}
 
 	// No On list — use defaults
-	return defaultRetryable(cat)
+	if cat, ok := f.statusCategory(); ok {
+		return defaultRetryable(cat)
+	}
+	return defaultRetryable(f.category)
 }
 
 // retryRuleMatches reports whether a single retry rule matches a failure.
 // Numeric rules compare against the HTTP status code, which a gRPC status maps
 // to; a gRPC status name matches that status alone, since several share one
 // HTTP status; other rules compare (case-insensitively) against the error
-// category name.
-func retryRuleMatches(rule string, cat ErrorCategory, status int, grpcName string) bool {
+// category name, or the category of the status a body error was given.
+func retryRuleMatches(rule string, f retryFailure) bool {
 	rule = strings.TrimSpace(rule)
 	if code, err := strconv.Atoi(rule); err == nil {
-		return status != 0 && code == status
+		return f.status != 0 && code == f.status
 	}
 	if code, ok := grpcstatus.CodeByName(rule); ok {
-		got, isGRPC := grpcstatus.CodeByName(grpcName)
-		return grpcName != "" && isGRPC && got == code
+		got, isGRPC := grpcstatus.CodeByName(f.grpcName)
+		return f.grpcName != "" && isGRPC && got == code
 	}
-	return strings.EqualFold(rule, cat.String())
+	if cat, ok := f.statusCategory(); ok && strings.EqualFold(rule, cat.String()) {
+		return true
+	}
+	return strings.EqualFold(rule, f.category.String())
 }
 
 // grpcStatusName returns a gRPC response's status name, and "" for an HTTP one.
@@ -302,6 +331,20 @@ func ActualStatusText(resp *adapter.Response, code int) string {
 		return name
 	}
 	return strconv.Itoa(code)
+}
+
+// StatusText renders the status a step came back with, as ActualStatusText
+// does, and what its body made of it: "200, body error" for an error the body
+// reports, or "200, body error as 500" for one given a status.
+func (r *StepResult) StatusText() string {
+	text := ActualStatusText(r.Response, r.StatusCode)
+	switch rbe := r.ResponseBodyError; {
+	case rbe != nil && rbe.Status != 0:
+		text += fmt.Sprintf(", body error as %d", rbe.Status)
+	case rbe != nil:
+		text += ", body error"
+	}
+	return text
 }
 
 // failureStatusText describes the status a step failed with, for the message

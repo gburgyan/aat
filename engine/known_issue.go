@@ -71,14 +71,16 @@ func (e *Engine) stepFailed(step plan.Step, r *StepResult) bool {
 // carries the entry. Nothing is logged for the run: the copy's original
 // already answers for the defect.
 func (e *Engine) coverSetupFailure(p *plan.Plan, step plan.Step, r *StepResult) bool {
-	if r.Error != nil || r.ResponseBodyError != nil {
+	if r.Error != nil {
 		return false
 	}
+	// A body error is the failure an expectFailure step may expect; on any
+	// other step it means the response did not do what was asked.
 	if step.ExpectFailure != nil {
 		if r.ExpectFailure == nil || !r.ExpectFailure.Passed {
 			return false
 		}
-	} else if r.StatusCode >= 400 {
+	} else if r.StatusCode >= 400 || r.ResponseBodyError != nil {
 		return false
 	}
 	ki, active := e.knownIssueFor(p, step)
