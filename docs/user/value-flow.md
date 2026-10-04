@@ -369,8 +369,9 @@ Seed: 4986022358596074 (replay its picks with --seed 4986022358596074)
 
 ## Raw Values
 
-`raw: true` sends a step value's default exactly as written: `{{…}}` is not evaluated, and the value is not
-converted to the input's type, so `"12"` stays a string for an `integer` input. It is for negative tests that need a
+`raw: true` sends a step value's default exactly as written: `{{…}}` is not evaluated, or checked as an expression,
+and the value is not converted to the input's type, so `"12"` stays a string for an `integer` input. A date YAML
+would read as a timestamp, such as an unquoted `1900-01-01`, is sent as written too. It is for negative tests that need a
 value the input's type would otherwise fix, and it is how [fuzz cases](fuzzing.md) are sent.
 
 ```yaml

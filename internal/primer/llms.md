@@ -889,14 +889,15 @@ operation, a request the spec refuses is judged as negative.
   on a step that changes state).
 - **Findings:** `server-error`, `no-response`, and `schema-violation` fail the
   run; `accepted-invalid` and `rejected-valid` are warnings (`--fuzz-fail`
-  changes the set). Fuzz steps never stop the run.
+  changes the set); `throttled` (a 429) and `not-sent` say nothing about the
+  API. Fuzz steps never stop the run.
 - **Replay:** case IDs are stable (`quantity.above-max`): `--fuzz-case ID`
   reruns one. `--fuzz-cases N` caps the cases, picked by the run's seed.
 - **Better cases:** declare `constraints` (min, max, lengths, pattern) and enum
   types on inputs; they make the boundaries the fuzzer tests.
 - **Keeping a finding:** `--fuzz-save DIR` writes a plan per failing case,
-  with the case pinned in the step's `fuzz:` block; it fails until the API is
-  fixed. A step's `fuzz:` block (`mode`, `inputs`, `skip`, `cases`, `only`,
+  with the case pinned in the step's `fuzz:` block and judged as it was; it
+  fails until the API is fixed. A step's `fuzz:` block (`mode`, `inputs`, `skip`, `cases`, `only`,
   `scope`, `fail`, `accept: [409]`, `pinned: [{id, mode, input, value}]`)
   fuzzes it on every run; `--no-fuzz` ignores blocks. MCP
   `generate_fuzz_cases` returns a step's cases as such a block.

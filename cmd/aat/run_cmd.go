@@ -60,7 +60,7 @@ func addExecutionFlags(cmd *cobra.Command) {
 	flags.Bool("no-fuzz", false, "ignore the plan's fuzz: blocks; run each step as written")
 	flags.String("fuzz-save", "", "write a plan to this directory for each fuzz case whose finding failed the run, with the case pinned in the target step's fuzz: block, so it fails until the bug is fixed")
 	flags.Bool("fuzz-save-all", false, "with --fuzz-save, also save the cases whose finding was only a warning")
-	flags.StringSlice("fuzz-fail", nil, "findings that fail the run (default server-error,no-response,schema-violation; also accepted-invalid, rejected-valid, undocumented-status, not-sent)")
+	flags.StringSlice("fuzz-fail", nil, "findings that fail the run (default server-error,no-response,schema-violation; also accepted-invalid, rejected-valid, undocumented-status, throttled, not-sent)")
 }
 
 // fuzzConfigFromFlags reads the --fuzz flags, or returns nil when --fuzz is

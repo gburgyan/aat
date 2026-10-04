@@ -25,20 +25,20 @@ cd examples/shop/
 ```
   [ 1/23] listProducts         200  0ms
   [ 2/23] createCart           201  0ms
-  [ 4/23] addItem              201  0ms
-  [ 5/23] addItem__fuzz_quan~ 201  0ms  fuzz quantity.at-min (positive)
-  [ 6/23] checkout             201  0ms
-  [ 8/23] paymentCharge        201  0ms
-  [ 9/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.below-min (negative)
-  [11/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.fraction (negative)
-  [13/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.overflow (negative)
-  [15/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.wrong-type (negative)
-  [17/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.missing (negative)
-  [19/23] addItem__fuzz_quan~ 400  0ms  fuzz quantity.null (negative)
-  [21/23] addItem__fuzz_quan~ 409  0ms  fuzz quantity.large (edge)
-  [23/23] addItem__fuzz_body~ 201  0ms  fuzz body.extra-property (edge)
+  [ 3/23] addItem              201  0ms
+  [ 5/23] addItem__fuzz_quant~ 201  0ms  fuzz quantity.at-min (positive)
+  [ 7/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.below-min (negative)
+  [ 9/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.fraction (negative)
+  [11/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.overflow (negative)
+  [13/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.wrong-type (negative)
+  [15/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.missing (negative)
+  [17/23] addItem__fuzz_quant~ 400  0ms  fuzz quantity.null (negative)
+  [19/23] addItem__fuzz_quant~ 409  0ms  fuzz quantity.large (edge)
+  [21/23] addItem__fuzz_body_~ 201  0ms  fuzz body.extra-property (edge)
+  [22/23] checkout             201  0ms
+  [23/23] paymentCharge        201  0ms
 ...
-PASSED (16/16 steps, 3ms)
+PASSED (16/16 steps, 4ms)
 Fuzz: 9 cases: 9 as expected · setup: 2 fresh, 7 reused
 ```
 
@@ -51,15 +51,20 @@ Only `quantity` was fuzzed as an input: `cartId` and `sku` are wired from earlie
 test that the step can't find its cart. The shop's graph gives `quantity` a `min: 1` constraint, which is where
 `at-min` and `below-min` come from.
 
-`--fuzz` takes step IDs or node names, comma-separated. A node name fuzzes every step of that node.
+`--fuzz` takes step IDs or node names, comma-separated. A node name fuzzes every step of that node that is meant to
+succeed: a negative step written for one bad request, with `expectFailure` or a `rawBody`, is left out, and naming
+one by its ID is an error, since its cases would be refused, or sent with its raw body, whatever they sent. A case's
+step is named after its target and case, as in `addItem__fuzz_quantity_below_min`; when two case IDs make the same
+name, the second gets `_2`.
 
 ## What a case runs on
 
 A case that the API accepts changes something: an item goes into a cart, a traveler onto a reservation, a booking is
 made. If every case ran on the happy path's cart, the cart would fill up. The rest of the plan would see a different
 cart, and an API with a limit, such as a few travelers per reservation, would start refusing cases for the wrong
-reason. So by default a case runs on a copy of the steps its target depends on. The copy also includes the earlier
-steps that build on those, such as the `addItem` a checkout needs even though it reads nothing from it. A step that
+reason. So by default a case runs on a copy of the steps its target depends on, wherever the plan lists them. The copy
+also includes the earlier steps that build on those, such as the `addItem` a checkout needs even though it reads
+nothing from it. A step that
 depends only on read-only steps, such as a wishlist made from `listProducts`, changes nothing the target works on and
 isn't copied. A target's cases all run before the steps that come after it in the plan.
 
@@ -67,13 +72,16 @@ Making a copy for every case is expensive against a slow, rate-limited API, so t
 
 - **Sharing.** A target's cases share a copy of its setup as long as the API refuses them. A refusal (a 4xx, or a
   success whose body the graph's `errorDetection` reads as an error) changes nothing, so the next case can use the
-  same cart. A target that only reads, such as `getOrder`, never changes its setup, so its cases all share one.
+  same cart; nor does a rate limit (`throttled`) or a case that was never sent. A target that only reads, such as
+  `getOrder`, never changes its setup, so its cases all share one.
 - **When a copy is used up.** When a case is accepted (2xx), fails with a 5xx that may have half-written something, or
   gets no response, the copy may have changed. The next case gets a fresh one.
 - **Read-only steps.** A setup step that only reads (a GET, HEAD, or OPTIONS with no cleanup pairing), such as
   `listProducts`, isn't copied at all, as long as it depends on nothing that is copied.
 - **Failed setup.** If a copy fails, its case is reported as `not-sent` and the run carries on. After three setups for
-  a target fail in a row, often because of a rate limit, that target's remaining cases aren't tried.
+  a target fail in a row, often because of a rate limit, that target's remaining cases aren't tried. A failure a
+  [`knownIssue`](plans.md#known-issues-a-failure-with-a-deadline) lets the happy path carry on past, such as a failed assertion, doesn't fail
+  the copy either.
 
 In the quick start, `at-min` was accepted, so the refused cases after it got a fresh cart and then shared it: `setup:
 2 fresh, 7 reused`. The copies' own lines are hidden unless one fails. They are in the archive with `fuzzSetup` set.
@@ -113,6 +121,20 @@ What each type gets:
 An input the template sends only inside a `{{?input}}` block gets no `missing` case: leaving it out is the template's
 own choice. An input that is only in the path gets none either, since leaving it out changes the route.
 
+A case is only made when the request can carry its value as itself:
+
+- **No empty value where empty means absent.** An input inside its own `{{?input}}` block, or the whole value of a
+  header or a `request.form` field, is left out of the request when it is `""`. Its `empty`-valued cases would send
+  what leaving it out sends, so they aren't made.
+- **No value a header can't hold.** A header refuses a control character, and gRPC metadata anything but printable
+  ASCII (unless its key ends in `-bin`); the client would refuse the request before sending it.
+- **Positive means allowed by everything declared.** `at-min-length` and `at-max-length` are made of a character the
+  input's pattern allows (`AAA` for `^[A-Z]{3}$`), or aren't made. A pool value the pattern refuses is an edge case.
+  A length over 65,536, such as the 2,147,483,647 some spec generators write for "no limit", gets no length cases,
+  and an integer bound past what a 64-bit integer or a float's precision holds gets no boundary cases.
+- **Wired inputs are left alone**, whether wired with `from` or by a default such as `{{createCart.cartId}}` that
+  reads an earlier step's output.
+
 ### The template's own fields
 
 A template also writes values of its own: `"channel": "web"`, a nested object, a literal query parameter. Nothing
@@ -129,11 +151,13 @@ response is a finding:
 A gRPC message gets no `body.extra-property`, `wrong-type`, `fraction`, or `overflow` cases: a protobuf message has no
 room for a field its type doesn't declare, and its codec refuses a value of the wrong type before anything is sent.
 
-Fields inside `{{?…}}` and `{{#…}}` blocks, and array elements, are left alone. A form body or one that isn't JSON
-gets none of these cases.
+Fields inside `{{?…}}` and `{{#…}}` blocks, array elements, elements after a block in the same array (a block can send
+any number of elements, so their index isn't known), and values under a key an input picks are left alone. A form
+body or one that isn't JSON gets none of these cases.
 
 These cases, and `missing` and `null`, change the request after the template builds it, so everything else in it is
-what the plan would send.
+what the plan would send. A query or header patch changes its own parameter or header and leaves the rest as the
+template wrote it.
 Values are sent exactly as generated, like a step value with [`raw: true`](value-flow.md#raw-values): `{{…}}` in a
 value is not evaluated, and `"12"` stays a string. A `wrong-type` value for a number or a boolean is a JSON string,
 quotes included, so it arrives as a string even in an unquoted template slot such as `{"quantity": {{quantity}}}`.
@@ -146,7 +170,11 @@ what it accepts. If the graph gave `quantity` no `min`, 0 would be an edge case,
 `minimum: 1`, so the case is judged as negative and a 400 is the right answer. Removing a body field the spec
 requires works the same way. The progress line shows the change as `edge→negative`, and the archive keeps the spec
 violations on the case. Spec violations on a fuzz step's request are the point of the case, so they don't count as
-OAS warnings.
+OAS warnings. A violation the target's own request has too, such as a SKU format the spec is stricter about than the
+API, is the spec's quarrel with the happy path, so it neither makes a case negative nor is listed on it.
+
+A positive value the step's [`constraint`](value-flow.md#constraints) rules out, such as a destination equal to the
+origin, is judged as edge: the plan would never send it, so a refusal isn't `rejected-valid`.
 
 ### Without an OpenAPI spec
 
@@ -175,10 +203,15 @@ Each case's response gets one finding, or none when it was what the case called 
 | `accepted-invalid` | A success for a negative case | no |
 | `rejected-valid` | A 4xx for a positive case | no |
 | `undocumented-status` | A status the node's OpenAPI operation doesn't list, with no `default` response | no |
-| `not-sent` | The case couldn't be sent: its setup failed (counted as `failed` in the setup line), or AAT couldn't build the request, such as a value a gRPC message can't hold | no |
+| `throttled` | A 429, or gRPC `RESOURCE_EXHAUSTED`, after the retries the target allows: the API turned the request away before judging its value | no |
+| `not-sent` | The case couldn't be sent: its setup failed (counted as `failed` in the setup line), or the request couldn't be built or its client refused it, such as a value a gRPC message can't hold | no |
+
+A case gets the most serious finding that applies, in the order of the table: a status the spec doesn't list never
+hides a forbidden value the API took.
 
 `--fuzz-fail` lists the findings that fail the run: `--fuzz-fail server-error,accepted-invalid` makes an API that
-takes forbidden values a failure. The others are warnings. A fuzz step never stops the run, and it doesn't retry.
+takes forbidden values a failure. The others are warnings. A fuzz step never stops the run. It retries only a rate
+limit, and only when its target's `retry` block would retry a 429; any other finding stands.
 
 After the run, the output counts the cases by finding and lists each case that had one, with the value and the
 status:
@@ -198,9 +231,9 @@ case: its ID, mode, input, value, the mode it was judged by, the spec violations
 |------|---------|-------------|
 | `--fuzz` | — | Steps to fuzz, by step ID or node |
 | `--fuzz-mode` | all | `positive`, `negative`, `edge`, comma-separated |
-| `--fuzz-input` | inputs not wired | Fuzz only these inputs. A wired input, such as an ID from an earlier step, is fuzzed only when named here |
+| `--fuzz-input` | inputs not wired | Fuzz only these inputs, of whichever targets have them. A wired input, such as an ID from an earlier step, is fuzzed only when named here |
 | `--fuzz-cases` | `0` (all) | At most this many cases per step, picked by the run's [seed](value-flow.md#replaying-a-runs-picks) |
-| `--fuzz-case` | — | Run only these case IDs |
+| `--fuzz-case` | — | Run only these case IDs. Each must be a case of a step `--fuzz` names; the cap then picks among them |
 | `--fuzz-scope` | `reuse` | What a case runs on: `reuse`, `isolated`, or `shared` (see [What a case runs on](#what-a-case-runs-on)) |
 | `--fuzz-fail` | `server-error,no-response,schema-violation` | Findings that fail the run |
 | `--fuzz-save` | — | Write a regression plan for each failing case to this directory ([Keeping a finding](#keeping-a-finding)) |
@@ -208,7 +241,12 @@ case: its ID, mode, input, value, the mode it was judged by, the spec violations
 | `--no-fuzz` | `false` | Ignore the plans' `fuzz:` blocks |
 
 The flags work on `aat run batch` too, where `--fuzz addItem` fuzzes every plan that has an `addItem` step and runs
-the others as written.
+the others as written. A name in `--fuzz`, `--fuzz-input`, or `--fuzz-case` only has to match in one plan, but one
+that matches in none fails the batch with exit code 2, so a misspelled target doesn't pass as a batch with nothing
+fuzzed.
+
+`--stop-after` names a step of the plan, not a fuzz case or a copy made for one. A run that a fuzz finding has already
+failed stops `failed`, not `stopped`, so the finding isn't lost.
 
 With `--fuzz-cases`, the seed picks which cases run, and the run prints the seed, so `--seed N` runs the same ones
 again.
@@ -246,11 +284,14 @@ Every key is optional.
   `409` to any request it can't serve right now isn't faulted for it: a status in `accept` is never
   `accepted-invalid`, `rejected-valid`, or `undocumented-status`. A 5xx can't be accepted.
 - **`pinned`** cases are sent as written, without the generator. A case sets either `input` and `value`, or `patch`.
-  With only `pinned`, nothing else is generated.
+  With only `pinned`, nothing else is generated. `mode`, `inputs`, `skip`, `only`, and `cases`, and the `--fuzz`
+  flags, choose among pinned cases as they do among generated ones.
+- **`only`** must name cases the step has; a misspelled ID is an error, not a block that sends nothing.
 - **`found`** records what a case found when it was saved. It isn't checked.
 
 `--fuzz` flags win over the block for the steps they name. `--no-fuzz` ignores every block and runs the plan as
-written. `aat validate` checks the block against the step's node: modes, findings, inputs, and each pinned case.
+written. `aat validate` checks the block against the step's node: modes, findings, inputs, and each pinned case. A
+block on a step with `expectFailure` or a `rawBody` is an error.
 
 The MCP server's [`generate_fuzz_cases`](mcp-server.md) tool lists the cases `--fuzz` would send to a step, as a
 `fuzz:` block of pinned cases, without sending anything. An assistant can show them and keep the ones worth keeping.
@@ -265,8 +306,8 @@ aat run plan smoke --fuzz addItem --fuzz-save plans/fuzz/
 ```
 
 The saved plan is the one that ran, with a recipe written out in full. Its target step has a `fuzz:` block pinning the
-one case, and `fail` includes the finding. On every run it sends that value, fails while the API still mishandles it,
-and passes once the API is fixed. Kept in a plan directory, it becomes part of `aat run batch`. A plain plan can't
+one case, with the `scope`, `accept`, and `fail` the case ran with, and `fail` includes the finding. On every run it
+sends that value, fails while the API still mishandles it, and passes once the API is fixed. Kept in a plan directory, it becomes part of `aat run batch`. A plain plan can't
 apply layers, so a plan found with layers says which ones in its description, along with the run's seed. In a batch,
 a file is named after the plan's path within its directory, as in `us-smoke--addItem--quantity.below-min.yaml`, so
 plans of one name in different subdirectories keep their own.

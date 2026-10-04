@@ -11,12 +11,13 @@ the graph and plan formats may still change before 1.0.
   seed, and a run that made such a choice prints it; `aat run show`, the archive, and `summary.json` record it.
   `aat run plan --seed N` and MCP `execute_plan`'s `seed` repeat those choices, and `aat run batch --seed N` now fixes
   each run's picks as well as the shuffle. A step's picks depend on its ID, not on the order steps run in, so parallel
-  steps replay too. `{{uuid}}` and `{{random N}}` stay unique. See
+  steps replay too, and a step's random named selections draw in name order, so several of them replay as well. `{{uuid}}` and `{{random N}}` stay unique. See
   [Replaying a run's picks](https://gburgyan.github.io/aat/value-flow/#replaying-a-runs-picks).
 - **Defaults can draw from the domain file's value pools.** `poolRef: airportCodes`, or `poolRef: airportCodes.us`
   for one group, works wherever `pool` does: graph defaults, layers, and step values, with `constraint` and
   `poolStrategy`. One list then serves every input that takes that kind of value, where each default used to copy
-  it. `aat validate` checks every name, the archive and web UI record which pool a value came from, and MCP
+  it. `aat validate` checks every name, in the graph, its workflows' `inject` values, layers, plans, workflow files,
+  and verification values; the archive and web UI record which pool a value came from, and MCP
   `list_value_pools` shows each pool's groups and the inputs that use it. See
   [Value Pools](https://gburgyan.github.io/aat/domain/#value-pools).
 - **`--fuzz` tries a step with generated values, inside a real flow.** `aat run plan smoke --fuzz addItem` runs the
@@ -52,7 +53,22 @@ the graph and plan formats may still change before 1.0.
   written. `--fuzz-save DIR` writes a plan per failing case with that case pinned, so it fails until the API is
   fixed; `--no-fuzz` ignores the blocks. The MCP tool `generate_fuzz_cases` lists a step's cases as a block to keep.
   See [Fuzzing: the fuzz block](https://gburgyan.github.io/aat/fuzzing/#the-fuzz-block).
-- **`raw: true` sends a step value exactly as written**, with no expression evaluation or type coercion. See
+- **Fuzz verdicts hold up on real APIs and templates.** A 429 (or `RESOURCE_EXHAUSTED`) is a new finding,
+  `throttled`, rather than a refusal, and a case retries it when its target's `retry` block would. A request the
+  client refuses before sending, such as a header value with a control character, is `not-sent`, not a server error.
+  Findings are tried most serious first, so `undocumented-status` no longer hides `accepted-invalid`. A spec
+  violation the target's own request has too doesn't make a case negative, and a positive value the step's
+  `constraint` rules out is judged as edge. Cases the request can't carry as themselves aren't made: `""` where the
+  template leaves an empty input out, a value a header can't hold, and length cases past 65,536 characters; positive
+  length cases match the input's pattern. `--fuzz <node>` skips steps with `expectFailure` or a `rawBody`;
+  `--fuzz-input` names inputs of any target; `--fuzz-case` and a block's `only` are checked before the cap; pinned
+  cases follow the mode, input, skip, and cap settings; and a batch fails when a `--fuzz` name matches in none of its
+  plans. Fuzz copies and cases never stand in for the happy path's resources in verification and cleanup, a
+  `knownIssue` covers a setup copy as it covers its original, `--stop-after` keeps a fuzz failure, and `aat run show`
+  and MCP failure analysis judge a fuzz case by its finding. `--fuzz-save` keeps the case's `accept`, `scope`, and
+  `fail`, so the saved plan passes once the API is fixed. See [Fuzzing](https://gburgyan.github.io/aat/fuzzing/).
+- **`raw: true` sends a step value exactly as written**, with no expression evaluation or type coercion. Its `{{…}}`
+  is text that validation doesn't check, and an unquoted YAML date is sent as written, not as a timestamp. See
   [Raw Values](https://gburgyan.github.io/aat/value-flow/#raw-values).
 - **`expectFailure` takes status classes.** `status: [4xx]` passes on any refusal and still fails on a 5xx or a
   success; it works in mutation `expectStatus` and overlay `expectFailure` too, and a gRPC status matches the class

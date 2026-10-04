@@ -48,7 +48,7 @@ Each step line shows the step index, the step ID, the HTTP status code, and the 
 
 ## Checkpoints
 
-`aat run plan --stop-after STEP` stops after a step passes and skips cleanup, so the resources created so far stay alive, and `--dump-state FILE` writes the session (base URLs, headers, and step inputs and outputs) for another tool to pick up, with credentials redacted unless `--dump-state-secrets` asks for them. The outcome is `stopped` with exit code `0`. See [Checkpoints](checkpoints.md) for the dump format, stdout mode, security, and a pytest handoff example.
+`aat run plan --stop-after STEP` stops after a step passes and skips cleanup, so the resources created so far stay alive, and `--dump-state FILE` writes the session (base URLs, headers, and step inputs and outputs) for another tool to pick up, with credentials redacted unless `--dump-state-secrets` asks for them. The outcome is `stopped` with exit code `0`, unless a [fuzz](fuzzing.md) finding has already failed the run, which then stops `failed`. See [Checkpoints](checkpoints.md) for the dump format, stdout mode, security, and a pytest handoff example.
 
 ## Inspecting a Run
 
