@@ -1,5 +1,3 @@
-
-**Without a `retry:` block, a step retries one thing: a rate limit.** A request the API turns away with a 429 (a gRPC `RESOURCE_EXHAUSTED`, or an [error in a 200](graphs.md#the-status-an-error-stands-for) given that status) is sent again, up to three times, after the wait the server asks for (see below). A 429 says the request was not looked at, so sending it again is safe whatever the method, and it says nothing about the behaviour the step tests. Everything else stands: a server error may be the finding, and a request that timed out may have gone through. A `retry:` block replaces this default, so a step with one retries exactly what the block says: `on: [server]` alone no longer retries a 429, and `max: 0` turns retries off altogether. A [negative test](#negative-testing-expectfailure) never retries the failure it expects, whatever its block says; a 429 it does not expect is retried as any step's is.
 # Plans and Recipes
 
 A plan is a test: the steps to run, the values that make it this test rather than another, and what must be true afterwards. It does not say how data moves between steps — the graph does — which is why most plans are a few lines.
@@ -514,6 +512,8 @@ Steps can configure retry behavior:
 | `retry.max` | Maximum retry attempts |
 | `retry.on` | Rules that trigger a retry — error category names and/or HTTP status codes |
 | `retry.failOn` | Rules that cause immediate failure with no retry; checked before `on` |
+
+**Without a `retry:` block, a step retries one thing: a rate limit.** A request the API turns away with a 429 (a gRPC `RESOURCE_EXHAUSTED`, or an [error in a 200](graphs.md#the-status-an-error-stands-for) given that status) is sent again, up to three times, after the wait the server asks for (see below). A 429 says the request was not looked at, so sending it again is safe whatever the method, and it says nothing about the behaviour the step tests. Everything else stands: a server error may be the finding, and a request that timed out may have gone through. A `retry:` block replaces this default, so a step with one retries exactly what the block says: `on: [server]` alone no longer retries a 429, and `max: 0` turns retries off altogether. A [negative test](#negative-testing-expectfailure) never retries the failure it expects, whatever its block says; a 429 it does not expect is retried as any step's is.
 
 Each entry in `on` and `failOn` is an **error category** name, an **HTTP status code** written as an integer, or a **[gRPC](grpc.md) status name**. They can be mixed freely: `on: [503, transient]` retries on any transient failure *and* on a bare 503. A gRPC name matches that status alone, where a number matches every gRPC status that maps to it: `failOn: [FAILED_PRECONDITION]` stops at that code but lets `INVALID_ARGUMENT`, also a 400, retry. AAT classifies every failure into exactly one category:
 
