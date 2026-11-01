@@ -108,7 +108,7 @@ func TestServeHTTP_HealthEndpoint(t *testing.T) {
 	assert.Equal(t, "ok\n", string(body))
 
 	cancel()
-	<-errCh
+	assert.NoError(t, <-errCh)
 }
 
 func TestServeHTTP_ListensAndShutdown(t *testing.T) {

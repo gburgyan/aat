@@ -290,8 +290,8 @@ func TestWebViewCommand_StartsEphemeralServer(t *testing.T) {
 	_ = syscall.Kill(syscall.Getpid(), syscall.SIGINT)
 
 	select {
-	case <-errCh:
-		// Clean shutdown.
+	case err := <-errCh:
+		assert.NoError(t, err, "clean shutdown")
 	case <-time.After(5 * time.Second):
 		t.Fatal("ephemeral server did not shut down in time")
 	}
