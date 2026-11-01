@@ -167,8 +167,21 @@ func cleanupSucceeded(r StepResult) bool {
 }
 
 // executeCleanupEntry sends the cleanup step for entry on node, which is nil
-// when the graph has no such node, with the inputs runCleanupChain resolved.
+// when the graph has no such node, with the inputs runCleanupChain resolved,
+// and sends it again when it fails in a way a retry may cure (see
+// cleanupRetry). The result is the last attempt's, timed from the first's
+// start; on failure it carries the classification of the last attempt.
 func (e *Engine) executeCleanupEntry(ctx context.Context, entry CleanupEntry, node *graph.Node, inputs map[string]any) StepResult {
+	result := e.sendCleanupEntry(ctx, entry, node, inputs)
+	return retryResult(ctx, result, cleanupRetry, false, classifyStepResult, func() StepResult {
+		return e.sendCleanupEntry(ctx, entry, node, inputs)
+	})
+}
+
+// sendCleanupEntry sends a cleanup step once: it builds the request from the
+// inputs, sends it, and reads the response's outputs, body errors, and OAS
+// findings.
+func (e *Engine) sendCleanupEntry(ctx context.Context, entry CleanupEntry, node *graph.Node, inputs map[string]any) StepResult {
 	start := time.Now()
 	// base identifies the cleanup step and when it started, so archives place
 	// it on the run's timeline like any other step.

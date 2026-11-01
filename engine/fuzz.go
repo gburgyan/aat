@@ -467,15 +467,20 @@ func stale(r *StepResult) bool {
 	return r.Response != nil && status == http.StatusGone
 }
 
-// throttleRetry is the retry block a target's cases get: the target's own,
-// cut down to retrying a rate limit, so a case the API throttles is sent again
-// as the happy path would be, and nothing else a case finds is retried away.
-// It is nil when the target's block would not retry a 429.
+// throttleRetry is the retry block a target's cases get. A target without one
+// gives its cases none, so each retries a rate limit as any step does (see
+// rateLimitRetry). A target with one gives its cases that block cut down to
+// retrying a rate limit, so a case the API throttles is sent again as the
+// happy path would be and nothing else a case finds is retried away; a block
+// that would not retry a 429 turns its cases' retries off.
 func throttleRetry(target *plan.RetryConfig) *plan.RetryConfig {
+	if target == nil {
+		return nil
+	}
 	if !shouldRetry(retryFailure{category: CategoryTransient, status: http.StatusTooManyRequests}, target, 1) &&
 		!shouldRetry(retryFailure{category: CategoryTransient, status: http.StatusTooManyRequests,
 			grpcName: grpcstatus.Name(grpcstatus.ResourceExhausted)}, target, 1) {
-		return nil
+		return &plan.RetryConfig{Max: 0}
 	}
 	return &plan.RetryConfig{Max: target.Max, On: []string{strconv.Itoa(http.StatusTooManyRequests)}}
 }

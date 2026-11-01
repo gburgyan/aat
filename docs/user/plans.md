@@ -1,3 +1,5 @@
+
+**Without a `retry:` block, a step retries one thing: a rate limit.** A request the API turns away with a 429 (a gRPC `RESOURCE_EXHAUSTED`, or an [error in a 200](graphs.md#the-status-an-error-stands-for) given that status) is sent again, up to three times, after the wait the server asks for (see below). A 429 says the request was not looked at, so sending it again is safe whatever the method, and it says nothing about the behaviour the step tests. Everything else stands: a server error may be the finding, and a request that timed out may have gone through. A `retry:` block replaces this default, so a step with one retries exactly what the block says: `on: [server]` alone no longer retries a 429, and `max: 0` turns retries off altogether. A [negative test](#negative-testing-expectfailure) never retries the failure it expects, whatever its block says; a 429 it does not expect is retried as any step's is.
 # Plans and Recipes
 
 A plan is a test: the steps to run, the values that make it this test rather than another, and what must be true afterwards. It does not say how data moves between steps — the graph does — which is why most plans are a few lines.
@@ -922,7 +924,7 @@ A cleanup step has just two fields: `node` and `runOn`. There is no `values:` bl
 
 **Skipped pairings.** After `runOn`, a registered pairing is skipped when it's no longer needed: a later main step already released its resource, such as an explicit `cancelOrder` step for the order the pairing would cancel, or the pairing's `when` condition is false. See [API Graphs: Cleanup](graphs.md#cleanup).
 
-Cleanup results are recorded in the archive and in the `cleanup` array of `--json` output, and appear under a `cleanup:` block in the console. Skipped pairings are recorded in the archive's `cleanupSkipped` and in `cleanup_skipped` in `--json`, and appear as `skipped:` lines under `cleanup:`. A cleanup failure never changes the run outcome. See [Running Tests: Cleanup](running.md#cleanup) for the execution-time details.
+Cleanup results are recorded in the archive and in the `cleanup` array of `--json` output, and appear under a `cleanup:` block in the console. Skipped pairings are recorded in the archive's `cleanupSkipped` and in `cleanup_skipped` in `--json`, and appear as `skipped:` lines under `cleanup:`. A cleanup step that fails in a way a retry may cure (a 429, a 502, 503, or 504, a dropped connection, a timeout, or another 5xx) is sent again up to three times, waiting as the server asks, as a step with `retry: {max: 3}` is; a refusal is not, and its chain stops there. The record carries the retries, as a main step's does. A cleanup failure never changes the run outcome. See [Running Tests: Cleanup](running.md#cleanup) for the execution-time details.
 
 ## Plan-Level Auth and Headers
 

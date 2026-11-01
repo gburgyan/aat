@@ -593,7 +593,8 @@ assertions:
   - `client`: other 4xx
   - `auth`: 401 and 403
   - `timeout`, `network`, `adapter` (the request couldn't be built or its outputs extracted), and `response_error` (an `errorDetection` rule matched; one given a status matches that status and its category too)
-- **Defaults:** without `on`, a step retries `transient`, `timeout`, and `server`. `failOn` wins over `on`. Failed assertions and `expectFailure` steps never retry.
+- **Without a block:** every step retries a 429 (or a gRPC `RESOURCE_EXHAUSTED`, or an `errorDetection` error given 429) up to 3 times, waiting as the server asks, and nothing else. A block replaces that default: `on: [server]` alone no longer retries a 429, and `max: 0` turns retries off. Cleanup steps retry `transient`, `timeout`, and `server` failures up to 3 times.
+- **Defaults of a block:** without `on`, it retries `transient`, `timeout`, and `server`. `failOn` wins over `on`. Failed assertions never retry, and an `expectFailure` step never retries the failure it expects, only a 429 it does not.
 - **Waits:** between attempts the step waits a backoff of 500 ms, doubling, capped at 10 s, with ±25% jitter.
   - It waits longer when the failed response asks: through `Retry-After`, or `RateLimit-Reset` on a 429 without one. Either may be seconds or an HTTP date.
   - If a server asks for more than 60 s, the step ends as `failed_fast`.
@@ -628,6 +629,8 @@ cleanup:
 A cleanup step takes only `node` and `runOn`. Its inputs are matched by name against the outputs of the steps that ran, so `cancelOrder`'s `orderId` input takes the `orderId` output of the step that produced one. A node's graph-level `cleanup:` pairing runs even when the plan does not list it.
 
 A cleanup node can have its own `cleanup:`, which makes a chain. The second node runs right after the first succeeds and takes that step's outputs first. That covers a release that takes two calls, such as requesting a refund and then confirming it with the refund's ID. Name the first cleanup node's output after the second one's input.
+
+A cleanup step that fails with a `transient`, `timeout`, or `server` failure is sent again up to 3 times, waiting as the server asks (see Retry); a refusal is not retried, and its chain stops there.
 
 When a plan may release the resource itself, or leave it in a state the cleanup can't handle, give the pairing as a mapping:
 
