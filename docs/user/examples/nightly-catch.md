@@ -157,3 +157,7 @@ Reported on 21 September 2026, and confirmed by Shippo as a known defect in thei
 That is a good outcome and a slightly deflating one, and both are worth saying. The plan was right, the documentation was right, and the API was wrong in a way that costs nobody a parcel. What it cost instead was a suite that could not tell the truth about a working integration — which is exactly what a test environment is for, and exactly the sort of thing that goes unnoticed when nothing is watching it on a schedule.
 
 The assertion can now be settled honestly: assert what test mode currently does, behind a dated note that says why and points here, so the suite goes green on a known fact rather than on a shrug, and fails again if the behaviour changes back. That is a different thing from widening the predicate and hoping.
+
+## Postscript
+
+Test mode went back to answering `PENDING` on 25 September 2026, a week after it stopped. From that day the nightly reported the three covered steps as *known issue passing again*, and the entries expired on 6 October with the steps green; they came out of the plan on 1 November. Nothing in the suite was edited while the defect lasted, and the run archives hold its start, Shippo's confirmation, and its end.
