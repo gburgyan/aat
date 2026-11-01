@@ -27,7 +27,7 @@ Each release attaches one archive per platform. The names carry no version, so t
 
 Every archive holds `aat`, `aat-sandbox` (`aat.exe` and `aat-sandbox.exe` on Windows), `LICENSE`, and `README.md`. The release also carries `checksums.txt` with the SHA-256 of every archive.
 
-The latest release is at `https://github.com/gburgyan/aat/releases/latest/download/<archive>`; a specific one is at `https://github.com/gburgyan/aat/releases/download/v0.4.0/<archive>`. On Linux:
+The latest release is at `https://github.com/gburgyan/aat/releases/latest/download/<archive>`; a specific one is at `https://github.com/gburgyan/aat/releases/download/v0.4.1/<archive>`. On Linux:
 
 ```
 curl -LO https://github.com/gburgyan/aat/releases/latest/download/aat_linux_amd64.tar.gz
@@ -65,12 +65,12 @@ The cask installs both `aat` and `aat-sandbox`, on macOS and on Linux with Homeb
 
 ## Docker
 
-The image `ghcr.io/gburgyan/aat` contains `aat` only (no `aat-sandbox`) and is built for `linux/amd64` and `linux/arm64`. Each release is tagged with its version without the `v` (`ghcr.io/gburgyan/aat:0.4.0`), and a release that is not a prerelease also moves `latest`.
+The image `ghcr.io/gburgyan/aat` contains `aat` only (no `aat-sandbox`) and is built for `linux/amd64` and `linux/arm64`. Each release is tagged with its version without the `v` (`ghcr.io/gburgyan/aat:0.4.1`), and a release that is not a prerelease also moves `latest`.
 
 The image's entrypoint is `aat` and its working directory is `/work`, so mount your project there and pass the subcommand:
 
 ```
-docker run --rm ghcr.io/gburgyan/aat:0.4.0 --version
+docker run --rm ghcr.io/gburgyan/aat:0.4.1 --version
 docker run --rm -v "$PWD":/work ghcr.io/gburgyan/aat validate
 docker run --rm -p 9119:9119 -v "$PWD":/work ghcr.io/gburgyan/aat web
 docker run --rm -p 8080:8080 -v "$PWD":/work ghcr.io/gburgyan/aat mcp serve --http
@@ -126,7 +126,7 @@ aat --version
 aat-sandbox --version
 ```
 
-Each prints `<name> version <version> (commit: <commit>, built: <date>)`. A release build prints the version without the `v` (`0.4.0`) with its short commit and UTC build time; a `go install` build prints `v0.4.0` with `commit: unknown, built: unknown`; a `make` build prints the `git describe` output (a tag, or a tag plus the commits since it, such as `v0.4.0-3-g1a2b3c4`).
+Each prints `<name> version <version> (commit: <commit>, built: <date>)`. A release build prints the version without the `v` (`0.4.1`) with its short commit and UTC build time; a `go install` build prints `v0.4.1` with `commit: unknown, built: unknown`; a `make` build prints the `git describe` output (a tag, or a tag plus the commits since it, such as `v0.4.1-3-g1a2b3c4`).
 
 To try the whole toolchain offline, extract the shop example and follow its README:
 

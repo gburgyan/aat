@@ -6,6 +6,14 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-01
+
+A retry release: a step without a `retry:` block retries a rate limit, and cleanup retries what a retry block would,
+so one 429 no longer ends an unrelated step or leaves a resource behind. The Duffel weekly of 26 October showed the
+cost of the old defaults, where four plans died on 429s inside ten seconds and a rate-limited cancel orphaned a held
+order that failed the live-orders guard every week after, and the Stripe nightly of 1 November lost a settle poll to
+one `lock_timeout`.
+
 ### Changed
 
 - A step without a `retry:` block retries a rate limit. A request the API turns away with a 429 (a gRPC
@@ -1410,7 +1418,8 @@ The first tagged version.
   headers, and OAuth2 token caching.
 - The Petstore example, the user documentation, and the Apache 2.0 license.
 
-[Unreleased]: https://github.com/gburgyan/aat/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/gburgyan/aat/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/gburgyan/aat/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/gburgyan/aat/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/gburgyan/aat/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/gburgyan/aat/compare/v0.3.0...v0.3.1
