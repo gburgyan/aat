@@ -6,6 +6,38 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-01
+
+The fuzzing release: a step in a real flow is sent the values its inputs allow, forbid, and say nothing about, and
+what the API makes of each is judged, recorded, and kept as a regression plan once it is a finding. The release also
+makes every run replayable, lets defaults draw from the domain file's pools, and reads the errors an API reports
+inside an HTTP 200 as the status they stand for.
+
+**Highlights.** `aat run plan smoke --fuzz addItem` runs the plan, then sends `addItem` values its inputs allow,
+values they forbid, values they say nothing about, and requests with a field missing, null, of the wrong type, or
+unknown, each as a sibling step on its own copy of the steps before it. The cases come from each input's type and
+constraints, the domain file's types and pools, and the template's own request, so nothing about fuzzing goes in the
+graph; when the node has an OpenAPI operation, a request the spec refuses is judged as negative. A 5xx, no response,
+a response that breaks the spec, a forbidden value accepted, an allowed one refused, a 429, and a status the operation
+doesn't list are the findings. Cases share one copy of their setup while the API refuses them, run after the happy
+path so a long run of cases doesn't hold up the plan until its session expires, and are sent again on a fresh copy
+when the setup turns out to be used up. A step's `fuzz:` block fuzzes it on every run, `--fuzz-save` keeps each
+failing case as a plan that fails until the API is fixed, and the MCP tool `generate_fuzz_cases` lists a step's cases
+as a block to keep. Every run's pool and `random` picks come from a seed the run prints and archives, and `--seed N`
+replays them, in `run plan`, `run batch`, and MCP `execute_plan`. `poolRef: airportCodes` lets a graph default, a
+layer, or a step value draw from a domain pool, so one list serves every input that takes that kind of value. An
+`errorDetection` rule takes `status` and `categories`, and the graph's `errorStatus` maps every rule at once, so an
+error a 200's body reports is retried, expected, asserted, and fuzz-judged as the status it means; a rule's
+`stale: true` says the state the request worked on is used up rather than the request wrong. `expectFailure` takes
+status classes (`status: [4xx]`), and `raw: true` sends a step value exactly as written. See
+[Fuzzing](https://gburgyan.github.io/aat/fuzzing/).
+
+**Breaking and noticeable.** Steps run in the order the plan lists them wherever `dependsOn` allows, where a step
+that became ready used to go to the back of the queue. A step whose body reported an error now fails with the API's
+message, where it failed as "extract path … not found", and the `--json` summary fails it, with a `body_error`
+object, where it reported it as passed. `--seed 0` picks a new seed. The shop example's `quantity` input declares
+`min: 1`.
+
 ### Added
 - **Runs can be replayed with the same pool picks.** Every run draws its pool orders and `random` selections from a
   seed, and a run that made such a choice prints it; `aat run show`, the archive, and `summary.json` record it.
@@ -1362,7 +1394,8 @@ The first tagged version.
   headers, and OAuth2 token caching.
 - The Petstore example, the user documentation, and the Apache 2.0 license.
 
-[Unreleased]: https://github.com/gburgyan/aat/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/gburgyan/aat/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/gburgyan/aat/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/gburgyan/aat/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/gburgyan/aat/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/gburgyan/aat/compare/v0.2.0...v0.3.0
