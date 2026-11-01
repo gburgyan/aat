@@ -6,6 +6,22 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+### Changed
+
+- A step without a `retry:` block retries a rate limit. A request the API turns away with a 429 (a gRPC
+  `RESOURCE_EXHAUSTED`, or an error in a 200 given that status) is sent again up to three times, after the wait the
+  server's `Retry-After` or `RateLimit-Reset` asks for; a 429 says the request was not looked at, so resending it is
+  safe whatever the method, and it says nothing about the behaviour the step tests. Nothing else is retried without
+  a block, and a block replaces the default: `on: [server]` alone no longer retries a 429, and `retry: {max: 0}` turns
+  retries off. An `expectFailure` step still never retries the failure it expects; a 429 it does not expect is retried
+  as any step's is. The fuzz cases of a target without a block retry a rate limit the same way; a target block that
+  would not retry a 429 turns its cases' retries off. A repeated step's requests retry under the same rule, so a poll
+  no longer ends on one `lock_timeout`.
+- Cleanup steps retry transient failures, timeouts, and server errors up to three times, waiting as the server asks,
+  as a step with `retry: {max: 3}` does, so one rate-limited cancel no longer leaves the resource behind. A refusal
+  is not retried, and the chain stops there as before. The cleanup record carries the retry count and the categories
+  retried, and its error classification, as a main step's does.
+
 ## [0.4.0] - 2026-11-01
 
 The fuzzing release: a step in a real flow is sent the values its inputs allow, forbid, and say nothing about, and

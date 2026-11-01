@@ -240,7 +240,8 @@ body the OpenAPI spec's 2xx schema doesn't describe is still a `schema-violation
 
 `--fuzz-fail` lists the findings that fail the run: `--fuzz-fail server-error,accepted-invalid` makes an API that
 takes forbidden values a failure. The others are warnings. A fuzz step never stops the run. It retries only a rate
-limit, and only when its target's `retry` block would retry a 429; any other finding stands.
+limit: as [any step does](plans.md#retry) when its target has no `retry` block, and as the target's block would when it has
+one, so a block that would not retry a 429 means its cases retry nothing. Any other finding stands.
 
 After the run, the output counts the cases by finding and lists each case that had one, with the value and the
 status:

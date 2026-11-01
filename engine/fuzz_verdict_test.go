@@ -122,8 +122,9 @@ func TestFuzz_Throttled(t *testing.T) {
 	})
 
 	t.Run("a retry block that wouldn't retry a 429", func(t *testing.T) {
-		assert.Nil(t, throttleRetry(&plan.RetryConfig{Max: 2, On: []string{"503"}}))
-		assert.Nil(t, throttleRetry(nil))
+		assert.Equal(t, &plan.RetryConfig{Max: 0}, throttleRetry(&plan.RetryConfig{Max: 2, On: []string{"503"}}),
+			"the cases retry nothing, not even the rate limit every step retries")
+		assert.Nil(t, throttleRetry(nil), "the cases retry a rate limit as any step does")
 		assert.Equal(t, &plan.RetryConfig{Max: 2, On: []string{"429"}}, throttleRetry(&plan.RetryConfig{Max: 2, On: []string{"RESOURCE_EXHAUSTED"}}))
 	})
 }

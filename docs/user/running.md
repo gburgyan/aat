@@ -341,7 +341,7 @@ Cleanup steps do not carry `values:`. Their inputs are filled by matching input 
 
 A graph pairing is skipped when it's no longer needed. Either a later main step on the cleanup node, or on a node the pairing's `releasedBy` lists, already released the resource with the same inputs, or the pairing's `when` condition is false for the outputs of the step that registered it. The console prints `skipped:` and the reason in place of a status, as in `cancelOrder  skipped: released by cancelOrder (for createOrder)`, and the archive records the skip in `cleanupSkipped`.
 
-Cleanup results are recorded in the archive (and in the `cleanup` array of `--json` output) with the same detail as main steps, but a failed cleanup step never changes the run outcome — the outcome is determined by the main steps alone.
+Cleanup results are recorded in the archive (and in the `cleanup` array of `--json` output) with the same detail as main steps, retries included: a cleanup step that fails in a way a retry may cure (a 429, a 502, 503, or 504, a dropped connection, a timeout, or another 5xx) is sent again up to three times, waiting as the server asks, as a step with `retry: {max: 3}` is, so one rate-limited cancel does not leave the resource behind. A refusal is not retried. A failed cleanup step never changes the run outcome — the outcome is determined by the main steps alone.
 
 See [Plans: Cleanup Steps](plans.md#cleanup-steps) and [API Graphs: Cleanup](graphs.md#cleanup) for how each kind is declared.
 

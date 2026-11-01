@@ -19,6 +19,20 @@ import (
 // before retrying. A server that asks for longer ends the step's retries.
 const maxRetryAfter = 60 * time.Second
 
+// rateLimitRetry is what a step without a retry block retries: a request the
+// API turned away with a rate limit, up to three times, after the wait the
+// server asks for. A 429 says the request was not looked at, so sending it
+// again is safe whatever the method, and it says nothing about the behaviour
+// the step tests. Every other failure stands: a server error may be the
+// finding, and a request that timed out may have gone through.
+var rateLimitRetry = &plan.RetryConfig{Max: 3, On: []string{strconv.Itoa(http.StatusTooManyRequests)}}
+
+// cleanupRetry is what a cleanup step retries: what a retry block without
+// rules retries, so a transient failure, a timeout, or a server error is sent
+// again up to three times. A cleanup that gives up leaves a resource behind,
+// so it tries as hard as a step told to retry does.
+var cleanupRetry = &plan.RetryConfig{Max: 3}
+
 // executeStepWithTracking runs a step: until its condition holds when it has a
 // repeat block (see executeStepRepeated), and otherwise once, with its retries.
 func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, node *graph.Node, state *RunState) StepResult {
@@ -28,53 +42,93 @@ func (e *Engine) executeStepWithTracking(ctx context.Context, step plan.Step, no
 	return e.executeStepWithRetry(ctx, step, node, state, nil)
 }
 
-// executeStepWithRetry wraps executeStepWith with retry logic based on the
-// step's RetryConfig. If no RetryConfig is set, it runs a single attempt.
-// The result of a retried step is its last attempt's, timed from the start of
-// the first attempt, so its duration includes the failed attempts and the
-// waits between them. Every attempt sends the inputs prepared holds, resolving
-// them first when it holds none; nil starts from none.
-func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, prepared *stepInputs) (result StepResult) {
+// executeStepWithRetry runs a step and retries it under its retry policy (see
+// retryPolicy). The result of a retried step is its last attempt's, timed from
+// the start of the first attempt, so its duration includes the failed attempts
+// and the waits between them. Every attempt sends the inputs prepared holds,
+// resolving them first when it holds none; nil starts from none.
+func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node *graph.Node, state *RunState, prepared *stepInputs) StepResult {
 	// Every attempt shares the inputs the first resolved, so a retry resends
 	// the same request. A repeated step passes its own, which every one of its
 	// requests shares.
 	if prepared == nil {
 		prepared = &stepInputs{}
 	}
-	result = e.executeStepWith(ctx, step, node, state, prepared)
-	firstStart := result.StartTime
-	defer func() {
-		if result.StartTime.After(firstStart) {
-			end := result.StartTime.Add(result.Duration)
-			result.StartTime = firstStart
-			result.Duration = end.Sub(firstStart)
-		}
-	}()
-
-	// Negative assertion steps should not retry — the failure IS the expected behavior.
+	result := e.executeStepWith(ctx, step, node, state, prepared)
+	cfg, written := retryPolicy(step)
+	if cfg == nil {
+		return result
+	}
+	failed := classifyStepResult
 	if step.ExpectFailure != nil {
-		return result
+		failed = unexpectedRateLimit(step)
 	}
+	return retryResult(ctx, result, cfg, written, failed, func() StepResult {
+		return e.executeStepWith(ctx, step, node, state, prepared)
+	})
+}
 
-	if step.Retry == nil {
-		// No retry config — classify for reporting but don't retry
-		if cls := classifyStepResult(&result); cls != nil {
-			cls.Action = "failed"
-			result.ErrorClass = cls
+// retryPolicy returns the retry block a step runs under, and whether the step
+// wrote it. A step without one retries a rate limit (see rateLimitRetry). A
+// negative test's failure is the behaviour it expects, so its own block never
+// retries it; it retries a rate limit it does not expect as any step does,
+// unless its block turns retries off with max 0. nil means no retries at all.
+func retryPolicy(step plan.Step) (cfg *plan.RetryConfig, written bool) {
+	if step.ExpectFailure != nil {
+		if step.Retry != nil && step.Retry.Max == 0 {
+			return nil, false
 		}
-		return result
+		return rateLimitRetry, false
 	}
+	if step.Retry == nil {
+		return rateLimitRetry, false
+	}
+	return step.Retry, true
+}
 
-	// Check if the first attempt succeeded
-	cls := classifyStepResult(&result)
+// unexpectedRateLimit classifies a negative test's result only when the API
+// rate-limited the request and the step does not expect a 429. The failure the
+// step expects is its success, and any other outcome stands.
+func unexpectedRateLimit(step plan.Step) func(*StepResult) *ErrorClassification {
+	return func(r *StepResult) *ErrorClassification {
+		status, name := r.FailureStatus()
+		if r.Response == nil || status != http.StatusTooManyRequests || step.ExpectFailure.Status.Matches(status, name) {
+			return nil
+		}
+		return classifyStepResult(r)
+	}
+}
+
+// retryResult retries a failed request under cfg: first is the first attempt's
+// result, failed says why a result is a failure the policy may retry (nil when
+// it is not one), and again sends the request once more. The result is the
+// last attempt's, timed from the first's start, with the category of every
+// retried attempt and, on failure, the classification of the last. written is
+// whether the step wrote cfg: a failure a step's own rules refuse to retry is
+// failed_fast, where one a policy the step did not write does not cover is
+// simply failed.
+func retryResult(ctx context.Context, first StepResult, cfg *plan.RetryConfig, written bool, failed func(*StepResult) *ErrorClassification, again func() StepResult) (result StepResult) {
+	result = first
+	cls := failed(&result)
 	if cls == nil {
 		return result // success on first try
+	}
+	defer func() {
+		if result.StartTime.After(first.StartTime) {
+			end := result.StartTime.Add(result.Duration)
+			result.StartTime = first.StartTime
+			result.Duration = end.Sub(first.StartTime)
+		}
+	}()
+	refused := "failed"
+	if written {
+		refused = "failed_fast"
 	}
 
 	// Retry loop. retriedOn keeps the category of every failed attempt that was
 	// retried, so a step that eventually succeeds still reports why it retried.
 	var retriedOn []ErrorCategory
-	for attempt := 1; attempt <= step.Retry.Max; attempt++ {
+	for attempt := 1; attempt <= cfg.Max; attempt++ {
 		select {
 		case <-ctx.Done():
 			result.Error = ctx.Err()
@@ -91,8 +145,8 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 		}
 
 		failureStatus, failureName := result.FailureStatus()
-		if !shouldRetry(retryFailure{category: cls.Category, status: failureStatus, grpcName: failureName}, step.Retry, attempt) {
-			cls.Action = "failed_fast"
+		if !shouldRetry(retryFailure{category: cls.Category, status: failureStatus, grpcName: failureName}, cfg, attempt) {
+			cls.Action = refused
 			cls.RetryAttempt = attempt - 1
 			result.ErrorClass = cls
 			result.RetryCount = attempt - 1
@@ -138,11 +192,11 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 		}
 
 		// Retry the step
-		result = e.executeStepWith(ctx, step, node, state, prepared)
+		result = again()
 		result.RetryCount = attempt
 		result.RetriedOn = append([]ErrorCategory(nil), retriedOn...)
 
-		cls = classifyStepResult(&result)
+		cls = failed(&result)
 		if cls == nil {
 			return result // success after retry
 		}
@@ -150,13 +204,11 @@ func (e *Engine) executeStepWithRetry(ctx context.Context, step plan.Step, node 
 
 	// All retries exhausted
 	cls.Action = "failed"
-	cls.RetryAttempt = step.Retry.Max
+	cls.RetryAttempt = cfg.Max
 	result.ErrorClass = cls
 	return result
 }
 
-// retryBackoff calculates the backoff duration for a given attempt using
-// exponential backoff with jitter. Base is 500ms, multiplier is 2x per attempt,
 // capped at 10 seconds.
 func retryBackoff(attempt int) time.Duration {
 	base := 500 * time.Millisecond

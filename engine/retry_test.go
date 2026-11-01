@@ -554,3 +554,112 @@ func TestRetryAfter_GRPCMetadata(t *testing.T) {
 		assert.False(t, ok)
 	})
 }
+
+// A step without a retry block still retries a rate limit: the API turned the
+// request away without looking at it, which says nothing about what the step
+// tests.
+func TestRateLimitRetriedWithoutConfig(t *testing.T) {
+	var calls atomic.Int32
+	server := retryAfterServer(t, &calls, http.StatusTooManyRequests, "0")
+
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), buildRetryPlan(nil))
+
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 1, result.Steps[0].RetryCount)
+	assert.Equal(t, []ErrorCategory{CategoryTransient}, result.Steps[0].RetriedOn)
+	assert.Nil(t, result.Steps[0].ErrorClass)
+	assert.Equal(t, int32(2), calls.Load())
+}
+
+// retry: {max: 0} turns every retry off, the rate-limit default included.
+func TestRateLimitRetryOffWithMaxZero(t *testing.T) {
+	var calls atomic.Int32
+	server := retryAfterServer(t, &calls, http.StatusTooManyRequests, "0")
+
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), buildRetryPlan(&plan.RetryConfig{Max: 0}))
+
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 429, result.Steps[0].StatusCode)
+	assert.Equal(t, 0, result.Steps[0].RetryCount)
+	require.NotNil(t, result.Steps[0].ErrorClass)
+	assert.Equal(t, "failed", result.Steps[0].ErrorClass.Action)
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+// A step's own retry block replaces the default: a block that names other
+// rules does not retry a rate limit, and says so as failed_fast.
+func TestWrittenRetryBlockReplacesRateLimitDefault(t *testing.T) {
+	var calls atomic.Int32
+	server := retryAfterServer(t, &calls, http.StatusTooManyRequests, "0")
+
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), buildRetryPlan(&plan.RetryConfig{Max: 2, On: []string{"503"}}))
+
+	assert.Equal(t, OutcomeFailed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 0, result.Steps[0].RetryCount)
+	require.NotNil(t, result.Steps[0].ErrorClass)
+	assert.Equal(t, "failed_fast", result.Steps[0].ErrorClass.Action)
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+// A negative test retries a rate limit it does not expect, and is then judged
+// on the answer it was waiting for.
+func TestExpectFailureRetriesUnexpectedRateLimit(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"error": "no such thing"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	p := buildRetryPlan(nil)
+	p.Execution.Steps[0].ExpectFailure = &plan.ExpectFailure{Status: plan.ExpectedStatuses{plan.HTTPStatus(422)}}
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), p)
+
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 1, result.Steps[0].RetryCount)
+	assert.Nil(t, result.Steps[0].ErrorClass, "the 422 is the behaviour the step expects, not a failure")
+	require.NotNil(t, result.Steps[0].ExpectFailure)
+	assert.True(t, result.Steps[0].ExpectFailure.Passed)
+	assert.Equal(t, int32(2), calls.Load())
+}
+
+// A negative test that expects the rate limit gets it on the first request.
+func TestExpectFailureExpectingRateLimitIsNotRetried(t *testing.T) {
+	var calls atomic.Int32
+	server := retryAfterServer(t, &calls, http.StatusTooManyRequests, "0")
+
+	p := buildRetryPlan(nil)
+	p.Execution.Steps[0].ExpectFailure = &plan.ExpectFailure{Status: plan.ExpectedStatuses{plan.HTTPStatus(429)}}
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), p)
+
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	require.Len(t, result.Steps, 1)
+	assert.Equal(t, 0, result.Steps[0].RetryCount)
+	assert.Equal(t, int32(1), calls.Load())
+}
+
+// The failure a negative test expects is never retried, whatever its block says.
+func TestExpectFailureBlockDoesNotRetryExpectedFailure(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(server.Close)
+
+	p := buildRetryPlan(&plan.RetryConfig{Max: 3})
+	p.Execution.Steps[0].ExpectFailure = &plan.ExpectFailure{Status: plan.ExpectedStatuses{plan.HTTPStatus(503)}}
+	result := buildRetryEngine(t, server.URL).Run(context.Background(), p)
+
+	assert.Equal(t, OutcomePassed, result.Outcome)
+	assert.Equal(t, int32(1), calls.Load())
+}

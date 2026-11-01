@@ -235,7 +235,7 @@ nodes:
 How a chain behaves:
 - **Inputs.** A chained step takes its inputs first from the outputs of the cleanup steps before it in its chain, nearest first, then the same way as any cleanup step.
 - **Isolation.** Those outputs stay inside the chain, so no other cleanup step picks them up.
-- **Failure.** When a cleanup step fails, the rest of its chain is skipped.
+- **Failure.** When a cleanup step fails, the rest of its chain is skipped. A failure a retry may cure, such as a 429 or a 503, is sent again up to three times first (see [Plans: Cleanup Steps](plans.md#cleanup-steps)).
 - **Loops.** A chain that loops back to a node it already passed is rejected when the graph loads.
 - **Step IDs and links.** In archives and `--json` output, each cleanup step has its own step ID: `requestRefund` for the first order, `requestRefund_2` for the second. `cleanupFor` (`cleanup_for` in `--json`) names the step whose resource the cleanup releases, or the cleanup step before it in its chain.
 
