@@ -65,7 +65,7 @@ The environment file supports two formats: **single-environment** (legacy, one `
 
 - **`docs/internal/`** — architecture notes (for contributors)
 - **Worklog** — decision log entries (date, decisions, rationale), kept out of the public tree in the private sibling repository `../aat-worklog` (`gburgyan/aat-worklog`)
-- **`docs/user/`** — user-facing docs, built into the site at https://gburgyan.github.io/aat/ (`mkdocs.yml`, Material for MkDocs; `.github/workflows/docs.yml` deploys it from main). Every page must be listed in the `mkdocs.yml` nav; links, anchors, and nav coverage are checked by `make docs`, so run it before committing doc changes. Keep pages readable on GitHub (plain Markdown); the one site-only construct is the `--8<--` snippet include in `changelog.md`, `examples/shop.md`, and `llms.md`, which pulls in `CHANGELOG.md`, the `examples/shop/README.md` section between its `[start:body]`/`[end:body]` markers, and the AI assistant primer, `internal/primer/llms.md`. The primer links to pages by site URL, which `make docs` does not check, so `internal/primer`'s tests check them; `docs/hooks/llms_txt.py` publishes the primer as `llms-full.txt` beside the static `docs/user/llms.txt` index
+- **`docs/user/`** — user-facing docs, built into the site with `mkdocs.yml`; `docs/CLAUDE.md` has the site's rules (nav coverage, `make docs` before committing, snippet includes)
 
 Record user-visible changes in `CHANGELOG.md` under *Unreleased* as tasks complete. Add worklog entries for non-trivial decisions in `../aat-worklog`. The launch roadmap lives in `LAUNCH-PLAN.md`, a local working document.
 
@@ -83,49 +83,7 @@ When making design decisions or completing milestones, add entries to the privat
 
 ## Running AAT
 
-Build both binaries and run the offline shop example (`examples/shop`, served by `aat-sandbox`):
-
-```bash
-# Build (injects version/commit/date automatically): aat and aat-sandbox
-make build
-# Or without rebuilding the web UI (`aat web` then needs a frontend build):
-# make cli sandbox
-
-# Shop example against the local sandbox (no network, no credentials)
-cd examples/shop/
-../../aat-sandbox serve --latency 0 &   # shop API :8765, payments :8766
-../../aat validate --strict
-../../aat run plan full-lifecycle
-../../aat run batch --oas-validate strict
-../../aat run batch --layer-group shipping-standard,shipping-express --layer-group basket-gear,basket-apparel --parallel 4
-../../aat run plan smoke --env eu
-../../aat run plan smoke --stop-after paymentCharge --dump-state -   # state for another tool, credentials redacted
-../../aat run plan smoke --var apiHost=localhost:9765                # a sandbox on other ports
-../../aat web view latest
-../../aat validate --strict --manifest aat-kit.yaml                  # the integration kit on its own
-sh package-kit.sh                                                     # package it: _output/shop-kit/ and .tar.gz
-
-# What CI runs against the shop (starts its own sandbox; needs curl, jq, free ports 8765/8766)
-make example-shop
-
-# The gRPC example: a cart over HTTP, then charge and refund over gRPC, against
-# the same sandbox (shop :8765, payments :8766, gRPC payments :8767)
-cd examples/grpc-payments/
-../../aat validate --strict                # checks gRPC nodes against payments.protoset, offline
-../../aat run plan charge-and-refund       # three HTTP steps, then two gRPC ones
-../../aat run plan declined-card           # expectFailure naming a gRPC status
-make example-grpc                          # what CI runs
-
-# Petstore example (public API, no credentials), from the repository root
-cd examples/petstore/
-../../aat run plan plans/create-and-verify.yaml
-
-# Explicit paths instead of manifest auto-discovery:
-./aat run plan examples/petstore/plans/create-and-verify.yaml \
-  --env-config examples/petstore/env.yaml \
-  --graph examples/petstore/graph.yaml \
-  --templates examples/petstore/templates/
-```
+The `run-examples` skill (`.claude/skills/run-examples/`) builds both binaries and runs the shop, gRPC, and petstore examples against the local sandbox; `aat <command> --help` documents every flag.
 
 The author's production-grade project (a 74-node airline API graph) lives in a separate private
 repository; it is cited by numbers only in public docs. LLM config (endpoint, API key, model) comes
