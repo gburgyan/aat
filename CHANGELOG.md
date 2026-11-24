@@ -6,6 +6,15 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- An `expectFailure` step that the API answers with a success now cleans up after itself. The step still fails the
+  run (or the knownIssue that covers it keeps it out of the outcome), but it stores its outputs and pushes its node's
+  cleanup, as a step that succeeds on purpose does, so the resource the API created instead of refusing is deleted by
+  its own id. Before, the run ended without the cleanup, and the resource failed the next run: the Duffel weekly of 16
+  November got a second webhook it expected to be refused, and the run of 23 November failed on that leftover at its
+  first step. A wrong refusal created nothing and still pushes no cleanup.
+
 ## [0.4.1] - 2026-11-01
 
 A retry release: a step without a `retry:` block retries a rate limit, and cleanup retries what a retry block would,
