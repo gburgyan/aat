@@ -202,6 +202,60 @@ func TestCleanup_EachStepCleansUpItsOwnResource(t *testing.T) {
 	assert.Equal(t, []any{"t2", "t1"}, cleanupInputs(result.CleanupResults, "thingId"))
 }
 
+// A step expected to be refused that the API accepts instead has created a
+// resource. The run still fails, or a knownIssue covers it, and either way
+// cleanup deletes that resource by its own id, so it cannot fail the next run.
+// A wrong refusal created nothing, so only the earlier resource is deleted.
+func TestCleanup_ExpectFailureStepThatSucceeds(t *testing.T) {
+	tests := []struct {
+		name        string
+		againStatus int // what createAgain answers; 0 is a 200
+		knownIssue  *plan.KnownIssue
+		wantOutcome Outcome
+		wantDeleted []any
+	}{
+		{name: "unexpected success", wantOutcome: OutcomeFailed, wantDeleted: []any{"t2", "t1"}},
+		{
+			name:        "unexpected success a known issue covers",
+			knownIssue:  &plan.KnownIssue{Until: mustDate(t, "2026-12-01"), Reason: "vendor stopped refusing"},
+			wantOutcome: OutcomePassed,
+			wantDeleted: []any{"t2", "t1"},
+		},
+		{name: "wrong refusal", againStatus: http.StatusConflict, wantOutcome: OutcomeFailed, wantDeleted: []any{"t1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fail := map[string]int{}
+			if tt.againStatus != 0 {
+				fail["/createAgain"] = tt.againStatus
+			}
+			srv := newLifecycleServer(t, fail)
+			eng := lifecycleEngine(t, srv.URL)
+			eng.Now = clockAt("2026-11-24")
+			eng.graph.Nodes["createAgain"] = &graph.Node{
+				Name: "createAgain", Adapter: "test.createAgain", Cleanup: graph.CleanupPairing{Node: "deleteThing"},
+				Outputs: []graph.Output{{Name: "thingId", Type: "string"}},
+			}
+			require.NoError(t, eng.registry.Register("test.createAgain", &stubAdapter{method: "POST", path: "/createAgain", response: map[string]any{"thingId": "t2"}}))
+
+			result := eng.Run(context.Background(), &plan.Plan{
+				Metadata: plan.Metadata{GraphVersion: "1.0.0"},
+				Execution: plan.Execution{Steps: []plan.Step{
+					{ID: "first", Node: "createThing"},
+					{
+						ID: "again", Node: "createAgain", DependsOn: []string{"first"},
+						ExpectFailure: &plan.ExpectFailure{Status: plan.HTTPStatuses([]int{http.StatusUnprocessableEntity})},
+						KnownIssue:    tt.knownIssue,
+					},
+				}},
+			})
+
+			assert.Equal(t, tt.wantOutcome, result.Outcome, "error: %v", result.Error)
+			assert.Equal(t, tt.wantDeleted, cleanupInputs(result.CleanupResults, "thingId"))
+		})
+	}
+}
+
 func TestCleanup_RegisteringStepWinsOverLaterOutputs(t *testing.T) {
 	srv := newLifecycleServer(t, nil)
 	eng := lifecycleEngine(t, srv.URL)

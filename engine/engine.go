@@ -528,9 +528,19 @@ func (e *Engine) Run(ctx context.Context, p *plan.Plan) (result *RunResult) {
 				continue
 			}
 
-			// Unexpected success or wrong error code — FAIL. There are no
-			// outputs to carry on from, so the run ends either way; a known
-			// issue only keeps it out of the outcome.
+			// Unexpected success or wrong error code — FAIL. The run ends
+			// either way; a known issue only keeps it out of the outcome. A
+			// success may have created what the step expected to be refused,
+			// so it stores its outputs and pushes its cleanup as on the happy
+			// path: left behind, the resource would fail the next run.
+			if stepResult.StatusCode < 400 && stepResult.ResponseBodyError == nil {
+				if stepResult.Outputs != nil {
+					state.StoreOutputs(step.StepID(), stepResult.Outputs)
+				}
+				if node.Cleanup.Node != "" {
+					cleanupStack.Push(CleanupEntry{NodeName: node.Cleanup.Node, ForNode: node.Name, ForStep: step.StepID()})
+				}
+			}
 			if suppressed {
 				kiLog.endedEarly()
 				end = &runEnd{}
