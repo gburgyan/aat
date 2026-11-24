@@ -6,6 +6,11 @@ the graph and plan formats may still change before 1.0.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-24
+
+A bug-fix release: an `expectFailure` step the API answers with a success cleans up what it created, so one API's
+change of rules fails one run, not every run after it.
+
 ### Fixed
 
 - An `expectFailure` step that the API answers with a success now cleans up after itself. The step still fails the
@@ -1427,7 +1432,8 @@ The first tagged version.
   headers, and OAuth2 token caching.
 - The Petstore example, the user documentation, and the Apache 2.0 license.
 
-[Unreleased]: https://github.com/gburgyan/aat/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/gburgyan/aat/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/gburgyan/aat/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/gburgyan/aat/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/gburgyan/aat/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/gburgyan/aat/compare/v0.3.1...v0.3.2
